@@ -1,5 +1,6 @@
 use thiserror::Error;
 use std::path::PathBuf;
+use anyhow;
 
 #[derive(Error, Debug)]
 pub enum VectorDBError {
@@ -41,6 +42,9 @@ pub enum VectorDBError {
 
     #[error("Database error: {0}")]
     DatabaseError(String),
+    
+    #[error("HNSW error: {0}")]
+    HNSWError(String),
 }
 
 pub type Result<T> = std::result::Result<T, VectorDBError>;
@@ -51,6 +55,12 @@ impl From<std::io::Error> for VectorDBError {
             path: PathBuf::from("<unknown>"),
             source: err,
         }
+    }
+}
+
+impl From<anyhow::Error> for VectorDBError {
+    fn from(err: anyhow::Error) -> Self {
+        VectorDBError::HNSWError(err.to_string())
     }
 }
 

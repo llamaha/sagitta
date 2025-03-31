@@ -25,6 +25,16 @@ pub struct EmbeddingCache {
     ttl: u64,
 }
 
+impl Clone for EmbeddingCache {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            cache_path: self.cache_path.clone(),
+            ttl: self.ttl,
+        }
+    }
+}
+
 impl EmbeddingCache {
     pub fn new(cache_path: String) -> Result<Self> {
         Self::new_with_ttl(cache_path, CACHE_TTL)

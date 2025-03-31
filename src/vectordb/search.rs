@@ -12,6 +12,8 @@ const BM25_K1: f32 = 1.5;
 const BM25_B: f32 = 0.75;
 const POSITION_BOOST: f32 = 0.2;
 const WINDOW_SIZE: usize = 8;
+const USE_HNSW: bool = true;
+const HNSW_TOP_K: usize = 20;
 
 #[derive(Debug)]
 pub struct SearchResult {
@@ -107,23 +109,42 @@ impl Search {
         let query_embedding = self.model.embed(query)?;
         let mut results = Vec::new();
 
-        for (file_path, file_embedding) in &self.db.embeddings {
-            let bm25_score = self.calculate_bm25(&query_embedding, file_embedding);
-            let position_boost = self.calculate_position_boost(file_path, query);
-            let final_score = bm25_score * position_boost;
+        if USE_HNSW {
+            // Use HNSW for faster approximate search
+            let mut db = self.db.clone();
+            let nearest = db.nearest_vectors(&query_embedding, HNSW_TOP_K)?;
             
-            if final_score >= SIMILARITY_THRESHOLD {
-                let snippet = self.get_snippet(file_path, query)?;
-                results.push(SearchResult {
-                    file_path: file_path.clone(),
-                    similarity: final_score,
-                    snippet,
-                });
+            for (file_path, similarity) in nearest {
+                // Only include results above threshold
+                if similarity >= SIMILARITY_THRESHOLD {
+                    let snippet = self.get_snippet(&file_path, query)?;
+                    results.push(SearchResult {
+                        file_path,
+                        similarity,
+                        snippet,
+                    });
+                }
+            }
+        } else {
+            // Fall back to the original BM25 search if HNSW is disabled
+            for (file_path, file_embedding) in &self.db.embeddings {
+                let bm25_score = self.calculate_bm25(&query_embedding, file_embedding);
+                let position_boost = self.calculate_position_boost(file_path, query);
+                let final_score = bm25_score * position_boost;
+                
+                if final_score >= SIMILARITY_THRESHOLD {
+                    let snippet = self.get_snippet(file_path, query)?;
+                    results.push(SearchResult {
+                        file_path: file_path.clone(),
+                        similarity: final_score,
+                        snippet,
+                    });
+                }
             }
         }
 
-        // Sort by final score in descending order
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+        // Sort by similarity in descending order
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
         
         // Take top 5 results
         results.truncate(5);
