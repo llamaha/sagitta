@@ -2,5 +2,24 @@
 name = "vectordb-cli"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A lightweight CLI tool for semantic file search using vector embeddings"
 
 [dependencies]
+clap = { version = "4.4", features = ["derive"] }
+indicatif = "0.17"
+walkdir = "2.4"
+anyhow = "1.0"
+thiserror = "1.0"
+rayon = "1.8"
+ndarray = "0.15"
+tokenizers = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+colored = "2.1"
+dirs = "5.0"
+tempfile = "3.8"
+regex = "1.10"
+
+[dev-dependencies]
+tempfile = "3.10"
