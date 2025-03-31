@@ -4,7 +4,6 @@ use std::collections::HashMap;
 pub struct CodeTokenizer {
     vocab: HashMap<String, u32>,
     unk_token: u32,
-    pad_token: u32,
 }
 
 impl CodeTokenizer {
@@ -40,7 +39,6 @@ impl CodeTokenizer {
         Ok(Self {
             vocab,
             unk_token: 0,
-            pad_token: 1,
         })
     }
 

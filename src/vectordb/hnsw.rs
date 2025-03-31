@@ -7,7 +7,6 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
 use rayon::prelude::*;
-use std::time::{Instant, Duration};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,7 +376,8 @@ pub struct HNSWStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::time::{Duration, Instant};
+    
     #[test]
     fn test_cosine_distance() {
         let a = vec![1.0, 0.0, 0.0];
@@ -484,6 +484,7 @@ mod tests {
     }
     
     #[test]
+    #[ignore] // This test is a performance benchmark that can take a long time to run
     fn benchmark_linear_vs_hnsw() {
         // Create random data
         let num_vectors = 1000;

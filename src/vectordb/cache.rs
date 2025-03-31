@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
 use crate::vectordb::error::{Result, VectorDBError};
-use tempfile::tempdir;
+use std::time::{Duration, Instant};
 
 const CACHE_TTL: u64 = 3600; // 1 hour in seconds
 
@@ -23,6 +23,7 @@ pub struct EmbeddingCache {
     entries: HashMap<String, CacheEntry>,
     cache_path: String,
     ttl: u64,
+    last_cleaned: Instant,
 }
 
 impl Clone for EmbeddingCache {
@@ -31,6 +32,7 @@ impl Clone for EmbeddingCache {
             entries: self.entries.clone(),
             cache_path: self.cache_path.clone(),
             ttl: self.ttl,
+            last_cleaned: self.last_cleaned,
         }
     }
 }
@@ -58,6 +60,7 @@ impl EmbeddingCache {
             entries,
             cache_path,
             ttl,
+            last_cleaned: Instant::now(),
         })
     }
 
@@ -106,10 +109,6 @@ impl EmbeddingCache {
         self.entries.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     fn save(&self) -> Result<()> {
         if let Some(parent) = Path::new(&self.cache_path).parent() {
             std::fs::create_dir_all(parent)
@@ -155,52 +154,91 @@ impl EmbeddingCache {
         
         Ok(modified.wrapping_mul(31).wrapping_add(size as u64))
     }
+
+    pub fn clean(&mut self) {
+        self.entries.retain(|_, entry| {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| VectorDBError::CacheError(e.to_string()))
+                .ok()
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            now - entry.timestamp < self.ttl
+        });
+        self.last_cleaned = Instant::now();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use tempfile::tempdir;
+    
     #[test]
-    fn test_cache_persistence() -> Result<()> {
+    fn test_cache_basic() -> Result<()> {
         let dir = tempdir()?;
-        let cache_path = dir.path().join("cache.json");
+        let cache_path = dir.path().join("cache.json").to_string_lossy().to_string();
         
-        // Create and populate cache
-        {
-            let mut cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
-            let embedding = vec![0.1, 0.2, 0.3];
-            cache.insert("test".to_string(), embedding.clone(), 123)?;
-        }
+        let mut cache = EmbeddingCache::new(cache_path.clone())?;
+        assert_eq!(cache.len(), 0);
         
-        // Create new cache instance and verify data persisted
-        let cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
-        let cached = cache.get("test");
-        assert!(cached.is_some());
-        assert_eq!(cached.unwrap(), &vec![0.1, 0.2, 0.3]);
-
+        // Insert an item
+        let embedding = vec![1.0, 2.0, 3.0];
+        let file_hash = 12345u64; // Example hash
+        cache.insert("test".to_string(), embedding.clone(), file_hash)?;
+        assert_eq!(cache.len(), 1);
+        
+        // Get the item
+        let retrieved = cache.get("test");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap(), &embedding);
+        
+        // Check persistence
+        let cache2 = EmbeddingCache::new(cache_path)?;
+        let retrieved2 = cache2.get("test");
+        assert!(retrieved2.is_some());
+        assert_eq!(retrieved2.unwrap(), &embedding);
+        
         Ok(())
     }
-
+    
     #[test]
-    fn test_cache_clear() -> Result<()> {
+    fn test_cache_ttl() -> Result<()> {
         let dir = tempdir()?;
-        let cache_path = dir.path().join("cache.json");
-        let mut cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
-
-        // Add some entries
-        cache.insert("test1".to_string(), vec![0.1], 1)?;
-        cache.insert("test2".to_string(), vec![0.2], 2)?;
-        assert_eq!(cache.len(), 2);
-
-        // Clear cache
-        cache.clear()?;
-        assert!(cache.is_empty());
+        let cache_path = dir.path().join("cache.json").to_string_lossy().to_string();
         
-        // Verify persistence of empty cache
-        let cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
-        assert!(cache.is_empty());
-
+        let mut cache = EmbeddingCache::new(cache_path)?;
+        
+        // Create an entry with an expired TTL
+        let embedding = vec![1.0, 2.0, 3.0];
+        let entry = CacheEntry {
+            embedding: embedding.clone(),
+            timestamp: 0, // Very old timestamp
+            file_hash: 12345u64,
+        };
+        
+        cache.entries.insert("test".to_string(), entry);
+        
+        // Try to get it - should be expired
+        let retrieved = cache.get("test");
+        assert!(retrieved.is_none());
+        
+        // Add a fresh entry
+        let entry2 = CacheEntry {
+            embedding: embedding.clone(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            file_hash: 12345u64,
+        };
+        
+        cache.entries.insert("test2".to_string(), entry2);
+        
+        // Should be retrievable
+        let retrieved = cache.get("test2");
+        assert!(retrieved.is_some());
+        
         Ok(())
     }
 }

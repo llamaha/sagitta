@@ -6,8 +6,7 @@ use walkdir::WalkDir;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::cache::EmbeddingCache;
 use crate::vectordb::error::{Result, VectorDBError};
-use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats};
-use rayon::prelude::*;
+use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats, LayerStats};
 
 #[derive(Serialize, Deserialize)]
 struct DBFile {
@@ -232,7 +231,9 @@ impl VectorDB {
         Ok(())
     }
 
+    /// Get vector database stats
     pub fn stats(&self) -> DBStats {
+        // Get HNSW stats directly from the index if available
         let hnsw_stats = self.hnsw_index.as_ref().map(|index| index.stats());
         
         DBStats {
@@ -244,111 +245,61 @@ impl VectorDB {
         }
     }
     
-    /// Build or rebuild the HNSW index
-    pub fn build_hnsw_index(&mut self, config: Option<HNSWConfig>) -> Result<()> {
-        let config = config.unwrap_or_else(HNSWConfig::default);
-        let mut index = HNSWIndex::new(config);
-        
-        // Add all embeddings to the index
-        for (_, embedding) in &self.embeddings {
-            index.insert(embedding.clone())?;
-        }
-        
-        self.hnsw_index = Some(index);
-        self.save()?;
-        
-        // Save the index to its own file
-        if let Some(index) = &self.hnsw_index {
-            let hnsw_path = Path::new(&self.db_path)
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("hnsw_index.json");
-            index.save_to_file(&hnsw_path)?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Build the HNSW index in parallel
-    pub fn build_hnsw_index_parallel(&mut self, config: Option<HNSWConfig>) -> Result<()> {
-        let config = config.unwrap_or_else(HNSWConfig::default);
-        
-        // Convert embeddings to a vector for parallel processing
-        let embeddings: Vec<Vec<f32>> = self.embeddings.values().cloned().collect();
-        
-        // Create index after parallel processing
-        let mut index = HNSWIndex::new(config);
-        
-        // Process embeddings sequentially as a fallback
-        for embedding in embeddings {
-            index.insert(embedding)?;
-        }
-        
-        self.hnsw_index = Some(index);
-        self.save()?;
-        
-        // Save the index to its own file
-        if let Some(index) = &self.hnsw_index {
-            let hnsw_path = Path::new(&self.db_path)
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("hnsw_index.json");
-            index.save_to_file(&hnsw_path)?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Enable or disable the HNSW index
-    pub fn set_hnsw_enabled(&mut self, enabled: bool) -> Result<()> {
-        if enabled && self.hnsw_index.is_none() {
-            self.build_hnsw_index(None)?;
-        } else if !enabled {
-            self.hnsw_index = None;
-            self.save()?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Get nearest vectors using HNSW index
-    pub fn nearest_vectors(&mut self, query_embedding: &[f32], k: usize) -> Result<Vec<(String, f32)>> {
-        if let Some(index) = &mut self.hnsw_index {
-            // Use HNSW for search
-            let results = index.search(query_embedding, k, 100)?;
+    /// Nearest vectors using HNSW index (if available)
+    pub fn nearest_vectors(&mut self, query: &[f32], k: usize) -> Result<Vec<(String, f32)>> {
+        if let Some(ref mut index) = self.hnsw_index {
+            // Use HNSW for efficient search
+            let ef = 100; // Default search ef parameter
+            let results = index.search(query, k, ef)?;
             
-            // Map index results back to file paths
-            let mut nearest = Vec::with_capacity(results.len());
-            
-            // Create a mapping of vector to file path
-            let file_paths: Vec<String> = self.embeddings.keys().cloned().collect();
-            let vectors: Vec<Vec<f32>> = self.embeddings.values().cloned().collect();
-            
-            for (idx, dist) in results {
-                // Convert distance to similarity score (1 - distance)
-                let similarity = 1.0 - dist;
-                
-                // Find the corresponding file path
-                if idx < file_paths.len() {
-                    nearest.push((file_paths[idx].clone(), similarity));
+            // Convert node IDs to file paths
+            let mut nearest = Vec::new();
+            for (node_id, dist) in results {
+                if let Some(file_path) = self.get_file_path(node_id) {
+                    let file_path = file_path.clone();
+                    let similarity = 1.0 - dist; // Convert distance to similarity
+                    nearest.push((file_path, similarity));
                 }
             }
             
             Ok(nearest)
         } else {
-            // Fallback to linear search
-            let mut nearest = Vec::new();
+            // Fall back to brute force search
+            let mut results: Vec<_> = self.embeddings.iter()
+                .map(|(path, embedding)| {
+                    let distance = Self::cosine_distance(embedding, query);
+                    let similarity = 1.0 - distance;
+                    (path.clone(), similarity)
+                })
+                .collect();
             
-            for (file_path, embedding) in &self.embeddings {
-                let similarity = cosine_similarity(query_embedding, embedding);
-                nearest.push((file_path.clone(), similarity));
-            }
+            // Sort by similarity (highest first)
+            results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            results.truncate(k);
             
-            // Sort by similarity (descending)
-            nearest.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            nearest.truncate(k);
-            
-            Ok(nearest)
+            Ok(results)
+        }
+    }
+    
+    /// Calculate cosine distance between two vectors (for search)
+    fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        
+        if norm_a > 0.0 && norm_b > 0.0 {
+            1.0 - (dot_product / (norm_a * norm_b))
+        } else {
+            1.0 // Maximum distance if either vector is zero
+        }
+    }
+    
+    fn get_file_path(&self, node_id: usize) -> Option<&String> {
+        if node_id < self.embeddings.len() {
+            let file_path = self.embeddings.keys().nth(node_id);
+            file_path
+        } else {
+            None
         }
     }
 }
