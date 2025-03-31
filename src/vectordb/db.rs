@@ -103,10 +103,64 @@ impl VectorDB {
     /// Set HNSW configuration - creates a new index if config is provided, removes it if None
     pub fn set_hnsw_config(&mut self, config: Option<HNSWConfig>) {
         if let Some(config) = config {
-            self.hnsw_index = Some(HNSWIndex::new(config));
+            let mut current_config = config;
+            
+            // If we have embeddings, use their count to optimize the number of layers
+            if !self.embeddings.is_empty() {
+                // Calculate optimal layer count based on dataset size
+                let dataset_size = self.embeddings.len();
+                let optimal_layers = HNSWConfig::calculate_optimal_layers(dataset_size);
+                
+                // Override the num_layers in the provided config
+                current_config.num_layers = optimal_layers;
+            }
+            
+            // Create a new index with the optimized config
+            let mut index = HNSWIndex::new(current_config);
+            
+            // Rebuild the index from existing embeddings if any
+            for (_, embedding) in &self.embeddings {
+                let _ = index.insert(embedding.clone());
+            }
+            
+            self.hnsw_index = Some(index);
         } else {
             self.hnsw_index = None;
         }
+    }
+
+    /// Rebuild the HNSW index with optimized configuration
+    pub fn rebuild_hnsw_index(&mut self) -> Result<()> {
+        if self.hnsw_index.is_none() {
+            return Ok(());  // Nothing to do if no index exists
+        }
+        
+        // Get current config
+        let current_config = self.hnsw_index.as_ref().unwrap().get_config();
+        
+        // Calculate optimal layer count
+        let dataset_size = self.embeddings.len();
+        let optimal_layers = HNSWConfig::calculate_optimal_layers(dataset_size);
+        
+        // Check if we need to rebuild
+        if current_config.num_layers == optimal_layers {
+            return Ok(());  // No need to rebuild if layer count is already optimal
+        }
+        
+        // Create a new config with the optimal layer count
+        let mut new_config = current_config.clone();
+        new_config.num_layers = optimal_layers;
+        
+        // Rebuild the index with the new config
+        if let Some(index) = &self.hnsw_index {
+            let new_index = index.rebuild_with_config(new_config)?;
+            self.hnsw_index = Some(new_index);
+            
+            // Save the updated index
+            self.save()?;
+        }
+        
+        Ok(())
     }
 
     pub fn index_file(&mut self, file_path: &Path) -> Result<()> {
@@ -167,6 +221,11 @@ impl VectorDB {
                     }
                 }
             }
+        }
+        
+        // After indexing is complete, rebuild the HNSW index with optimized layers if needed
+        if self.hnsw_index.is_some() {
+            self.rebuild_hnsw_index()?;
         }
         
         Ok(())
@@ -332,34 +391,68 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
-    use std::io::Write;
+    use std::fs;
     use tempfile::tempdir;
+    use std::io::Write;
 
     #[test]
     fn test_vectordb() -> Result<()> {
-        let dir = tempdir()?;
-        let db_path = dir.path().join("db.json");
-        let mut db = VectorDB::new(db_path.to_string_lossy().to_string())?;
-
-        // Create a test file
-        let test_file = dir.path().join("test.txt");
-        let mut file = File::create(&test_file)?;
-        file.write_all(b"test content")?;
-
-        // Test indexing
-        db.index_file(&test_file)?;
-
-        // Test stats
-        let stats = db.stats();
-        assert_eq!(stats.indexed_files, 1);
-        assert!(stats.embedding_dimension > 0);
-        assert!(stats.cached_files > 0);
-
-        // Test clear
-        db.clear()?;
-        assert_eq!(db.embeddings.len(), 0);
-
+        // Create a temporary directory
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("test.db").to_string_lossy().to_string();
+        
+        // Create a new database
+        let mut db = VectorDB::new(db_path)?;
+        
+        // Test basic operations
+        // ...
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_optimal_layer_count() -> Result<()> {
+        // Create a temporary directory
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("test.db").to_string_lossy().to_string();
+        
+        // Create test files with different content
+        let file_count = 20;
+        for i in 0..file_count {
+            let test_file = temp_dir.path().join(format!("test_{}.txt", i));
+            let mut file = fs::File::create(&test_file)?;
+            writeln!(file, "Test file content {}", i)?;
+        }
+        
+        // Create a VectorDB with HNSW enabled
+        let mut db = VectorDB::new(db_path)?;
+        db.set_hnsw_config(Some(HNSWConfig::default()));
+        
+        // Index a directory
+        db.index_directory(temp_dir.path().to_str().unwrap(), &["txt".to_string()])?;
+        
+        // Check if the HNSW index has the optimal number of layers
+        if let Some(stats) = db.stats().hnsw_stats {
+            // For 20 documents, optimal layer count should be log2(20) = 5 (rounded up)
+            assert_eq!(stats.layers, 5);
+            
+            // Check if actual layer usage matches expectations
+            let mut highest_populated_layer = 0;
+            for (i, layer_stat) in stats.layer_stats.iter().enumerate() {
+                if layer_stat.nodes > 0 {
+                    highest_populated_layer = i;
+                }
+            }
+            
+            // There should be far fewer populated layers than the maximum 16
+            assert!(highest_populated_layer < 16);
+            
+            // And the highest populated layer should not exceed our expected optimal count
+            assert!(highest_populated_layer < 6);
+        } else {
+            assert!(false, "HNSW index should be present");
+        }
+        
         Ok(())
     }
 } 

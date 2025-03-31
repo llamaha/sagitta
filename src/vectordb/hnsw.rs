@@ -21,6 +21,29 @@ pub struct HNSWConfig {
     pub random_seed: u64,
 }
 
+impl HNSWConfig {
+    /// Calculate the optimal number of layers based on dataset size
+    /// 
+    /// The formula used is log2(n) as recommended in the HNSW paper,
+    /// where n is the number of vectors in the dataset.
+    /// 
+    /// Returns a value between MIN_LAYERS and MAX_LAYERS (2-16).
+    pub fn calculate_optimal_layers(dataset_size: usize) -> usize {
+        const MIN_LAYERS: usize = 2;
+        const MAX_LAYERS: usize = 16;
+        
+        if dataset_size == 0 {
+            return MIN_LAYERS;
+        }
+        
+        // Use log2(n) as recommended in the HNSW paper
+        let optimal_layers = (dataset_size as f64).log2().ceil() as usize;
+        
+        // Constrain between MIN_LAYERS and MAX_LAYERS
+        optimal_layers.clamp(MIN_LAYERS, MAX_LAYERS)
+    }
+}
+
 impl Default for HNSWConfig {
     fn default() -> Self {
         Self {
@@ -351,6 +374,18 @@ impl HNSWIndex {
             entry_points: serialized.entry_points,
         })
     }
+    
+    /// Rebuild the index with a new configuration
+    pub fn rebuild_with_config(&self, new_config: HNSWConfig) -> Result<Self> {
+        let mut new_index = Self::new(new_config);
+        
+        // Extract all vectors from the current index and insert them into the new one
+        for node in &self.nodes {
+            new_index.insert(node.vector.clone())?;
+        }
+        
+        Ok(new_index)
+    }
 }
 
 /// Statistics for a single layer in the HNSW index
@@ -384,6 +419,27 @@ mod tests {
         let b = vec![0.0, 1.0, 0.0];
         let dist = HNSWIndex::cosine_distance(&a, &b);
         assert!((dist - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_optimal_layer_calculation() {
+        // Test small datasets - should return minimum of 2 layers
+        assert_eq!(HNSWConfig::calculate_optimal_layers(0), 2);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(1), 2);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(2), 2);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(3), 2);
+        
+        // Medium datasets - should follow log2(n) pattern
+        assert_eq!(HNSWConfig::calculate_optimal_layers(4), 2);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(8), 3);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(16), 4);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(32), 5);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(64), 6);
+        
+        // Large datasets - should not exceed max of 16 layers
+        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 15), 15);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 16), 16);
+        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 20), 16); // Should be capped at 16
     }
 
     #[test]
@@ -459,6 +515,47 @@ mod tests {
         assert_eq!(stats.total_nodes, 5);
         assert_eq!(stats.layers, config.num_layers);
         assert_eq!(stats.layer_stats.len(), config.num_layers);
+    }
+
+    #[test]
+    fn test_rebuild_with_config() {
+        // Create an index with 16 layers
+        let initial_config = HNSWConfig {
+            m: 16,
+            ef_construction: 100,
+            num_layers: 16,
+            random_seed: 42,
+        };
+        let mut index = HNSWIndex::new(initial_config);
+        
+        // Add some vectors
+        for i in 0..10 {
+            let mut vector = vec![0.0; EMBEDDING_DIM];
+            vector[i % EMBEDDING_DIM] = 1.0;
+            index.insert(vector).unwrap();
+        }
+        
+        // Create a new config with fewer layers
+        let new_config = HNSWConfig {
+            m: 16,
+            ef_construction: 100,
+            num_layers: 4,
+            random_seed: 42,
+        };
+        
+        // Rebuild the index
+        let rebuilt_index = index.rebuild_with_config(new_config).unwrap();
+        
+        // Verify that the rebuilt index has the new config
+        assert_eq!(rebuilt_index.config.num_layers, 4);
+        
+        // Verify that all vectors were transferred
+        assert_eq!(rebuilt_index.nodes.len(), index.nodes.len());
+        
+        // Check that search still works
+        let query = vec![1.0; EMBEDDING_DIM];
+        let results = rebuilt_index.search_parallel(&query, 5, 100).unwrap();
+        assert!(!results.is_empty());
     }
 
     // Helper function for benchmarking

@@ -592,8 +592,14 @@ impl Search {
         } else {
             // Fallback to a simple snippet if no good regions found
             let mut simple_snippet = String::new();
-            let start = 0.max(lines.len() / 2 - MIN_CONTEXT_LINES);
-            let end = (start + MIN_CONTEXT_LINES * 2).min(lines.len());
+            // Fix potential underflow by ensuring we don't subtract more than lines.len()/2
+            let min_context = MIN_CONTEXT_LINES.min(lines.len() / 2);
+            let start = if lines.len() >= min_context * 2 {
+                lines.len() / 2 - min_context
+            } else {
+                0
+            };
+            let end = (start + min_context * 2).min(lines.len());
             
             for i in start..end {
                 simple_snippet.push_str(&format!("{:4} | {}\n", i + 1, lines[i]));
