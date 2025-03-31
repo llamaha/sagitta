@@ -4,10 +4,12 @@ use crate::vectordb::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::search::{Search, CodeSearchType};
 use crate::vectordb::parsing::{RustAnalyzer, CodeElement};
+use crate::vectordb::hnsw::HNSWConfig;
 use std::path::Path;
 use std::collections::HashSet;
 use colored::Colorize;
 use walkdir::WalkDir;
+use std::time::{Instant, Duration};
 
 #[derive(Parser, Debug)]
 pub enum Command {
@@ -20,6 +22,10 @@ pub enum Command {
         /// File types to index (e.g. rs,py,txt)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Vec<String>,
+        
+        /// Use HNSW index for faster searches on large codebases
+        #[arg(long = "use-hnsw")]
+        use_hnsw: bool,
     },
 
     /// Search for files by content
@@ -72,8 +78,16 @@ pub enum Command {
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
-        Command::Index { dir, file_types } => {
+        Command::Index { dir, file_types, use_hnsw } => {
             println!("Indexing files in {}...", dir);
+            
+            // Create HNSW config if the flag is used
+            if use_hnsw {
+                println!("Using HNSW index for faster searches...");
+                let hnsw_config = HNSWConfig::default();
+                db.set_hnsw_config(Some(hnsw_config));
+            }
+            
             db.index_directory(&dir, &file_types)?;
             println!("Indexing complete!");
         }
@@ -246,14 +260,18 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("\nHNSW Index:");
                 println!("  Nodes: {}", hnsw_stats.total_nodes);
                 println!("  Layers: {}", hnsw_stats.layers);
+                println!("  Info: The HNSW index provides faster search on large codebases.");
+                println!("        Use --use-hnsw with the index command to enable.");
                 
                 // Display layer stats
-                println!("  Layer statistics:");
-                for (i, layer_stat) in hnsw_stats.layer_stats.iter().enumerate() {
-                    println!("    Layer {}: {} nodes", i, layer_stat.nodes);
+                println!("\n  Layer Statistics:");
+                for (i, layer) in hnsw_stats.layer_stats.iter().enumerate() {
+                    println!("    Layer {}: {} nodes, {:.2} avg. connections", 
+                        i, layer.nodes, layer.avg_connections);
                 }
             } else {
                 println!("\nHNSW Index: Not enabled");
+                println!("  For faster searches on large codebases, use --use-hnsw when indexing.");
             }
         }
         Command::Clear => {
@@ -262,4 +280,137 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+    use std::io::Write;
+
+    #[test]
+    fn test_hnsw_flag_creates_index() -> Result<()> {
+        // Create a temporary directory for the test
+        let temp_dir = tempdir()?;
+        let db_dir = tempdir()?;
+        let db_path = db_dir.path().join("test.db").to_string_lossy().to_string();
+        
+        // Create a test file
+        let test_file = temp_dir.path().join("test.rs");
+        let mut file = fs::File::create(&test_file)?;
+        writeln!(file, "fn main() {{ println!(\"Hello, world!\"); }}")?;
+        
+        // Create VectorDB
+        let db = VectorDB::new(db_path.clone())?;
+        
+        // Execute the index command with use_hnsw flag
+        let command = Command::Index {
+            dir: temp_dir.path().to_string_lossy().to_string(),
+            file_types: vec!["rs".to_string()],
+            use_hnsw: true,
+        };
+        
+        execute_command(command, db)?;
+        
+        // Load the DB again to check if HNSW index was created and saved
+        let reloaded_db = VectorDB::new(db_path)?;
+        let stats = reloaded_db.stats();
+        assert!(stats.hnsw_stats.is_some(), "HNSW index should be created");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_hnsw_search_performance() -> Result<()> {
+        // Create a temporary directory for the test
+        let temp_dir = tempdir()?;
+        let db_dir = tempdir()?;
+        
+        // Create multiple test files to simulate a larger codebase
+        for i in 0..50 {
+            let test_file = temp_dir.path().join(format!("test_{}.rs", i));
+            let mut file = fs::File::create(&test_file)?;
+            writeln!(file, "// File {}", i)?;
+            writeln!(file, "fn function_{}() {{ println!(\"Function {}\"); }}", i, i)?;
+            writeln!(file, "struct Struct{} {{ field: i32 }}", i)?;
+        }
+        
+        // Test with HNSW
+        let db_path_hnsw = db_dir.path().join("test_hnsw.db").to_string_lossy().to_string();
+        let mut db_hnsw = VectorDB::new(db_path_hnsw)?;
+        db_hnsw.set_hnsw_config(Some(HNSWConfig::default()));
+        
+        // Index with HNSW
+        db_hnsw.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        
+        // Create embedding model for HNSW search
+        let model_hnsw = EmbeddingModel::new()?;
+        let mut search_hnsw = Search::new(db_hnsw, model_hnsw);
+        
+        // Test without HNSW
+        let db_path_normal = db_dir.path().join("test_normal.db").to_string_lossy().to_string();
+        let mut db_normal = VectorDB::new(db_path_normal)?;
+        
+        // Index without HNSW
+        db_normal.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        
+        // Create separate embedding model for normal search
+        let model_normal = EmbeddingModel::new()?;
+        let mut search_normal = Search::new(db_normal, model_normal);
+        
+        // Measure search time with HNSW
+        let start_hnsw = Instant::now();
+        let _results_hnsw = search_hnsw.search("function")?;
+        let duration_hnsw = start_hnsw.elapsed();
+        
+        // Measure search time without HNSW
+        let start_normal = Instant::now();
+        let _results_normal = search_normal.search("function")?;
+        let duration_normal = start_normal.elapsed();
+        
+        // For consistent test results, we don't strictly assert that HNSW is faster
+        // as it might not be measurable with a small test dataset
+        // Instead, just log the results
+        println!("Search time with HNSW: {:?}", duration_hnsw);
+        println!("Search time without HNSW: {:?}", duration_normal);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_hnsw_index_persistence() -> Result<()> {
+        // Create temporary directories
+        let temp_dir = tempdir()?;
+        let db_dir = tempdir()?;
+        let db_path = db_dir.path().join("test_persistence.db").to_string_lossy().to_string();
+        
+        // Create a test file
+        let test_file = temp_dir.path().join("test.rs");
+        let mut file = fs::File::create(&test_file)?;
+        writeln!(file, "fn test() {{ println!(\"Test\"); }}")?;
+        
+        // Create VectorDB with HNSW config
+        let mut db = VectorDB::new(db_path.clone())?;
+        db.set_hnsw_config(Some(HNSWConfig::default()));
+        
+        // Index files
+        db.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        
+        // Get stats before reloading
+        let hnsw_stats_before = db.stats().hnsw_stats;
+        assert!(hnsw_stats_before.is_some(), "HNSW index should be present");
+        
+        // Force the DB to save changes
+        drop(db);
+        
+        // Reload the database
+        let db_reloaded = VectorDB::new(db_path)?;
+        
+        // Check if HNSW config is still there
+        let hnsw_stats_after = db_reloaded.stats().hnsw_stats;
+        assert!(hnsw_stats_after.is_some(), "HNSW index should persist after reload");
+        
+        Ok(())
+    }
 } 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct CodeTokenizer {
     vocab: HashMap<String, u32>,
     unk_token: u32,

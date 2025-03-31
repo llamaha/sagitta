@@ -100,6 +100,15 @@ impl VectorDB {
         })
     }
 
+    /// Set HNSW configuration - creates a new index if config is provided, removes it if None
+    pub fn set_hnsw_config(&mut self, config: Option<HNSWConfig>) {
+        if let Some(config) = config {
+            self.hnsw_index = Some(HNSWIndex::new(config));
+        } else {
+            self.hnsw_index = None;
+        }
+    }
+
     pub fn index_file(&mut self, file_path: &Path) -> Result<()> {
         let file_path_str = file_path.to_string_lossy().to_string();
         

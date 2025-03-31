@@ -5,6 +5,7 @@ pub const EMBEDDING_DIM: usize = 384;
 const NGRAM_SIZE: usize = 3;
 const POSITION_WEIGHT: f32 = 0.3;
 
+#[derive(Clone)]
 pub struct EmbeddingModel {
     tokenizer: CodeTokenizer,
 }
