@@ -1,9 +1,13 @@
 use std::collections::HashMap;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use serde::{Serialize, Deserialize};
+use std::time::Instant;
+use std::fs;
 use crate::vectordb::error::{Result, VectorDBError};
-use std::time::{Duration, Instant};
+use std::io::{Read, Seek, SeekFrom};
+use std::convert::TryInto;
 
 const CACHE_TTL: u64 = 3600; // 1 hour in seconds
 
@@ -44,14 +48,24 @@ impl EmbeddingCache {
 
     fn new_with_ttl(cache_path: String, ttl: u64) -> Result<Self> {
         let entries = if Path::new(&cache_path).exists() {
-            let contents = std::fs::read_to_string(&cache_path)
-                .map_err(|e| VectorDBError::FileReadError {
-                    path: Path::new(&cache_path).to_path_buf(),
-                    source: e,
-                })?;
-            let cache_file: CacheFile = serde_json::from_str(&contents)
-                .map_err(VectorDBError::SerializationError)?;
-            cache_file.entries
+            match std::fs::read_to_string(&cache_path) {
+                Ok(contents) => {
+                    match serde_json::from_str::<CacheFile>(&contents) {
+                        Ok(cache_file) => cache_file.entries,
+                        Err(e) => {
+                            // Handle corrupted cache file
+                            eprintln!("Warning: Cache file appears corrupted: {}", e);
+                            // Don't return an error, just start with an empty cache
+                            HashMap::new()
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Handle file reading error
+                    eprintln!("Warning: Couldn't read cache file: {}", e);
+                    HashMap::new()
+                }
+            }
         } else {
             HashMap::new()
         };
@@ -109,7 +123,7 @@ impl EmbeddingCache {
         self.entries.len()
     }
 
-    fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
         if let Some(parent) = Path::new(&self.cache_path).parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| VectorDBError::DirectoryCreationError {
@@ -122,15 +136,25 @@ impl EmbeddingCache {
             entries: self.entries.clone(),
         };
         
+        // Create a temporary file first
+        let temp_path = format!("{}.tmp", self.cache_path);
+        
+        // Write to temporary file first
         let contents = serde_json::to_string_pretty(&cache_file)
             .map_err(VectorDBError::SerializationError)?;
-        
-        std::fs::write(&self.cache_path, contents)
+        std::fs::write(&temp_path, contents)
+            .map_err(|e| VectorDBError::FileWriteError {
+                path: Path::new(&temp_path).to_path_buf(),
+                source: e,
+            })?;
+            
+        // Atomically rename the temporary file to the actual file
+        std::fs::rename(&temp_path, &self.cache_path)
             .map_err(|e| VectorDBError::FileWriteError {
                 path: Path::new(&self.cache_path).to_path_buf(),
                 source: e,
             })?;
-        
+            
         Ok(())
     }
 

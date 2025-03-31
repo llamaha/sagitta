@@ -6,22 +6,22 @@ authors = ["Your Name <your.email@example.com>"]
 description = "A lightweight CLI tool for semantic file search using vector embeddings"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.1", features = ["derive"] }
 indicatif = "0.17"
-walkdir = "2.4"
+walkdir = "2.3"
 anyhow = "1.0"
 thiserror = "1.0"
-rayon = "1.8"
+rayon = "1.7"
 ndarray = "0.15"
 tokenizers = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-colored = "2.1"
+colored = "2.0"
 dirs = "5.0"
-tempfile = "3.8"
-regex = "1.10"
+tempfile = "3.5"
+regex = "1.8"
 rand = "0.8"
-num_cpus = "1.16"
+num_cpus = "1.15"
 # Code parsing dependencies
 tree-sitter = "0.20"
 tree-sitter-rust = "0.20"
@@ -32,6 +32,7 @@ crossbeam-channel = "0.5"
 syn = { version = "2.0", features = ["full", "parsing", "extra-traits", "visit"] }
 proc-macro2 = "1.0"
 quote = "1.0"
+ctrlc = "3.2"
 
 [dev-dependencies]
 tempfile = "3.10"

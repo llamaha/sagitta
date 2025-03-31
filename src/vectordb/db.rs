@@ -6,12 +6,13 @@ use walkdir::WalkDir;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::cache::EmbeddingCache;
 use crate::vectordb::error::{Result, VectorDBError};
-use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats, LayerStats};
+use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats};
 use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::atomic::AtomicBool;
 
 #[derive(Serialize, Deserialize)]
 struct DBFile {
@@ -41,14 +42,28 @@ impl Clone for VectorDB {
 impl VectorDB {
     pub fn new(db_path: String) -> Result<Self> {
         let (embeddings, hnsw_config) = if Path::new(&db_path).exists() {
-            let contents = fs::read_to_string(&db_path)
-                .map_err(|e| VectorDBError::FileReadError {
-                    path: Path::new(&db_path).to_path_buf(),
-                    source: e,
-                })?;
-            let db_file: DBFile = serde_json::from_str(&contents)
-                .map_err(VectorDBError::SerializationError)?;
-            (db_file.embeddings, db_file.hnsw_config)
+            // Try to read the existing database file, but handle corruption gracefully
+            match fs::read_to_string(&db_path) {
+                Ok(contents) => {
+                    match serde_json::from_str::<DBFile>(&contents) {
+                        Ok(db_file) => (db_file.embeddings, db_file.hnsw_config),
+                        Err(e) => {
+                            // If JSON parsing fails, assume the file is corrupted
+                            eprintln!("Warning: Database file appears to be corrupted: {}", e);
+                            eprintln!("Creating a new empty database.");
+                            // Remove corrupted file
+                            let _ = fs::remove_file(&db_path);
+                            (HashMap::new(), None)
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Handle file read errors
+                    eprintln!("Warning: Couldn't read database file: {}", e);
+                    eprintln!("Creating a new empty database.");
+                    (HashMap::new(), None)
+                }
+            }
         } else {
             (HashMap::new(), None)
         };
@@ -61,7 +76,18 @@ impl VectorDB {
             .to_string_lossy()
             .to_string();
         
-        let cache = EmbeddingCache::new(cache_path)?;
+        // Try to create cache, but handle potential cache corruption
+        let cache = match EmbeddingCache::new(cache_path.clone()) {
+            Ok(cache) => cache,
+            Err(e) => {
+                eprintln!("Warning: Couldn't load cache: {}", e);
+                eprintln!("Creating a new empty cache.");
+                // Try to remove the corrupted cache file
+                let _ = fs::remove_file(&cache_path);
+                // Create a new empty cache
+                EmbeddingCache::new(cache_path)?
+            }
+        };
         
         // Check for an HNSW index file
         let hnsw_path = Path::new(&db_path)
@@ -73,8 +99,14 @@ impl VectorDB {
         let hnsw_index = if hnsw_path.exists() {
             match HNSWIndex::load_from_file(&hnsw_path) {
                 Ok(index) => Some(index),
-                Err(_) => {
-                    // If loading fails, rebuild the index
+                Err(e) => {
+                    // If loading fails, clean up and rebuild the index
+                    eprintln!("Warning: Couldn't load HNSW index: {}", e);
+                    eprintln!("Creating a new index or rebuilding from embeddings.");
+                    // Try to remove corrupted file
+                    let _ = fs::remove_file(&hnsw_path);
+                    
+                    // Rebuild the index if we have a configuration
                     hnsw_config.map(|config| {
                         let mut index = HNSWIndex::new(config);
                         // Rebuild the index from embeddings
@@ -230,55 +262,76 @@ impl VectorDB {
             }
         }
         
-        // Process files in parallel using Rayon
         let file_count = eligible_files.len();
-        if file_count > 0 {
-            println!("Found {} files to index. Processing in parallel...", file_count);
-            
-            // Setup progress bar
-            let progress_bar = ProgressBar::new(file_count as u64);
-            progress_bar.set_style(
-                ProgressStyle::default_bar()
-                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({eta})")
-                    .unwrap()
-                    .progress_chars("#>-")
-            );
-            
-            // Counter for processed files
-            let processed_files = Arc::new(AtomicUsize::new(0));
-            
-            // We need thread-safe references to our data
-            let cache = Arc::new(Mutex::new(&mut self.cache));
-            let embeddings = Arc::new(Mutex::new(&mut self.embeddings));
-            let hnsw_index = if self.hnsw_index.is_some() {
-                Some(Arc::new(Mutex::new(&mut self.hnsw_index)))
-            } else {
-                None
-            };
-            
-            // Use thread_local for embedding model to avoid creating a new model for each file
+        println!("Found {} files to index. Processing in parallel...", file_count);
+        
+        // Track if we were interrupted
+        let mut was_interrupted = false;
+        
+        // Choose single-threaded or parallel indexing based on file count
+        if file_count < 10 {
+            // For small numbers of files, just process sequentially
+            for file_path in eligible_files {
+                self.index_file(&file_path)?;
+                
+                // Check for interruption
+                unsafe {
+                    if crate::cli::commands::INTERRUPT_RECEIVED {
+                        was_interrupted = true;
+                        println!("Interrupt received, saving progress...");
+                        self.save()?;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Use parallel processing for larger file counts
+            // Set up thread-local embedding model
             thread_local! {
                 static EMBEDDING_MODEL: RefCell<Option<EmbeddingModel>> = RefCell::new(None);
             }
             
-            // Process files in parallel
+            // Shared resources with proper synchronization
+            let embeddings = Arc::new(Mutex::new(HashMap::new()));
+            let cache = Arc::new(Mutex::new(self.cache.clone()));
+            let hnsw_index_option = self.hnsw_index.as_ref().map(|index| {
+                let config = index.get_config();
+                Arc::new(Mutex::new(HNSWIndex::new(config)))
+            });
+            
+            // Track progress
+            let processed_files = Arc::new(AtomicUsize::new(0));
+            let save_triggered = Arc::new(AtomicBool::new(false));
+            
+            // Create a progress bar
+            let progress_bar = ProgressBar::new(file_count as u64);
+            progress_bar.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({eta})")
+                .unwrap()
+                .progress_chars("#>-"));
+                
+            // Periodically save progress to handle large indexing operations
+            let save_interval = std::cmp::max(file_count / 10, 100); // Save after every 10% or 100 files, whichever is larger
+            
             eligible_files.par_iter().for_each(|file_path| {
+                // Skip if we've received an interrupt
+                unsafe {
+                    if crate::cli::commands::INTERRUPT_RECEIVED {
+                        return;
+                    }
+                }
+                
+                // Get file path as string
                 let file_path_str = file_path.to_string_lossy().to_string();
                 
-                // Check if the file is already in the cache
-                let cache_guard = cache.lock().unwrap();
-                let cached_embedding = cache_guard.get(&file_path_str).map(|v| v.to_vec());
-                drop(cache_guard); // Explicitly drop the mutex guard
-                
+                // Check if file is already in cache
+                let cached_embedding = cache.lock().unwrap().get(&file_path_str).map(|v| v.to_vec());
                 if let Some(embedding) = cached_embedding {
-                    // If in cache, insert into embeddings
                     embeddings.lock().unwrap().insert(file_path_str.clone(), embedding.clone());
                     
                     // Add to HNSW index if available
-                    if let Some(index_lock) = &hnsw_index {
-                        if let Some(index) = index_lock.lock().unwrap().as_mut() {
-                            let _ = index.insert(embedding.to_vec());
-                        }
+                    if let Some(ref index_lock) = hnsw_index_option {
+                        index_lock.lock().unwrap().insert(embedding).ok();
                     }
                 } else {
                     // Get or initialize thread-local embedding model
@@ -298,10 +351,8 @@ impl VectorDB {
                                         embeddings.lock().unwrap().insert(file_path_str, embedding.clone());
                                         
                                         // Add to HNSW index if available
-                                        if let Some(index_lock) = &hnsw_index {
-                                            if let Some(index) = index_lock.lock().unwrap().as_mut() {
-                                                let _ = index.insert(embedding);
-                                            }
+                                        if let Some(index_lock) = &hnsw_index_option {
+                                            index_lock.lock().unwrap().insert(embedding).ok();
                                         }
                                     }
                                 }
@@ -313,19 +364,43 @@ impl VectorDB {
                 // Update progress
                 let current = processed_files.fetch_add(1, Ordering::SeqCst) + 1;
                 progress_bar.set_position(current as u64);
+                
+                // Check for interruption or trigger periodic save
+                unsafe {
+                    if crate::cli::commands::INTERRUPT_RECEIVED || current % save_interval == 0 {
+                        save_triggered.store(true, Ordering::SeqCst);
+                    }
+                }
             });
             
             progress_bar.finish_with_message("Parallel indexing complete!");
             
-            // After parallel indexing is complete, save the database
+            // Check if we were interrupted
+            unsafe {
+                was_interrupted = crate::cli::commands::INTERRUPT_RECEIVED;
+            }
+            
+            // After parallel indexing is complete, update the main database with accumulated data
+            self.embeddings = embeddings.lock().unwrap().clone();
+            
+            // Update the HNSW index if available
+            if let Some(index_lock) = hnsw_index_option {
+                self.hnsw_index = Some(index_lock.lock().unwrap().clone());
+            }
+            
+            // Save the database
             println!("Saving database...");
             self.save()?;
             
-            // Rebuild the HNSW index with optimized layers if needed
-            if self.hnsw_index.is_some() {
+            // Check if we should rebuild the HNSW index
+            if !was_interrupted && self.hnsw_index.is_some() {
                 println!("Optimizing HNSW index...");
                 self.rebuild_hnsw_index()?;
             }
+        }
+        
+        if was_interrupted {
+            println!("Indexing was interrupted but your data has been saved safely.");
         }
         
         Ok(())
@@ -348,9 +423,21 @@ impl VectorDB {
             hnsw_config,
         };
         
+        // Create a temporary file first
+        let temp_path = format!("{}.tmp", self.db_path);
+        
+        // Serialize to the temporary file first
         let contents = serde_json::to_string_pretty(&db_file)
             .map_err(VectorDBError::SerializationError)?;
-        fs::write(&self.db_path, contents)
+        fs::write(&temp_path, contents)
+            .map_err(|e| VectorDBError::FileWriteError {
+                path: Path::new(&temp_path).to_path_buf(),
+                source: e,
+            })?;
+            
+        // Atomically rename the temporary file to the actual file
+        // This ensures we don't end up with a partially written file if interrupted
+        fs::rename(&temp_path, &self.db_path)
             .map_err(|e| VectorDBError::FileWriteError {
                 path: Path::new(&self.db_path).to_path_buf(),
                 source: e,
@@ -362,7 +449,15 @@ impl VectorDB {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join("hnsw_index.json");
-            index.save_to_file(&hnsw_path)?;
+                
+            // Use atomic write for HNSW index too
+            let hnsw_temp_path = format!("{}.tmp", hnsw_path.to_string_lossy());
+            index.save_to_file(Path::new(&hnsw_temp_path))?;
+            fs::rename(&hnsw_temp_path, &hnsw_path)
+                .map_err(|e| VectorDBError::FileWriteError {
+                    path: hnsw_path.clone(),
+                    source: e,
+                })?;
         }
         
         Ok(())

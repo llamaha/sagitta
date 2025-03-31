@@ -360,7 +360,15 @@ impl HNSWIndex {
             entry_points: self.entry_points.clone(),
         };
         
+        // First serialize to a string
         let data = serde_json::to_string_pretty(&serialized)?;
+        
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        
+        // Write to the file
         fs::write(path, data)?;
         
         Ok(())

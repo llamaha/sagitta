@@ -12,6 +12,12 @@ use walkdir::WalkDir;
 use std::time::{Instant, Duration};
 use rayon;
 use num_cpus;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use ctrlc;
+
+// Global flag for handling interrupts
+pub static mut INTERRUPT_RECEIVED: bool = false;
 
 #[derive(Parser, Debug)]
 pub enum Command {
@@ -87,6 +93,17 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
         Command::Index { dir, file_types, use_hnsw, threads } => {
             println!("Indexing files in {}...", dir);
             
+            // Set up signal handler for clean shutdown
+            let running = Arc::new(AtomicBool::new(true));
+            let r = running.clone();
+            
+            // Handle Ctrl+C gracefully
+            ctrlc::set_handler(move || {
+                println!("\nInterrupt received, finishing current operations and shutting down...");
+                r.store(false, Ordering::SeqCst);
+                unsafe { INTERRUPT_RECEIVED = true; }
+            }).expect("Failed to set Ctrl+C handler");
+            
             // Create HNSW config if the flag is used
             if use_hnsw {
                 println!("Using HNSW index for faster searches...");
@@ -108,9 +125,25 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
             
             let start = Instant::now();
-            db.index_directory(&dir, &file_types)?;
-            let duration = start.elapsed();
-            println!("Indexing complete in {:.2} seconds!", duration.as_secs_f32());
+            
+            // Check for interrupt periodically during indexing
+            match db.index_directory(&dir, &file_types) {
+                Ok(_) => {
+                    let duration = start.elapsed();
+                    if unsafe { INTERRUPT_RECEIVED } {
+                        println!("Indexing was interrupted but data has been saved safely.");
+                    } else {
+                        println!("Indexing complete in {:.2} seconds!", duration.as_secs_f32());
+                    }
+                },
+                Err(e) => {
+                    if unsafe { INTERRUPT_RECEIVED } {
+                        println!("Indexing was interrupted but data has been saved safely.");
+                    } else {
+                        return Err(e.into());
+                    }
+                }
+            }
         }
         Command::Query { query } => {
             let model = EmbeddingModel::new()?;
