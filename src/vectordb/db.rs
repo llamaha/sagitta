@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use walkdir::WalkDir;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::cache::EmbeddingCache;
+use crate::vectordb::error::{Result, VectorDBError};
 
 #[derive(Serialize, Deserialize)]
 struct DBFile {
@@ -21,9 +21,13 @@ pub struct VectorDB {
 impl VectorDB {
     pub fn new(db_path: String) -> Result<Self> {
         let embeddings = if Path::new(&db_path).exists() {
-            let contents = fs::read_to_string(&db_path)?;
-            let db_file: DBFile = serde_json::from_str(&contents)?;
-            db_file.embeddings
+            let contents = fs::read_to_string(&db_path)
+                .map_err(|e| VectorDBError::FileReadError {
+                    path: Path::new(&db_path).to_path_buf(),
+                    source: e,
+                })?;
+            serde_json::from_str(&contents)
+                .map_err(VectorDBError::SerializationError)?
         } else {
             HashMap::new()
         };
@@ -56,9 +60,15 @@ impl VectorDB {
         }
 
         // If not in cache, generate new embedding
-        let model = EmbeddingModel::new()?;
-        let contents = fs::read_to_string(file_path)?;
-        let embedding = model.embed(&contents)?;
+        let model = EmbeddingModel::new()
+            .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
+        let contents = fs::read_to_string(file_path)
+            .map_err(|e| VectorDBError::FileReadError {
+                path: file_path.to_path_buf(),
+                source: e,
+            })?;
+        let embedding = model.embed(&contents)
+            .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
         
         // Get file hash for cache
         let file_hash = EmbeddingCache::get_file_hash(file_path)?;
@@ -75,7 +85,7 @@ impl VectorDB {
         let dir_path = Path::new(dir);
         
         for entry in WalkDir::new(dir_path) {
-            let entry = entry?;
+            let entry = entry.map_err(|e| VectorDBError::DatabaseError(e.to_string()))?;
             if entry.file_type().is_file() {
                 let path = entry.path();
                 if let Some(ext) = path.extension() {
@@ -92,13 +102,22 @@ impl VectorDB {
 
     fn save(&self) -> Result<()> {
         if let Some(parent) = Path::new(&self.db_path).parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .map_err(|e| VectorDBError::DirectoryCreationError {
+                    path: parent.to_path_buf(),
+                    source: e,
+                })?;
         }
         let db_file = DBFile {
             embeddings: self.embeddings.clone(),
         };
-        let contents = serde_json::to_string_pretty(&db_file)?;
-        fs::write(&self.db_path, contents)?;
+        let contents = serde_json::to_string_pretty(&db_file)
+            .map_err(VectorDBError::SerializationError)?;
+        fs::write(&self.db_path, contents)
+            .map_err(|e| VectorDBError::FileWriteError {
+                path: Path::new(&self.db_path).to_path_buf(),
+                source: e,
+            })?;
         Ok(())
     }
 
@@ -106,7 +125,11 @@ impl VectorDB {
         self.embeddings.clear();
         self.cache.clear()?;
         if Path::new(&self.db_path).exists() {
-            fs::remove_file(&self.db_path)?;
+            fs::remove_file(&self.db_path)
+                .map_err(|e| VectorDBError::FileWriteError {
+                    path: Path::new(&self.db_path).to_path_buf(),
+                    source: e,
+                })?;
         }
         Ok(())
     }
