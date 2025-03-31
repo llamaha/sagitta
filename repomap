@@ -1,0 +1,2266 @@
+
+=== Repository Method Map ===
+
+📁 ./src/bin/test_env.rs
+  ⚙️  debug_value(value: &str, chars: usize)
+    📝 Print first few characters of a string for debugging (safe for API keys)
+    📞 Calls: debug_value, len, to_string
+  ⚙️  main
+    📝 Print first few characters of a string for debugging (safe for API keys)
+    📞 Calls: main
+  ⚙️  test_debug_value
+    📝 #[test]
+    📞 Calls: debug_value, test_debug_value
+  🛠️  test_debug_value
+    📝 #[test]
+  ⚙️  test_env_file_detection
+    📝 #[test]
+    📞 Calls: new, test_env_file_detection, unwrap
+  🛠️  test_env_file_detection
+    📝 #[test]
+
+📁 ./src/context/manager.rs
+  🔨 ContextManager
+    📝 /// Whether to automatically extract context using vector search
+  ⚙️  new(max_context_size: usize)
+    📝 /// Create a new context manager
+    📞 Calls: new
+  ⚙️  init(&mut self)
+    📝 /// Initialize the context manager
+    📞 Calls: discover, init
+  ⚙️  extract_context(&mut self)
+    📝 /// Extract context
+    📞 Calls: clear, extract_context
+  ⚙️  get_context(&self)
+    📝 /// Get the current context
+    📞 Calls: get_context
+  ⚙️  clear_context(&mut self)
+    📝 /// Clear the context
+    📞 Calls: clear, clear_context
+  ⚙️  add_summary_context(&mut self, summary: &str)
+    📝 /// Add a summary context
+    📞 Calls: add_summary_context, from
+  ⚙️  summarize_context(&self)
+    📝 /// Summarize the context
+    📞 Calls: new, summarize_context
+  ⚙️  is_empty(&self)
+    📝 /// Check if context is empty
+    📞 Calls: is_empty
+  ⚙️  total_lines(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, count, iter, lines, map, total_lines
+  ⚙️  generate_repo_map(&mut self)
+    📝 /// Generate repository map using find ./data
+    📞 Calls: generate_repo_map
+  ⚙️  find_relevant_files(&mut self, query: &str)
+    📝 /// Find relevant files for a query
+    📞 Calls: Some, find_relevant_files
+  ⚙️  extract_context_with_vector_db(&mut self, query: Option<&str>)
+    📝 /// Extract context with vector database
+    📞 Calls: clear, extract_context_with_vector_db
+  ⚙️  extract_context_with_repo_map(&mut self, query: Option<&str>)
+    📝 /// Extract context with file list from find ./data
+    📞 Calls: clear, extract_context_with_repo_map
+  ⚙️  get_repo_map(&self)
+    📝 /// Get the repository map directly
+    📞 Calls: get_repo_map
+  ⚙️  clear_file_context(&mut self)
+    📝 /// Clear file context from the context items
+    📞 Calls: clear_file_context
+  ⚙️  build_vector_index(&mut self, data_dir: &str)
+    📝 /// Build or rebuild the vector index
+    📞 Calls: Some, build_vector_index
+  ⚙️  get_vector_db_stats(&self)
+    📝 /// Get vector database statistics
+    📞 Calls: Some, get_vector_db_stats, is_initialized
+  ⚙️  set_relevance_threshold(&mut self, threshold: f32)
+    📝 /// Set the relevance threshold
+    📞 Calls: Err, set_relevance_threshold
+  ⚙️  get_vector_db(&self)
+    📝 /// Get access to the vector database
+    📞 Calls: as_ref, get_vector_db
+  ⚙️  set_auto_context(&mut self, enabled: bool)
+    📝 /// Set automatic context extraction setting
+    📞 Calls: set_auto_context
+  ⚙️  set_max_files(&mut self, max_files: usize)
+    📝 /// Set maximum files to include in context
+    📞 Calls: set_max_files
+  ⚙️  set_max_content(&mut self, max_content: usize)
+    📝 /// Set maximum content per file
+    📞 Calls: set_max_content
+  ⚙️  get_extraction_stats(&self)
+    📝 /// Get statistics about the last context extraction
+    📞 Calls: get_extraction_stats, iter, len
+  ⚙️  read_file_content(&self, file_path: &str)
+    📝 /// Read file content from disk
+    📞 Calls: from, read_file_content
+  🛠️  read_file_content(&self, file_path: &str)
+    📝 /// Read file content from disk
+  ⚙️  auto_extract_context(&self)
+    📝 /// Get automatic context extraction setting
+    📞 Calls: auto_extract_context
+  ⚙️  create_test_context_manager
+    📝 // Helper function to create a test context manager
+    📞 Calls: create_test_context_manager, new, path, to_path_buf, unwrap
+  🛠️  create_test_context_manager
+    📝 // Helper function to create a test context manager
+  ⚙️  test_context_manager_new
+    📝 #[test]
+    📞 Calls: new, test_context_manager_new
+  🛠️  test_context_manager_new
+    📝 #[test]
+  ⚙️  test_context_management
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_context_management
+  🛠️  test_context_management
+    📝 #[test]
+  ⚙️  test_summarize_context
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_summarize_context
+  🛠️  test_summarize_context
+    📝 #[test]
+  ⚙️  test_context_empty_check
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_context_empty_check
+  🛠️  test_context_empty_check
+    📝 #[test]
+  ⚙️  test_extract_context
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_extract_context
+  🛠️  test_extract_context
+    📝 #[test]
+  ⚙️  test_file_context_operations
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_file_context_operations
+  🛠️  test_file_context_operations
+    📝 #[test]
+  ⚙️  test_context_extraction_with_repo_map
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_context_extraction_with_repo_map
+  🛠️  test_context_extraction_with_repo_map
+    📝 #[test]
+  ⚙️  test_context_extraction_stats
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_context_extraction_stats
+  🛠️  test_context_extraction_stats
+    📝 #[test]
+  ⚙️  test_auto_context_setting
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_auto_context_setting
+  🛠️  test_auto_context_setting
+    📝 #[test]
+  ⚙️  test_max_files_and_content_settings
+    📝 #[test]
+    📞 Calls: create_test_context_manager, test_max_files_and_content_settings
+  🛠️  test_max_files_and_content_settings
+    📝 #[test]
+  ⚙️  test_context_extraction_with_vector_db
+    📝 #[test]
+    📞 Calls: new, test_context_extraction_with_vector_db, unwrap
+  🛠️  test_context_extraction_with_vector_db
+    📝 #[test]
+  ⚙️  test_summarize_context_with_content
+    📝 #[test]
+    📞 Calls: new, test_summarize_context_with_content
+  🛠️  test_summarize_context_with_content
+    📝 #[test]
+  ⚙️  test_find_files_with_extensions
+    📝 #[test]
+    📞 Calls: new, test_find_files_with_extensions, unwrap
+  🛠️  test_find_files_with_extensions
+    📝 #[test]
+  ⚙️  test_file_content_with_syntax_highlighting
+    📝 #[test]
+    📞 Calls: new, test_file_content_with_syntax_highlighting
+  🛠️  test_file_content_with_syntax_highlighting
+    📝 #[test]
+  ⚙️  test_truncate_content
+    📝 #[test]
+    📞 Calls: new, test_truncate_content
+  🛠️  test_truncate_content
+    📝 #[test]
+  ⚙️  test_max_files_limit
+    📝 #[test]
+    📞 Calls: new, test_max_files_limit
+  🛠️  test_max_files_limit
+    📝 #[test]
+
+📁 ./src/api/models.rs
+  🔨 ChatCompletionRequest
+    📝 #[allow(dead_code)]
+  ⚙️  new(content: String)
+    📝 /// Create a new chat completion request
+    📞 Calls: new
+  ⚙️  add_file_context(&mut self, path: &str, content: &str)
+    📝 /// Add a file context element
+    📞 Calls: add_file_context, to_string
+  ⚙️  test_chat_completion_request_serialization
+    📝 #[test]
+    📞 Calls: test_chat_completion_request_serialization
+  🛠️  test_chat_completion_request_serialization
+    📝 #[test]
+  ⚙️  test_chat_completion_request_deserialization
+    📝 #[test]
+    📞 Calls: test_chat_completion_request_deserialization
+  🛠️  test_chat_completion_request_deserialization
+    📝 #[test]
+  ⚙️  test_context_element_serialization
+    📝 #[test]
+    📞 Calls: test_context_element_serialization
+  🛠️  test_context_element_serialization
+    📝 #[test]
+  ⚙️  test_chat_completion_response_deserialization
+    📝 #[test]
+    📞 Calls: test_chat_completion_response_deserialization
+  🛠️  test_chat_completion_response_deserialization
+    📝 #[test]
+  ⚙️  test_chat_completion_request_new
+    📝 #[test]
+    📞 Calls: new, test_chat_completion_request_new, to_string
+  🛠️  test_chat_completion_request_new
+    📝 #[test]
+  ⚙️  test_chat_completion_request_add_file_context
+    📝 #[test]
+    📞 Calls: new, test_chat_completion_request_add_file_context, to_string
+  🛠️  test_chat_completion_request_add_file_context
+    📝 #[test]
+
+📁 ./src/vectordb/config.rs
+  🔨 Default
+    📝 /// Whether to disable progress bar output (useful for TUI interfaces)
+  ⚙️  default
+    📝 /// Whether to disable progress bar output (useful for TUI interfaces)
+    📞 Calls: default, from
+  🛠️  default
+    📝 /// Whether to disable progress bar output (useful for TUI interfaces)
+  ⚙️  test_config_default
+    📝 #[test]
+    📞 Calls: default, from, test_config_default
+  🛠️  test_config_default
+    📝 #[test]
+  ⚙️  test_config_custom
+    📝 #[test]
+    📞 Calls: from, test_config_custom
+  🛠️  test_config_custom
+    📝 #[test]
+
+📁 ./src/context/search.rs
+  🔨 ContextSearch
+    📝 /// Relevant files based on query
+  ⚙️  new(cache_ttl: u64)
+    📝 /// Create a new context search
+    📞 Calls: new
+  ⚙️  generate_repo_map(&mut self)
+    📝 /// Generate repository map using find ./data
+    📞 Calls: Some, generate_repo_map
+  ⚙️  find_files_recursive(&self, dir: &Path, files: &mut Vec<String>)
+    📝 /// Find files recursively
+    📞 Calls: Ok, exists, find_files_recursive, is_dir
+  🛠️  find_files_recursive(&self, dir: &Path, files: &mut Vec<String>)
+    📝 /// Find files recursively
+  ⚙️  is_likely_binary(&self, path: &Path)
+    📝 /// Check if a file is likely binary
+    📞 Calls: Some, extension, is_likely_binary
+  🛠️  is_likely_binary(&self, path: &Path)
+    📝 /// Check if a file is likely binary
+  ⚙️  find_relevant_files(&mut self, query: &str)
+    📝 /// Find relevant files for a query
+    📞 Calls: Some, find_relevant_files, get
+  ⚙️  search_content(&self, files: &[String], query: &str, max_results: usize)
+    📝 /// Deep search for content matching query
+    📞 Calls: search_content, split_whitespace
+  ⚙️  extract_match_context(&self, content: &str, keyword: &str, context_lines: usize)
+    📝 /// Extract context around the first occurrence of a keyword
+    📞 Calls: collect, extract_match_context, lines, to_lowercase
+  🛠️  extract_match_context(&self, content: &str, keyword: &str, context_lines: usize)
+    📝 /// Extract context around the first occurrence of a keyword
+  ⚙️  clear_cache(&mut self)
+    📝 /// Clear the search cache
+    📞 Calls: clear, clear_cache
+  ⚙️  create_test_files
+    📝 [cfg(test)]
+    📞 Calls: create_test_files, new, unwrap
+  🛠️  create_test_files
+    📝 [cfg(test)]
+  ⚙️  test_is_likely_binary
+    📝 #[test]
+    📞 Calls: new, test_is_likely_binary, unwrap
+  🛠️  test_is_likely_binary
+    📝 #[test]
+  ⚙️  test_find_relevant_files
+    📝 #[test]
+    📞 Calls: create_test_files, current_dir, test_find_relevant_files, unwrap
+  🛠️  test_find_relevant_files
+    📝 #[test]
+  ⚙️  test_search_content
+    📝 #[test]
+    📞 Calls: create_test_files, current_dir, test_search_content, unwrap
+  🛠️  test_search_content
+    📝 #[test]
+  ⚙️  test_clear_cache
+    📝 #[test]
+    📞 Calls: new, test_clear_cache
+  🛠️  test_clear_cache
+    📝 #[test]
+
+📁 ./src/ui/clipboard.rs
+  🔨 Default
+    📝 /// The arboard clipboard instance
+  ⚙️  default
+    📝 /// The arboard clipboard instance
+    📞 Calls: default, new
+  🛠️  default
+    📝 /// The arboard clipboard instance
+  🔨 ClipboardManager
+    📝 /// The arboard clipboard instance
+  ⚙️  new
+    📝 /// Create a new clipboard manager
+    📞 Calls: Ok, new
+  ⚙️  copy_to_clipboard(&mut self, text: &str)
+    📝 /// Copy text to clipboard
+    📞 Calls: Some, copy_to_clipboard, set_text
+  ⚙️  get_text_from_clipboard(&mut self)
+    📝 /// Get text from clipboard
+    📞 Calls: Some, get_text, get_text_from_clipboard
+  ⚙️  is_available(&self)
+    📝 /// Check if clipboard is available
+    📞 Calls: is_available, is_some
+
+📁 ./src/ui/components/input_height.rs
+  ⚙️  calculate_input_height(input_text: &str, width: u16, min_height: u16, max_height: u16)
+    📝 Returns the height in rows required to display the input text, constrained by min and max.
+    📞 Calls: calculate_input_height, is_empty
+  ⚙️  test_empty_input
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_empty_input
+  🛠️  test_empty_input
+    📝 #[test]
+  ⚙️  test_single_line
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_single_line
+  🛠️  test_single_line
+    📝 #[test]
+  ⚙️  test_long_single_line
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_long_single_line
+  🛠️  test_long_single_line
+    📝 #[test]
+  ⚙️  test_multiple_lines
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_multiple_lines
+  🛠️  test_multiple_lines
+    📝 #[test]
+  ⚙️  test_mixed_content
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_mixed_content
+  🛠️  test_mixed_content
+    📝 #[test]
+  ⚙️  test_max_height_limit
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_max_height_limit
+  🛠️  test_max_height_limit
+    📝 #[test]
+  ⚙️  test_zero_width
+    📝 #[test]
+    📞 Calls: calculate_input_height, test_zero_width
+  🛠️  test_zero_width
+    📝 #[test]
+
+📁 ./src/ui/components/rendering.rs
+  ⚙️  render_messages(f: &mut Frame, area: Rect, messages: &[Message], scroll_position: usize, selection: &Selection)
+    📝 Render the chat messages
+    📞 Calls: is_empty, render_messages
+  ⚙️  render_input(f: &mut Frame, area: Rect, input: &str, cursor_pos: usize)
+    📝 Render the input box
+    📞 Calls: render_input
+  ⚙️  render_status_bar(f: &mut Frame, area: Rect, status: &str)
+    📝 Render the status bar
+    📞 Calls: from, render_status_bar, status_bar_style, styled
+  ⚙️  test_render_messages
+    📝 #[test]
+    📞 Calls: new, test_render_messages
+  🛠️  test_render_messages
+    📝 #[test]
+  ⚙️  test_render_input
+    📝 #[test]
+    📞 Calls: new, test_render_input
+  🛠️  test_render_input
+    📝 #[test]
+  ⚙️  test_render_status_bar
+    📝 #[test]
+    📞 Calls: new, test_render_status_bar
+  🛠️  test_render_status_bar
+    📝 #[test]
+
+📁 ./src/utils/logger.rs
+  ⚙️  init_logger
+    📝 Initialize the logger
+    📞 Calls: init_logger, new
+  🔨 EnvVarGuard
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  new(key: &str, value: &str)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+    📞 Calls: new, ok, set_var, var
+  🛠️  new(key: &str, value: &str)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  🔨 Drop
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  drop(&mut self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+    📞 Calls: Some, drop, set_var
+  🛠️  drop(&mut self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  🔨 HomeGuard
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  new
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+    📞 Calls: new, ok, unwrap, var
+  🛠️  new
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  home_dir(&self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+    📞 Calls: home_dir, path, to_path_buf
+  🛠️  home_dir(&self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  🔨 Drop
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  drop(&mut self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+    📞 Calls: Some, drop, set_var
+  🛠️  drop(&mut self)
+    📝 // Use a mutex to ensure tests don't run in parallel with logger initialization
+  ⚙️  test_init_logger(home_guard: &HomeGuard)
+    📝 // Create a test version of init_logger that doesn't actually initialize the global logger
+    📞 Calls: new, test_init_logger
+  🛠️  test_init_logger(home_guard: &HomeGuard)
+    📝 // Create a test version of init_logger that doesn't actually initialize the global logger
+  ⚙️  test_init_logger_creates_log_directory
+    📝 #[test]
+    📞 Calls: lock, test_init_logger_creates_log_directory, unwrap
+  🛠️  test_init_logger_creates_log_directory
+    📝 #[test]
+  ⚙️  test_init_logger_respects_custom_log_level
+    📝 #[test]
+    📞 Calls: lock, test_init_logger_respects_custom_log_level, unwrap
+  🛠️  test_init_logger_respects_custom_log_level
+    📝 #[test]
+  ⚙️  test_init_logger_with_invalid_log_level_uses_default
+    📝 #[test]
+    📞 Calls: lock, test_init_logger_with_invalid_log_level_uses_default, unwrap
+  🛠️  test_init_logger_with_invalid_log_level_uses_default
+    📝 #[test]
+
+📁 ./src/ui/ui.rs
+  🔨 Default
+    📝 /// Context files count
+  ⚙️  default
+    📝 /// Context files count
+    📞 Calls: default, new
+  🛠️  default
+    📝 /// Context files count
+  🔨 Ui
+    📝 /// Context files count
+  ⚙️  new
+    📝 /// Create a new UI
+    📞 Calls: new
+  ⚙️  add_system_message(&mut self, content: &str)
+    📝 /// Add a system message
+    📞 Calls: add_system_message, trim
+  ⚙️  add_user_message(&mut self, content: &str)
+    📝 /// Add a user message
+    📞 Calls: add_user_message, trim
+  ⚙️  add_ai_message(&mut self, content: &str)
+    📝 /// Add an AI message
+    📞 Calls: add_ai_message, to_string, trim
+  ⚙️  add_ai_message_start(&mut self)
+    📝 /// Add AI message start (for streaming)
+    📞 Calls: Ai, add_ai_message_start, new, push
+  ⚙️  update_ai_message(&mut self, content: &str)
+    📝 /// Update AI message content (for streaming)
+    📞 Calls: Ai, Some, last_mut, update_ai_message
+  ⚙️  set_status(&mut self, status: &str)
+    📝 /// Set the status message
+    📞 Calls: set_status, to_string
+  ⚙️  scroll_up(&mut self, lines: usize)
+    📝 /// Scroll up by the given number of lines
+    📞 Calls: scroll_up
+  ⚙️  scroll_down(&mut self, lines: usize)
+    📝 /// Scroll down by the given number of lines
+    📞 Calls: scroll_down
+  ⚙️  scroll_to_top(&mut self)
+    📝 /// Scroll to the top of the messages
+    📞 Calls: scroll_to_top
+  ⚙️  scroll_to_bottom(&mut self)
+    📝 /// Scroll to the bottom of the messages
+    📞 Calls: scroll_to_bottom
+  ⚙️  page_up(&mut self)
+    📝 /// Page up
+    📞 Calls: page_up
+  ⚙️  page_down(&mut self)
+    📝 /// Page down
+    📞 Calls: page_down
+  ⚙️  toggle_auto_scroll(&mut self)
+    📝 /// Toggle auto-scroll
+    📞 Calls: toggle_auto_scroll
+  ⚙️  handle_mouse_event(&mut self, event: MouseEvent)
+    📝 /// Handle mouse events
+    📞 Calls: handle_mouse_event
+  ⚙️  handle_clipboard_key_event(&mut self, key: KeyEvent)
+    📝 /// Handle key events related to clipboard operations
+    📞 Calls: handle_clipboard_key_event
+  ⚙️  extract_selected_text(&mut self)
+    📝 /// Extract selected text from messages based on selection boundaries
+    📞 Calls: Some, extract_selected_text, get_boundaries
+  🛠️  extract_selected_text(&mut self)
+    📝 /// Extract selected text from messages based on selection boundaries
+  ⚙️  render(&mut self, f: &mut Frame)
+    📝 /// Render the UI
+    📞 Calls: render, size
+
+📁 ./src/ui/message.rs
+  🔨 Message
+    📝 /// AI message
+  ⚙️  new(content: String, message_type: MessageType)
+    📝 /// Create a new message
+    📞 Calls: System, new
+  ⚙️  process_content(&self, content: &str)
+    📝 /// Process content to remove any unwanted characters and properly handle escape sequences
+    📞 Calls: process_content, to_string
+  ⚙️  message_type(&self)
+    📝 /// Get the message type
+    📞 Calls: System, message_type
+  ⚙️  content(&self)
+    📝 /// Get the message content
+    📞 Calls: System, content
+  ⚙️  get_header_span(&self)
+    📝 /// Get a styled span for the message header
+    📞 Calls: get_header_span, message_type
+  ⚙️  to_styled_text(&self, markup_processor: &dyn Fn(&str)
+    📝 /// Convert the message to styled Text for display
+    📞 Calls: Fn, get_header_span, new, to_styled_text
+  ⚙️  test_message_creation
+    📝 #[test]
+    📞 Calls: message_type, new, test_message_creation, to_string
+  🛠️  test_message_creation
+    📝 #[test]
+  ⚙️  test_process_content
+    📝 #[test]
+    📞 Calls: User, test_process_content, to_string
+  🛠️  test_process_content
+    📝 #[test]
+  ⚙️  test_get_header_span
+    📝 #[test]
+    📞 Calls: Ai, User, test_get_header_span, to_string
+  🛠️  test_get_header_span
+    📝 #[test]
+  ⚙️  test_to_styled_text
+    📝 #[test]
+    📞 Calls: User, test_to_styled_text, to_string
+  🛠️  test_to_styled_text
+    📝 #[test]
+
+📁 ./src/ui/selection.rs
+  🔨 TextPosition
+    📝 /// Column number (0-based)
+  ⚙️  new(line: usize, column: usize)
+    📝 /// Create a new text position
+    📞 Calls: new
+  ⚙️  is_before(&self, other: &TextPosition)
+    📝 /// Check if this position is before another position
+    📞 Calls: is_before
+  🔨 Selection
+    📝 /// Position in text
+  ⚙️  new
+    📝 /// Create a new selection
+    📞 Calls: new
+  ⚙️  start_selection(&mut self, position: TextPosition)
+    📝 /// Start a new selection
+    📞 Calls: start_selection
+  ⚙️  update_selection(&mut self, position: TextPosition)
+    📝 /// Update the selection end point
+    📞 Calls: update_selection
+  ⚙️  end_selection(&mut self)
+    📝 /// End the selection
+    📞 Calls: end_selection
+  ⚙️  reset(&mut self)
+    📝 /// Reset the selection
+    📞 Calls: reset
+  ⚙️  is_active(&self)
+    📝 /// Check if the selection is active
+    📞 Calls: is_active
+  ⚙️  contains(&self, position: TextPosition)
+    📝 /// Check if a position is within the selection
+    📞 Calls: contains
+  ⚙️  get_boundaries(&self)
+    📝 /// Get the selected text boundaries (actual start and end positions)
+    📞 Calls: Some, get_boundaries, new
+  ⚙️  set_text(&mut self, text: String)
+    📝 /// Set the selected text
+    📞 Calls: set_text
+  ⚙️  process_mouse_event(&mut self, event: MouseEvent, area: Rect, scroll_position: usize)
+    📝 /// Process a mouse event for selection
+    📞 Calls: process_mouse_event, saturating_sub
+
+📁 ./src/context/stats.rs
+  🔨 ContextStats
+    📝 Context statistics utilities
+  ⚙️  new
+    📝 /// Create a new context stats instance
+    📞 Calls: new
+  ⚙️  summarize_context(&self, context: &[(PathBuf, String)
+    📝 /// Generate a summary of the context
+    📞 Calls: new, summarize_context
+  ⚙️  total_lines(&self, context: &[(PathBuf, String)
+    📝 /// Count the total number of lines in the context
+    📞 Calls: count, iter, lines, map, total_lines
+  ⚙️  total_size(&self, context: &[(PathBuf, String)
+    📝 /// Calculate the total size of the context in bytes
+    📞 Calls: iter, len, map, total_size
+  ⚙️  get_stats(&self, context: &[(PathBuf, String)
+    📝 /// Calculate statistics for the context
+    📞 Calls: get_stats, len, total_lines
+  ⚙️  generate_report(&self, context: &[(PathBuf, String)
+    📝 /// Generate a detailed report about the context
+    📞 Calls: generate_report, get_stats
+  ⚙️  create_test_context
+    📝 [cfg(test)]
+    📞 Calls: create_test_context, from, main, to_string
+  🛠️  create_test_context
+    📝 [cfg(test)]
+  ⚙️  test_total_lines
+    📝 #[test]
+    📞 Calls: create_test_context, new, test_total_lines
+  🛠️  test_total_lines
+    📝 #[test]
+  ⚙️  test_total_size
+    📝 #[test]
+    📞 Calls: create_test_context, new, test_total_size
+  🛠️  test_total_size
+    📝 #[test]
+  ⚙️  test_get_stats
+    📝 #[test]
+    📞 Calls: create_test_context, new, test_get_stats
+  🛠️  test_get_stats
+    📝 #[test]
+  ⚙️  test_summarize_context
+    📝 #[test]
+    📞 Calls: create_test_context, new, test_summarize_context
+  🛠️  test_summarize_context
+    📝 #[test]
+  ⚙️  test_generate_report
+    📝 #[test]
+    📞 Calls: create_test_context, new, test_generate_report
+  🛠️  test_generate_report
+    📝 #[test]
+
+📁 ./src/ui/components/code_highlight.rs
+  ⚙️  colorize_code(code: &str, language: &str)
+    📝 Function to apply syntax highlighting to code
+    📞 Calls: colorize_code, to_string
+  ⚙️  test_colorize_code
+    📝 #[test]
+    📞 Calls: test_colorize_code
+  🛠️  test_colorize_code
+    📝 #[test]
+
+📁 ./src/vectordb/index.rs
+  🔨 VectorIndex
+    📝 Vector index for fast similarity search
+  ⚙️  new(dimensions: usize)
+    📝 /// Create a new vector index
+    📞 Calls: new
+  ⚙️  add(&mut self, vector: &[f32], id: u64)
+    📝 /// Add a vector to the index
+    📞 Calls: add
+  ⚙️  search(&self, query: &[f32], top_k: usize)
+    📝 /// Search for similar vectors
+    📞 Calls: search
+  ⚙️  len(&self)
+    📝 /// Get the number of vectors in the index
+    📞 Calls: len
+  ⚙️  is_empty(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, is_empty
+  ⚙️  save(&self, index_path: &Path, metadata_path: &Path)
+    📝 /// Save the index to disk
+    📞 Calls: save
+  ⚙️  load(index_path: &Path, metadata_path: &Path)
+    📝 /// Load the index from disk
+    📞 Calls: load
+  ⚙️  size(&self)
+    📝 /// Get the size (number of vectors) in the index
+    📞 Calls: len, size
+  🔨 IndexMetadata
+    📝 // Use a timestamp format without the serde feature
+  ⚙️  new(dimensions: usize, count: usize)
+    📝 /// Create new metadata
+    📞 Calls: new, to_string
+  ⚙️  save(&self, path: &Path)
+    📝 /// Save metadata to disk
+    📞 Calls: save, to_string_pretty, write
+  ⚙️  load(path: &Path)
+    📝 /// Load metadata from disk
+    📞 Calls: from_str, load, read_to_string
+  ⚙️  test_vector_index_new
+    📝 #[test]
+    📞 Calls: test_vector_index_new
+  🛠️  test_vector_index_new
+    📝 #[test]
+  ⚙️  test_vector_index_add
+    📝 #[test]
+    📞 Calls: test_vector_index_add
+  🛠️  test_vector_index_add
+    📝 #[test]
+  ⚙️  test_vector_index_add_dimension_mismatch
+    📝 #[test]
+    📞 Calls: test_vector_index_add_dimension_mismatch
+  🛠️  test_vector_index_add_dimension_mismatch
+    📝 #[test]
+  ⚙️  test_vector_index_search
+    📝 #[test]
+    📞 Calls: test_vector_index_search
+  🛠️  test_vector_index_search
+    📝 #[test]
+  ⚙️  test_vector_index_search_dimension_mismatch
+    📝 #[test]
+    📞 Calls: test_vector_index_search_dimension_mismatch
+  🛠️  test_vector_index_search_dimension_mismatch
+    📝 #[test]
+  ⚙️  test_vector_index_search_empty
+    📝 #[test]
+    📞 Calls: test_vector_index_search_empty
+  🛠️  test_vector_index_search_empty
+    📝 #[test]
+  ⚙️  test_vector_index_len_and_is_empty
+    📝 #[test]
+    📞 Calls: test_vector_index_len_and_is_empty
+  🛠️  test_vector_index_len_and_is_empty
+    📝 #[test]
+  ⚙️  test_index_metadata_new
+    📝 #[test]
+    📞 Calls: test_index_metadata_new
+  🛠️  test_index_metadata_new
+    📝 #[test]
+  ⚙️  test_index_metadata_save_and_load
+    📝 #[test]
+    📞 Calls: new, test_index_metadata_save_and_load, unwrap
+  🛠️  test_index_metadata_save_and_load
+    📝 #[test]
+  ⚙️  test_index_metadata_load_failure
+    📝 #[test]
+    📞 Calls: new, test_index_metadata_load_failure
+  🛠️  test_index_metadata_load_failure
+    📝 #[test]
+
+📁 ./src/ui/components/markdown.rs
+  ⚙️  process_markdown(_message: &Message, text: &str)
+    📝 Process markdown elements in text
+    📞 Calls: new, process_markdown
+  ⚙️  process_regular_text(text: &str)
+    📝 Process regular text (not in code blocks) with markdown formatting
+    📞 Calls: new, process_regular_text
+  ⚙️  test_ai_message_markdown_processing
+    📝 #[test]
+    📞 Calls: test_ai_message_markdown_processing
+  🛠️  test_ai_message_markdown_processing
+    📝 #[test]
+  ⚙️  main
+    📝 // Test basic markdown formatting in AI messages
+    📞 Calls: main
+
+📁 ./src/config/settings_tests.rs
+  ⚙️  test_default_settings
+    📝 #[test]
+    📞 Calls: default, test_default_settings
+  🛠️  test_default_settings
+    📝 #[test]
+  ⚙️  test_load_from_env_vars
+    📝 #[test]
+    📞 Calls: new, test_load_from_env_vars
+  🛠️  test_load_from_env_vars
+    📝 #[test]
+  ⚙️  test_env_vars_override_defaults
+    📝 #[test]
+    📞 Calls: new, test_env_vars_override_defaults
+  🛠️  test_env_vars_override_defaults
+    📝 #[test]
+  ⚙️  test_missing_env_vars_use_defaults
+    📝 #[test]
+    📞 Calls: new, test_missing_env_vars_use_defaults
+  🛠️  test_missing_env_vars_use_defaults
+    📝 #[test]
+  ⚙️  test_invalid_env_var_values_use_defaults
+    📝 #[test]
+    📞 Calls: new, test_invalid_env_var_values_use_defaults
+  🛠️  test_invalid_env_var_values_use_defaults
+    📝 #[test]
+  ⚙️  test_api_key_validation
+    📝 #[test]
+    📞 Calls: test_api_key_validation
+  🛠️  test_api_key_validation
+    📝 #[test]
+
+📁 ./src/ui/terminal.rs
+  ⚙️  init
+    📝 Initialize the terminal
+    📞 Calls: enable_raw_mode, init
+  ⚙️  restore
+    📝 Restore terminal to original state
+    📞 Calls: disable_raw_mode, restore
+  ⚙️  with_terminal(test_func: F)
+    📝 // in a way that ensures terminal state is restored even if the test fails
+    📞 Calls: FnOnce
+  🛠️  with_terminal(test_func: F)
+    📝 // in a way that ensures terminal state is restored even if the test fails
+  ⚙️  test_init_and_restore
+    📝 #[test]
+    📞 Calls: test_init_and_restore
+  🛠️  test_init_and_restore
+    📝 #[test]
+  ⚙️  test_terminal_lifecycle
+    📝 #[ignore] // Ignored by default as it manipulates terminal state
+    📞 Calls: test_terminal_lifecycle, with_terminal
+  🛠️  test_terminal_lifecycle
+    📝 #[ignore] // Ignored by default as it manipulates terminal state
+
+📁 ./src/ui/components/layout.rs
+  ⚙️  create_layout(area: Rect)
+    📝 Create a layout with messages, input, and status areas
+    📞 Calls: create_layout, default
+  ⚙️  create_dynamic_layout(area: Rect, input_text: &str)
+    📝 Create a layout with dynamic input height based on content
+    📞 Calls: calculate_input_height, create_dynamic_layout
+  ⚙️  test_create_layout
+    📝 #[test]
+    📞 Calls: new, test_create_layout
+  🛠️  test_create_layout
+    📝 #[test]
+  ⚙️  test_create_dynamic_layout
+    📝 #[test]
+    📞 Calls: new, test_create_dynamic_layout
+  🛠️  test_create_dynamic_layout
+    📝 #[test]
+
+📁 ./src/ui/layout.rs
+  ⚙️  centered_rect(percent_x: u16, percent_y: u16, r: Rect)
+    📝 Create a centered rect using up a certain percentage of the available rect
+    📞 Calls: centered_rect, default, direction
+  ⚙️  popup_block(title: &str)
+    📝 Create a popup block with a title
+    📞 Calls: default, popup_block, title
+  ⚙️  titled_block(title: &str)
+    📝 Create a block with title and borders
+    📞 Calls: default, title, titled_block
+  ⚙️  active_block(title: &str, is_active: bool)
+    📝 Create a block with a different style for active state
+    📞 Calls: active_block, default, title
+  ⚙️  input_box(title: Option<&str>, is_active: bool)
+    📝 Create a text input box with optional title
+    📞 Calls: Some, borders, default, input_box, title
+  ⚙️  paragraph_with_block(text: &str, block: Option<Block>)
+    📝 Create a simple paragraph with text and optional block
+    📞 Calls: new, paragraph_with_block, wrap
+  ⚙️  modal_layout(area: Rect)
+    📝 Create a basic layout for a modal dialog
+    📞 Calls: default, direction, modal_layout
+  ⚙️  messages_layout(area: Rect)
+    📝 Create a layout for displaying messages
+    📞 Calls: default, direction, messages_layout
+  ⚙️  split_layout(area: Rect, left_percent: u16)
+    📝 Create a layout for a split view (e.g., editor and preview)
+    📞 Calls: default, direction, split_layout
+  ⚙️  tabbed_layout(area: Rect, tab_height: u16)
+    📝 Create a tabbed layout with tabs at the top
+    📞 Calls: default, direction, tabbed_layout
+  ⚙️  test_centered_rect
+    📝 #[test]
+    📞 Calls: centered_rect, new, test_centered_rect
+  🛠️  test_centered_rect
+    📝 #[test]
+  ⚙️  test_popup_block
+    📝 #[test]
+    📞 Calls: popup_block, test_popup_block
+  🛠️  test_popup_block
+    📝 #[test]
+  ⚙️  test_active_block
+    📝 #[test]
+    📞 Calls: active_block, test_active_block
+  🛠️  test_active_block
+    📝 #[test]
+  ⚙️  test_input_box
+    📝 #[test]
+    📞 Calls: Some, input_box, test_input_box
+  🛠️  test_input_box
+    📝 #[test]
+  ⚙️  test_modal_layout
+    📝 #[test]
+    📞 Calls: modal_layout, new, test_modal_layout
+  🛠️  test_modal_layout
+    📝 #[test]
+
+📁 ./src/commands/command.rs
+  🔨 Command
+    📝 #[allow(dead_code)]
+  ⚙️  new(command_type: CommandType, raw: String)
+    📝 /// Create a new command
+    📞 Calls: new
+  ⚙️  execute_save(&self, app: &mut App, filename: &str)
+    📝 /// Execute the save command
+    📞 Calls: create, execute_save
+  🛠️  execute_save(&self, app: &mut App, filename: &str)
+    📝 /// Execute the save command
+  ⚙️  execute_vector_help(&self, app: &mut App)
+    📝 /// Execute the vector help command
+    📞 Calls: execute_vector_help
+  🛠️  execute_vector_help(&self, app: &mut App)
+    📝 /// Execute the vector help command
+  ⚙️  execute_index_info(&self, app: &mut App, context_type: &str)
+    📝 /// Execute the index info command
+    📞 Calls: Some, execute_index_info
+  🛠️  execute_index_info(&self, app: &mut App, context_type: &str)
+    📝 /// Execute the index info command
+  ⚙️  execute_vector_stats(&self, app: &mut App)
+    📝 /// Execute the vector stats command
+    📞 Calls: Some, execute_vector_stats, get_vector_db_stats
+  🛠️  execute_vector_stats(&self, app: &mut App)
+    📝 /// Execute the vector stats command
+  ⚙️  execute_set_relevance(&self, app: &mut App, threshold: f32)
+    📝 /// Execute the set relevance command
+    📞 Calls: Some, execute_set_relevance, set_relevance_threshold
+  🛠️  execute_set_relevance(&self, app: &mut App, threshold: f32)
+    📝 /// Execute the set relevance command
+  ⚙️  execute_set_auto_context(&self, app: &mut App, enabled: bool)
+    📝 /// Execute the set auto context command
+    📞 Calls: Some, execute_set_auto_context, set_auto_context
+  🛠️  execute_set_auto_context(&self, app: &mut App, enabled: bool)
+    📝 /// Execute the set auto context command
+  ⚙️  execute_set_max_files(&self, app: &mut App, max_files: usize)
+    📝 /// Execute the set max files command
+    📞 Calls: Some, execute_set_max_files, set_max_files
+  🛠️  execute_set_max_files(&self, app: &mut App, max_files: usize)
+    📝 /// Execute the set max files command
+  ⚙️  execute_set_max_content(&self, app: &mut App, max_content: usize)
+    📝 /// Execute the set max content command
+    📞 Calls: Some, execute_set_max_content, set_max_content
+  🛠️  execute_set_max_content(&self, app: &mut App, max_content: usize)
+    📝 /// Execute the set max content command
+  ⚙️  execute_clear_index(&self, app: &mut App)
+    📝 /// Execute the clear index command
+    📞 Calls: Some, clear_file_context, execute_clear_index
+  🛠️  execute_clear_index(&self, app: &mut App)
+    📝 /// Execute the clear index command
+  🔨 fmt
+    📝 // Update context statistics
+  ⚙️  fmt(&self, f: &mut fmt::Formatter<'_>)
+    📝 // Update context statistics
+    📞 Calls: fmt
+  🛠️  fmt(&self, f: &mut fmt::Formatter<'_>)
+    📝 // Update context statistics
+  ⚙️  create_test_app
+    📝 // Helper function to create a minimal test app
+    📞 Calls: create_test_app, new
+  🛠️  create_test_app
+    📝 // Helper function to create a minimal test app
+  ⚙️  run_command(command: Command, app: &mut App)
+    📝 // Helper to run async commands in tests
+    📞 Calls: block_on, execute, new, run_command
+  🛠️  run_command(command: Command, app: &mut App)
+    📝 // Helper to run async commands in tests
+  ⚙️  test_create_command
+    📝 #[test]
+    📞 Calls: test_create_command
+  🛠️  test_create_command
+    📝 #[test]
+  ⚙️  test_command_help
+    📝 #[test]
+    📞 Calls: create_test_app, new, test_command_help, to_string
+  🛠️  test_command_help
+    📝 #[test]
+  ⚙️  test_command_clear
+    📝 #[test]
+    📞 Calls: create_test_app, test_command_clear
+  🛠️  test_command_clear
+    📝 #[test]
+  ⚙️  test_command_yolo
+    📝 #[test]
+    📞 Calls: create_test_app, test_command_yolo
+  🛠️  test_command_yolo
+    📝 #[test]
+  ⚙️  test_command_quit
+    📝 #[test]
+    📞 Calls: create_test_app, test_command_quit
+  🛠️  test_command_quit
+    📝 #[test]
+  ⚙️  test_command_save
+    📝 #[test]
+    📞 Calls: create_test_app, test_command_save
+  🛠️  test_command_save
+    📝 #[test]
+  ⚙️  test_command_shell
+    📝 #[test]
+    📞 Calls: create_test_app, test_command_shell
+  🛠️  test_command_shell
+    📝 #[test]
+
+📁 ./src/config/test_utils.rs
+  🔨 EnvVarGuard
+    📝 A helper struct to manage environment variables during tests
+  ⚙️  new
+    📝 /// Create a new guard without setting any variables
+    📞 Calls: new
+  ⚙️  set(&mut self, key: &str, value: &str)
+    📝 /// Set an environment variable for the duration of the test
+    📞 Calls: ok, set, var
+  ⚙️  remove(&mut self, key: &str)
+    📝 /// Remove an environment variable for the duration of the test
+    📞 Calls: ok, remove, var
+  🔨 Drop
+    📝 // Remove the variable
+  ⚙️  drop(&mut self)
+    📝 // Remove the variable
+    📞 Calls: drop
+  🛠️  drop(&mut self)
+    📝 // Remove the variable
+  🔨 ConfigFileGuard
+    📝 A helper struct to create temporary configuration files
+  ⚙️  new(content: &str)
+    📝 /// Create a new guard with a temporary config file
+    📞 Calls: join, new, path
+  ⚙️  path(&self)
+    📝 /// Get the path to the config file
+    📞 Calls: path
+  ⚙️  update_content(&self, content: &str)
+    📝 /// Update the content of the config file
+    📞 Calls: update_content, write
+  ⚙️  create_test_settings
+    📝 Helper function to create test settings
+    📞 Calls: Some, create_test_settings, new, to_string
+  ⚙️  sample_config_toml
+    📝 Sample TOML configuration content for testing
+    📞 Calls: sample_config_toml
+  ⚙️  sample_env_file
+    📝 Sample .env file content for testing
+    📞 Calls: sample_env_file
+
+📁 ./src/utils/test_utils.rs
+  🔨 MockApiResponse
+    📝 Mock for API responses
+  ⚙️  new(status_code: u16, body: &str)
+    📝 Mock for API responses
+    📞 Calls: new
+  ⚙️  ok(body: &str)
+    📝 Mock for API responses
+    📞 Calls: new, ok
+  ⚙️  error(status_code: u16, body: &str)
+    📝 Mock for API responses
+    📞 Calls: error, new
+  🔨 MockApiClient
+    📝 MockApiClient for testing API interactions without making real requests
+  ⚙️  new
+    📝 MockApiClient for testing API interactions without making real requests
+    📞 Calls: new
+  ⚙️  add_response(&self, request_pattern: &str, response: MockApiResponse)
+    📝 /// Add a mock response for a specific request pattern
+    📞 Calls: add_response, insert, lock, to_string, unwrap
+  ⚙️  get_requests(&self)
+    📝 /// Get recorded requests
+    📞 Calls: clone, get_requests, lock, unwrap
+  ⚙️  request(&self, endpoint: &str, body: &str)
+    📝 /// Simulate a request and return the mocked response
+    📞 Calls: request
+  🔨 Clone
+    📝 // Try to find a pattern match
+  ⚙️  clone(&self)
+    📝 // Try to find a pattern match
+    📞 Calls: clone
+  🛠️  clone(&self)
+    📝 // Try to find a pattern match
+  🔨 MockFileSystem
+    📝 Mock filesystem for testing file operations
+  ⚙️  new
+    📝 Mock filesystem for testing file operations
+    📞 Calls: new
+  ⚙️  add_file(&self, path: P, content: &str)
+    📝 /// Add a mock file with content
+    📞 Calls: as_ref, insert, lock, to_path_buf, to_string, unwrap
+  ⚙️  read_file(&self, path: P)
+    📝 /// Read content from a mock file
+    📞 Calls: as_ref, get, lock, to_path_buf, unwrap
+  ⚙️  file_exists(&self, path: P)
+    📝 /// Check if a mock file exists
+    📞 Calls: as_ref, contains_key, lock, to_path_buf, unwrap
+  ⚙️  list_files(&self, dir: P)
+    📝 /// List all mock files in a directory
+    📞 Calls: as_ref, lock, to_path_buf, unwrap
+  🔨 TestData
+    📝 Sample test data generator for common test scenarios
+  ⚙️  sample_conversation
+    📝 /// Generate a sample conversation history
+    📞 Calls: sample_conversation, to_string
+  ⚙️  sample_code(language: &str)
+    📝 /// Generate a sample code file content
+    📞 Calls: sample_code
+  ⚙️  main
+    📝 /// Generate a sample code file content
+    📞 Calls: main
+  ⚙️  sample_config
+    📝 /// Generate a sample configuration
+    📞 Calls: insert, new, sample_config, to_string
+  🔨 MockGitRepository
+    📝 Test fixture for git operations
+  ⚙️  new
+    📝 Test fixture for git operations
+    📞 Calls: new
+  ⚙️  add_file(&mut self, path: &str, content: &str)
+    📝 Test fixture for git operations
+    📞 Calls: add_file, push, to_string
+  ⚙️  add_commit(&mut self, commit: MockGitCommit)
+    📝 Test fixture for git operations
+    📞 Calls: add_commit, push
+  ⚙️  get_files(&self)
+    📝 Test fixture for git operations
+    📞 Calls: get_files
+  ⚙️  get_commits(&self)
+    📝 Test fixture for git operations
+    📞 Calls: get_commits
+  ⚙️  get_file_content(&self, path: &str)
+    📝 Test fixture for git operations
+    📞 Calls: find, get_file_content, iter
+  🔨 MockGitCommit
+    📝 Test fixture for git operations
+  ⚙️  new(id: &str, message: &str, author: &str)
+    📝 Test fixture for git operations
+    📞 Calls: new, to_string
+  ⚙️  with_changed_file(mut self, path: &str)
+    📝 Test fixture for git operations
+    📞 Calls: push, to_string, with_changed_file
+
+📁 ./src/ui/markdown.rs
+  ⚙️  process_markdown(content: &str)
+    📝 Process markdown text into styled ratatui Text
+    📞 Calls: new, process_markdown
+  ⚙️  process_text_spans(text: &str)
+    📝 Process regular text (non-code) into styled spans
+    📞 Calls: new, process_text_spans
+  ⚙️  colorize_code(code: &str, language: &str)
+    📝 Colorize code with syntax highlighting
+    📞 Calls: collect, colorize_code, lines, new
+  ⚙️  test_process_markdown_headers
+    📝 #[test]
+    📞 Calls: process_markdown, test_process_markdown_headers
+  🛠️  test_process_markdown_headers
+    📝 #[test]
+  ⚙️  test_process_markdown_code_blocks
+    📝 #[test]
+    📞 Calls: main, process_markdown, test_process_markdown_code_blocks
+  🛠️  test_process_markdown_code_blocks
+    📝 #[test]
+  ⚙️  test_process_markdown_inline_formatting
+    📝 #[test]
+    📞 Calls: process_markdown, test_process_markdown_inline_formatting
+  🛠️  test_process_markdown_inline_formatting
+    📝 #[test]
+  ⚙️  test_colorize_code
+    📝 #[test]
+    📞 Calls: colorize_code, main, test_colorize_code
+  🛠️  test_colorize_code
+    📝 #[test]
+
+📁 ./src/api/client.rs
+  🔨 GitLabDuoClient
+    📝 /// Anthropic client for delegation
+  ⚙️  new(settings: &Settings)
+    📝 /// Create a new client that wraps AnthropicClient
+    📞 Calls: new
+  ⚙️  create_test_settings
+    📝 // Helper to create test settings
+    📞 Calls: Some, create_test_settings, to_string
+  🛠️  create_test_settings
+    📝 // Helper to create test settings
+  ⚙️  test_client_creation
+    📝 #[test]
+    📞 Calls: create_test_settings, test_client_creation
+  🛠️  test_client_creation
+    📝 #[test]
+  ⚙️  test_context_transformation
+    📝 #[test]
+    📞 Calls: create_test_settings, test_context_transformation
+  🛠️  test_context_transformation
+    📝 #[test]
+
+📁 ./src/context/extraction.rs
+  🔨 ContextExtractor
+    📝 /// Maximum content size per file
+  ⚙️  new(max_context_size: usize, max_content_per_file: usize)
+    📝 /// Create a new context extractor
+    📞 Calls: new
+  ⚙️  extract_from_files(&self, files: &[String], query: &str)
+    📝 /// Extract context from a set of files based on a query
+    📞 Calls: extract_from_files, new
+  ⚙️  extract_from_directory(&self, dir: &Path)
+    📝 /// Extract context from a directory
+    📞 Calls: extract_from_directory, new
+  ⚙️  process_directory(&self, dir: &Path, context: &mut Vec<(PathBuf, String)
+    📝 /// Process a directory recursively
+    📞 Calls: process_directory, read_dir
+  🛠️  process_directory(&self, dir: &Path, context: &mut Vec<(PathBuf, String)
+    📝 /// Process a directory recursively
+  ⚙️  extract_from_file(&self, file_path: &Path)
+    📝 /// Extract context from a specific file
+    📞 Calls: Err, exists, extract_from_file, is_file
+  ⚙️  trim_content_if_needed(&self, content: &str)
+    📝 /// Trim content if it exceeds the maximum size per file
+    📞 Calls: len, to_string, trim_content_if_needed
+  🛠️  trim_content_if_needed(&self, content: &str)
+    📝 /// Trim content if it exceeds the maximum size per file
+  ⚙️  extract_relevant_sections(&self, content: &str, query: &str, max_sections: usize)
+    📝 /// Extract relevant sections from content based on query
+    📞 Calls: extract_relevant_sections
+  ⚙️  test_trim_content
+    📝 #[test]
+    📞 Calls: new, test_trim_content
+  🛠️  test_trim_content
+    📝 #[test]
+  ⚙️  test_extract_from_file
+    📝 #[test]
+    📞 Calls: join, new, path, test_extract_from_file, unwrap
+  🛠️  test_extract_from_file
+    📝 #[test]
+  ⚙️  test_extract_from_directory
+    📝 #[test]
+    📞 Calls: new, test_extract_from_directory, unwrap
+  🛠️  test_extract_from_directory
+    📝 #[test]
+  ⚙️  test_extract_relevant_sections
+    📝 #[test]
+    📞 Calls: test_extract_relevant_sections
+  🛠️  test_extract_relevant_sections
+    📝 #[test]
+
+📁 ./src/ui/components/styles.rs
+  ⚙️  bold_style(color: Color)
+    📝 Common styles
+    📞 Calls: add_modifier, bold_style, default, fg
+  ⚙️  header_style
+    📝 Common styles
+    📞 Calls: add_modifier, default, fg, header_style
+  ⚙️  inline_code_style
+    📝 Common styles
+    📞 Calls: bg, default, fg, inline_code_style
+  ⚙️  status_bar_style
+    📝 Common styles
+    📞 Calls: bg, default, fg, status_bar_style
+
+📁 ./src/ui/scroll/mod.rs
+  🔨 Default
+    📝 /// Whether content was recently changed
+  ⚙️  default
+    📝 /// Whether content was recently changed
+    📞 Calls: default, new
+  🛠️  default
+    📝 /// Whether content was recently changed
+  🔨 ScrollManager
+    📝 /// Whether content was recently changed
+  ⚙️  new
+    📝 /// Create a new scroll manager
+    📞 Calls: new
+  ⚙️  update_content_size(&mut self, total_lines: usize)
+    📝 /// Update the total number of lines in the content
+    📞 Calls: update_content_size
+  ⚙️  update_viewport(&mut self, viewport_height: usize)
+    📝 /// Update the viewport height
+    📞 Calls: clamp_position, update_viewport
+  ⚙️  toggle_auto_scroll(&mut self)
+    📝 /// Toggle auto-scroll mode
+    📞 Calls: toggle_auto_scroll
+  ⚙️  enable_auto_scroll(&mut self)
+    📝 /// Enable auto-scroll mode
+    📞 Calls: enable_auto_scroll
+  ⚙️  disable_auto_scroll(&mut self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, disable_auto_scroll
+  ⚙️  position(&self)
+    📝 /// Get the current scroll position
+    📞 Calls: position
+  ⚙️  max_scroll_position(&self)
+    📝 /// Get the maximum scroll position (where the bottom of the content is visible)
+    📞 Calls: max_scroll_position
+  ⚙️  can_scroll_up(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, can_scroll_up
+  ⚙️  can_scroll_down(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, can_scroll_down, max_scroll_position
+  ⚙️  scroll_up(&mut self, lines: usize)
+    📝 /// Scroll up by the given number of lines
+    📞 Calls: saturating_sub, scroll_up
+  ⚙️  scroll_down(&mut self, lines: usize)
+    📝 /// Scroll down by the given number of lines
+    📞 Calls: max_scroll_position, scroll_down
+  ⚙️  scroll_to_top(&mut self)
+    📝 /// Scroll to the top of the content
+    📞 Calls: scroll_to_top
+  ⚙️  scroll_to_bottom(&mut self)
+    📝 /// Scroll to the bottom of the content
+    📞 Calls: max_scroll_position, scroll_to_bottom
+  ⚙️  page_up(&mut self)
+    📝 /// Page up - scroll up by viewport height
+    📞 Calls: page_up
+  ⚙️  page_down(&mut self)
+    📝 /// Page down - scroll down by viewport height
+    📞 Calls: page_down
+  ⚙️  process_pending_actions(&mut self)
+    📝 /// Process any pending scroll actions
+    📞 Calls: process_pending_actions
+  ⚙️  notify_content_changed(&mut self)
+    📝 /// Notify that content has changed
+    📞 Calls: notify_content_changed
+  ⚙️  is_auto_scroll(&self)
+    📝 /// Is auto-scroll enabled?
+    📞 Calls: is_auto_scroll
+  ⚙️  get_scroll_info(&self)
+    📝 /// Get scroll info for status bar
+    📞 Calls: get_scroll_info, to_string
+  ⚙️  clamp_position(&mut self)
+    📝 /// Ensure the position is within valid bounds
+    📞 Calls: clamp_position, max_scroll_position
+  🛠️  clamp_position(&mut self)
+    📝 /// Ensure the position is within valid bounds
+  ⚙️  force_scroll_to_bottom(&mut self)
+    📝 /// Used during streaming to ensure newest content is visible
+    📞 Calls: force_scroll_to_bottom
+  ⚙️  is_near_bottom(&self, threshold: usize)
+    📝 // Check if we're near the bottom of the content
+    📞 Calls: is_near_bottom, max_scroll_position
+
+📁 ./src/api/anthropic_tests.rs
+  ⚙️  setup_mock_client
+    📝 // Helper function to setup mock client for tests
+    📞 Calls: new, setup_mock_client
+  🛠️  setup_mock_client
+    📝 // Helper function to setup mock client for tests
+
+📁 ./src/api/test_utils.rs
+  🔨 MockAnthropicClient
+    📝 Mock for AnthropicClient that can be used in tests
+  ⚙️  new
+    📝 /// Create a new mock client
+    📞 Calls: new
+  ⚙️  add_response(&self, input: &str, response: &str)
+    📝 /// Add a mock response for a specific input
+    📞 Calls: add_response, insert, lock, to_string, unwrap
+  ⚙️  add_stream_response(&self, input: &str, chunks: Vec<String>)
+    📝 /// Add a mock streaming response for a specific input
+    📞 Calls: add_stream_response, insert, lock, to_string, unwrap
+  ⚙️  get_requests(&self)
+    📝 /// Get all recorded requests
+    📞 Calls: clone, get_requests, lock, unwrap
+  ⚙️  get_system_prompts(&self)
+    📝 /// Get all recorded system prompts
+    📞 Calls: clone, get_system_prompts, lock, unwrap
+  ⚙️  get_context_files(&self)
+    📝 /// Get all recorded context files
+    📞 Calls: clone, get_context_files, lock, unwrap
+  ⚙️  clear(&mut self)
+    📝 /// Clear the recorded data
+    📞 Calls: clear, lock, unwrap
+  ⚙️  verify_request_made(&self, request_fragment: &str)
+    📝 /// Verify a specific request was made
+    📞 Calls: any, contains, iter, lock, unwrap, verify_request_made
+  ⚙️  create_fake_response(content: &str)
+    📝 Generate a fake Anthropic API response that looks authentic
+    📞 Calls: create_fake_response, to_string
+  ⚙️  create_stream_event(text: &str, event_type: &str)
+    📝 Generate a fake Anthropic API stream event
+    📞 Calls: create_stream_event
+  🔨 ApiTestData
+    📝 Sample data generator for API tests
+  ⚙️  sample_system_prompt
+    📝 /// Generate a sample system prompt
+    📞 Calls: sample_system_prompt, to_string
+  ⚙️  sample_user_message
+    📝 /// Generate a sample user message
+    📞 Calls: sample_user_message, to_string
+  ⚙️  sample_assistant_response
+    📝 /// Generate a sample assistant response
+    📞 Calls: sample_assistant_response
+  ⚙️  sample_context_files
+    📝 /// Generate sample context files
+    📞 Calls: main, sample_context_files, to_string
+  ⭐ ReplaceWithMock
+    📝 Extension trait to replace AnthropicClient with MockAnthropicClient in tests
+  ⚙️  replace_with_mock(&mut self, mock: MockAnthropicClient)
+    📝 Extension trait to replace AnthropicClient with MockAnthropicClient in tests
+    📞 Calls: replace_with_mock
+  🛠️  replace_with_mock(&mut self, mock: MockAnthropicClient)
+    📝 Extension trait to replace AnthropicClient with MockAnthropicClient in tests
+
+📁 ./src/vectordb/database.rs
+  🔨 VectorDB
+    📝 /// Path map for fast lookups
+  ⚙️  new(config: VectorDBConfig)
+    📝 /// Create a new vector database
+    📞 Calls: new
+  ⚙️  initialize(&mut self)
+    📝 /// Initialize the database from disk or create a new one
+    📞 Calls: initialize, join
+  ⚙️  new_with_embeddings
+    📝 #[cfg(test)]
+    📞 Calls: cfg, new_with_embeddings
+  ⚙️  test_database_new
+    📝 #[test]
+    📞 Calls: is_ok, test_database_new, var
+  🛠️  test_database_new
+    📝 #[test]
+  ⚙️  test_database_model
+    📝 #[test]
+    📞 Calls: is_ok, test_database_model, var
+  🛠️  test_database_model
+    📝 #[test]
+  ⚙️  test_initialize
+    📝 #[test]
+    📞 Calls: is_ok, test_initialize, var
+  🛠️  test_initialize
+    📝 #[test]
+
+📁 ./src/app.rs
+  🔨 App
+    📝 /// Context cache
+  ⚙️  new
+    📝 /// Create a new application
+    📞 Calls: new
+  ⚙️  new_for_testing
+    📝 /// Create a new application for testing
+    📞 Calls: new_for_testing, new_test_mode
+  ⚙️  create_mock_terminal
+    📝 /// Create a mock terminal that doesn't interact with the actual terminal
+    📞 Calls: create_mock_terminal
+  🛠️  create_mock_terminal
+    📝 /// Create a mock terminal that doesn't interact with the actual terminal
+  ⚙️  set_pending_shell_command(&mut self, command: &str)
+    📝 #[allow(dead_code)]
+    📞 Calls: Some, add_system_message, allow, set_pending_shell_command, to_string
+  ⚙️  update_context_stats(&mut self)
+    📝 /// Update context statistics
+    📞 Calls: Some, get_extraction_stats, update_context_stats
+  ⚙️  setup_test_env
+    📝 // Helper to set up test environment variables
+    📞 Calls: set_var, setup_test_env
+  🛠️  setup_test_env
+    📝 // Helper to set up test environment variables
+  ⚙️  teardown_test_env
+    📝 // Helper to clean up test environment variables
+    📞 Calls: remove_var, teardown_test_env
+  🛠️  teardown_test_env
+    📝 // Helper to clean up test environment variables
+  ⚙️  test_app_creation
+    📝 #[test]
+    📞 Calls: setup_test_env, test_app_creation
+  🛠️  test_app_creation
+    📝 #[test]
+  ⚙️  test_app_settings
+    📝 #[test]
+    📞 Calls: setup_test_env, test_app_settings
+  🛠️  test_app_settings
+    📝 #[test]
+  ⚙️  test_app_api_client_creation
+    📝 #[test]
+    📞 Calls: setup_test_env, test_app_api_client_creation
+  🛠️  test_app_api_client_creation
+    📝 #[test]
+  ⚙️  test_app_context_manager
+    📝 #[test]
+    📞 Calls: setup_test_env, test_app_context_manager
+  🛠️  test_app_context_manager
+    📝 #[test]
+  ⚙️  test_set_pending_shell_command
+    📝 #[test]
+    📞 Calls: setup_test_env, test_set_pending_shell_command
+  🛠️  test_set_pending_shell_command
+    📝 #[test]
+  ⚙️  test_update_context_stats
+    📝 #[test]
+    📞 Calls: setup_test_env, test_update_context_stats
+  🛠️  test_update_context_stats
+    📝 #[test]
+
+📁 ./src/config/env.rs
+  ⚙️  get_env_var(name: &str)
+    📝 Get an environment variable
+    📞 Calls: get_env_var, ok, var
+  ⚙️  get_env_var_or(name: &str, default: &str)
+    📝 Get an environment variable or return a default value
+    📞 Calls: get_env_var_or, to_string, unwrap_or_else, var
+  ⚙️  get_env_var_as_usize_or(name: &str, default: usize)
+    📝 Get an environment variable as a number or return a default value
+    📞 Calls: get_env_var_as_usize_or, ok, var
+  ⚙️  get_env_var_as_u32_or(name: &str, default: u32)
+    📝 Get an environment variable as u32 or return a default value
+    📞 Calls: get_env_var_as_u32_or, ok, var
+  ⚙️  get_anthropic_api_key
+    📝 Get the Anthropic API key
+    📞 Calls: get_anthropic_api_key, get_env_var
+  ⚙️  get_anthropic_api_url
+    📝 Get the Anthropic API URL
+    📞 Calls: get_anthropic_api_url, get_env_var_or
+  ⚙️  get_anthropic_model
+    📝 Get the Anthropic model
+    📞 Calls: get_anthropic_model, get_env_var_or
+  ⚙️  get_anthropic_max_tokens
+    📝 Get the Anthropic max tokens
+    📞 Calls: get_anthropic_max_tokens, get_env_var_as_u32_or
+  ⚙️  get_max_context_size
+    📝 Get the maximum context size
+    📞 Calls: get_env_var_as_usize_or, get_max_context_size
+  ⚙️  get_log_level
+    📝 [allow(dead_code)]
+    📞 Calls: allow, get_env_var_or, get_log_level
+  ⚙️  test_get_anthropic_api_key
+    📝 #[test]
+    📞 Calls: new, test_get_anthropic_api_key
+  🛠️  test_get_anthropic_api_key
+    📝 #[test]
+  ⚙️  test_get_anthropic_api_url
+    📝 #[test]
+    📞 Calls: new, test_get_anthropic_api_url
+  🛠️  test_get_anthropic_api_url
+    📝 #[test]
+  ⚙️  test_get_anthropic_model
+    📝 #[test]
+    📞 Calls: new, test_get_anthropic_model
+  🛠️  test_get_anthropic_model
+    📝 #[test]
+  ⚙️  test_get_anthropic_max_tokens
+    📝 #[test]
+    📞 Calls: new, test_get_anthropic_max_tokens
+  🛠️  test_get_anthropic_max_tokens
+    📝 #[test]
+  ⚙️  test_get_max_context_size
+    📝 #[test]
+    📞 Calls: new, test_get_max_context_size
+  🛠️  test_get_max_context_size
+    📝 #[test]
+
+📁 ./src/config/settings.rs
+  🔨 Settings
+    📝 /// Test mode (for running tests without terminal UI)
+  ⚙️  new
+    📝 /// Create new settings
+    📞 Calls: get_anthropic_api_key, get_anthropic_api_url, new
+  ⚙️  new_test_mode
+    📝 /// Create settings for test mode
+    📞 Calls: new, new_test_mode
+  ⚙️  validate(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: Err, allow, is_none, validate
+  ⚙️  set_yolo_mode(&mut self, enabled: bool)
+    📝 /// Set yolo mode
+    📞 Calls: set_yolo_mode
+  ⚙️  test_new_settings
+    📝 #[test]
+    📞 Calls: new, test_new_settings
+  🛠️  test_new_settings
+    📝 #[test]
+  ⚙️  test_settings_with_env_vars
+    📝 #[test]
+    📞 Calls: new, test_settings_with_env_vars
+  🛠️  test_settings_with_env_vars
+    📝 #[test]
+  ⚙️  test_invalid_env_var_values
+    📝 #[test]
+    📞 Calls: new, test_invalid_env_var_values
+  🛠️  test_invalid_env_var_values
+    📝 #[test]
+  ⚙️  test_validate_settings
+    📝 #[test]
+    📞 Calls: test_validate_settings
+  🛠️  test_validate_settings
+    📝 #[test]
+  ⚙️  test_set_yolo_mode
+    📝 #[test]
+    📞 Calls: create_test_settings, test_set_yolo_mode
+  🛠️  test_set_yolo_mode
+    📝 #[test]
+
+📁 ./src/api/anthropic.rs
+  🔨 AnthropicClient
+    📝 /// Rate limit delay in milliseconds
+  ⚙️  new(settings: &Settings)
+    📝 /// Create a new Anthropic API client
+    📞 Calls: new
+  ⚙️  create_messages(&self, content: &str, context_files: Vec<(String, String)
+    📝 /// Create messages from content and context files
+    📞 Calls: create_messages, to_string
+  🛠️  create_messages(&self, content: &str, context_files: Vec<(String, String)
+    📝 /// Create messages from content and context files
+  ⚙️  create_messages_with_history
+    📝 /// Create messages from conversation history, current content and context files
+    📞 Calls: create_messages_with_history
+  ⚙️  generate_cache_key(&self, request: &AnthropicRequest)
+    📝 /// Generate a cache key for a request
+    📞 Calls: generate_cache_key, to_string, unwrap_or_default
+  🛠️  generate_cache_key(&self, request: &AnthropicRequest)
+    📝 /// Generate a cache key for a request
+  ⚙️  clear_cache(&mut self)
+    📝 /// Clear the cache
+    📞 Calls: clear, clear_cache
+  ⚙️  set_cache_ttl(&mut self, ttl: u64)
+    📝 /// Set the cache TTL in seconds
+    📞 Calls: set_cache_ttl
+  ⚙️  setup_test_settings
+    📝 // Setup test settings
+    📞 Calls: Some, setup_test_settings, to_string
+  🛠️  setup_test_settings
+    📝 // Setup test settings
+  ⚙️  get_test_client
+    📝 // Get a test client for unit tests
+    📞 Calls: get_test_client, new, setup_test_settings
+  🛠️  get_test_client
+    📝 // Get a test client for unit tests
+
+📁 ./src/git/context.rs
+  🔨 GitContext
+    📝 /// Ignored patterns from .gitignore
+  ⚙️  new(repo: Repository, max_context_size: usize)
+    📝 /// Create a new Git context
+    📞 Calls: new
+  ⚙️  load_gitignore(&mut self)
+    📝 /// Load .gitignore patterns
+    📞 Calls: join, load_gitignore, path
+  🛠️  load_gitignore(&mut self)
+    📝 /// Load .gitignore patterns
+  ⚙️  is_ignored(&self, path: &Path)
+    📝 /// Check if a path matches any ignored pattern
+    📞 Calls: is_ignored, to_string_lossy
+  🛠️  is_ignored(&self, path: &Path)
+    📝 /// Check if a path matches any ignored pattern
+  ⚙️  extract_context(&self)
+    📝 /// Extract context from the repository
+    📞 Calls: extract_context, modified_files, new
+  ⚙️  read_file(&self, path: P)
+    📝 /// Read a file and return its content
+    📞 Calls: as_ref, display
+  ⚙️  is_binary_file(&self, path: P)
+    📝 /// Check if a file is binary
+    📞 Calls: as_ref
+  ⚙️  limit_context(&self, context: &mut Vec<(PathBuf, String)
+    📝 /// Limit context size
+    📞 Calls: limit_context
+  🛠️  limit_context(&self, context: &mut Vec<(PathBuf, String)
+    📝 /// Limit context size
+
+📁 ./src/config/env_tests.rs
+  ⚙️  test_load_env_from_file
+    📝 #[test]
+    📞 Calls: sample_env_file, test_load_env_from_file
+  🛠️  test_load_env_from_file
+    📝 #[test]
+  ⚙️  test_load_env_from_nonexistent_file
+    📝 #[test]
+    📞 Calls: load_env_from_file, test_load_env_from_nonexistent_file
+  🛠️  test_load_env_from_nonexistent_file
+    📝 #[test]
+  ⚙️  test_load_env_from_invalid_file
+    📝 #[test]
+    📞 Calls: test_load_env_from_invalid_file
+  🛠️  test_load_env_from_invalid_file
+    📝 #[test]
+  ⚙️  test_load_env_default
+    📝 #[test]
+    📞 Calls: test_load_env_default
+  🛠️  test_load_env_default
+    📝 #[test]
+
+📁 ./src/embeddings/model.rs
+  🔨 EmbeddingModel
+    📝 // Implementation details would go here
+  ⚙️  new
+    📝 /// Create a new embedding model
+    📞 Calls: Ok, new
+  ⚙️  embed(&self, text: &str)
+    📝 /// Embed a text string into a vector
+    📞 Calls: embed
+  ⚙️  calculate_similarity(vec1: &[f32], vec2: &[f32])
+    📝 Calculate cosine similarity between two vectors
+    📞 Calls: calculate_similarity, is_empty, len
+  ⚙️  normalize_vector(vec: &[f32])
+    📝 Normalize a vector to unit length
+    📞 Calls: is_empty, normalize_vector, to_vec
+  ⚙️  test_embedding_model_creation
+    📝 #[test]
+    📞 Calls: is_ok, new, test_embedding_model_creation
+  🛠️  test_embedding_model_creation
+    📝 #[test]
+  ⚙️  test_embed_text
+    📝 #[test]
+    📞 Calls: new, test_embed_text, unwrap
+  🛠️  test_embed_text
+    📝 #[test]
+  ⚙️  test_embed_empty_text
+    📝 #[test]
+    📞 Calls: new, test_embed_empty_text, unwrap
+  🛠️  test_embed_empty_text
+    📝 #[test]
+  ⚙️  test_similarity_calculation
+    📝 #[test]
+    📞 Calls: new, test_similarity_calculation, unwrap
+  🛠️  test_similarity_calculation
+    📝 #[test]
+  ⚙️  test_similarity_edge_cases
+    📝 #[test]
+    📞 Calls: test_similarity_edge_cases
+  🛠️  test_similarity_edge_cases
+    📝 #[test]
+  ⚙️  test_normalize_vector
+    📝 #[test]
+    📞 Calls: test_normalize_vector
+  🛠️  test_normalize_vector
+    📝 #[test]
+
+📁 ./src/logging.rs
+  🔨 UiLogger
+    📝 A logger implementation that sends log messages to a channel
+  ⚙️  new(sender: Sender<String>, level: Level)
+    📝 A logger implementation that sends log messages to a channel
+    📞 Calls: new
+  ⚙️  init(sender: Sender<String>, level: Level)
+    📝 A logger implementation that sends log messages to a channel
+    📞 Calls: init, new, set_boxed_logger
+  🔨 log
+    📝 A logger implementation that sends log messages to a channel
+  ⚙️  enabled(&self, metadata: &Metadata)
+    📝 A logger implementation that sends log messages to a channel
+    📞 Calls: enabled, level
+  🛠️  enabled(&self, metadata: &Metadata)
+    📝 A logger implementation that sends log messages to a channel
+  ⚙️  log(&self, record: &Record)
+    📝 A logger implementation that sends log messages to a channel
+    📞 Calls: args, enabled, level, log, metadata
+  🛠️  log(&self, record: &Record)
+    📝 A logger implementation that sends log messages to a channel
+  ⚙️  flush(&self)
+    📝 A logger implementation that sends log messages to a channel
+    📞 Calls: flush
+  🛠️  flush(&self)
+    📝 A logger implementation that sends log messages to a channel
+  ⚙️  create_ui_logger(level: Level)
+    📝 Create a logger and return a sender/receiver pair for log messages
+    📞 Calls: channel, clone, create_ui_logger
+  ⚙️  setup
+    📝 // Ensure we only initialize logging once across all tests
+    📞 Calls: call_once, new, setup
+  🛠️  setup
+    📝 // Ensure we only initialize logging once across all tests
+  ⚙️  test_log_record_formatting
+    📝 #[test]
+    📞 Calls: setup, test_log_record_formatting
+  🛠️  test_log_record_formatting
+    📝 #[test]
+  ⚙️  test_log_level_formatting
+    📝 #[test]
+    📞 Calls: setup, test_log_level_formatting
+  🛠️  test_log_level_formatting
+    📝 #[test]
+  ⚙️  test_ui_logger_creation
+    📝 #[test]
+    📞 Calls: channel, test_ui_logger_creation
+  🛠️  test_ui_logger_creation
+    📝 #[test]
+  ⚙️  test_ui_logger_enabled
+    📝 #[test]
+    📞 Calls: channel, test_ui_logger_enabled
+  🛠️  test_ui_logger_enabled
+    📝 #[test]
+  ⚙️  test_ui_logger_log_function
+    📝 #[test]
+    📞 Calls: channel, test_ui_logger_log_function
+  🛠️  test_ui_logger_log_function
+    📝 #[test]
+  ⚙️  test_create_ui_logger
+    📝 #[test]
+    📞 Calls: test_create_ui_logger
+  🛠️  test_create_ui_logger
+    📝 #[test]
+
+📁 ./src/ui/components/message.rs
+  🔨 Message
+    📝 /// AI message
+  ⚙️  new(content: String, message_type: MessageType)
+    📝 /// Create a new message
+    📞 Calls: System, new
+  ⚙️  process_content(&self, content: &str)
+    📝 /// Process content to remove any unwanted characters and properly handle escape sequences
+    📞 Calls: process_content, to_string
+  ⚙️  message_type(&self)
+    📝 /// Get the message type
+    📞 Calls: System, message_type
+  ⚙️  content(&self)
+    📝 /// Get the message content
+    📞 Calls: System, content
+  ⚙️  to_text(&self)
+    📝 /// Convert message to a styled text
+    📞 Calls: System, to_text
+  ⚙️  test_message_content
+    📝 #[test]
+    📞 Calls: System, test_message_content, to_string
+  🛠️  test_message_content
+    📝 #[test]
+  ⚙️  test_message_type
+    📝 #[test]
+    📞 Calls: System, test_message_type, to_string
+  🛠️  test_message_type
+    📝 #[test]
+  ⚙️  test_message_content_method
+    📝 #[test]
+    📞 Calls: System, test_message_content_method, to_string
+  🛠️  test_message_content_method
+    📝 #[test]
+  ⚙️  test_process_content
+    📝 #[test]
+    📞 Calls: User, test_process_content, to_string
+  🛠️  test_process_content
+    📝 #[test]
+
+📁 ./src/git/repository.rs
+  🔨 Repository
+    📝 /// Repository path
+  ⚙️  open(path: P)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, as_ref, display
+  ⚙️  discover
+    📝 /// Find a Git repository from the current directory or its parents
+    📞 Calls: current_dir, discover, display
+  ⚙️  path(&self)
+    📝 /// Get the repository path
+    📞 Calls: path
+  ⚙️  name(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, name, path
+  ⚙️  branch_name(&self)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, branch_name, head
+  ⚙️  modified_files(&self)
+    📝 /// Get the list of modified files
+    📞 Calls: include_untracked, modified_files, new
+
+📁 ./src/ui/api_usage.rs
+  🔨 ApiUsage
+    📝 /// Estimated cost in USD (at $3/MTok input, $15/MTok output for Claude 3.7 Sonnet)
+  ⚙️  new
+    📝 /// Create a new API usage tracker
+    📞 Calls: new
+  ⚙️  add_usage(&mut self, input_tokens: u32, output_tokens: u32)
+    📝 /// Add usage from an API call
+    📞 Calls: add_usage
+  ⚙️  format(&self)
+    📝 /// Get a formatted string of the usage
+    📞 Calls: format
+
+📁 ./src/vectordb/utils.rs
+  ⚙️  find_files
+    📝 Utility for finding files
+    📞 Calls: find_files
+  ⚙️  find_files_recursive
+    📝 Recursive helper for finding files
+    📞 Calls: find_files_recursive
+  ⚙️  create_progress_bar(count: u64, message: &str)
+    📝 Create a progress bar for vectordb operations
+    📞 Calls: create_progress_bar, new, set_style
+  🔨 VectorDB
+    📝 Create a progress bar for vectordb operations
+  ⚙️  save_to_disk(&self)
+    📝 /// Save database to disk
+    📞 Calls: save_to_disk
+  ⚙️  get_stats(&self)
+    📝 /// Get database statistics as a formatted string
+    📞 Calls: get_stats, new
+  ⚙️  is_initialized(&self)
+    📝 /// Check if the database is initialized
+    📞 Calls: is_empty, is_initialized, is_some
+  ⚙️  get_model(&self)
+    📝 /// Get the embedding model
+    📞 Calls: get_model
+  ⚙️  indexed_files_count(&self)
+    📝 /// Get the number of indexed files
+    📞 Calls: indexed_files_count, len
+  ⚙️  set_min_relevance(&mut self, min_relevance: f32)
+    📝 /// Set minimum relevance threshold for search results
+    📞 Calls: set_min_relevance
+  ⚙️  min_relevance(&self)
+    📝 /// Get the current minimum relevance threshold
+    📞 Calls: min_relevance
+  ⚙️  get_embeddings(&self)
+    📝 /// Get all file embeddings
+    📞 Calls: get_embeddings
+  ⚙️  get_embedding_by_path(&self, path: P)
+    📝 /// Get a file embedding by path
+    📞 Calls: as_ref, to_string, to_string_lossy
+  ⚙️  clear(&mut self)
+    📝 /// Clear the database
+    📞 Calls: clear
+  ⚙️  test_find_files
+    📝 #[test]
+    📞 Calls: new, test_find_files, unwrap
+  🛠️  test_find_files
+    📝 #[test]
+  ⚙️  test_find_files_nonexistent_dir
+    📝 #[test]
+    📞 Calls: find_files, is_err, new, test_find_files_nonexistent_dir
+  🛠️  test_find_files_nonexistent_dir
+    📝 #[test]
+  ⚙️  test_progress_bar_creation
+    📝 #[test]
+    📞 Calls: create_progress_bar, length, test_progress_bar_creation, unwrap
+  🛠️  test_progress_bar_creation
+    📝 #[test]
+
+📁 ./src/commands/parser.rs
+  🔨 CommandParser
+    📝 Command parser
+  ⚙️  new
+    📝 /// Create a new command parser
+    📞 Calls: new
+  ⚙️  parse(&self, input: &str)
+    📝 /// Parse a command string
+    📞 Calls: Err, parse, starts_with
+  ⚙️  test_parse_help_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_help_command
+  🛠️  test_parse_help_command
+    📝 #[test]
+  ⚙️  test_parse_clear_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_clear_command
+  🛠️  test_parse_clear_command
+    📝 #[test]
+  ⚙️  test_parse_shell_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_shell_command
+  🛠️  test_parse_shell_command
+    📝 #[test]
+  ⚙️  test_parse_shell_command_no_args
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_shell_command_no_args
+  🛠️  test_parse_shell_command_no_args
+    📝 #[test]
+  ⚙️  test_parse_yolo_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_yolo_command
+  🛠️  test_parse_yolo_command
+    📝 #[test]
+  ⚙️  test_parse_yolo_command_invalid_args
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_yolo_command_invalid_args
+  🛠️  test_parse_yolo_command_invalid_args
+    📝 #[test]
+  ⚙️  test_parse_save_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_save_command
+  🛠️  test_parse_save_command
+    📝 #[test]
+  ⚙️  test_parse_quit_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_quit_command
+  🛠️  test_parse_quit_command
+    📝 #[test]
+  ⚙️  test_parse_unknown_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_unknown_command
+  🛠️  test_parse_unknown_command
+    📝 #[test]
+  ⚙️  test_parse_not_a_command
+    📝 #[test]
+    📞 Calls: new, parse, test_parse_not_a_command
+  🛠️  test_parse_not_a_command
+    📝 #[test]
+  ⚙️  test_parse_vector_command
+    📝 #[test]
+    📞 Calls: new, test_parse_vector_command
+  🛠️  test_parse_vector_command
+    📝 #[test]
+  ⚙️  test_parse_vector_alias_command
+    📝 #[test]
+    📞 Calls: new, test_parse_vector_alias_command
+  🛠️  test_parse_vector_alias_command
+    📝 #[test]
+  ⚙️  test_parse_invalid_vector_command
+    📝 #[test]
+    📞 Calls: new, test_parse_invalid_vector_command
+  🛠️  test_parse_invalid_vector_command
+    📝 #[test]
+
+📁 ./src/vectordb/indexing.rs
+  🔨 VectorDB
+  ⚙️  index_files(&mut self, data_dir: &Path)
+    📝 /// Index files in a directory for fast search
+    📞 Calls: index_files
+  ⚙️  rebuild_index(&mut self)
+    📝 /// Rebuild the vector index
+    📞 Calls: Err, is_empty, rebuild_index
+  ⚙️  find_files(&self, dir: &Path)
+    📝 /// Find files to index in a directory
+    📞 Calls: find_files, find_files_recursive, new
+  ⚙️  find_files_recursive(&self, dir: &Path, files: &mut Vec<PathBuf>)
+    📝 /// Recursively find files in a directory
+    📞 Calls: Ok, exists, find_files_recursive, is_dir
+  🛠️  find_files_recursive(&self, dir: &Path, files: &mut Vec<PathBuf>)
+    📝 /// Recursively find files in a directory
+  ⚙️  rebuild_path_map(&mut self)
+    📝 /// Rebuilds the path to ID map for fast lookups
+    📞 Calls: clear, enumerate, iter, rebuild_path_map
+  ⚙️  test_find_files
+    📝 #[test]
+    📞 Calls: is_ok, test_find_files, var
+  🛠️  test_find_files
+    📝 #[test]
+
+📁 ./src/vectordb/file_embedding.rs
+  🔨 FileEmbedding
+    📝 #[serde(skip_serializing_if = "Option::is_none")]
+  ⚙️  new(path: String, embedding: Vec<f32>, file_path: &Path)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, metadata, new
+  ⚙️  new_with_content(path: String, embedding: Vec<f32>, file_path: &Path, content: String)
+    📝 /// Create a new file embedding with content
+    📞 Calls: metadata, new_with_content
+  ⚙️  test_file_embedding_new
+    📝 #[test]
+    📞 Calls: join, new, path, test_file_embedding_new, unwrap
+  🛠️  test_file_embedding_new
+    📝 #[test]
+
+📁 ./src/utils/error.rs
+  ⚙️  to_app_error(err: E, context: &str)
+    📝 Convert a generic error to an AppError
+  ⚙️  format_error_for_user(err: &AppError)
+    📝 [allow(dead_code)]
+    📞 Calls: ApiError, allow, format_error_for_user
+  ⚙️  test_app_error_display
+    📝 #[test]
+    📞 Calls: ApiError, test_app_error_display, to_string
+  🛠️  test_app_error_display
+    📝 #[test]
+  ⚙️  test_to_app_error_categorization
+    📝 #[test]
+    📞 Calls: new, test_to_app_error_categorization
+  🛠️  test_to_app_error_categorization
+    📝 #[test]
+  ⚙️  test_format_error_for_user
+    📝 #[test]
+    📞 Calls: ApiError, test_format_error_for_user, to_string
+  🛠️  test_format_error_for_user
+    📝 #[test]
+
+📁 ./src/ui/input.rs
+  🔨 Default
+    📝 /// Temporary text when navigating history
+  ⚙️  default
+    📝 /// Temporary text when navigating history
+    📞 Calls: default, new
+  🛠️  default
+    📝 /// Temporary text when navigating history
+  🔨 Input
+    📝 /// Temporary text when navigating history
+  ⚙️  new
+    📝 /// Create a new input handler
+    📞 Calls: new
+  ⚙️  handle_key_event(&mut self, key: KeyEvent)
+    📝 /// Handle key events
+    📞 Calls: handle_key_event
+  ⚙️  insert_char(&mut self, c: char)
+    📝 /// Insert a character at the cursor position
+    📞 Calls: insert, insert_char
+  ⚙️  backspace(&mut self)
+    📝 /// Delete the character before the cursor
+    📞 Calls: backspace, remove
+  🛠️  backspace(&mut self)
+    📝 /// Delete the character before the cursor
+  ⚙️  delete(&mut self)
+    📝 /// Delete the character at the cursor
+    📞 Calls: delete, len, remove
+  🛠️  delete(&mut self)
+    📝 /// Delete the character at the cursor
+  ⚙️  move_cursor_left(&mut self)
+    📝 /// Move the cursor left
+    📞 Calls: move_cursor_left
+  🛠️  move_cursor_left(&mut self)
+    📝 /// Move the cursor left
+  ⚙️  move_cursor_right(&mut self)
+    📝 /// Move the cursor right
+    📞 Calls: len, move_cursor_right
+  🛠️  move_cursor_right(&mut self)
+    📝 /// Move the cursor right
+  ⚙️  move_cursor_to_start(&mut self)
+    📝 /// Move the cursor to the start of the input
+    📞 Calls: move_cursor_to_start
+  🛠️  move_cursor_to_start(&mut self)
+    📝 /// Move the cursor to the start of the input
+  ⚙️  move_cursor_to_end(&mut self)
+    📝 /// Move the cursor to the end of the input
+    📞 Calls: len, move_cursor_to_end
+  🛠️  move_cursor_to_end(&mut self)
+    📝 /// Move the cursor to the end of the input
+  ⚙️  navigate_history_up(&mut self)
+    📝 /// Navigate up in the history
+    📞 Calls: is_empty, navigate_history_up
+  🛠️  navigate_history_up(&mut self)
+    📝 /// Navigate up in the history
+  ⚙️  navigate_history_down(&mut self)
+    📝 /// Navigate down in the history
+    📞 Calls: navigate_history_down
+  🛠️  navigate_history_down(&mut self)
+    📝 /// Navigate down in the history
+  ⚙️  clear_to_cursor(&mut self)
+    📝 /// Clear text from the start to the cursor
+    📞 Calls: clear_to_cursor, to_string
+  🛠️  clear_to_cursor(&mut self)
+    📝 /// Clear text from the start to the cursor
+  ⚙️  clear_from_cursor(&mut self)
+    📝 /// Clear text from the cursor to the end
+    📞 Calls: clear_from_cursor, truncate
+  🛠️  clear_from_cursor(&mut self)
+    📝 /// Clear text from the cursor to the end
+  ⚙️  drain(&mut self)
+    📝 /// Drain the input text and add to history
+    📞 Calls: drain, take
+  ⚙️  reset(&mut self)
+    📝 /// Reset the input state completely
+    📞 Calls: clear, reset
+
+📁 ./src/vectordb/embeddings.rs
+  🔨 EmbeddingModel
+    📝 /// Embedding dimension
+  ⚙️  new
+    📝 /// Create a new embedding model
+    📞 Calls: new
+  ⚙️  embed(&self, text: &str)
+    📝 /// Generate embeddings for a text
+    📞 Calls: chars, count, embed
+  ⚙️  embed_file(&self, path: &Path)
+    📝 #[allow(dead_code)]
+    📞 Calls: allow, embed, embed_file, read_to_string
+  ⚙️  preprocess_text(&self, text: &str)
+    📝 /// Preprocess text: normalize, remove stopwords, and tokenize
+    📞 Calls: detect, lang, map, preprocess_text, unwrap_or
+  🛠️  preprocess_text(&self, text: &str)
+    📝 /// Preprocess text: normalize, remove stopwords, and tokenize
+  ⚙️  calculate_term_frequencies(&self, tokens: &[String])
+    📝 /// Calculate term frequencies from tokens
+    📞 Calls: calculate_term_frequencies, len, new
+  🛠️  calculate_term_frequencies(&self, tokens: &[String])
+    📝 /// Calculate term frequencies from tokens
+  ⚙️  create_embedding(&self, term_frequencies: HashMap<String, f32>)
+    📝 /// Create embedding vector from term frequencies
+    📞 Calls: create_embedding
+  🛠️  create_embedding(&self, term_frequencies: HashMap<String, f32>)
+    📝 /// Create embedding vector from term frequencies
+  ⚙️  hash_term(&self, term: &str)
+    📝 /// Hash a term to determine its position in the embedding vector
+    📞 Calls: hash_term
+  🛠️  hash_term(&self, term: &str)
+    📝 /// Hash a term to determine its position in the embedding vector
+  ⚙️  normalize_vector(&self, vector: &mut [f32])
+    📝 /// Normalize a vector to unit length
+    📞 Calls: iter, map, normalize_vector, sqrt
+  🛠️  normalize_vector(&self, vector: &mut [f32])
+    📝 /// Normalize a vector to unit length
+  ⚙️  cosine_similarity(a: ArrayView1<f32>, b: ArrayView1<f32>)
+    📝 [allow(dead_code)]
+    📞 Calls: allow, cosine_similarity, dot, sqrt
+  ⚙️  test_embed
+    📝 #[test]
+    📞 Calls: embed, new, test_embed, unwrap
+  🛠️  test_embed
+    📝 #[test]
+  ⚙️  test_similarity
+    📝 #[test]
+    📞 Calls: new, test_similarity, unwrap
+  🛠️  test_similarity
+    📝 #[test]
+
+📁 ./src/vectordb/search.rs
+  ⭐ SearchMethods
+    📝 Search methods for vector database
+  ⚙️  search(&self, query: &str, top_k: usize)
+    📝 /// Search for files relevant to the query
+    📞 Calls: search
+  🛠️  search(&self, query: &str, top_k: usize)
+    📝 /// Search for files relevant to the query
+  ⚙️  search_with_content(&self, query: &str, top_k: usize)
+    📝 /// Search for files with content relevant to the query
+    📞 Calls: search_with_content
+  🛠️  search_with_content(&self, query: &str, top_k: usize)
+    📝 /// Search for files with content relevant to the query
+  ⚙️  get_query_embedding(&self, query: &str)
+    📝 /// Get embedding vector for a query
+    📞 Calls: get_query_embedding
+  🛠️  get_query_embedding(&self, query: &str)
+    📝 /// Get embedding vector for a query
+  ⚙️  get_embeddings(&self)
+    📝 /// Get embeddings for querying
+    📞 Calls: get_embeddings
+  🛠️  get_embeddings(&self)
+    📝 /// Get embeddings for querying
+  ⚙️  min_relevance(&self)
+    📝 /// Get the minimum relevance threshold
+    📞 Calls: min_relevance
+  🛠️  min_relevance(&self)
+    📝 /// Get the minimum relevance threshold
+  🔨 VectorDB
+    📝 /// Get the minimum relevance threshold
+  ⚙️  search(&self, query: &str, top_k: usize)
+    📝 /// Search for relevant files based on a query string
+    📞 Calls: search
+  ⚙️  search_with_content(&self, query: &str, top_k: usize)
+    📝 /// Search for relevant files and include content in the results
+    📞 Calls: search, search_with_content
+  ⚙️  cosine_similarity(a: &[f32], b: &[f32])
+    📝 Calculate cosine similarity between two vectors
+    📞 Calls: cosine_similarity
+  ⚙️  test_cosine_similarity
+    📝 #[test]
+    📞 Calls: test_cosine_similarity
+  🛠️  test_cosine_similarity
+    📝 #[test]
+  ⚙️  test_search_without_index
+    📝 #[test]
+    📞 Calls: is_ok, test_search_without_index, var
+  🛠️  test_search_without_index
+    📝 #[test]
+  🔨 TestSearchHarness
+    📝 // by creating a test harness struct
+  ⚙️  search(&self)
+    📝 // by creating a test harness struct
+    📞 Calls: is_empty, search
+  🛠️  search(&self)
+    📝 // by creating a test harness struct
+  ⚙️  test_search_with_content
+    📝 #[test]
+    📞 Calls: new, test_search_with_content, unwrap
+  🛠️  test_search_with_content
+    📝 #[test]
+  🔨 TestSearchHarness
+    📝 // a fixed query embedding
+  ⚙️  search_with_content(&self)
+    📝 // a fixed query embedding
+    📞 Calls: search_with_content
+  🛠️  search_with_content(&self)
+    📝 // a fixed query embedding
+  ⚙️  test_get_embedding_by_path
+    📝 #[test]
+    📞 Calls: new, test_get_embedding_by_path, unwrap
+  🛠️  test_get_embedding_by_path
+    📝 #[test]
+
+Summary:
+Total files scanned: 50
+Total methods found: 817
+Ruby files: 0
+JavaScript files: 0
+TypeScript files: 0
+Vue files: 0
+Go files: 0
+Rust files: 50
+Yaml files: 0
+Markdown files: 0
+
