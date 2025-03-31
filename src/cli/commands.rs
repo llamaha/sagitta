@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use colored::Colorize;
 use walkdir::WalkDir;
 use std::time::{Instant, Duration};
+use rayon;
+use num_cpus;
 
 #[derive(Parser, Debug)]
 pub enum Command {
@@ -26,6 +28,10 @@ pub enum Command {
         /// Use HNSW index for faster searches on large codebases
         #[arg(long = "use-hnsw")]
         use_hnsw: bool,
+
+        /// Number of threads to use for indexing (defaults to available CPUs)
+        #[arg(short = 'j', long = "threads")]
+        threads: Option<usize>,
     },
 
     /// Search for files by content
@@ -78,7 +84,7 @@ pub enum Command {
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
-        Command::Index { dir, file_types, use_hnsw } => {
+        Command::Index { dir, file_types, use_hnsw, threads } => {
             println!("Indexing files in {}...", dir);
             
             // Create HNSW config if the flag is used
@@ -88,8 +94,23 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 db.set_hnsw_config(Some(hnsw_config));
             }
             
+            // Set thread count if specified
+            let num_cpus = num_cpus::get();
+            if let Some(thread_count) = threads {
+                println!("Using {} threads for indexing ({} CPUs available)...", 
+                         thread_count, num_cpus);
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(thread_count)
+                    .build_global()
+                    .unwrap_or_else(|e| println!("Failed to set thread count: {}", e));
+            } else {
+                println!("Using all {} available CPUs for indexing...", num_cpus);
+            }
+            
+            let start = Instant::now();
             db.index_directory(&dir, &file_types)?;
-            println!("Indexing complete!");
+            let duration = start.elapsed();
+            println!("Indexing complete in {:.2} seconds!", duration.as_secs_f32());
         }
         Command::Query { query } => {
             let model = EmbeddingModel::new()?;
@@ -319,6 +340,7 @@ mod tests {
             dir: temp_dir.path().to_string_lossy().to_string(),
             file_types: vec!["rs".to_string()],
             use_hnsw: true,
+            threads: None,
         };
         
         execute_command(command, db)?;

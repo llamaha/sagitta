@@ -7,6 +7,9 @@ use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use serde::{Serialize, Deserialize};
 use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use indicatif::{ProgressBar, ProgressStyle};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,16 +378,119 @@ impl HNSWIndex {
         })
     }
     
-    /// Rebuild the index with a new configuration
-    pub fn rebuild_with_config(&self, new_config: HNSWConfig) -> Result<Self> {
-        let mut new_index = Self::new(new_config);
+    /// Rebuild the index with a new configuration in parallel
+    pub fn rebuild_with_config_parallel(&self, new_config: HNSWConfig) -> Result<Self> {
+        let mut new_index = HNSWIndex::new(new_config.clone());
         
-        // Extract all vectors from the current index and insert them into the new one
-        for node in &self.nodes {
-            new_index.insert(node.vector.clone())?;
+        // Set up progress bar for large datasets
+        let node_count = self.nodes.len();
+        let progress_bar = if node_count > 10000 {
+            let pb = ProgressBar::new(node_count as u64);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} nodes ({eta})")
+                    .unwrap()
+                    .progress_chars("#>-")
+            );
+            Some(pb)
+        } else {
+            None
+        };
+        
+        // Create a vector of all embeddings
+        let embeddings: Vec<Vec<f32>> = self.nodes.iter()
+            .map(|node| node.vector.clone())
+            .collect();
+        
+        // Process insertion in parallel
+        let counter = Arc::new(AtomicUsize::new(0));
+        let new_nodes = Arc::new(Mutex::new(Vec::with_capacity(node_count)));
+        let layer_count = new_config.num_layers;
+        let _entry_points = Arc::new(Mutex::new(vec![0; layer_count]));
+        
+        embeddings.par_iter().enumerate().for_each(|(_i, embedding)| {
+            let mut local_new_index = HNSWIndex::new(new_config.clone());
+            
+            // Insert the embedding into the local index
+            let _ = local_new_index.insert(embedding.clone());
+            
+            // Transfer the newly inserted node to the shared data structure
+            if let Some(node) = local_new_index.nodes.pop() {
+                new_nodes.lock().unwrap().push(node);
+            }
+            
+            // Update progress
+            if let Some(pb) = &progress_bar {
+                let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                pb.set_position(current as u64);
+            }
+        });
+        
+        if let Some(pb) = progress_bar {
+            pb.finish_with_message("HNSW index rebuilding complete!");
         }
         
+        // Assign the collected nodes and entry points
+        new_index.nodes = new_nodes.lock().unwrap().clone();
+        
+        // Rebuild the connections between nodes
+        new_index.optimize();
+        
         Ok(new_index)
+    }
+    
+    /// Optimize the index by ensuring connections are bidirectional and consistent
+    fn optimize(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        
+        // Find the highest layer
+        let mut max_layer = 0;
+        for node in &self.nodes {
+            max_layer = max_layer.max(node.max_layer);
+        }
+        
+        // For each layer, rebuild connections
+        for layer in 0..=max_layer.min(self.config.num_layers - 1) {
+            // For each node at this layer or higher
+            for i in 0..self.nodes.len() {
+                if layer <= self.nodes[i].max_layer {
+                    // Find neighbors
+                    let mut neighbors = Vec::new();
+                    for j in 0..self.nodes.len() {
+                        if i != j && layer <= self.nodes[j].max_layer {
+                            let dist = Self::cosine_distance(&self.nodes[i].vector, &self.nodes[j].vector);
+                            neighbors.push((j, dist));
+                        }
+                    }
+                    
+                    // Sort by distance and take the closest m neighbors
+                    neighbors.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    let selected = neighbors.iter()
+                        .take(self.config.m)
+                        .map(|(idx, _)| *idx)
+                        .collect::<Vec<_>>();
+                    
+                    // Update connections for this node
+                    self.nodes[i].connections[layer] = selected;
+                }
+            }
+        }
+        
+        // Set entry points for each layer
+        for layer in 0..self.config.num_layers {
+            // Find a node at this layer
+            let nodes_at_layer: Vec<usize> = self.nodes.iter()
+                .enumerate()
+                .filter(|(_, node)| layer <= node.max_layer)
+                .map(|(i, _)| i)
+                .collect();
+                
+            if !nodes_at_layer.is_empty() {
+                self.entry_points[layer] = nodes_at_layer[0];
+            }
+        }
     }
 }
 
@@ -544,7 +650,7 @@ mod tests {
         };
         
         // Rebuild the index
-        let rebuilt_index = index.rebuild_with_config(new_config).unwrap();
+        let rebuilt_index = index.rebuild_with_config_parallel(new_config).unwrap();
         
         // Verify that the rebuilt index has the new config
         assert_eq!(rebuilt_index.config.num_layers, 4);

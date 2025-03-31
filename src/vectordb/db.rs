@@ -7,6 +7,11 @@ use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::cache::EmbeddingCache;
 use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats, LayerStats};
+use std::sync::{Arc, Mutex};
+use rayon::prelude::*;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Serialize, Deserialize)]
 struct DBFile {
@@ -151,9 +156,9 @@ impl VectorDB {
         let mut new_config = current_config.clone();
         new_config.num_layers = optimal_layers;
         
-        // Rebuild the index with the new config
+        // Rebuild the index with the new config using parallel implementation
         if let Some(index) = &self.hnsw_index {
-            let new_index = index.rebuild_with_config(new_config)?;
+            let new_index = index.rebuild_with_config_parallel(new_config)?;
             self.hnsw_index = Some(new_index);
             
             // Save the updated index
@@ -210,6 +215,8 @@ impl VectorDB {
     pub fn index_directory(&mut self, dir: &str, file_types: &[String]) -> Result<()> {
         let dir_path = Path::new(dir);
         
+        // Collect all eligible files first
+        let mut eligible_files = Vec::new();
         for entry in WalkDir::new(dir_path) {
             let entry = entry.map_err(|e| VectorDBError::DatabaseError(e.to_string()))?;
             if entry.file_type().is_file() {
@@ -217,15 +224,108 @@ impl VectorDB {
                 if let Some(ext) = path.extension() {
                     let ext = ext.to_string_lossy().to_string();
                     if file_types.contains(&ext) {
-                        self.index_file(path)?;
+                        eligible_files.push(path.to_path_buf());
                     }
                 }
             }
         }
         
-        // After indexing is complete, rebuild the HNSW index with optimized layers if needed
-        if self.hnsw_index.is_some() {
-            self.rebuild_hnsw_index()?;
+        // Process files in parallel using Rayon
+        let file_count = eligible_files.len();
+        if file_count > 0 {
+            println!("Found {} files to index. Processing in parallel...", file_count);
+            
+            // Setup progress bar
+            let progress_bar = ProgressBar::new(file_count as u64);
+            progress_bar.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({eta})")
+                    .unwrap()
+                    .progress_chars("#>-")
+            );
+            
+            // Counter for processed files
+            let processed_files = Arc::new(AtomicUsize::new(0));
+            
+            // We need thread-safe references to our data
+            let cache = Arc::new(Mutex::new(&mut self.cache));
+            let embeddings = Arc::new(Mutex::new(&mut self.embeddings));
+            let hnsw_index = if self.hnsw_index.is_some() {
+                Some(Arc::new(Mutex::new(&mut self.hnsw_index)))
+            } else {
+                None
+            };
+            
+            // Use thread_local for embedding model to avoid creating a new model for each file
+            thread_local! {
+                static EMBEDDING_MODEL: RefCell<Option<EmbeddingModel>> = RefCell::new(None);
+            }
+            
+            // Process files in parallel
+            eligible_files.par_iter().for_each(|file_path| {
+                let file_path_str = file_path.to_string_lossy().to_string();
+                
+                // Check if the file is already in the cache
+                let cache_guard = cache.lock().unwrap();
+                let cached_embedding = cache_guard.get(&file_path_str).map(|v| v.to_vec());
+                drop(cache_guard); // Explicitly drop the mutex guard
+                
+                if let Some(embedding) = cached_embedding {
+                    // If in cache, insert into embeddings
+                    embeddings.lock().unwrap().insert(file_path_str.clone(), embedding.clone());
+                    
+                    // Add to HNSW index if available
+                    if let Some(index_lock) = &hnsw_index {
+                        if let Some(index) = index_lock.lock().unwrap().as_mut() {
+                            let _ = index.insert(embedding.to_vec());
+                        }
+                    }
+                } else {
+                    // Get or initialize thread-local embedding model
+                    EMBEDDING_MODEL.with(|model_cell| {
+                        let mut model_ref = model_cell.borrow_mut();
+                        if model_ref.is_none() {
+                            *model_ref = EmbeddingModel::new().ok();
+                        }
+                        
+                        if let Some(model) = &*model_ref {
+                            if let Ok(contents) = fs::read_to_string(file_path) {
+                                if let Ok(embedding) = model.embed(&contents) {
+                                    // Get file hash for cache
+                                    if let Ok(file_hash) = EmbeddingCache::get_file_hash(file_path) {
+                                        // Store in both cache and database
+                                        let _ = cache.lock().unwrap().insert(file_path_str.clone(), embedding.clone(), file_hash);
+                                        embeddings.lock().unwrap().insert(file_path_str, embedding.clone());
+                                        
+                                        // Add to HNSW index if available
+                                        if let Some(index_lock) = &hnsw_index {
+                                            if let Some(index) = index_lock.lock().unwrap().as_mut() {
+                                                let _ = index.insert(embedding);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Update progress
+                let current = processed_files.fetch_add(1, Ordering::SeqCst) + 1;
+                progress_bar.set_position(current as u64);
+            });
+            
+            progress_bar.finish_with_message("Parallel indexing complete!");
+            
+            // After parallel indexing is complete, save the database
+            println!("Saving database...");
+            self.save()?;
+            
+            // Rebuild the HNSW index with optimized layers if needed
+            if self.hnsw_index.is_some() {
+                println!("Optimizing HNSW index...");
+                self.rebuild_hnsw_index()?;
+            }
         }
         
         Ok(())
