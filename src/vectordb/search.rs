@@ -462,6 +462,14 @@ impl Search {
             .map(|s| s.to_string())
             .collect();
         
+        // Check if this is a method-related query
+        let is_method_query = query_lower.contains("method") || 
+                              query_lower.contains("function") || 
+                              query_lower.contains("fn ");
+
+        // Use a larger context window for method queries
+        let max_context_lines = if is_method_query { 30 } else { MAX_CONTEXT_LINES };
+        
         // Find all matching regions with scores
         let mut regions: Vec<(usize, f32, usize)> = Vec::new(); // (start_line, score, length)
         
@@ -502,6 +510,11 @@ impl Search {
             }
             if has_fn {
                 score *= 3.0;  // Increased priority for function definitions
+                
+                // Extra boost for method queries
+                if is_method_query {
+                    score *= 2.0;
+                }
             }
             if has_brace {
                 score *= 1.5;  // Bonus for code block boundaries
@@ -530,7 +543,7 @@ impl Search {
                 
                 // Look backwards for context
                 while context_start > 0 && 
-                      context_length < MAX_CONTEXT_LINES &&
+                      context_length < max_context_lines &&
                       (lines[context_start - 1].contains("{") || 
                        lines[context_start - 1].trim().is_empty() ||
                        lines[context_start - 1].starts_with("    ") ||
@@ -541,20 +554,75 @@ impl Search {
                     context_length += 1;
                 }
                 
-                // Look forwards for context
-                let mut context_end = window_end;
-                while context_end < lines.len() && 
-                      context_length < MAX_CONTEXT_LINES &&
-                      (lines[context_end - 1].contains("}") ||
-                       lines[context_end - 1].trim().is_empty() ||
-                       lines[context_end - 1].contains("{") ||
-                       lines[context_end - 1].contains("fn")) {
-                    context_end += 1;
-                    context_length += 1;
+                // For method queries, try to capture the entire method body
+                if is_method_query && has_fn {
+                    let mut brace_count = 0;
+                    let mut in_method_body = false;
+                    
+                    // First find start of method
+                    while context_start > 0 {
+                        let line = lines[context_start];
+                        if line.contains("fn ") && !in_method_body {
+                            in_method_body = true;
+                            if line.contains("{") {
+                                brace_count += 1;
+                            }
+                        }
+                        if in_method_body {
+                            break;
+                        }
+                        context_start -= 1;
+                        context_length += 1;
+                        if context_length >= max_context_lines {
+                            break;
+                        }
+                    }
+                    
+                    // Then find end of method body
+                    let mut context_end = window_end;
+                    in_method_body = false;
+                    
+                    // Process the starting line for braces
+                    if context_start < lines.len() {
+                        let start_line = lines[context_start];
+                        if start_line.contains("fn ") {
+                            in_method_body = true;
+                            brace_count += start_line.chars().filter(|&c| c == '{').count();
+                            brace_count -= start_line.chars().filter(|&c| c == '}').count();
+                        }
+                    }
+                    
+                    // Now find closing brace
+                    if in_method_body && brace_count > 0 {
+                        while context_end < lines.len() && 
+                              context_length < max_context_lines * 2 && // Allow longer snippets for methods
+                              brace_count > 0 {
+                            if context_end < lines.len() {
+                                let line = lines[context_end];
+                                brace_count += line.chars().filter(|&c| c == '{').count();
+                                brace_count -= line.chars().filter(|&c| c == '}').count();
+                            }
+                            context_end += 1;
+                            context_length += 1;
+                        }
+                    }
+                } else {
+                    // Regular context expansion for non-method queries
+                    // Look forwards for context
+                    let mut context_end = window_end;
+                    while context_end < lines.len() && 
+                          context_length < max_context_lines &&
+                          (lines[context_end - 1].contains("}") ||
+                           lines[context_end - 1].trim().is_empty() ||
+                           lines[context_end - 1].contains("{") ||
+                           lines[context_end - 1].contains("fn")) {
+                        context_end += 1;
+                        context_length += 1;
+                    }
                 }
                 
                 // Store the region
-                regions.push((context_start, score, context_end - context_start));
+                regions.push((context_start, score, context_length));
             }
         }
         
@@ -563,7 +631,7 @@ impl Search {
         
         // Generate the snippet from the best region
         if let Some((start_line, _, length)) = regions.first() {
-            let end_line = start_line + length;
+            let end_line = (*start_line + length).min(lines.len());
             let relevant_lines = &lines[*start_line..end_line];
             
             // Highlight matching terms

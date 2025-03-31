@@ -101,10 +101,20 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 return Ok(());
             }
 
-            println!("\nSearch results for: {}\n", query);
+            // Check if this is a method-related query
+            let is_method_query = query.to_lowercase().contains("method") || 
+                                  query.to_lowercase().contains("function") ||
+                                  query.to_lowercase().contains("fn ");
+
+            if is_method_query {
+                println!("\nSearch results for methods: {}\n", query);
+            } else {
+                println!("\nSearch results for: {}\n", query);
+            }
+            
             for (i, result) in results.iter().enumerate() {
                 println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
-                println!("   {}", result.snippet);
+                println!("{}", result.snippet);
                 println!();
             }
         }
