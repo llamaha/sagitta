@@ -25,6 +25,7 @@ num_cpus = "1.16"
 # Code parsing dependencies
 tree-sitter = "0.20"
 tree-sitter-rust = "0.20"
+tree-sitter-ruby = "0.20"
 lsp-types = "0.94"
 crossbeam-channel = "0.5"
 # Syntax parsing dependencies

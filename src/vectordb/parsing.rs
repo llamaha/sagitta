@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use crate::vectordb::error::VectorDBError;
-use tree_sitter_rust::language;
+use tree_sitter_rust::language as rust_language;
+use tree_sitter_ruby::language as ruby_language;
 use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, ItemTrait, UseTree};
 use syn::parse_file;
 
@@ -77,6 +78,8 @@ pub struct CodeParser {
     parsed_files: HashMap<PathBuf, ParsedFile>,
     rust_query_fn: Query,
     rust_query_struct: Query,
+    ruby_query_method: Query,
+    ruby_query_class: Query,
 }
 
 /// Advanced Rust code analyzer using syn crate
@@ -89,22 +92,35 @@ impl CodeParser {
     pub fn new() -> Self {
         // Initialize the Tree-sitter parser
         let mut parser = Parser::new();
-        let rust_language = language();
-        parser.set_language(rust_language).expect("Error loading Rust grammar");
+        
+        // Load Rust grammar
+        let rust_lang = rust_language();
+        parser.set_language(rust_lang).expect("Error loading Rust grammar");
         
         // Queries for Rust code elements
-        // Note: The query syntax needs to match the actual tree-sitter-rust grammar
-        let rust_query_fn = Query::new(rust_language, 
+        let rust_query_fn = Query::new(rust_lang, 
             "(function_item (identifier) @function.name) @function.def").expect("Invalid function query");
         
-        let rust_query_struct = Query::new(rust_language, 
+        let rust_query_struct = Query::new(rust_lang, 
             "(struct_item (type_identifier) @struct.name) @struct.def").expect("Invalid struct query");
+
+        // Load Ruby grammar
+        let ruby_lang = ruby_language();
+        
+        // Queries for Ruby code elements
+        let ruby_query_method = Query::new(ruby_lang,
+            "(method name: (identifier) @method.name) @method.def").expect("Invalid Ruby method query");
+            
+        let ruby_query_class = Query::new(ruby_lang,
+            "(class name: (constant) @class.name) @class.def").expect("Invalid Ruby class query");
 
         CodeParser {
             parser,
             parsed_files: HashMap::new(),
             rust_query_fn,
             rust_query_struct,
+            ruby_query_method,
+            ruby_query_class,
         }
     }
 
@@ -124,6 +140,7 @@ impl CodeParser {
         // Determine language based on file extension
         let language = match file_path.extension().and_then(|ext| ext.to_str()) {
             Some("rs") => "rust",
+            Some("rb") => "ruby",
             // For testing purposes, treat any file as rust if no extension is provided
             None => "rust",
             // Add more languages as needed
@@ -133,6 +150,7 @@ impl CodeParser {
         // Parse the file based on the language
         match language {
             "rust" => self.parse_rust_file(&file_path, &content)?,
+            "ruby" => self.parse_ruby_file(&file_path, &content)?,
             _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
         }
 
@@ -237,6 +255,121 @@ impl CodeParser {
             dependencies,
             language: "rust".to_string(),
         };
+
+        // Store the parsed file
+        self.parsed_files.insert(file_path.clone(), parsed_file);
+
+        Ok(())
+    }
+
+    /// Parse a Ruby source file
+    fn parse_ruby_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        // Set parser to use Ruby language
+        let ruby_lang = ruby_language();
+        self.parser.set_language(ruby_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set Ruby language".to_string()))?;
+            
+        // Parse the file using tree-sitter
+        let tree = self.parser.parse(content, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse Ruby file".to_string()))?;
+        
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+
+        // Extract methods using queries
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.ruby_query_method, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // For each match, find the method name and definition node
+            let mut method_name = String::new();
+            let mut method_node = None;
+            
+            for capture in query_match.captures {
+                let capture_name = self.ruby_query_method.capture_names()[capture.index as usize].as_str();
+                match capture_name {
+                    "method.name" => {
+                        method_name = content[capture.node.byte_range()].to_string();
+                    },
+                    "method.def" => {
+                        method_node = Some(capture.node);
+                    },
+                    _ => {}
+                }
+            }
+            
+            if let Some(node) = method_node {
+                // Extract method body
+                let body = content[node.byte_range()].to_string();
+                
+                // Create code span
+                let span = self.node_to_span(node, file_path);
+                
+                // Add method as a function to elements
+                elements.push(CodeElement::Function {
+                    name: method_name,
+                    params: self.extract_ruby_method_params(node, content),
+                    return_type: None, // Ruby doesn't have explicit return types
+                    body,
+                    span,
+                });
+            }
+        }
+        
+        // Extract classes using queries
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.ruby_query_class, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // For each match, find the class name and definition node
+            let mut class_name = String::new();
+            let mut class_node = None;
+            
+            for capture in query_match.captures {
+                let capture_name = self.ruby_query_class.capture_names()[capture.index as usize].as_str();
+                match capture_name {
+                    "class.name" => {
+                        class_name = content[capture.node.byte_range()].to_string();
+                    },
+                    "class.def" => {
+                        class_node = Some(capture.node);
+                    },
+                    _ => {}
+                }
+            }
+            
+            if let Some(node) = class_node {
+                // Extract class methods
+                let methods = self.extract_ruby_class_methods(node, content);
+                
+                // Create code span
+                let span = self.node_to_span(node, file_path);
+                
+                // Add class as a struct to elements (closest match in our model)
+                elements.push(CodeElement::Struct {
+                    name: class_name,
+                    fields: Vec::new(), // Ruby classes don't have explicit fields like Rust structs
+                    methods,
+                    span,
+                });
+            }
+        }
+        
+        // Extract Ruby requires (imports)
+        self.extract_ruby_requires(&tree.root_node(), file_path, &mut elements, &mut dependencies, content.as_bytes())?;
+
+        // Create the parsed file representation
+        let parsed_file = ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "ruby".to_string(),
+        };
+
+        // Reset parser back to Rust language
+        let rust_lang = rust_language();
+        self.parser.set_language(rust_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to reset to Rust language".to_string()))?;
 
         // Store the parsed file
         self.parsed_files.insert(file_path.clone(), parsed_file);
@@ -455,6 +588,135 @@ impl CodeParser {
         
         Ok(())
     }
+
+    /// Extract method parameters from a Ruby method node
+    fn extract_ruby_method_params(&self, node: Node, content: &str) -> Vec<String> {
+        let mut params = Vec::new();
+        
+        // Find parameters node
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                if child.kind() == "parameters" {
+                    // Process each parameter
+                    for j in 0..child.child_count() {
+                        if let Some(param_node) = child.child(j) {
+                            // Only include actual parameter nodes
+                            if param_node.kind() == "identifier" {
+                                if let Ok(param_text) = param_node.utf8_text(content.as_bytes()) {
+                                    params.push(param_text.to_string());
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        
+        params
+    }
+    
+    /// Extract method names from a Ruby class node
+    fn extract_ruby_class_methods(&self, node: Node, content: &str) -> Vec<String> {
+        let mut methods = Vec::new();
+        
+        // Create a cursor for traversing the AST
+        let mut cursor = node.walk();
+        
+        // Function to recursively find method nodes
+        fn find_methods<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, content: &str, methods: &mut Vec<String>) {
+            if cursor.node().kind() == "method" {
+                // Look for the method name (identifier)
+                for i in 0..cursor.node().child_count() {
+                    if let Some(child) = cursor.node().child(i) {
+                        if child.kind() == "identifier" {
+                            if let Ok(method_name) = child.utf8_text(content.as_bytes()) {
+                                methods.push(method_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Go to first child
+            if cursor.goto_first_child() {
+                find_methods(cursor, content, methods);
+                
+                // Go to next siblings
+                while cursor.goto_next_sibling() {
+                    find_methods(cursor, content, methods);
+                }
+                
+                // Go back up
+                cursor.goto_parent();
+            }
+        }
+        
+        find_methods(&mut cursor, content, &mut methods);
+        
+        methods
+    }
+    
+    /// Extract Ruby requires (imports)
+    fn extract_ruby_requires(
+        &self,
+        node: &Node,
+        file_path: &PathBuf,
+        elements: &mut Vec<CodeElement>,
+        dependencies: &mut HashSet<String>,
+        content: &[u8]
+    ) -> Result<(), VectorDBError> {
+        // Use a stack-based approach to traverse the AST for require statements
+        let mut stack = vec![node.clone()];
+        
+        while let Some(current_node) = stack.pop() {
+            // Check if the current node is a require statement
+            if current_node.kind() == "call" {
+                if let Some(method_node) = current_node.child_by_field_name("method") {
+                    if let Ok(method_name) = method_node.utf8_text(content) {
+                        if method_name == "require" || method_name == "require_relative" {
+                            // Find the argument (string literal)
+                            if let Some(args_node) = current_node.child_by_field_name("arguments") {
+                                if let Some(string_node) = args_node.child(0) {
+                                    if string_node.kind().contains("string") {
+                                        if let Ok(require_path) = string_node.utf8_text(content) {
+                                            // Clean up the string literal quotes
+                                            let dep = require_path.trim_matches('"').trim_matches('\'').to_string();
+                                            dependencies.insert(dep.clone());
+                                            
+                                            // Create an Import CodeElement
+                                            let span = CodeSpan {
+                                                file_path: file_path.to_path_buf(),
+                                                start_line: current_node.start_position().row + 1,
+                                                start_column: current_node.start_position().column + 1,
+                                                end_line: current_node.end_position().row + 1,
+                                                end_column: current_node.end_position().column + 1,
+                                            };
+                                            
+                                            elements.push(CodeElement::Import {
+                                                path: format!("require '{}'", dep),
+                                                span,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Add children to the stack (in reverse order)
+            let child_count = current_node.child_count();
+            for i in (0..child_count).rev() {
+                if let Some(child) = current_node.child(i) {
+                    stack.push(child);
+                }
+            }
+        }
+        
+        Ok(())
+    }
 }
 
 impl RustAnalyzer {
@@ -464,44 +726,39 @@ impl RustAnalyzer {
             parsed_files: HashMap::new(),
         })
     }
-    
-    /// Load a project from a directory containing a Cargo.toml file
+
+    /// Load and parse all Rust files in a project directory
     pub fn load_project(&mut self, project_dir: &Path) -> Result<(), VectorDBError> {
-        let manifest_path = project_dir.join("Cargo.toml");
-        if !manifest_path.exists() {
-            return Err(VectorDBError::FileNotFound(
-                manifest_path.to_string_lossy().to_string()
-            ));
+        if !project_dir.exists() {
+            return Err(VectorDBError::DirectoryCreationError {
+                path: project_dir.to_path_buf(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "Directory not found"),
+            });
         }
         
-        // Simple implementation - just walk the directory
-        use walkdir::WalkDir;
-        
-        for entry in WalkDir::new(project_dir) {
+        // Recursively walk through the directory
+        for entry in walkdir::WalkDir::new(project_dir) {
             let entry = match entry {
                 Ok(entry) => entry,
-                Err(e) => {
-                    println!("Error reading directory entry: {}", e);
-                    continue;
-                }
+                Err(_) => continue, // Skip entries that can't be read
             };
             
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            
             let path = entry.path();
-            if let Some(ext) = path.extension() {
-                if ext == "rs" {
-                    let _ = self.parse_file(path);
+            
+            // Check if it's a file and has a .rs extension
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "rs" || ext == "rb" {
+                        let _ = self.parse_file(path);
+                    }
                 }
             }
         }
         
         Ok(())
     }
-    
-    /// Parse a Rust file and extract structural elements
+
+    /// Parse a source file and extract code elements
     pub fn parse_file(&mut self, file_path: &Path) -> Result<ParsedFile, VectorDBError> {
         if !file_path.exists() {
             return Err(VectorDBError::FileNotFound(
@@ -514,6 +771,320 @@ impl RustAnalyzer {
             return Ok(parsed.clone());
         }
         
+        // Determine language based on file extension
+        let language = match file_path.extension().and_then(|ext| ext.to_str()) {
+            Some("rs") => "rust",
+            Some("rb") => "ruby",
+            _ => return Err(VectorDBError::UnsupportedLanguage(
+                file_path.extension().unwrap_or_default().to_string_lossy().to_string()
+            )),
+        };
+        
+        // Parse based on language
+        let parsed_file = match language {
+            "rust" => self.parse_rust_file(file_path)?,
+            "ruby" => self.parse_ruby_file(file_path)?,
+            _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
+        };
+        
+        // Store for future reference
+        self.parsed_files.insert(file_path.to_path_buf(), parsed_file.clone());
+        
+        Ok(parsed_file)
+    }
+    
+    /// Parse a Ruby file
+    fn parse_ruby_file(&self, file_path: &Path) -> Result<ParsedFile, VectorDBError> {
+        // Read file contents
+        let source_code = fs::read_to_string(file_path)
+            .map_err(|e| VectorDBError::FileReadError {
+                path: file_path.to_path_buf(),
+                source: e,
+            })?;
+        
+        // Setup tree-sitter parser
+        let mut parser = Parser::new();
+        let ruby_lang = ruby_language();
+        parser.set_language(ruby_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set Ruby language".to_string()))?;
+        
+        // Parse the Ruby file
+        let tree = parser.parse(&source_code, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse Ruby file".to_string()))?;
+        
+        // Create queries for Ruby elements
+        let method_query = Query::new(ruby_lang, 
+            "(method name: (identifier) @method.name) @method.def").expect("Invalid Ruby method query");
+            
+        let class_query = Query::new(ruby_lang,
+            "(class name: (constant) @class.name) @class.def").expect("Invalid Ruby class query");
+            
+        let module_query = Query::new(ruby_lang,
+            "(module name: (constant) @module.name) @module.def").expect("Invalid Ruby module query");
+        
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+        
+        // Extract methods
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&method_query, tree.root_node(), source_code.as_bytes());
+        
+        for query_match in matches {
+            // For each match, find the method name and definition node
+            let mut method_name = String::new();
+            let mut method_node = None;
+            
+            for capture in query_match.captures {
+                let capture_name = method_query.capture_names()[capture.index as usize].as_str();
+                match capture_name {
+                    "method.name" => {
+                        method_name = source_code[capture.node.byte_range()].to_string();
+                    },
+                    "method.def" => {
+                        method_node = Some(capture.node);
+                    },
+                    _ => {}
+                }
+            }
+            
+            if let Some(node) = method_node {
+                // Extract method body
+                let body = source_code[node.byte_range()].to_string();
+                
+                // Create code span
+                let span = CodeSpan {
+                    file_path: file_path.to_path_buf(),
+                    start_line: node.start_position().row + 1,
+                    start_column: node.start_position().column + 1,
+                    end_line: node.end_position().row + 1,
+                    end_column: node.end_position().column + 1,
+                };
+                
+                // Extract parameters
+                let mut params = Vec::new();
+                if let Some(params_node) = node.child_by_field_name("parameters") {
+                    for i in 0..params_node.child_count() {
+                        if let Some(param_node) = params_node.child(i) {
+                            if param_node.kind() == "identifier" {
+                                if let Ok(param_text) = param_node.utf8_text(source_code.as_bytes()) {
+                                    params.push(param_text.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Add method as a function to elements
+                elements.push(CodeElement::Function {
+                    name: method_name,
+                    params,
+                    return_type: None, // Ruby doesn't have explicit return types
+                    body,
+                    span,
+                });
+            }
+        }
+        
+        // Extract classes
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&class_query, tree.root_node(), source_code.as_bytes());
+        
+        for query_match in matches {
+            // For each match, find the class name and definition node
+            let mut class_name = String::new();
+            let mut class_node = None;
+            
+            for capture in query_match.captures {
+                let capture_name = class_query.capture_names()[capture.index as usize].as_str();
+                match capture_name {
+                    "class.name" => {
+                        class_name = source_code[capture.node.byte_range()].to_string();
+                    },
+                    "class.def" => {
+                        class_node = Some(capture.node);
+                    },
+                    _ => {}
+                }
+            }
+            
+            if let Some(node) = class_node {
+                // Create code span
+                let span = CodeSpan {
+                    file_path: file_path.to_path_buf(),
+                    start_line: node.start_position().row + 1,
+                    start_column: node.start_position().column + 1,
+                    end_line: node.end_position().row + 1,
+                    end_column: node.end_position().column + 1,
+                };
+                
+                // Extract class methods
+                let mut methods = Vec::new();
+                
+                // Create a cursor for traversing the AST
+                let mut cursor = node.walk();
+                
+                // Function to recursively find method nodes
+                fn find_methods<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, source: &str, methods: &mut Vec<String>) {
+                    if cursor.node().kind() == "method" {
+                        // Look for the method name (identifier)
+                        if let Some(name_node) = cursor.node().child_by_field_name("name") {
+                            if let Ok(method_name) = name_node.utf8_text(source.as_bytes()) {
+                                methods.push(method_name.to_string());
+                            }
+                        }
+                    }
+                    
+                    // Go to first child
+                    if cursor.goto_first_child() {
+                        find_methods(cursor, source, methods);
+                        
+                        // Go to next siblings
+                        while cursor.goto_next_sibling() {
+                            find_methods(cursor, source, methods);
+                        }
+                        
+                        // Go back up
+                        cursor.goto_parent();
+                    }
+                }
+                
+                find_methods(&mut cursor, &source_code, &mut methods);
+                
+                // Add class as a struct to elements (closest match in our model)
+                elements.push(CodeElement::Struct {
+                    name: class_name,
+                    fields: Vec::new(), // Ruby classes don't have explicit fields like Rust structs
+                    methods,
+                    span,
+                });
+            }
+        }
+        
+        // Extract modules (similar to classes)
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&module_query, tree.root_node(), source_code.as_bytes());
+        
+        for query_match in matches {
+            let mut module_name = String::new();
+            let mut module_node = None;
+            
+            for capture in query_match.captures {
+                let capture_name = module_query.capture_names()[capture.index as usize].as_str();
+                match capture_name {
+                    "module.name" => {
+                        module_name = source_code[capture.node.byte_range()].to_string();
+                    },
+                    "module.def" => {
+                        module_node = Some(capture.node);
+                    },
+                    _ => {}
+                }
+            }
+            
+            if let Some(node) = module_node {
+                // Create code span
+                let span = CodeSpan {
+                    file_path: file_path.to_path_buf(),
+                    start_line: node.start_position().row + 1,
+                    start_column: node.start_position().column + 1,
+                    end_line: node.end_position().row + 1,
+                    end_column: node.end_position().column + 1,
+                };
+                
+                // Extract module methods (same as class methods)
+                let mut methods = Vec::new();
+                let mut cursor = node.walk();
+                
+                fn find_methods<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, source: &str, methods: &mut Vec<String>) {
+                    if cursor.node().kind() == "method" {
+                        if let Some(name_node) = cursor.node().child_by_field_name("name") {
+                            if let Ok(method_name) = name_node.utf8_text(source.as_bytes()) {
+                                methods.push(method_name.to_string());
+                            }
+                        }
+                    }
+                    
+                    if cursor.goto_first_child() {
+                        find_methods(cursor, source, methods);
+                        while cursor.goto_next_sibling() {
+                            find_methods(cursor, source, methods);
+                        }
+                        cursor.goto_parent();
+                    }
+                }
+                
+                find_methods(&mut cursor, &source_code, &mut methods);
+                
+                // Add module as a trait (closest match in our model)
+                elements.push(CodeElement::Trait {
+                    name: module_name,
+                    methods,
+                    span,
+                });
+            }
+        }
+        
+        // Extract Ruby requires (imports)
+        // Use a stack-based approach to traverse the AST for require statements
+        let mut stack = vec![tree.root_node()];
+        
+        while let Some(current_node) = stack.pop() {
+            // Check if the current node is a require statement
+            if current_node.kind() == "call" {
+                if let Some(method_node) = current_node.child_by_field_name("method") {
+                    if let Ok(method_name) = method_node.utf8_text(source_code.as_bytes()) {
+                        if method_name == "require" || method_name == "require_relative" {
+                            // Find the argument (string literal)
+                            if let Some(args_node) = current_node.child_by_field_name("arguments") {
+                                if let Some(string_node) = args_node.child(0) {
+                                    if string_node.kind().contains("string") {
+                                        if let Ok(require_path) = string_node.utf8_text(source_code.as_bytes()) {
+                                            // Clean up the string literal quotes
+                                            let dep = require_path.trim_matches('"').trim_matches('\'').to_string();
+                                            dependencies.insert(dep.clone());
+                                            
+                                            // Create an Import CodeElement
+                                            let span = CodeSpan {
+                                                file_path: file_path.to_path_buf(),
+                                                start_line: current_node.start_position().row + 1,
+                                                start_column: current_node.start_position().column + 1,
+                                                end_line: current_node.end_position().row + 1,
+                                                end_column: current_node.end_position().column + 1,
+                                            };
+                                            
+                                            elements.push(CodeElement::Import {
+                                                path: format!("require '{}'", dep),
+                                                span,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Add children to the stack (in reverse order)
+            let child_count = current_node.child_count();
+            for i in (0..child_count).rev() {
+                if let Some(child) = current_node.child(i) {
+                    stack.push(child);
+                }
+            }
+        }
+        
+        // Create the parsed file
+        Ok(ParsedFile {
+            file_path: file_path.to_path_buf(),
+            elements,
+            dependencies,
+            language: "ruby".to_string(),
+        })
+    }
+    
+    /// Parse a Rust file
+    fn parse_rust_file(&self, file_path: &Path) -> Result<ParsedFile, VectorDBError> {
         // Read file contents
         let source_code = fs::read_to_string(file_path)
             .map_err(|e| VectorDBError::FileReadError {
@@ -540,17 +1111,12 @@ impl RustAnalyzer {
         visitor.visit_file(&syntax);
         
         // Create the parsed file
-        let parsed_file = ParsedFile {
+        Ok(ParsedFile {
             file_path: file_path.to_path_buf(),
             elements,
             dependencies,
             language: "rust".to_string(),
-        };
-        
-        // Store for future reference
-        self.parsed_files.insert(file_path.to_path_buf(), parsed_file.clone());
-        
-        Ok(parsed_file)
+        })
     }
     
     /// Find references to a symbol across the codebase
@@ -1069,6 +1635,8 @@ fn find_by_name(name: &str) -> bool {{
         
         // Create a temporary Rust file with a simple function and struct
         let mut file = NamedTempFile::new()?;
+        let rust_filename = file.path().with_extension("rs");
+        
         let test_code = r#"
 use std::collections::HashMap;
 
@@ -1112,11 +1680,11 @@ fn main() {
     map.insert("key", "value");
 }
 "#;
-        file.write_all(test_code.as_bytes())?;
+        std::fs::write(&rust_filename, test_code)?;
         
         // Create a RustAnalyzer and parse the file
         let mut analyzer = RustAnalyzer::new()?;
-        let parsed = analyzer.parse_file(file.path())?;
+        let parsed = analyzer.parse_file(&rust_filename)?;
         
         // Check functions
         let add_function = parsed.elements.iter().find(|e| match e {
@@ -1137,6 +1705,111 @@ fn main() {
         // Check dependencies
         assert!(parsed.dependencies.iter().any(|dep| dep.contains("HashMap")), 
                 "Expected to find HashMap in dependencies");
+        
+        // Clean up
+        std::fs::remove_file(&rust_filename).unwrap();
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_ruby_parsing() -> Result<(), VectorDBError> {
+        // Create a temporary Ruby file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        let ruby_filename = temp_file.path().with_extension("rb");
+        
+        // Write Ruby code to the file
+        let ruby_code = r#"
+class Person
+  attr_accessor :name, :age
+  
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+  
+  def to_s
+    "Simple String"
+  end
+end
+
+module Utils
+  def self.format_currency(amount)
+    "Dollar Amount"
+  end
+end
+
+require 'json'
+require_relative 'config'
+    "#;
+        
+        std::fs::write(&ruby_filename, ruby_code).unwrap();
+        
+        // Create a parser
+        let mut analyzer = RustAnalyzer::new()?;
+        
+        // Parse the file
+        let parsed = analyzer.parse_file(&ruby_filename)?;
+        
+        // Check language detection
+        assert_eq!(parsed.language, "ruby");
+        
+        // Check for classes
+        let class_elements: Vec<_> = parsed.elements.iter()
+            .filter_map(|e| {
+                if let CodeElement::Struct { name, .. } = e {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        assert!(class_elements.contains(&"Person"));
+        
+        // Check for methods
+        let method_elements: Vec<_> = parsed.elements.iter()
+            .filter_map(|e| {
+                if let CodeElement::Function { name, .. } = e {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        assert!(method_elements.contains(&"initialize"));
+        assert!(method_elements.contains(&"to_s"));
+        
+        // Check for modules
+        let module_elements: Vec<_> = parsed.elements.iter()
+            .filter_map(|e| {
+                if let CodeElement::Trait { name, .. } = e {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        assert!(module_elements.contains(&"Utils"));
+        
+        // Check for imports
+        let import_elements: Vec<_> = parsed.elements.iter()
+            .filter_map(|e| {
+                if let CodeElement::Import { path, .. } = e {
+                    Some(path.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        assert!(import_elements.iter().any(|s| s.contains("json")));
+        assert!(import_elements.iter().any(|s| s.contains("config")));
+        
+        // Clean up
+        std::fs::remove_file(&ruby_filename).unwrap();
         
         Ok(())
     }

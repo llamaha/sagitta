@@ -17,12 +17,22 @@ impl CodeTokenizer {
         
         // Programming keywords
         let keywords = vec![
+            // Rust keywords
             "fn", "let", "mut", "const", "pub", "struct", "enum", "impl", "trait",
             "use", "mod", "return", "if", "else", "for", "while", "loop", "match",
             "break", "continue", "async", "await", "unsafe", "extern", "crate",
             "self", "super", "where", "type", "as", "ref", "box", "move", "static",
             "dyn", "true", "false", "None", "Some", "Result", "Option", "String",
             "Vec", "HashMap", "u32", "i32", "f32", "bool", "char", "str",
+            
+            // Ruby keywords
+            "def", "class", "module", "end", "require", "require_relative", "include",
+            "extend", "attr_accessor", "attr_reader", "attr_writer", "initialize",
+            "nil", "true", "false", "unless", "elsif", "case", "when", "rescue",
+            "ensure", "begin", "yield", "super", "do", "lambda", "proc", "puts",
+            "gets", "print", "raise", "private", "protected", "public", "alias",
+            "undef", "defined?", "array", "hash", "symbol", "string", "integer",
+            "float", "not", "and", "or", "retry", "redo", "next", "self", "then",
         ];
         
         for (idx, keyword) in keywords.into_iter().enumerate() {
