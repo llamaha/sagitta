@@ -34,7 +34,7 @@ proc-macro2 = "1.0"
 quote = "1.0"
 ctrlc = "3.2"
 # ONNX Runtime dependencies
-ort = "1.16.3"
+ort = "1.16.0"
 
 [dev-dependencies]
 tempfile = "3.10"
