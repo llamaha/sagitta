@@ -98,7 +98,7 @@ pub enum Command {
     /// Clear the database
     Clear,
 
-    /// Hybrid search combining semantic and lexical matches (deprecated, use Query instead)
+    /// Query search combining semantic and lexical matches (deprecated, use Query instead)
     #[deprecated(
         since = "0.2.0",
         note = "Use 'query' command instead which performs hybrid search by default"
@@ -115,21 +115,6 @@ pub enum Command {
         /// Weight for BM25 lexical search (default: 0.3)
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
-    },
-
-    /// Record feedback for a search result to improve future searches
-    Feedback {
-        /// The search query
-        #[arg(short, long)]
-        query: String,
-        
-        /// The file path of the result
-        #[arg(short, long)]
-        file: String,
-        
-        /// Whether the result was relevant (true) or not (false)
-        #[arg(short, long)]
-        relevant: bool,
     },
 }
 
@@ -192,7 +177,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("Performing vector-only search...");
                 search.search(&query)?
             } else {
-                println!("Performing hybrid search (combining semantic and lexical matching)...");
+                println!("Performing query search (combining semantic and lexical matching)...");
                 
                 // Show weights being used
                 let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
@@ -399,7 +384,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let model = EmbeddingModel::new()?;
             let search = Search::new(db, model);
             
-            println!("Performing hybrid search (combining semantic and lexical matching)...");
+            println!("Performing query search (combining semantic and lexical matching)...");
             
             // Show weights being used
             let v_weight = vector_weight.unwrap_or(0.7);
@@ -413,25 +398,12 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 return Ok(());
             }
 
-            println!("\nHybrid search results for: {}\n", query);
+            println!("\nQuery search results for: {}\n", query);
             for (i, result) in results.iter().enumerate() {
                 println!("{}. {} (score: {:.2})", i + 1, result.file_path, result.similarity);
                 println!("{}", result.snippet);
                 println!();
             }
-        }
-        Command::Feedback { query, file, relevant } => {
-            // Create search instance to access feedback recording
-            let model = EmbeddingModel::new()?;
-            let mut search = Search::new(db, model);
-            
-            // Record the feedback
-            search.record_result_feedback(&query, &file, relevant)?;
-            
-            println!("Feedback recorded: '{}' {} for query '{}'", 
-                file, 
-                if relevant { "is relevant" } else { "is not relevant" },
-                query);
         }
     }
     Ok(())
