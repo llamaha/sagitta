@@ -308,18 +308,18 @@ mod tests {
         cache.set_model_type(EmbeddingModelType::Basic);
         cache.insert("test".to_string(), embedding.clone(), file_hash)?;
         
-        // Change model type to ONNX
-        cache.set_model_type(EmbeddingModelType::ONNX);
+        // Change model type to Onnx
+        cache.set_model_type(EmbeddingModelType::Onnx);
         
         // Get the item - should be None because model type doesn't match
         let retrieved = cache.get("test");
         assert!(retrieved.is_none());
         
-        // Insert a new item with ONNX model type
+        // Insert a new item with Onnx model type
         let embedding2 = vec![4.0, 5.0, 6.0];
         cache.insert("test2".to_string(), embedding2.clone(), file_hash)?;
         
-        // Get the ONNX item - should exist
+        // Get the Onnx item - should exist
         let retrieved = cache.get("test2");
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap(), &embedding2);

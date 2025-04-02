@@ -132,6 +132,9 @@ pub enum Command {
 
     /// Clear the database
     Clear,
+
+    /// Run the Phase 2 ONNX Optimization Demo
+    Phase2Demo,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -152,7 +155,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 );
                 
                 // Set the model type to ONNX
-                match db.set_embedding_model_type(EmbeddingModelType::ONNX) {
+                match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                     Ok(_) => {
                         println!("Using ONNX-based embedding model:");
                         println!("  - Model: {}", model_path);
@@ -217,102 +220,118 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
         }
         Command::Query { query, vector_only, vector_weight, bm25_weight, file_types } => {
-            // Create embedding model based on the database configuration
-            let model = create_embedding_model(&db)?;
-            let search = Search::new(db, model);
-            
-            // Determine search type based on flags
-            let mut results = if vector_only {
-                println!("Performing vector-only search...");
-                search.search(&query)?
-            } else {
-                println!("Performing query search (combining semantic and lexical matching)...");
-                
-                // Show weights being used
-                let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
-                let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
-                println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
-                
-                search.hybrid_search(&query, vector_weight, bm25_weight)?
-            };
+            // Use get_embedding_model for embedding logic
+            let model_type = db.embedding_model_type();
+            match get_embedding_model(model_type, &db) {
+                Ok(model) => {
+                    let search = Search::new(db, model);
+                    
+                    // Determine search type based on flags
+                    let mut results = if vector_only {
+                        println!("Performing vector-only search...");
+                        search.search(&query)?
+                    } else {
+                        println!("Performing query search (combining semantic and lexical matching)...");
+                        
+                        // Show weights being used
+                        let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+                        let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+                        println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+                        
+                        search.hybrid_search(&query, vector_weight, bm25_weight)?
+                    };
 
-            // Filter results by file type if specified
-            if let Some(types) = file_types {
-                if !types.is_empty() {
-                    println!("Filtering results by file types: {}", types.join(", "));
-                    results.retain(|result| {
-                        let path = Path::new(&result.file_path);
-                        if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy().to_string();
-                            types.contains(&ext_str)
-                        } else {
-                            false
+                    // Filter results by file type if specified
+                    if let Some(types) = file_types {
+                        if !types.is_empty() {
+                            println!("Filtering results by file types: {}", types.join(", "));
+                            results.retain(|result| {
+                                let path = Path::new(&result.file_path);
+                                if let Some(ext) = path.extension() {
+                                    let ext_str = ext.to_string_lossy().to_string();
+                                    types.contains(&ext_str)
+                                } else {
+                                    false
+                                }
+                            });
                         }
-                    });
+                    }
+
+                    if results.is_empty() {
+                        println!("No results found.");
+                        return Ok(());
+                    }
+
+                    // Check if this is a method-related query
+                    let is_method_query = query.to_lowercase().contains("method") || 
+                                          query.to_lowercase().contains("function") ||
+                                          query.to_lowercase().contains("fn ");
+
+                    if is_method_query {
+                        println!("\nSearch results for methods: {}\n", query);
+                    } else {
+                        println!("\nSearch results for: {}\n", query);
+                    }
+                    
+                    for (i, result) in results.iter().enumerate() {
+                        println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
+                        println!("{}", result.snippet);
+                        println!();
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error creating embedding model: {}", e);
+                    return Ok(());
                 }
-            }
-
-            if results.is_empty() {
-                println!("No results found.");
-                return Ok(());
-            }
-
-            // Check if this is a method-related query
-            let is_method_query = query.to_lowercase().contains("method") || 
-                                  query.to_lowercase().contains("function") ||
-                                  query.to_lowercase().contains("fn ");
-
-            if is_method_query {
-                println!("\nSearch results for methods: {}\n", query);
-            } else {
-                println!("\nSearch results for: {}\n", query);
-            }
-            
-            for (i, result) in results.iter().enumerate() {
-                println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
-                println!("{}", result.snippet);
-                println!();
             }
         }
         Command::CodeSearch { query, search_type } => {
-            // Create embedding model based on the database configuration
-            let model = create_embedding_model(&db)?;
-            let mut search = Search::new(db, model);
-            
-            // Parse the search type
-            let code_search_type = match search_type.as_deref() {
-                Some("function") => Some(CodeSearchType::Function),
-                Some("type") => Some(CodeSearchType::Type),
-                Some("dependency") => Some(CodeSearchType::Dependency),
-                Some("usage") => Some(CodeSearchType::Usage),
-                None => None,
-                Some(unknown) => {
-                    println!("Unknown search type: {}. Using general code search.", unknown);
-                    None
-                }
-            };
-            
-            // Execute the code-aware search
-            let results = search.search_code(&query, code_search_type)?;
+            // Use get_embedding_model for embedding logic
+            let model_type = db.embedding_model_type();
+            match get_embedding_model(model_type, &db) {
+                Ok(model) => {
+                    let mut search = Search::new(db, model);
+                    
+                    // Parse the search type
+                    let code_search_type = match search_type.as_deref() {
+                        Some("function") => Some(CodeSearchType::Function),
+                        Some("type") => Some(CodeSearchType::Type),
+                        Some("dependency") => Some(CodeSearchType::Dependency),
+                        Some("usage") => Some(CodeSearchType::Usage),
+                        None => None,
+                        Some(unknown) => {
+                            println!("Unknown search type: {}. Using general code search.", unknown);
+                            None
+                        }
+                    };
+                    
+                    // Execute the code-aware search
+                    let results = search.search_code(&query, code_search_type)?;
 
-            if results.is_empty() {
-                println!("No code results found.");
-                return Ok(());
-            }
+                    if results.is_empty() {
+                        println!("No code results found.");
+                        return Ok(());
+                    }
 
-            println!("\nCode search results for: {}\n", query);
-            for (i, result) in results.iter().enumerate() {
-                println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
-                
-                // Print code context if available
-                if let Some(context) = &result.code_context {
-                    println!("   {}:", "Code Context".green());
-                    println!("   {}", context.replace("\n", "\n   "));
+                    println!("\nCode search results for: {}\n", query);
+                    for (i, result) in results.iter().enumerate() {
+                        println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
+                        
+                        // Print code context if available
+                        if let Some(context) = &result.code_context {
+                            println!("   {}:", "Code Context".green());
+                            println!("   {}", context.replace("\n", "\n   "));
+                        }
+                        
+                        println!("   {}:", "Snippet".green());
+                        println!("   {}", result.snippet.replace("\n", "\n   "));
+                        println!();
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error creating embedding model: {}", e);
+                    return Ok(());
                 }
-                
-                println!("   {}:", "Snippet".green());
-                println!("   {}", result.snippet.replace("\n", "\n   "));
-                println!();
             }
         }
         Command::Model { use_basic, use_onnx, onnx_model, onnx_tokenizer } => {
@@ -338,7 +357,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 );
                 
                 // Set the model type to ONNX
-                match db.set_embedding_model_type(EmbeddingModelType::ONNX) {
+                match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                     Ok(_) => {
                         println!("Set embedding model to ONNX:");
                         println!("  - Model: {}", model_path);
@@ -349,11 +368,11 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     }
                 }
             } else {
-                // Just display the current model type
+                // Print embedding statistics
                 let model_type = db.embedding_model_type();
                 println!("Current embedding model: {:?}", model_type);
                 
-                if *model_type == EmbeddingModelType::ONNX {
+                if *model_type == EmbeddingModelType::Onnx {
                     println!("ONNX model paths:");
                     println!("  - Model: {}", db.onnx_model_path().map_or_else(
                         || "Not set".to_string(), 
@@ -475,7 +494,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             println!("Cached files: {}", stats.cached_files);
             
             // Display ONNX paths if using ONNX model
-            if stats.embedding_model_type == EmbeddingModelType::ONNX {
+            if stats.embedding_model_type == EmbeddingModelType::Onnx {
                 println!("ONNX model paths:");
                 println!("  - Model: {}", db.onnx_model_path().map_or_else(
                     || "Not set".to_string(), 
@@ -511,6 +530,22 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             db.clear()?;
             println!("Database cleared!");
         }
+        Command::Phase2Demo => {
+            #[cfg(feature = "onnx")]
+            {
+                println!("ONNX Phase 2 Demo would run here if implemented.");
+                println!("This is a placeholder for the ONNX optimization demo.");
+                return Ok(());
+            }
+            
+            #[cfg(not(feature = "onnx"))]
+            {
+                println!("Error: ONNX feature is not enabled.");
+                println!("Please rebuild with:");
+                println!("  cargo build --features onnx");
+                return Ok(());
+            }
+        }
     }
     Ok(())
 }
@@ -519,18 +554,34 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
 fn create_embedding_model(db: &VectorDB) -> Result<EmbeddingModel> {
     match db.embedding_model_type() {
         EmbeddingModelType::Basic => {
-            EmbeddingModel::new()
-                .map_err(|e| anyhow::Error::msg(format!("Failed to create basic embedding model: {}", e)))
+            Ok(EmbeddingModel::new())
         },
-        EmbeddingModelType::ONNX => {
+        EmbeddingModelType::Onnx => {
             if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
-                EmbeddingModel::new_with_onnx(model_path, tokenizer_path)
+                EmbeddingModel::new_onnx(model_path, tokenizer_path)
                     .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
             } else {
                 // Fallback to basic model if ONNX paths aren't set properly
                 eprintln!("Warning: ONNX model paths not set correctly, falling back to basic embedding model");
-                EmbeddingModel::new()
-                    .map_err(|e| anyhow::Error::msg(format!("Failed to create basic embedding model: {}", e)))
+                Ok(EmbeddingModel::new())
+            }
+        }
+    }
+}
+
+fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow::Result<EmbeddingModel> {
+    match model_type {
+        EmbeddingModelType::Basic => {
+            Ok(EmbeddingModel::new())
+        },
+        EmbeddingModelType::Onnx => {
+            if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
+                EmbeddingModel::new_onnx(model_path, tokenizer_path)
+                    .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
+            } else {
+                // Fallback to basic model
+                println!("Warning: ONNX paths not set, falling back to basic model");
+                Ok(EmbeddingModel::new())
             }
         }
     }
@@ -601,7 +652,7 @@ mod tests {
         db_hnsw.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
         
         // Create embedding model for HNSW search
-        let model_hnsw = EmbeddingModel::new()?;
+        let model_hnsw = EmbeddingModel::new();
         let search_hnsw = Search::new(db_hnsw, model_hnsw);
         
         // For comparison, create a database with a deliberately slowed down search
@@ -617,7 +668,7 @@ mod tests {
         let mut db_clone = db_slow.clone();
         
         // Create separate embedding model
-        let model_slow = EmbeddingModel::new()?;
+        let model_slow = EmbeddingModel::new();
         let _search_slow = Search::new(db_slow, model_slow);
         
         // Measure search time with standard HNSW
@@ -627,7 +678,7 @@ mod tests {
         
         // For comparison only, use manual vector search
         let query = "function";
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let query_embedding = model.embed(query)?;
         
         // Measure time for manual search (will be slower)

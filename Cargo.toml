@@ -1,9 +1,13 @@
 [package]
 name = "vectordb-cli"
+description = "A CLI tool for semantic code search."
 version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-description = "A lightweight CLI tool for semantic file search using vector embeddings"
+
+[features]
+default = ["onnx"]
+onnx = []
 
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }
@@ -35,10 +39,12 @@ quote = "1.0"
 ctrlc = "3.2"
 # ONNX Runtime dependencies
 ort = "1.16.0"
+lru = "0.11.0"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 tempfile = "3.10"
 
 [[bin]]
-name = "model_inspector"
-path = "model_inspector.rs"
+name = "vectordb-cli"
+path = "src/main.rs"

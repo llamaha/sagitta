@@ -2107,7 +2107,7 @@ mod tests {
         // Make sure we have an HNSW index
         assert!(db.hnsw_index.is_some(), "HNSW index should be created by default");
         
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Search for Rust
@@ -2178,7 +2178,7 @@ fn process_data(data: &str) {
         
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let mut search = Search::new(db, model);
         
         let snippet = search.get_snippet(
@@ -2225,7 +2225,7 @@ fn main() {
         // Index the test file
         db.index_file(&test_file)?;
         
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let mut search = Search::new(db, model);
         
         // Set code context directly for the test
@@ -2257,7 +2257,7 @@ fn main() {
         fs::write(&test_file, "This is a test document about Rust programming language")?;
         db.index_file(&test_file)?;
         
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Test BM25 with various queries
@@ -2296,7 +2296,7 @@ fn main() {
         fs::write(&test_file3, "Rust and Python are both popular programming languages")?;
         db.index_file(&test_file3)?;
         
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let mut search = Search::new(db, model);
         
         // Test hybrid search for "Rust programming"
@@ -2399,7 +2399,7 @@ require_relative 'helper'
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Test different query types
@@ -2435,7 +2435,7 @@ require_relative 'helper'
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Create test results with different scores
@@ -2554,7 +2554,7 @@ require_relative 'helper'
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Create test results with different snippets
@@ -2608,7 +2608,7 @@ require_relative 'helper'
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
+        let model = EmbeddingModel::new();
         let search = Search::new(db, model);
         
         // Create similar snippets

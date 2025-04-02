@@ -190,7 +190,7 @@ impl VectorDB {
         // Check if we're changing model type
         if self.embedding_model_type != model_type {
             // If switching to ONNX, verify paths are set
-            if model_type == EmbeddingModelType::ONNX {
+            if model_type == EmbeddingModelType::Onnx {
                 if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
                     return Err(VectorDBError::EmbeddingError(
                         "ONNX model and tokenizer paths must be set before using ONNX embeddings".into()
@@ -239,18 +239,16 @@ impl VectorDB {
     fn create_embedding_model(&self) -> Result<EmbeddingModel> {
         match &self.embedding_model_type {
             EmbeddingModelType::Basic => {
-                EmbeddingModel::new()
-                    .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
+                Ok(EmbeddingModel::new())
             },
-            EmbeddingModelType::ONNX => {
+            EmbeddingModelType::Onnx => {
                 if let (Some(model_path), Some(tokenizer_path)) = (&self.onnx_model_path, &self.onnx_tokenizer_path) {
-                    EmbeddingModel::new_with_onnx(model_path, tokenizer_path)
+                    EmbeddingModel::new_onnx(model_path, tokenizer_path)
                         .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
                 } else {
                     // Fallback to basic model if paths aren't set
                     eprintln!("Warning: ONNX model paths not set, falling back to basic embedding model");
-                    EmbeddingModel::new()
-                        .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
+                    Ok(EmbeddingModel::new())
                 }
             }
         }
@@ -468,18 +466,24 @@ impl VectorDB {
                     EMBEDDING_MODEL.with(|model_cell| {
                         let mut model_ref = model_cell.borrow_mut();
                         if model_ref.is_none() {
-                            // Create the appropriate model for this thread
+                            // Lazy initialization of embedding model based on model type
                             *model_ref = match embedding_model_type {
                                 EmbeddingModelType::Basic => {
-                                    EmbeddingModel::new().ok()
+                                    Some(EmbeddingModel::new())
                                 },
-                                EmbeddingModelType::ONNX => {
+                                EmbeddingModelType::Onnx => {
                                     if let (Some(model_path), Some(tokenizer_path)) = 
                                         (onnx_model_path.as_ref(), onnx_tokenizer_path.as_ref()) {
-                                        EmbeddingModel::new_with_onnx(model_path, tokenizer_path).ok()
+                                        match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
+                                            Ok(model) => Some(model),
+                                            Err(e) => {
+                                                eprintln!("Error creating ONNX model: {}", e);
+                                                Some(EmbeddingModel::new())
+                                            }
+                                        }
                                     } else {
                                         // Fallback to basic model if ONNX paths aren't available
-                                        EmbeddingModel::new().ok()
+                                        Some(EmbeddingModel::new())
                                     }
                                 }
                             };
@@ -621,7 +625,7 @@ impl VectorDB {
         } else {
             match &self.embedding_model_type {
                 EmbeddingModelType::Basic => EMBEDDING_DIM,
-                EmbeddingModelType::ONNX => ONNX_EMBEDDING_DIM,
+                EmbeddingModelType::Onnx => ONNX_EMBEDDING_DIM,
             }
         };
     
