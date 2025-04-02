@@ -1,71 +1,86 @@
 use anyhow::Result;
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::vectordb::provider::EmbeddingProvider;
-use crate::vectordb::tokenizer::CodeTokenizer;
 
-/// Dimension of the basic embedding vectors
+/// Dimension of the basic embeddings (position-weighted token hashes)
 pub const BASIC_EMBEDDING_DIM: usize = 384;
-const NGRAM_SIZE: usize = 3;
-const POSITION_WEIGHT: f32 = 0.3;
 
-/// Basic embedding provider using token-based approach
+/// Simple embedding provider using token hashes with position weighting
 pub struct BasicEmbeddingProvider {
-    /// The tokenizer for processing text
-    tokenizer: CodeTokenizer,
+    /// Cached trigram hashes for common tokens
+    trigram_cache: HashMap<String, u64>,
 }
 
 impl BasicEmbeddingProvider {
-    /// Creates a new basic embedding provider
-    pub fn new() -> Result<Self> {
-        let tokenizer = CodeTokenizer::new()?;
-        Ok(Self { tokenizer })
+    /// Create a new BasicEmbeddingProvider
+    pub fn new() -> Self {
+        Self {
+            trigram_cache: HashMap::new(),
+        }
     }
     
-    /// Generates n-grams from the text
-    fn generate_ngrams(text: &str) -> Vec<String> {
-        let mut ngrams = Vec::new();
+    /// Extract n-grams from a string
+    fn extract_ngrams(&self, text: &str, n: usize) -> Vec<String> {
         let chars: Vec<char> = text.chars().collect();
+        if chars.len() < n {
+            return vec![text.to_string()];
+        }
         
-        for i in 0..chars.len().saturating_sub(NGRAM_SIZE - 1) {
-            let ngram: String = chars[i..i + NGRAM_SIZE].iter().collect();
+        let mut ngrams = Vec::with_capacity(chars.len() - n + 1);
+        for i in 0..=(chars.len() - n) {
+            let ngram: String = chars[i..(i + n)].iter().collect();
             ngrams.push(ngram);
         }
         
         ngrams
     }
     
-    /// Calculates position weight for tokens
-    fn calculate_position_weight(position: usize, total: usize) -> f32 {
-        let normalized_pos = position as f32 / total as f32;
-        1.0 + (POSITION_WEIGHT * (1.0 - normalized_pos))
+    /// Hash a string to a u64 value
+    fn hash_string(&mut self, s: &str) -> u64 {
+        if let Some(&hash) = self.trigram_cache.get(s) {
+            return hash;
+        }
+        
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        let hash = hasher.finish();
+        
+        // Cache the hash for future use
+        if s.len() == 3 {
+            self.trigram_cache.insert(s.to_string(), hash);
+        }
+        
+        hash
     }
 }
 
 impl EmbeddingProvider for BasicEmbeddingProvider {
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let tokens = self.tokenizer.tokenize(text)?;
+        let mut provider = self.clone();
+        
+        // Normalize the text
+        let text = text.to_lowercase();
+        
+        // Extract character trigrams
+        let trigrams = provider.extract_ngrams(&text, 3);
+        
+        // Initialize embedding vector
         let mut embedding = vec![0.0; BASIC_EMBEDDING_DIM];
         
-        // Process tokens with position weighting
-        let total_tokens = tokens.len();
-        for (pos, &token) in tokens.iter().enumerate() {
-            let weight = Self::calculate_position_weight(pos, total_tokens);
-            let idx = token as usize % BASIC_EMBEDDING_DIM;
-            embedding[idx] += weight;
-        }
-        
-        // Process character n-grams
-        let ngrams = Self::generate_ngrams(text);
-        for ngram in ngrams {
-            // Use a simple hash function for n-grams
-            let mut hash: u64 = 0;
-            for c in ngram.chars() {
-                hash = hash.wrapping_mul(31).wrapping_add(c as u64);
+        // Generate embedding based on trigram hashes with position weighting
+        for (i, trigram) in trigrams.iter().enumerate() {
+            let hash = provider.hash_string(trigram);
+            let position_weight = 1.0 - (i as f32 / trigrams.len() as f32) * 0.5; // Weight ranges from 0.5 to 1.0
+            
+            // Distribute the weighted hash across multiple dimensions
+            for j in 0..3 {
+                let index = ((hash >> (j * 16)) % BASIC_EMBEDDING_DIM as u64) as usize;
+                embedding[index] += position_weight;
             }
-            let idx = (hash as usize) % BASIC_EMBEDDING_DIM;
-            embedding[idx] += 0.5; // Lower weight for n-grams
         }
         
-        // Normalize the embedding
+        // Normalize the embedding to unit length
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
             for x in &mut embedding {
@@ -81,11 +96,19 @@ impl EmbeddingProvider for BasicEmbeddingProvider {
     }
     
     fn name(&self) -> &'static str {
-        "Basic"
+        "Basic-Trigram"
     }
     
     fn description(&self) -> &'static str {
-        "Token-based embedding with n-gram features and position weighting"
+        "Basic embedding using character trigrams with position weighting"
+    }
+}
+
+impl Clone for BasicEmbeddingProvider {
+    fn clone(&self) -> Self {
+        Self {
+            trigram_cache: self.trigram_cache.clone(),
+        }
     }
 }
 
@@ -96,24 +119,46 @@ mod tests {
     
     #[test]
     fn test_basic_provider() {
-        let provider = BasicEmbeddingProvider::new().unwrap();
+        let provider = BasicEmbeddingProvider::new();
         test_provider_basics(&provider);
     }
     
     #[test]
-    fn test_ngram_generation() {
-        let text = "hello";
-        let ngrams = BasicEmbeddingProvider::generate_ngrams(text);
-        assert!(!ngrams.is_empty());
-        assert!(ngrams.contains(&"hel".to_string()));
-        assert!(ngrams.contains(&"ell".to_string()));
-        assert!(ngrams.contains(&"llo".to_string()));
+    fn test_deterministic_embeddings() {
+        let provider = BasicEmbeddingProvider::new();
+        let text = "fn main() { println!(\"Hello, world!\"); }";
+        
+        let embedding1 = provider.embed(text).unwrap();
+        let embedding2 = provider.embed(text).unwrap();
+        
+        // Embeddings for the same text should be identical
+        assert_eq!(embedding1, embedding2);
     }
     
     #[test]
-    fn test_position_weighting() {
-        let weight_start = BasicEmbeddingProvider::calculate_position_weight(0, 10);
-        let weight_end = BasicEmbeddingProvider::calculate_position_weight(9, 10);
-        assert!(weight_start > weight_end);
+    fn test_similar_texts() {
+        let provider = BasicEmbeddingProvider::new();
+        let text1 = "fn calculate_sum(a: i32, b: i32) -> i32 { a + b }";
+        let text2 = "fn calculate_sum(a: i32, b: i32) -> i32 { return a + b; }";
+        let text3 = "struct Point { x: i32, y: i32 }";
+        
+        let embedding1 = provider.embed(text1).unwrap();
+        let embedding2 = provider.embed(text2).unwrap();
+        let embedding3 = provider.embed(text3).unwrap();
+        
+        // Calculate cosine similarity
+        fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+            let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+            // Vectors should already be normalized to length 1, so dot product = cosine similarity
+            dot_product
+        }
+        
+        // Similar texts should have high similarity
+        let sim_1_2 = cosine_similarity(&embedding1, &embedding2);
+        // Different texts should have lower similarity
+        let sim_1_3 = cosine_similarity(&embedding1, &embedding3);
+        
+        assert!(sim_1_2 > 0.8, "Similar texts should have high similarity: {}", sim_1_2);
+        assert!(sim_1_3 < 0.8, "Different texts should have lower similarity: {}", sim_1_3);
     }
 } 
