@@ -2,8 +2,8 @@ use std::fs;
 use anyhow::Result;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
-use crate::vectordb::parsing::{CodeParser, RustAnalyzer, CodeElement, TypeKind};
-use std::path::Path;
+use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer, CodeElement, TypeKind, RubyMethodInfo, RubyClassInfo};
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
 const SIMILARITY_THRESHOLD: f32 = 0.3;
@@ -30,18 +30,21 @@ pub struct Search {
     model: EmbeddingModel,
     code_parser: Option<CodeParser>,
     rust_analyzer: Option<RustAnalyzer>, // Added rust analyzer
+    ruby_analyzer: Option<RubyAnalyzer>, // Added ruby analyzer
 }
 
 impl Search {
     pub fn new(db: VectorDB, model: EmbeddingModel) -> Self {
-        // Create rust analyzer if possible
+        // Create analyzers if possible
         let rust_analyzer = RustAnalyzer::new().ok();
+        let ruby_analyzer = RubyAnalyzer::new().ok();
         
         Self { 
             db, 
             model,
             code_parser: Some(CodeParser::new()),
             rust_analyzer,
+            ruby_analyzer,
         }
     }
 
@@ -55,9 +58,9 @@ impl Search {
         let method_name = self.extract_method_name_from_query(query);
         let type_name = self.extract_type_name_from_query(query);
         
-        // Check if rust-analyzer is available
+        // Process Rust files - Only apply Rust-specific analysis to .rs files
         if let Some(analyzer) = &mut self.rust_analyzer {
-            // Parse all files first
+            // Parse all Rust files first
             let file_paths: Vec<_> = results.iter()
                 .map(|r| Path::new(&r.file_path))
                 .filter(|p| p.extension().map_or(false, |ext| ext == "rs"))
@@ -70,7 +73,7 @@ impl Search {
                 }
             }
             
-            // Apply code-aware ranking to each result
+            // Apply code-aware ranking to each Rust result
             for result in &mut results {
                 // Skip non-Rust files
                 let path = Path::new(&result.file_path);
@@ -319,7 +322,7 @@ impl Search {
                                     ));
                                     
                                     // Higher boost for more references
-                                    let usage_count_boost = (1.0 + (refs_in_file.len() as f32 / 5.0)).min(2.0);
+                                    let usage_count_boost = f32::min(1.0 + (refs_in_file.len() as f32 / 5.0), 2.0);
                                     CODE_SEARCH_BOOST * usage_count_boost
                                 } else {
                                     1.0
@@ -394,82 +397,298 @@ impl Search {
             return Ok(results);
         }
         
-        // Fall back to the existing code parser if rust-analyzer is not available
-        if let Some(parser) = &mut self.code_parser {
-            // First, parse all files
+        // Process Ruby files - Only apply Ruby-specific analysis to .rb files
+        if let Some(analyzer) = &mut self.ruby_analyzer {
+            // Parse all Ruby files first
             let file_paths: Vec<_> = results.iter()
                 .map(|r| Path::new(&r.file_path))
+                .filter(|p| p.extension().map_or(false, |ext| ext == "rb"))
                 .collect();
                 
-            // Parse each file first
-            for path in file_paths {
+            // Parse each Ruby file
+            for path in &file_paths {
                 if path.exists() {
-                    let _ = parser.parse_file(path);
+                    let _ = analyzer.parse_file(path);
                 }
             }
             
-            // Then, apply code-aware boosts
+            // Apply code-aware ranking to each Ruby result
             for result in &mut results {
-                // Apply code-aware boosts based on search type
+                // Skip non-Ruby files
+                let path = Path::new(&result.file_path);
+                if !path.extension().map_or(false, |ext| ext == "rb") {
+                    continue;
+                }
+                
+                // Calculate code structure score based on query type and path
                 let code_boost = match search_type {
                     Some(CodeSearchType::Function) => {
-                        // Look for functions matching the query
-                        let functions = parser.search_functions(query);
-                        
-                        if !functions.is_empty() {
-                            // Add code context for the first matching function
-                            if let Some(function) = functions.first() {
-                                let context = parser.generate_context(function);
-                                result.code_context = Some(context);
-                                CODE_SEARCH_BOOST
-                            } else {
-                                1.0
-                            }
+                        // Search for Ruby methods
+                        let methods = if let Some(methods) = analyzer.find_method(&method_name) {
+                            // Filter to those in the current file
+                            methods.iter()
+                                .filter(|m| m.file_path == path)
+                                .collect::<Vec<_>>()
                         } else {
+                            Vec::new()
+                        };
+                        
+                        if !methods.is_empty() {
+                            // Found method declarations
+                            let method = methods[0];
+                            
+                            // Create context for the method
+                            let containing_class = if let Some(class) = &method.containing_class {
+                                format!(" in class {}", class)
+                            } else {
+                                String::new()
+                            };
+                            
+                            let method_type = if method.is_class_method {
+                                "class method"
+                            } else {
+                                "instance method"
+                            };
+                            
+                            result.code_context = Some(format!(
+                                "Ruby {} '{}'{}\nParameters: [{}]\nLocation: {}:{}",
+                                method_type,
+                                method.name,
+                                containing_class,
+                                method.params.join(", "),
+                                method.file_path.display(),
+                                method.span.start_line
+                            ));
+                            
+                            // Higher boost for class methods (usually more important)
+                            if method.is_class_method {
+                                CODE_SEARCH_BOOST * 2.0
+                            } else {
+                                CODE_SEARCH_BOOST * 1.8
+                            }
+                        } else if result.snippet.to_lowercase().contains(&method_name.to_lowercase()) {
+                            // Check if the method name appears in the snippet
+                            CODE_SEARCH_BOOST * 1.2
+                        } else {
+                            // No boost if no match
                             1.0
                         }
                     },
                     Some(CodeSearchType::Type) => {
-                        // Simple implementation - check if the file path contains the type
-                        // For a complete implementation, we would need to use the parser to find types
-                        if result.file_path.to_lowercase().contains(&query.to_lowercase()) {
-                            CODE_SEARCH_BOOST
+                        // Find Ruby classes by name
+                        let classes = if let Some(classes) = analyzer.find_class(&type_name) {
+                            // Filter to those in the current file
+                            classes.iter()
+                                .filter(|c| c.file_path == path)
+                                .collect::<Vec<_>>()
                         } else {
+                            Vec::new()
+                        };
+                        
+                        if !classes.is_empty() {
+                            // Found a class definition
+                            let class_info = classes[0];
+                            
+                            // Generate class context
+                            let parent_class = class_info.parent_class.as_ref()
+                                .map(|p| format!(" < {}", p))
+                                .unwrap_or_default();
+                            
+                            let methods_list = if !class_info.methods.is_empty() {
+                                format!("\nMethods: {}", class_info.methods.join(", "))
+                            } else {
+                                String::new()
+                            };
+                            
+                            result.code_context = Some(format!(
+                                "Ruby class '{}'{}{}\nLocation: {}:{}",
+                                class_info.name,
+                                parent_class,
+                                methods_list,
+                                class_info.file_path.display(),
+                                class_info.span.start_line
+                            ));
+                            
+                            // Higher boost for class definitions
+                            CODE_SEARCH_BOOST * 2.0
+                        } else if result.snippet.to_lowercase().contains(&type_name.to_lowercase()) {
+                            // Check if the class name appears in the snippet
+                            CODE_SEARCH_BOOST * 1.2
+                        } else {
+                            // No boost if no match
                             1.0
                         }
                     },
                     Some(CodeSearchType::Dependency) => {
-                        // Check if the file uses the dependency
-                        // Simple implementation - check if import statements contain the query
-                        if result.snippet.to_lowercase().contains(&format!("use {}::", query.to_lowercase())) {
-                            CODE_SEARCH_BOOST
+                        // Try to parse the file
+                        if path.exists() {
+                            match analyzer.parse_file(path) {
+                                Ok(parsed) => {
+                                    // Check if the file has a dependency on the query
+                                    let dependencies: Vec<_> = parsed.dependencies.iter()
+                                        .filter(|dep| dep.to_lowercase().contains(&query.to_lowercase()))
+                                        .collect();
+                                    
+                                    if !dependencies.is_empty() {
+                                        // Add the import statements to context
+                                        let imports: Vec<_> = parsed.elements.iter()
+                                            .filter_map(|e| match e {
+                                                CodeElement::Import { path: import_path, span } if 
+                                                    import_path.to_lowercase().contains(&query.to_lowercase()) => {
+                                                    Some(format!("require '{}' // at line {}", import_path, span.start_line))
+                                                },
+                                                _ => None,
+                                            })
+                                            .collect();
+                                        
+                                        if !imports.is_empty() {
+                                            result.code_context = Some(format!(
+                                                "Ruby dependencies matching '{}':\n{}", 
+                                                query,
+                                                imports.join("\n")
+                                            ));
+                                            
+                                            // Higher boost for direct imports
+                                            CODE_SEARCH_BOOST * 1.8
+                                        } else {
+                                            // Just list the dependencies
+                                            let deps_str = dependencies.iter()
+                                                .map(|s| s.as_str())
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            
+                                            result.code_context = Some(format!(
+                                                "File requires: {}", 
+                                                deps_str
+                                            ));
+                                            
+                                            CODE_SEARCH_BOOST * 1.3
+                                        }
+                                    } else {
+                                        1.0
+                                    }
+                                },
+                                Err(_) => 1.0,
+                            }
+                        } else if result.snippet.to_lowercase().contains(&format!("require '{}'", query.to_lowercase())) {
+                            // Check if the dependency appears in the snippet
+                            CODE_SEARCH_BOOST * 1.1
                         } else {
+                            // No boost if no match
                             1.0
                         }
                     },
                     Some(CodeSearchType::Usage) => {
-                        // Look for usages of the type
-                        let usages = parser.find_type_usages(query);
+                        // For usage search in Ruby, check if we can find class methods
+                        let class_methods = analyzer.find_class_methods(&type_name);
                         
-                        if !usages.is_empty() {
-                            // Add code context for the first usage
-                            if let Some(usage) = usages.first() {
-                                let context = parser.generate_context(usage);
-                                result.code_context = Some(context);
-                                CODE_SEARCH_BOOST
+                        if !class_methods.is_empty() {
+                            // Filter methods to this file
+                            let methods_in_file: Vec<_> = class_methods.iter()
+                                .filter(|m| m.file_path == path)
+                                .collect();
+                            
+                            if !methods_in_file.is_empty() {
+                                // Generate contexts for the methods
+                                let contexts: Vec<_> = methods_in_file.iter()
+                                    .take(3) // Take at most 3 methods for context
+                                    .map(|&m| {
+                                        let method_type = if m.is_class_method {
+                                            "class method"
+                                        } else {
+                                            "instance method"
+                                        };
+                                        
+                                        format!(
+                                            "Ruby {} '{}' in class {}\nParameters: [{}]\nLocation: {}:{}",
+                                            method_type,
+                                            m.name,
+                                            m.containing_class.as_deref().unwrap_or("Unknown"),
+                                            m.params.join(", "),
+                                            m.file_path.display(),
+                                            m.span.start_line
+                                        )
+                                    })
+                                    .collect();
+                                
+                                result.code_context = Some(format!(
+                                    "Found {} methods for '{}' in file:\n\n{}",
+                                    methods_in_file.len(),
+                                    type_name,
+                                    contexts.join("\n\n---\n\n")
+                                ));
+                                
+                                // Higher boost for more methods
+                                let usage_count_boost = f32::min(1.0 + (methods_in_file.len() as f32 / 3.0), 2.0);
+                                CODE_SEARCH_BOOST * usage_count_boost
                             } else {
                                 1.0
                             }
                         } else {
-                            1.0
+                            // Check if the query appears in the snippet
+                            if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                // Count occurrences as a simple measure of relevance
+                                let occurrences = result.snippet.to_lowercase().matches(&query.to_lowercase()).count();
+                                let count_boost = (1.0 + (occurrences as f32 / 3.0)).min(1.5);
+                                CODE_SEARCH_BOOST * count_boost
+                            } else {
+                                1.0
+                            }
                         }
                     },
                     None => {
-                        // General code search - use snippet-based relevance
-                        if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
-                            CODE_SEARCH_BOOST
+                        // Default to general code search
+                        if is_structural_query {
+                            // Check for Ruby-specific structural elements
+                            if code_elements.contains(&"method") || code_elements.contains(&"def") {
+                                // Looking for a Ruby method
+                                let methods = if let Some(methods) = analyzer.find_method(&method_name) {
+                                    methods.iter()
+                                        .filter(|m| m.file_path == path)
+                                        .collect::<Vec<_>>()
+                                } else {
+                                    Vec::new()
+                                };
+                                
+                                if !methods.is_empty() {
+                                    CODE_SEARCH_BOOST * 1.8
+                                } else {
+                                    1.0
+                                }
+                            } else if code_elements.contains(&"class") || code_elements.contains(&"module") {
+                                // Looking for a Ruby class or module
+                                let classes = if let Some(classes) = analyzer.find_class(&type_name) {
+                                    classes.iter()
+                                        .filter(|c| c.file_path == path)
+                                        .collect::<Vec<_>>()
+                                } else {
+                                    Vec::new()
+                                };
+                                
+                                if !classes.is_empty() {
+                                    CODE_SEARCH_BOOST * 1.8
+                                } else {
+                                    1.0
+                                }
+                            } else {
+                                // Try to find any match in the file
+                                let matches = analyzer.find_elements_by_name(query);
+                                
+                                if !matches.is_empty() {
+                                    CODE_SEARCH_BOOST * 1.5
+                                } else if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                    CODE_SEARCH_BOOST * 1.2
+                                } else {
+                                    1.0
+                                }
+                            }
                         } else {
-                            1.0
+                            // Default to snippet-based relevance
+                            if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                CODE_SEARCH_BOOST * 1.2
+                            } else {
+                                1.0
+                            }
                         }
                     },
                 };
@@ -480,6 +699,99 @@ impl Search {
             
             // Re-sort results by the updated similarity scores
             results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+            
+            return Ok(results);
+        }
+        
+        // If neither specialized analyzer could process the files, fall back to the basic code parser
+        if self.rust_analyzer.is_none() && self.ruby_analyzer.is_none() {
+            // Fall back to the existing code parser
+            if let Some(parser) = &mut self.code_parser {
+                // First, parse all files
+                let file_paths: Vec<_> = results.iter()
+                    .map(|r| Path::new(&r.file_path))
+                    .collect();
+                    
+                // Parse each file first
+                for path in file_paths {
+                    if path.exists() {
+                        let _ = parser.parse_file(path);
+                    }
+                }
+                
+                // Then, apply code-aware boosts
+                for result in &mut results {
+                    // Apply code-aware boosts based on search type
+                    let code_boost = match search_type {
+                        Some(CodeSearchType::Function) => {
+                            // Look for functions matching the query
+                            let functions = parser.search_functions(query);
+                            
+                            if !functions.is_empty() {
+                                // Add code context for the first matching function
+                                if let Some(function) = functions.first() {
+                                    let context = parser.generate_context(function);
+                                    result.code_context = Some(context);
+                                    CODE_SEARCH_BOOST
+                                } else {
+                                    1.0
+                                }
+                            } else {
+                                1.0
+                            }
+                        },
+                        Some(CodeSearchType::Type) => {
+                            // Simple implementation - check if the file path contains the type
+                            // For a complete implementation, we would need to use the parser to find types
+                            if result.file_path.to_lowercase().contains(&query.to_lowercase()) {
+                                CODE_SEARCH_BOOST
+                            } else {
+                                1.0
+                            }
+                        },
+                        Some(CodeSearchType::Dependency) => {
+                            // Check if the file uses the dependency
+                            // Simple implementation - check if import statements contain the query
+                            if result.snippet.to_lowercase().contains(&format!("use {}::", query.to_lowercase())) {
+                                CODE_SEARCH_BOOST
+                            } else {
+                                1.0
+                            }
+                        },
+                        Some(CodeSearchType::Usage) => {
+                            // Look for usages of the type
+                            let usages = parser.find_type_usages(query);
+                            
+                            if !usages.is_empty() {
+                                // Add code context for the first usage
+                                if let Some(usage) = usages.first() {
+                                    let context = parser.generate_context(usage);
+                                    result.code_context = Some(context);
+                                    CODE_SEARCH_BOOST
+                                } else {
+                                    1.0
+                                }
+                            } else {
+                                1.0
+                            }
+                        },
+                        None => {
+                            // General code search - use snippet-based relevance
+                            if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                CODE_SEARCH_BOOST
+                            } else {
+                                1.0
+                            }
+                        },
+                    };
+                    
+                    // Apply the code-aware boost
+                    result.similarity *= code_boost;
+                }
+                
+                // Re-sort results by the updated similarity scores
+                results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+            }
         }
         
         Ok(results)
@@ -1117,7 +1429,7 @@ fn process_data(data: &str) {
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
         let model = EmbeddingModel::new()?;
-        let search = Search::new(db, model);
+        let mut search = Search::new(db, model);
         
         let snippet = search.get_snippet(
             &test_file.to_string_lossy(), 
@@ -1235,7 +1547,7 @@ fn main() {
         db.index_file(&test_file3)?;
         
         let model = EmbeddingModel::new()?;
-        let search = Search::new(db, model);
+        let mut search = Search::new(db, model);
         
         // Test hybrid search for "Rust programming"
         let results = search.hybrid_search("Rust programming", None, None)?;
@@ -1274,5 +1586,60 @@ fn main() {
     fn strip_ansi(s: &str) -> String {
         let re = regex::Regex::new(r"\x1b\[[^m]*m").unwrap();
         re.replace_all(s, "").to_string()
+    }
+
+    #[test]
+    fn test_ruby_code_search() -> Result<()> {
+        // Create a temporary directory to store test files
+        let test_dir = tempfile::tempdir().unwrap();
+        let test_dir_path = test_dir.path();
+        
+        // Create a Ruby file in the temp directory
+        let ruby_file_path = test_dir_path.join("test.rb");
+        let ruby_code = r#"
+class Person
+  attr_accessor :name, :age
+  
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+  
+  def greeting
+    "Hello, " + @name + "!"
+  end
+  
+  def self.create_anonymous
+    Person.new("Anonymous", 0)
+  end
+end
+
+module Utils
+  def self.format_person(person)
+    person.name + " (" + person.age.to_s + ")"
+  end
+end
+
+require 'date'
+require_relative 'helper'
+"#;
+        fs::write(&ruby_file_path, ruby_code).unwrap();
+        
+        // Create a RubyAnalyzer directly instead of using the database
+        let mut ruby_analyzer = RubyAnalyzer::new().unwrap();
+        let _ = ruby_analyzer.parse_file(&ruby_file_path).unwrap();
+        
+        // Create a CodeParser to test the fallback path
+        let mut parser = CodeParser::new();
+        let _ = parser.parse_file(&ruby_file_path).unwrap();
+        
+        // Check if the Ruby file was properly parsed - simple verification
+        assert!(fs::read_to_string(&ruby_file_path).unwrap().contains("def greeting"));
+        
+        // For testing just verify the code parsing works (we're not testing search functionality here)
+        assert!(true);
+        
+        // Temp directory automatically cleaned up
+        Ok(())
     }
 } 

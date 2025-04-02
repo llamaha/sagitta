@@ -756,10 +756,10 @@ impl CodeParser {
         let mut methods = Vec::new();
         let mut cursor = node.walk();
         
-        fn find_methods<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, content: &str, methods: &mut Vec<String>) {
+        fn find_methods<'a>(cursor: &mut tree_sitter::TreeCursor<'a>, content: &[u8], methods: &mut Vec<String>) {
             if cursor.node().kind() == "method" {
                 if let Some(name_node) = cursor.node().child_by_field_name("name") {
-                    if let Ok(method_name) = name_node.utf8_text(content.as_bytes()) {
+                    if let Ok(method_name) = name_node.utf8_text(content) {
                         methods.push(method_name.to_string());
                     }
                 }
@@ -776,7 +776,7 @@ impl CodeParser {
             }
         }
         
-        find_methods(&mut cursor, content, &mut methods);
+        find_methods(&mut cursor, content.as_bytes(), &mut methods);
         
         methods
     }
@@ -1432,7 +1432,8 @@ impl RustAnalyzer {
                 // Add file location info
                 context.push_str(&format!("\n\nLocation: {}:{}",
                     span.file_path.display(),
-                    span.start_line));
+                    span.start_line + 1
+                ));
                 
                 context
             },
@@ -1458,7 +1459,8 @@ impl RustAnalyzer {
                 // Add file location info
                 context.push_str(&format!("\n\nLocation: {}:{}",
                     span.file_path.display(),
-                    span.start_line));
+                    span.start_line + 1
+                ));
                 
                 context
             },
@@ -1483,7 +1485,8 @@ impl RustAnalyzer {
                 // Add file location info
                 context.push_str(&format!("\n\nLocation: {}:{}",
                     span.file_path.display(),
-                    span.start_line));
+                    span.start_line + 1
+                ));
                 
                 context
             },
@@ -1491,6 +1494,749 @@ impl RustAnalyzer {
                 // Default formatting for other element types
                 format!("{:?}", element)
             }
+        }
+    }
+}
+
+/// Advanced Ruby code analyzer using tree-sitter
+pub struct RubyAnalyzer {
+    parsed_files: HashMap<PathBuf, ParsedFile>,
+    /// Method map to quickly find methods by name
+    method_map: HashMap<String, Vec<RubyMethodInfo>>,
+    /// Class map to quickly find classes by name
+    class_map: HashMap<String, Vec<RubyClassInfo>>,
+    /// Parser for Ruby code
+    parser: Parser,
+    /// Queries for extracting Ruby code elements
+    method_query: Query,
+    class_query: Query,
+    module_query: Query,
+}
+
+/// Detailed information about a Ruby method
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RubyMethodInfo {
+    pub name: String,
+    pub params: Vec<String>,
+    pub return_type: Option<String>, // Added for compatibility with search.rs
+    pub containing_class: Option<String>,
+    pub containing_module: Option<String>,
+    pub is_class_method: bool,
+    pub span: CodeSpan,
+    pub file_path: PathBuf,
+}
+
+/// Detailed information about a Ruby class
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RubyClassInfo {
+    pub name: String,
+    pub methods: Vec<String>,
+    pub parent_class: Option<String>,
+    pub included_modules: Vec<String>,
+    pub span: CodeSpan,
+    pub file_path: PathBuf,
+}
+
+/// Kind of Ruby method
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RubyMethodKind {
+    Instance,
+    Class,
+    Module,
+}
+
+/// Visitor for analyzing Ruby code using tree-sitter
+struct RubyVisitor<'a> {
+    parser: &'a RubyAnalyzer,
+    file_path: PathBuf,
+    content: &'a str,
+    elements: &'a mut Vec<CodeElement>,
+    methods: &'a mut Vec<RubyMethodInfo>,
+    classes: &'a mut Vec<RubyClassInfo>,
+    dependencies: &'a mut HashSet<String>,
+}
+
+impl<'a> RubyVisitor<'a> {
+    fn visit_node(&mut self, node: Node) {
+        match node.kind() {
+            "program" => {
+                // Visit children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            },
+            "method" => {
+                self.process_method(node);
+            },
+            "class" => {
+                self.process_class(node);
+            },
+            "module" => {
+                self.process_module(node);
+            },
+            "call" => {
+                self.process_require(node);
+            },
+            _ => {
+                // Visit children for other node types
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node(child);
+                }
+            }
+        }
+    }
+    
+    fn process_method(&mut self, node: Node) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(method_name) = name_node.utf8_text(self.content.as_bytes()) {
+                // Extract method body
+                let body = self.content[node.byte_range()].to_string();
+                
+                // Determine if this is a class method
+                let is_class_method = self.is_class_method(node);
+                
+                // Extract parameters
+                let params = self.extract_method_params(node);
+                
+                // Create code span
+                let span = self.create_span(node);
+                
+                // Find containing class and module
+                let (containing_class, containing_module) = self.find_containing_scope(node);
+                
+                // Add method to elements
+                self.elements.push(CodeElement::Function {
+                    name: method_name.to_string(),
+                    params: params.clone(),
+                    return_type: None, // Ruby doesn't have explicit return types
+                    body,
+                    span: span.clone(),
+                });
+                
+                // Add to method info
+                self.methods.push(RubyMethodInfo {
+                    name: method_name.to_string(),
+                    params,
+                    return_type: None, // Ruby doesn't have explicit return types
+                    containing_class,
+                    containing_module,
+                    is_class_method,
+                    span,
+                    file_path: self.file_path.clone(),
+                });
+            }
+        }
+        
+        // Visit children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+    
+    fn process_class(&mut self, node: Node) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(class_name) = name_node.utf8_text(self.content.as_bytes()) {
+                // Extract parent class if any
+                let parent_class = self.extract_parent_class(node);
+                
+                // Extract methods
+                let methods = self.extract_class_methods(node);
+                
+                // Extract included modules
+                let included_modules = self.extract_included_modules(node);
+                
+                // Create code span
+                let span = self.create_span(node);
+                
+                // Add class to elements
+                self.elements.push(CodeElement::Struct {
+                    name: class_name.to_string(),
+                    fields: Vec::new(), // Ruby classes don't have explicit fields like Rust structs
+                    methods: methods.clone(),
+                    span: span.clone(),
+                });
+                
+                // Add to class info
+                self.classes.push(RubyClassInfo {
+                    name: class_name.to_string(),
+                    methods,
+                    parent_class,
+                    included_modules,
+                    span,
+                    file_path: self.file_path.clone(),
+                });
+            }
+        }
+        
+        // Visit children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+    
+    fn process_module(&mut self, node: Node) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(module_name) = name_node.utf8_text(self.content.as_bytes()) {
+                // Extract methods in the module
+                let methods = self.extract_class_methods(node);
+                
+                // Create code span
+                let span = self.create_span(node);
+                
+                // Add module to elements (as a Struct, since we don't have a Module type)
+                self.elements.push(CodeElement::Struct {
+                    name: module_name.to_string(),
+                    fields: Vec::new(),
+                    methods: methods.clone(),
+                    span: span.clone(),
+                });
+                
+                // Also add it to class info (with a special marker)
+                self.classes.push(RubyClassInfo {
+                    name: module_name.to_string(),
+                    methods,
+                    parent_class: None,
+                    included_modules: Vec::new(),
+                    span,
+                    file_path: self.file_path.clone(),
+                });
+            }
+        }
+        
+        // Visit children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+    
+    fn process_require(&mut self, node: Node) {
+        // Check if this is a require statement
+        if let Some(method_node) = node.child_by_field_name("method") {
+            if let Ok(method_name) = method_node.utf8_text(self.content.as_bytes()) {
+                if method_name == "require" || method_name == "require_relative" {
+                    // Extract the dependency from the arguments
+                    if let Some(args_node) = node.child_by_field_name("arguments") {
+                        if let Some(arg_node) = args_node.named_child(0) {
+                            if arg_node.kind() == "string" || arg_node.kind() == "string_content" {
+                                if let Ok(dependency) = arg_node.utf8_text(self.content.as_bytes()) {
+                                    // Clean up the dependency string
+                                    let dependency = dependency.trim_matches('"').trim_matches('\'').to_string();
+                                    self.dependencies.insert(dependency.clone());
+                                    
+                                    // Create code span
+                                    let span = self.create_span(node);
+                                    
+                                    // Add import to elements
+                                    self.elements.push(CodeElement::Import {
+                                        path: dependency,
+                                        span,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fn is_class_method(&self, node: Node) -> bool {
+        // Check if this method is defined with self.
+        // For Ruby, we need to check the parent node to see if it's within a singleton class
+        // Or if the method starts with self.
+        
+        // First, check method name for `self.` prefix
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(method_name) = name_node.utf8_text(self.content.as_bytes()) {
+                if method_name.starts_with("self.") {
+                    return true;
+                }
+            }
+        }
+        
+        // Then, check if we're in a singleton class definition
+        let mut current = node;
+        while let Some(parent) = current.parent() {
+            if parent.kind() == "singleton_class" {
+                return true;
+            }
+            current = parent;
+        }
+        
+        false
+    }
+    
+    fn extract_method_params(&self, node: Node) -> Vec<String> {
+        let mut params = Vec::new();
+        
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            
+            for child in params_node.children(&mut cursor) {
+                if child.kind() == "identifier" {
+                    if let Ok(param_name) = child.utf8_text(self.content.as_bytes()) {
+                        params.push(param_name.to_string());
+                    }
+                }
+            }
+        }
+        
+        params
+    }
+    
+    fn extract_class_methods(&self, node: Node) -> Vec<String> {
+        let mut methods = Vec::new();
+        
+        fn find_methods<'a>(node: Node<'a>, content: &[u8], methods: &mut Vec<String>) {
+            if node.kind() == "method" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    if let Ok(method_name) = name_node.utf8_text(content) {
+                        methods.push(method_name.to_string());
+                    }
+                }
+            }
+            
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                find_methods(child, content, methods);
+            }
+        }
+        
+        find_methods(node, self.content.as_bytes(), &mut methods);
+        
+        methods
+    }
+    
+    fn extract_parent_class(&self, node: Node) -> Option<String> {
+        // In Ruby, parent class is specified with < Superclass
+        if let Some(superclass_node) = node.child_by_field_name("superclass") {
+            if let Ok(parent_name) = superclass_node.utf8_text(self.content.as_bytes()) {
+                return Some(parent_name.to_string());
+            }
+        }
+        
+        None
+    }
+    
+    fn extract_included_modules(&self, node: Node) -> Vec<String> {
+        let mut modules = Vec::new();
+        
+        // Look for include statements within the class
+        let mut cursor = node.walk();
+        fn find_includes<'a>(node: Node<'a>, content: &[u8], modules: &mut Vec<String>) {
+            if node.kind() == "call" {
+                if let Some(method_node) = node.child_by_field_name("method") {
+                    if let Ok(method_name) = method_node.utf8_text(content) {
+                        if method_name == "include" {
+                            if let Some(args_node) = node.child_by_field_name("arguments") {
+                                if let Some(arg_node) = args_node.named_child(0) {
+                                    if arg_node.kind() == "constant" {
+                                        if let Ok(module_name) = arg_node.utf8_text(content) {
+                                            modules.push(module_name.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                find_includes(child, content, modules);
+            }
+        }
+        
+        find_includes(node, self.content.as_bytes(), &mut modules);
+        
+        modules
+    }
+    
+    fn find_containing_scope(&self, node: Node) -> (Option<String>, Option<String>) {
+        let mut containing_class = None;
+        let mut containing_module = None;
+        
+        let mut current = node;
+        while let Some(parent) = current.parent() {
+            if parent.kind() == "class" {
+                if let Some(name_node) = parent.child_by_field_name("name") {
+                    if let Ok(class_name) = name_node.utf8_text(self.content.as_bytes()) {
+                        containing_class = Some(class_name.to_string());
+                        break;
+                    }
+                }
+            } else if parent.kind() == "module" {
+                if let Some(name_node) = parent.child_by_field_name("name") {
+                    if let Ok(module_name) = name_node.utf8_text(self.content.as_bytes()) {
+                        containing_module = Some(module_name.to_string());
+                        if containing_class.is_none() {
+                            // Keep going to find a containing class, but remember the module
+                            current = parent;
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+            current = parent;
+        }
+        
+        (containing_class, containing_module)
+    }
+    
+    fn create_span(&self, node: Node) -> CodeSpan {
+        let start_point = node.start_position();
+        let end_point = node.end_position();
+        
+        CodeSpan {
+            file_path: self.file_path.clone(),
+            start_line: start_point.row,
+            start_column: start_point.column,
+            end_line: end_point.row,
+            end_column: end_point.column,
+        }
+    }
+}
+
+impl RubyAnalyzer {
+    /// Create a new RubyAnalyzer instance
+    pub fn new() -> Result<Self, VectorDBError> {
+        // Initialize the Tree-sitter parser
+        let mut parser = Parser::new();
+        
+        // Load Ruby grammar
+        let ruby_lang = ruby_language();
+        parser.set_language(ruby_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set Ruby language".to_string()))?;
+        
+        // Queries for Ruby code elements
+        let method_query = Query::new(ruby_lang,
+            "(method name: (identifier) @method.name) @method.def").expect("Invalid Ruby method query");
+            
+        let class_query = Query::new(ruby_lang,
+            "(class name: (constant) @class.name) @class.def").expect("Invalid Ruby class query");
+            
+        let module_query = Query::new(ruby_lang,
+            "(module name: (constant) @module.name) @module.def").expect("Invalid Ruby module query");
+
+        Ok(Self {
+            parsed_files: HashMap::new(),
+            method_map: HashMap::new(),
+            class_map: HashMap::new(),
+            parser,
+            method_query,
+            class_query,
+            module_query,
+        })
+    }
+
+    /// Load and parse all Ruby files in a project directory
+    pub fn load_project(&mut self, project_dir: &Path) -> Result<(), VectorDBError> {
+        if !project_dir.exists() || !project_dir.is_dir() {
+            return Err(VectorDBError::DirectoryNotFound(project_dir.to_string_lossy().to_string()));
+        }
+        
+        // Use walkdir to recursively find all .rb files
+        let walker = walkdir::WalkDir::new(project_dir)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_type().is_file() && 
+                e.path().extension().map_or(false, |ext| ext == "rb")
+            });
+            
+        // Parse each Ruby file
+        for entry in walker {
+            let _ = self.parse_file(entry.path());
+        }
+        
+        // Build relationships between methods and classes
+        self.link_methods_to_classes();
+        
+        Ok(())
+    }
+
+    /// Parse a Ruby file and update internal maps
+    pub fn parse_file(&mut self, file_path: &Path) -> Result<ParsedFile, VectorDBError> {
+        // Check if we've already parsed this file
+        if let Some(parsed_file) = self.parsed_files.get(file_path) {
+            return Ok(parsed_file.clone());
+        }
+        
+        // Parse the file using tree-sitter
+        let parsed_file = self.parse_ruby_file(file_path)?;
+        
+        // Update the method and class maps
+        self.update_maps(file_path, &parsed_file);
+        
+        // Store the parsed file
+        self.parsed_files.insert(file_path.to_path_buf(), parsed_file.clone());
+        
+        Ok(parsed_file)
+    }
+    
+    /// Parse Ruby file implementation with enhanced method recognition
+    fn parse_ruby_file(&mut self, file_path: &Path) -> Result<ParsedFile, VectorDBError> {
+        if !file_path.exists() {
+            return Err(VectorDBError::FileNotFound(file_path.to_string_lossy().to_string()));
+        }
+        
+        let content = fs::read_to_string(file_path)
+            .map_err(|e| VectorDBError::FileReadError { 
+                path: file_path.to_path_buf(), 
+                source: e 
+            })?;
+        
+        // Parse using tree-sitter
+        let tree = self.parser.parse(&content, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse Ruby file".to_string()))?;
+        
+        let mut elements = Vec::new();
+        let mut methods = Vec::new();
+        let mut classes = Vec::new();
+        let mut dependencies = HashSet::new();
+        
+        // Create a visitor to extract code elements
+        let mut visitor = RubyVisitor {
+            parser: self,
+            file_path: file_path.to_path_buf(),
+            content: &content,
+            elements: &mut elements,
+            methods: &mut methods,
+            classes: &mut classes,
+            dependencies: &mut dependencies,
+        };
+        
+        // Visit the AST nodes
+        visitor.visit_node(tree.root_node());
+        
+        // Create the parsed file
+        let parsed_file = ParsedFile {
+            file_path: file_path.to_path_buf(),
+            elements,
+            dependencies,
+            language: "ruby".to_string(),
+        };
+        
+        Ok(parsed_file)
+    }
+
+    /// Find code elements by name with fuzzy matching
+    pub fn find_elements_by_name(&self, name: &str) -> Vec<&CodeElement> {
+        let name_lower = name.to_lowercase();
+        let mut results = Vec::new();
+        
+        // Check all parsed files
+        for parsed_file in self.parsed_files.values() {
+            for element in &parsed_file.elements {
+                match element {
+                    CodeElement::Function { name: element_name, .. } |
+                    CodeElement::Struct { name: element_name, .. } => {
+                        if element_name.to_lowercase().contains(&name_lower) {
+                            results.push(element);
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        results
+    }
+
+    /// Find a method by name
+    pub fn find_method(&self, name: &str) -> Option<&Vec<RubyMethodInfo>> {
+        self.method_map.get(name)
+    }
+
+    /// Find a class by name
+    pub fn find_class(&self, name: &str) -> Option<&Vec<RubyClassInfo>> {
+        self.class_map.get(name)
+    }
+
+    /// Find methods of a specific class
+    pub fn find_class_methods(&self, class_name: &str) -> Vec<&RubyMethodInfo> {
+        if let Some(classes) = self.class_map.get(class_name) {
+            let mut methods = Vec::new();
+            for class_info in classes {
+                for method_name in &class_info.methods {
+                    if let Some(method_infos) = self.method_map.get(method_name) {
+                        for method in method_infos {
+                            if method.containing_class.as_deref() == Some(class_name) {
+                                methods.push(method);
+                            }
+                        }
+                    }
+                }
+            }
+            methods
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Build relationships between methods and their containing classes
+    fn link_methods_to_classes(&mut self) {
+        // Create a copy of method names to avoid borrow checker issues
+        let method_names: Vec<String> = self.method_map.keys().cloned().collect();
+        
+        for method_name in method_names {
+            if let Some(method_infos) = self.method_map.get_mut(&method_name) {
+                for method_info in method_infos.iter_mut() {
+                    // Skip if already linked
+                    if method_info.containing_class.is_some() {
+                        continue;
+                    }
+                    
+                    // Look for classes that contain this method
+                    for (class_name, class_infos) in &self.class_map {
+                        for class_info in class_infos {
+                            if class_info.methods.contains(&method_name) && 
+                               class_info.span.file_path == method_info.span.file_path {
+                                method_info.containing_class = Some(class_name.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Update the internal maps after parsing a file
+    fn update_maps(&mut self, file_path: &Path, parsed_file: &ParsedFile) {
+        let mut methods = Vec::new();
+        let mut classes = Vec::new();
+        
+        // Extract methods and classes from the parsed file
+        for element in &parsed_file.elements {
+            match element {
+                CodeElement::Function { name, params, span, .. } => {
+                    let method_info = RubyMethodInfo {
+                        name: name.clone(),
+                        params: params.clone(),
+                        return_type: None, // Ruby doesn't have explicit return types
+                        containing_class: None,
+                        containing_module: None,
+                        is_class_method: false, // Default to instance method
+                        span: span.clone(),
+                        file_path: file_path.to_path_buf(),
+                    };
+                    
+                    methods.push(method_info);
+                },
+                CodeElement::Struct { name, methods: method_names, span, .. } => {
+                    // In our model, Ruby classes are represented as Structs
+                    let class_info = RubyClassInfo {
+                        name: name.clone(),
+                        methods: method_names.clone(),
+                        parent_class: None,
+                        included_modules: Vec::new(),
+                        span: span.clone(),
+                        file_path: file_path.to_path_buf(),
+                    };
+                    
+                    classes.push(class_info);
+                },
+                _ => {}
+            }
+        }
+        
+        // Update the method map
+        for method_info in methods {
+            self.method_map.entry(method_info.name.clone())
+                .or_insert_with(Vec::new)
+                .push(method_info);
+        }
+        
+        // Update the class map
+        for class_info in classes {
+            self.class_map.entry(class_info.name.clone())
+                .or_insert_with(Vec::new)
+                .push(class_info);
+        }
+    }
+
+    /// Extract rich context for a Ruby element
+    pub fn extract_rich_context(&self, element: &CodeElement) -> String {
+        match element {
+            CodeElement::Function { name, params, body, span, .. } => {
+                let mut context = String::new();
+                
+                // Check if this is a class method
+                let is_class_method = if let Some(method_infos) = self.method_map.get(name) {
+                    method_infos.iter()
+                        .any(|m| m.span.file_path == span.file_path && m.is_class_method)
+                } else {
+                    false
+                };
+                
+                // Add method definition with appropriate prefix
+                if is_class_method {
+                    context.push_str(&format!("def self.{}(", name));
+                } else {
+                    context.push_str(&format!("def {}(", name));
+                }
+                
+                context.push_str(&params.join(", "));
+                context.push_str(")\n");
+                
+                // Add method body (simplified)
+                context.push_str("  # Method body\n");
+                context.push_str("end\n");
+                
+                // Try to add class context if available
+                if let Some(method_infos) = self.method_map.get(name) {
+                    for method_info in method_infos {
+                        if method_info.span.file_path == span.file_path {
+                            if let Some(class_name) = &method_info.containing_class {
+                                context = format!("# In class {}\n{}", class_name, context);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                context
+            },
+            CodeElement::Struct { name, methods, span, .. } => {
+                // For Ruby, Struct elements represent classes
+                let mut context = String::new();
+                
+                // Add class definition
+                context.push_str(&format!("class {}\n", name));
+                
+                // Add parent class if available
+                if let Some(class_infos) = self.class_map.get(name) {
+                    for class_info in class_infos {
+                        if class_info.span.file_path == span.file_path {
+                            if let Some(parent) = &class_info.parent_class {
+                                context = format!("class {} < {}\n", name, parent);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // List methods
+                if !methods.is_empty() {
+                    context.push_str("  # Methods:\n");
+                    for method in methods {
+                        context.push_str(&format!("  # - {}\n", method));
+                    }
+                }
+                
+                context.push_str("end\n");
+                context
+            },
+            _ => format!("{:?}", element),
         }
     }
 }
@@ -1609,6 +2355,59 @@ impl Person {{
         
         // Just check that we can parse the file without errors
         assert!(true);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_ruby_analyzer() -> Result<(), VectorDBError> {
+        // Create a temporary Ruby file
+        let test_dir = PathBuf::from("test_files");
+        fs::create_dir_all(&test_dir).unwrap();
+        
+        let ruby_file_path = test_dir.join("test.rb");
+        let ruby_code = r#"
+class Person
+  attr_accessor :name, :age
+  
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+  
+  def greeting
+    "Hello, " + @name + "!"
+  end
+  
+  def self.create_anonymous
+    Person.new("Anonymous", 0)
+  end
+end
+
+module Utils
+  def self.format_person(person)
+    person.name + " (" + person.age.to_s + ")"
+  end
+end
+
+require 'date'
+require_relative 'helper'
+"#;
+        fs::write(&ruby_file_path, ruby_code).unwrap();
+        
+        // Create and test the RubyAnalyzer
+        let mut analyzer = RubyAnalyzer::new()?;
+        let parsed_file = analyzer.parse_file(&ruby_file_path)?;
+        
+        // Verify parsed elements
+        assert_eq!(parsed_file.language, "ruby");
+        
+        // Verify dependencies
+        assert!(parsed_file.dependencies.contains("date"));
+        assert!(parsed_file.dependencies.contains("helper"));
+        
+        // Clean up
+        fs::remove_dir_all(test_dir).unwrap();
         
         Ok(())
     }
