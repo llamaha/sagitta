@@ -56,6 +56,10 @@ pub enum Command {
         /// Weight for BM25 lexical search (default: 0.3)
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
+        
+        /// File types to search (e.g. rs,py,txt)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',')]
+        file_types: Option<Vec<String>>,
     },
 
     /// Code-aware search for functions, types, etc.
@@ -115,6 +119,10 @@ pub enum Command {
         /// Weight for BM25 lexical search (default: 0.3)
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
+        
+        /// File types to search (e.g. rs,py,txt)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',')]
+        file_types: Option<Vec<String>>,
     },
 }
 
@@ -168,12 +176,12 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::Query { query, vector_only, vector_weight, bm25_weight } => {
+        Command::Query { query, vector_only, vector_weight, bm25_weight, file_types } => {
             let model = EmbeddingModel::new()?;
             let search = Search::new(db, model);
             
             // Determine search type based on flags
-            let results = if vector_only {
+            let mut results = if vector_only {
                 println!("Performing vector-only search...");
                 search.search(&query)?
             } else {
@@ -186,6 +194,22 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 
                 search.hybrid_search(&query, vector_weight, bm25_weight)?
             };
+
+            // Filter results by file type if specified
+            if let Some(types) = file_types {
+                if !types.is_empty() {
+                    println!("Filtering results by file types: {}", types.join(", "));
+                    results.retain(|result| {
+                        let path = Path::new(&result.file_path);
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy().to_string();
+                            types.contains(&ext_str)
+                        } else {
+                            false
+                        }
+                    });
+                }
+            }
 
             if results.is_empty() {
                 println!("No results found.");
@@ -380,7 +404,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             db.clear()?;
             println!("Database cleared!");
         }
-        Command::Hybrid { query, vector_weight, bm25_weight } => {
+        Command::Hybrid { query, vector_weight, bm25_weight, file_types } => {
             let model = EmbeddingModel::new()?;
             let search = Search::new(db, model);
             
@@ -391,7 +415,24 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let b_weight = bm25_weight.unwrap_or(0.3);
             println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
             
-            let results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
+            // Execute the search
+            let mut results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
+
+            // Filter results by file type if specified
+            if let Some(types) = file_types {
+                if !types.is_empty() {
+                    println!("Filtering results by file types: {}", types.join(", "));
+                    results.retain(|result| {
+                        let path = Path::new(&result.file_path);
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy().to_string();
+                            types.contains(&ext_str)
+                        } else {
+                            false
+                        }
+                    });
+                }
+            }
 
             if results.is_empty() {
                 println!("No results found.");
@@ -575,7 +616,8 @@ mod tests {
             query: "search".to_string(),
             vector_only: false,
             vector_weight: Some(0.6),
-            bm25_weight: Some(0.4)
+            bm25_weight: Some(0.4),
+            file_types: Some(vec!["rs".to_string()]),
         };
         
         // Execute query command
@@ -587,7 +629,8 @@ mod tests {
             query: "search".to_string(),
             vector_only: true,
             vector_weight: None,
-            bm25_weight: None
+            bm25_weight: None,
+            file_types: None,
         };
         
         // Execute vector-only command
@@ -599,7 +642,8 @@ mod tests {
         let deprecated_command = Command::Hybrid { 
             query: "search".to_string(),
             vector_weight: None,
-            bm25_weight: None
+            bm25_weight: None,
+            file_types: Some(vec!["rs".to_string()]),
         };
         
         // Execute deprecated command
