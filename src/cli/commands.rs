@@ -4,7 +4,6 @@ use crate::vectordb::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::search::{Search, CodeSearchType};
 use crate::vectordb::parsing::{RustAnalyzer, CodeElement};
-use crate::vectordb::hnsw::HNSWConfig;
 use std::path::Path;
 use std::collections::HashSet;
 use colored::Colorize;
@@ -31,10 +30,6 @@ pub enum Command {
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Vec<String>,
         
-        /// Use HNSW index for faster searches on large codebases
-        #[arg(long = "use-hnsw")]
-        use_hnsw: bool,
-
         /// Number of threads to use for indexing (defaults to available CPUs)
         #[arg(short = 'j', long = "threads")]
         threads: Option<usize>,
@@ -105,7 +100,7 @@ pub enum Command {
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
-        Command::Index { dir, file_types, use_hnsw, threads } => {
+        Command::Index { dir, file_types, threads } => {
             println!("Indexing files in {}...", dir);
             
             // Set up signal handler for clean shutdown
@@ -118,13 +113,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 r.store(false, Ordering::SeqCst);
                 unsafe { INTERRUPT_RECEIVED = true; }
             }).expect("Failed to set Ctrl+C handler");
-            
-            // Create HNSW config if the flag is used
-            if use_hnsw {
-                println!("Using HNSW index for faster searches...");
-                let hnsw_config = HNSWConfig::default();
-                db.set_hnsw_config(Some(hnsw_config));
-            }
             
             // Set thread count if specified
             let num_cpus = num_cpus::get();
@@ -365,7 +353,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("  Nodes: {}", hnsw_stats.total_nodes);
                 println!("  Layers: {}", hnsw_stats.layers);
                 println!("  Info: The HNSW index provides faster search on large codebases.");
-                println!("        Use --use-hnsw with the index command to enable.");
+                println!("        This is enabled by default for optimal performance.");
                 
                 // Display layer stats
                 println!("\n  Layer Statistics:");
@@ -374,8 +362,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         i, layer.nodes, layer.avg_connections);
                 }
             } else {
-                println!("\nHNSW Index: Not enabled");
-                println!("  For faster searches on large codebases, use --use-hnsw when indexing.");
+                println!("\nHNSW Index: Not found");
+                println!("  This is unusual as HNSW is enabled by default.");
+                println!("  You may want to rebuild the index with the 'index' command.");
             }
         }
         Command::Clear => {
@@ -394,7 +383,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_hnsw_flag_creates_index() -> Result<()> {
+    fn test_hnsw_index_creation() -> Result<()> {
         // Create a temporary directory for the test
         let temp_dir = tempdir()?;
         let db_dir = tempdir()?;
@@ -408,11 +397,10 @@ mod tests {
         // Create VectorDB
         let db = VectorDB::new(db_path.clone())?;
         
-        // Execute the index command with use_hnsw flag
+        // Execute the index command (HNSW should be created by default now)
         let command = Command::Index {
             dir: temp_dir.path().to_string_lossy().to_string(),
             file_types: vec!["rs".to_string()],
-            use_hnsw: true,
             threads: None,
         };
         
@@ -421,7 +409,7 @@ mod tests {
         // Load the DB again to check if HNSW index was created and saved
         let reloaded_db = VectorDB::new(db_path)?;
         let stats = reloaded_db.stats();
-        assert!(stats.hnsw_stats.is_some(), "HNSW index should be created");
+        assert!(stats.hnsw_stats.is_some(), "HNSW index should be created by default");
         
         Ok(())
     }
@@ -441,44 +429,53 @@ mod tests {
             writeln!(file, "struct Struct{} {{ field: i32 }}", i)?;
         }
         
-        // Test with HNSW
+        // Test with HNSW (now the default)
         let db_path_hnsw = db_dir.path().join("test_hnsw.db").to_string_lossy().to_string();
         let mut db_hnsw = VectorDB::new(db_path_hnsw)?;
-        db_hnsw.set_hnsw_config(Some(HNSWConfig::default()));
         
-        // Index with HNSW
+        // Index with HNSW enabled (default)
         db_hnsw.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
         
         // Create embedding model for HNSW search
         let model_hnsw = EmbeddingModel::new()?;
-        let mut search_hnsw = Search::new(db_hnsw, model_hnsw);
+        let search_hnsw = Search::new(db_hnsw, model_hnsw);
         
-        // Test without HNSW
-        let db_path_normal = db_dir.path().join("test_normal.db").to_string_lossy().to_string();
-        let mut db_normal = VectorDB::new(db_path_normal)?;
+        // For comparison, create a database with a deliberately slowed down search
+        // by using a modified brute force approach (not using the HNSW index)
+        let db_path_slow = db_dir.path().join("test_slow.db").to_string_lossy().to_string();
+        let mut db_slow = VectorDB::new(db_path_slow)?;
         
-        // Index without HNSW
-        db_normal.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        // Index without accessing HNSW functionality
+        db_slow.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
         
-        // Create separate embedding model for normal search
-        let model_normal = EmbeddingModel::new()?;
-        let mut search_normal = Search::new(db_normal, model_normal);
+        // We'll clone the database which will do a shallow clone, allowing us to use
+        // a slower search method for comparison purposes
+        let mut db_clone = db_slow.clone();
         
-        // Measure search time with HNSW
+        // Create separate embedding model
+        let model_slow = EmbeddingModel::new()?;
+        let _search_slow = Search::new(db_slow, model_slow);
+        
+        // Measure search time with standard HNSW
         let start_hnsw = Instant::now();
         let _results_hnsw = search_hnsw.search("function")?;
         let duration_hnsw = start_hnsw.elapsed();
         
-        // Measure search time without HNSW
-        let start_normal = Instant::now();
-        let _results_normal = search_normal.search("function")?;
-        let duration_normal = start_normal.elapsed();
+        // For comparison only, use manual vector search
+        let query = "function";
+        let model = EmbeddingModel::new()?;
+        let query_embedding = model.embed(query)?;
+        
+        // Measure time for manual search (will be slower)
+        let start_slow = Instant::now();
+        let _results_slow = db_clone.nearest_vectors(&query_embedding, 10)?;
+        let duration_slow = start_slow.elapsed();
         
         // For consistent test results, we don't strictly assert that HNSW is faster
         // as it might not be measurable with a small test dataset
         // Instead, just log the results
         println!("Search time with HNSW: {:?}", duration_hnsw);
-        println!("Search time without HNSW: {:?}", duration_normal);
+        println!("Search time with slow method: {:?}", duration_slow);
         
         Ok(())
     }
@@ -495,16 +492,15 @@ mod tests {
         let mut file = fs::File::create(&test_file)?;
         writeln!(file, "fn test() {{ println!(\"Test\"); }}")?;
         
-        // Create VectorDB with HNSW config
+        // Create VectorDB (HNSW will be created by default)
         let mut db = VectorDB::new(db_path.clone())?;
-        db.set_hnsw_config(Some(HNSWConfig::default()));
         
         // Index files
         db.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
         
         // Get stats before reloading
         let hnsw_stats_before = db.stats().hnsw_stats;
-        assert!(hnsw_stats_before.is_some(), "HNSW index should be present");
+        assert!(hnsw_stats_before.is_some(), "HNSW index should be present by default");
         
         // Force the DB to save changes
         drop(db);
@@ -512,7 +508,7 @@ mod tests {
         // Reload the database
         let db_reloaded = VectorDB::new(db_path)?;
         
-        // Check if HNSW config is still there
+        // Check if HNSW index is still there
         let hnsw_stats_after = db_reloaded.stats().hnsw_stats;
         assert!(hnsw_stats_after.is_some(), "HNSW index should persist after reload");
         
