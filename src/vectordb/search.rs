@@ -1325,9 +1325,10 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let norm_b: f32 = b.iter().map(|b| b * b).sum::<f32>().sqrt();
     
     if norm_a > 0.0 && norm_b > 0.0 {
-        dot_product / (norm_a * norm_b)
+        // Ensure similarity stays within the [-1, 1] bounds
+        (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0)
     } else {
-        0.0
+        0.0 // Zero similarity if either vector has zero norm
     }
 }
 

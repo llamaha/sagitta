@@ -15,6 +15,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use ctrlc;
 
+// Default weights for hybrid search
+const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
+const HYBRID_BM25_WEIGHT: f32 = 0.3;
+
 // Global flag for handling interrupts
 pub static mut INTERRUPT_RECEIVED: bool = false;
 
@@ -40,13 +44,10 @@ pub enum Command {
         /// Search query
         #[arg(required = true)]
         query: String,
-    },
-
-    /// Hybrid search combining semantic and lexical matches
-    Hybrid {
-        /// Search query
-        #[arg(required = true)]
-        query: String,
+        
+        /// Use only vector search (without hybrid BM25 combination)
+        #[arg(long = "vector-only")]
+        vector_only: bool,
         
         /// Weight for vector search (default: 0.7)
         #[arg(long = "vector-weight")]
@@ -96,6 +97,25 @@ pub enum Command {
 
     /// Clear the database
     Clear,
+
+    /// Hybrid search combining semantic and lexical matches (deprecated, use Query instead)
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use 'query' command instead which performs hybrid search by default"
+    )]
+    Hybrid {
+        /// Search query
+        #[arg(required = true)]
+        query: String,
+        
+        /// Weight for vector search (default: 0.7)
+        #[arg(long = "vector-weight")]
+        vector_weight: Option<f32>,
+        
+        /// Weight for BM25 lexical search (default: 0.3)
+        #[arg(long = "bm25-weight")]
+        bm25_weight: Option<f32>,
+    },
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -148,10 +168,24 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::Query { query } => {
+        Command::Query { query, vector_only, vector_weight, bm25_weight } => {
             let model = EmbeddingModel::new()?;
             let search = Search::new(db, model);
-            let results = search.search(&query)?;
+            
+            // Determine search type based on flags
+            let results = if vector_only {
+                println!("Performing vector-only search...");
+                search.search(&query)?
+            } else {
+                println!("Performing hybrid search (combining semantic and lexical matching)...");
+                
+                // Show weights being used
+                let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+                let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+                println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+                
+                search.hybrid_search(&query, vector_weight, bm25_weight)?
+            };
 
             if results.is_empty() {
                 println!("No results found.");
@@ -171,31 +205,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             for (i, result) in results.iter().enumerate() {
                 println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
-                println!("{}", result.snippet);
-                println!();
-            }
-        }
-        Command::Hybrid { query, vector_weight, bm25_weight } => {
-            let model = EmbeddingModel::new()?;
-            let search = Search::new(db, model);
-            
-            println!("Performing hybrid search (combining semantic and lexical matching)...");
-            
-            // Show weights being used
-            let v_weight = vector_weight.unwrap_or(0.7);
-            let b_weight = bm25_weight.unwrap_or(0.3);
-            println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
-            
-            let results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
-
-            if results.is_empty() {
-                println!("No results found.");
-                return Ok(());
-            }
-
-            println!("\nHybrid search results for: {}\n", query);
-            for (i, result) in results.iter().enumerate() {
-                println!("{}. {} (score: {:.2})", i + 1, result.file_path, result.similarity);
                 println!("{}", result.snippet);
                 println!();
             }
@@ -371,6 +380,31 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             db.clear()?;
             println!("Database cleared!");
         }
+        Command::Hybrid { query, vector_weight, bm25_weight } => {
+            let model = EmbeddingModel::new()?;
+            let search = Search::new(db, model);
+            
+            println!("Performing hybrid search (combining semantic and lexical matching)...");
+            
+            // Show weights being used
+            let v_weight = vector_weight.unwrap_or(0.7);
+            let b_weight = bm25_weight.unwrap_or(0.3);
+            println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+            
+            let results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
+
+            if results.is_empty() {
+                println!("No results found.");
+                return Ok(());
+            }
+
+            println!("\nHybrid search results for: {}\n", query);
+            for (i, result) in results.iter().enumerate() {
+                println!("{}. {} (score: {:.2})", i + 1, result.file_path, result.similarity);
+                println!("{}", result.snippet);
+                println!();
+            }
+        }
     }
     Ok(())
 }
@@ -536,18 +570,41 @@ mod tests {
         db.index_file(&test_file1)?;
         db.index_file(&test_file2)?;
         
-        // Create test hybrid search command
-        let command = Command::Hybrid { 
+        // Test new Query command with hybrid search enabled (default)
+        let query_command = Command::Query { 
             query: "search".to_string(),
+            vector_only: false,
             vector_weight: Some(0.6),
             bm25_weight: Some(0.4)
         };
         
-        // Capture stdout to verify output
-        let result = execute_command(command, db);
+        // Execute query command
+        let result = execute_command(query_command, db.clone());
+        assert!(result.is_ok(), "Query command with hybrid search should execute without error");
         
-        // Just verify the command executes without error
-        assert!(result.is_ok(), "Hybrid search command should execute without error");
+        // Test vector-only search
+        let vector_command = Command::Query { 
+            query: "search".to_string(),
+            vector_only: true,
+            vector_weight: None,
+            bm25_weight: None
+        };
+        
+        // Execute vector-only command
+        let result = execute_command(vector_command, db.clone());
+        assert!(result.is_ok(), "Query command with vector-only should execute without error");
+        
+        // Test deprecated Hybrid command
+        #[allow(deprecated)]
+        let deprecated_command = Command::Hybrid { 
+            query: "search".to_string(),
+            vector_weight: None,
+            bm25_weight: None
+        };
+        
+        // Execute deprecated command
+        let result = execute_command(deprecated_command, db);
+        assert!(result.is_ok(), "Deprecated Hybrid command should still execute without error");
 
         Ok(())
     }

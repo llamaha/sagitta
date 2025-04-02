@@ -553,7 +553,12 @@ impl VectorDB {
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
         
         if norm_a > 0.0 && norm_b > 0.0 {
-            1.0 - (dot_product / (norm_a * norm_b))
+            // Calculate normalized cosine distance with proper bounds
+            let similarity = dot_product / (norm_a * norm_b);
+            // Handle potential floating point issues that might push similarity outside [-1, 1]
+            let clamped_similarity = similarity.clamp(-1.0, 1.0);
+            // Convert to distance in range [0, 2], with identical vectors having distance 0
+            1.0 - clamped_similarity
         } else {
             1.0 // Maximum distance if either vector is zero
         }
@@ -578,7 +583,13 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    dot_product / (norm_a * norm_b)
+    
+    if norm_a > 0.0 && norm_b > 0.0 {
+        // Ensure similarity stays within the [-1, 1] bounds
+        (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0)
+    } else {
+        0.0 // Zero similarity if either vector has zero norm
+    }
 }
 
 #[cfg(test)]
