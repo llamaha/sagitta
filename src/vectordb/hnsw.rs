@@ -50,9 +50,9 @@ impl HNSWConfig {
 impl Default for HNSWConfig {
     fn default() -> Self {
         Self {
-            m: 16,
-            ef_construction: 100,
-            num_layers: 16,
+            m: 16,                // Higher m value for better recall
+            ef_construction: 200, // Increased from 100 for better index quality
+            num_layers: 16,       // Will be dynamically adjusted based on dataset size
             random_seed: 42,
         }
     }

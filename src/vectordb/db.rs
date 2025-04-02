@@ -24,7 +24,7 @@ pub struct VectorDB {
     pub embeddings: HashMap<String, Vec<f32>>,
     db_path: String,
     cache: EmbeddingCache,
-    hnsw_index: Option<HNSWIndex>,
+    pub hnsw_index: Option<HNSWIndex>,
 }
 
 // Implement Clone for VectorDB
@@ -53,7 +53,7 @@ impl VectorDB {
                             eprintln!("Creating a new empty database.");
                             // Remove corrupted file
                             let _ = fs::remove_file(&db_path);
-                            (HashMap::new(), None)
+                            (HashMap::new(), Some(HNSWConfig::default()))
                         }
                     }
                 }
@@ -61,11 +61,12 @@ impl VectorDB {
                     // Handle file read errors
                     eprintln!("Warning: Couldn't read database file: {}", e);
                     eprintln!("Creating a new empty database.");
-                    (HashMap::new(), None)
+                    (HashMap::new(), Some(HNSWConfig::default()))
                 }
             }
         } else {
-            (HashMap::new(), None)
+            // Create new database with default HNSW config
+            (HashMap::new(), Some(HNSWConfig::default()))
         };
 
         // Create cache in the same directory as the database
@@ -118,15 +119,14 @@ impl VectorDB {
                 }
             }
         } else {
-            // No index file, build from scratch if config exists
-            hnsw_config.map(|config| {
-                let mut index = HNSWIndex::new(config);
-                // Rebuild the index from embeddings
-                for (_, embedding) in &embeddings {
-                    let _ = index.insert(embedding.clone());
-                }
-                index
-            })
+            // No index file, build from scratch with default or provided config
+            let config = hnsw_config.unwrap_or_else(HNSWConfig::default);
+            let mut index = HNSWIndex::new(config);
+            // Build the index from embeddings if any exist
+            for (_, embedding) in &embeddings {
+                let _ = index.insert(embedding.clone());
+            }
+            Some(index)
         };
 
         Ok(Self {
@@ -216,7 +216,7 @@ impl VectorDB {
             return Ok(());
         }
 
-        // If not in cache, generate new embedding
+        // If not in cache, generate new embedding for the entire file
         let model = EmbeddingModel::new()
             .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
         let contents = fs::read_to_string(file_path)
@@ -224,6 +224,8 @@ impl VectorDB {
                 path: file_path.to_path_buf(),
                 source: e,
             })?;
+            
+        // Generate a single embedding for the entire file
         let embedding = model.embed(&contents)
             .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
         
@@ -557,13 +559,9 @@ impl VectorDB {
         }
     }
     
-    fn get_file_path(&self, node_id: usize) -> Option<&String> {
-        if node_id < self.embeddings.len() {
-            let file_path = self.embeddings.keys().nth(node_id);
-            file_path
-        } else {
-            None
-        }
+    /// Get the file path associated with a node ID
+    pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
+        self.embeddings.keys().nth(node_id)
     }
 }
 

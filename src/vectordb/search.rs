@@ -3,19 +3,14 @@ use anyhow::Result;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::parsing::{CodeParser, RustAnalyzer, CodeElement};
-use std::collections::HashMap;
 use regex;
 use std::path::Path;
 
 const SIMILARITY_THRESHOLD: f32 = 0.3;
 const MIN_CONTEXT_LINES: usize = 2;
 const MAX_CONTEXT_LINES: usize = 8;
-const BM25_K1: f32 = 1.5;
-const BM25_B: f32 = 0.75;
-const POSITION_BOOST: f32 = 0.2;
 const WINDOW_SIZE: usize = 8;
-const USE_HNSW: bool = true;
-const HNSW_TOP_K: usize = 20;
+const HNSW_TOP_K: usize = 30; // Increased from 20 for better recall
 const CODE_SEARCH_BOOST: f32 = 1.5; // Boost for code-aware search results
 
 #[derive(Debug)]
@@ -29,91 +24,21 @@ pub struct SearchResult {
 pub struct Search {
     db: VectorDB,
     model: EmbeddingModel,
-    avg_doc_length: f32,
     code_parser: Option<CodeParser>,
     rust_analyzer: Option<RustAnalyzer>, // Added rust analyzer
 }
 
 impl Search {
     pub fn new(db: VectorDB, model: EmbeddingModel) -> Self {
-        // Calculate average document length
-        let total_length: usize = db.embeddings.values()
-            .map(|embedding| embedding.iter().filter(|&&x| x > 0.0).count())
-            .sum();
-        let avg_doc_length = total_length as f32 / db.embeddings.len() as f32;
-        
         // Create rust analyzer if possible
         let rust_analyzer = RustAnalyzer::new().ok();
         
         Self { 
             db, 
             model,
-            avg_doc_length,
             code_parser: Some(CodeParser::new()),
             rust_analyzer,
         }
-    }
-
-    fn calculate_bm25(&self, query_embedding: &[f32], doc_embedding: &[f32]) -> f32 {
-        let mut score = 0.0;
-        let doc_length = doc_embedding.iter().filter(|&&x| x > 0.0).count() as f32;
-        
-        // Calculate term frequencies
-        let mut query_tf = HashMap::new();
-        let mut doc_tf = HashMap::new();
-        
-        for (i, &q) in query_embedding.iter().enumerate() {
-            if q > 0.0 {
-                *query_tf.entry(i).or_insert(0.0) += q;
-            }
-        }
-        
-        for (i, &d) in doc_embedding.iter().enumerate() {
-            if d > 0.0 {
-                *doc_tf.entry(i).or_insert(0.0) += d;
-            }
-        }
-        
-        // Calculate BM25 score
-        for (term, &_q_tf) in query_tf.iter() {
-            if let Some(&d_tf) = doc_tf.get(term) {
-                let idf = ((self.db.embeddings.len() as f32 + 1.0) / 
-                          (self.db.embeddings.values()
-                           .filter(|doc| doc[*term] > 0.0)
-                           .count() as f32 + 1.0))
-                    .ln();
-                
-                let tf = d_tf / (1.0 - BM25_B + BM25_B * doc_length / self.avg_doc_length);
-                score += idf * (tf * (BM25_K1 + 1.0)) / (tf + BM25_K1);
-            }
-        }
-        
-        score
-    }
-
-    fn calculate_position_boost(&self, file_path: &str, query: &str) -> f32 {
-        let content = match fs::read_to_string(file_path) {
-            Ok(content) => content,
-            Err(_) => return 1.0,
-        };
-        
-        // Find the first occurrence of any query term
-        let query_terms: Vec<&str> = query.split_whitespace().collect();
-        let mut min_position = f32::MAX;
-        
-        for term in query_terms {
-            if let Some(pos) = content.to_lowercase().find(&term.to_lowercase()) {
-                min_position = min_position.min(pos as f32);
-            }
-        }
-        
-        if min_position == f32::MAX {
-            return 1.0;
-        }
-        
-        // Boost based on position (earlier = higher boost)
-        let normalized_pos = min_position / content.len() as f32;
-        1.0 + (POSITION_BOOST * (1.0 - normalized_pos))
     }
 
     // Enhanced search_code method using RustAnalyzer
@@ -405,50 +330,52 @@ impl Search {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+        // Embed the query string
         let query_embedding = self.model.embed(query)?;
-        let mut results = Vec::new();
-
-        if USE_HNSW {
-            // Use HNSW for faster approximate search
-            let mut db = self.db.clone();
-            let nearest = db.nearest_vectors(&query_embedding, HNSW_TOP_K)?;
-            
-            for (file_path, similarity) in nearest {
-                // Only include results above threshold
-                if similarity >= SIMILARITY_THRESHOLD {
-                    let snippet = self.get_snippet(&file_path, query)?;
-                    results.push(SearchResult {
-                        file_path,
-                        similarity,
-                        snippet,
-                        code_context: None,
-                    });
-                }
-            }
-        } else {
-            // Fall back to the original BM25 search if HNSW is disabled
-            for (file_path, file_embedding) in &self.db.embeddings {
-                let bm25_score = self.calculate_bm25(&query_embedding, file_embedding);
-                let position_boost = self.calculate_position_boost(file_path, query);
-                let final_score = bm25_score * position_boost;
-                
-                if final_score >= SIMILARITY_THRESHOLD {
-                    let snippet = self.get_snippet(file_path, query)?;
-                    results.push(SearchResult {
-                        file_path: file_path.clone(),
-                        similarity: final_score,
-                        snippet,
-                        code_context: None,
-                    });
-                }
-            }
-        }
-
-        // Sort by similarity in descending order
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
         
-        // Take top 5 results
-        results.truncate(5);
+        // Always use HNSW search if available for better performance
+        let nearest: Vec<(String, f32)> = if let Some(index) = &self.db.hnsw_index {
+            // Use HNSW index with parallel search for better performance
+            let results = index.search_parallel(&query_embedding, HNSW_TOP_K, HNSW_TOP_K * 2)?;
+            
+            // Convert node IDs to file paths
+            results.into_iter()
+                .filter_map(|(node_id, distance)| {
+                    if let Some(file_path) = self.db.get_file_path(node_id) {
+                        Some((file_path.clone(), 1.0 - distance))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            // Fall back to brute-force search if no HNSW index is available
+            // We need to clone the db to work around the mutability requirement
+            let mut db_clone = self.db.clone();
+            db_clone.nearest_vectors(&query_embedding, 10)?
+        };
+        
+        // Generate results with improved snippets
+        let mut results = Vec::new();
+        for (file_path, similarity) in nearest {
+            // Skip low similarity results
+            if similarity < SIMILARITY_THRESHOLD {
+                continue;
+            }
+            
+            // Generate snippet from file showing the most relevant part
+            let snippet = self.get_snippet(&file_path, query)?;
+            
+            results.push(SearchResult {
+                file_path,
+                similarity,
+                snippet,
+                code_context: None,
+            });
+        }
+        
+        // Sort by similarity
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
         
         Ok(results)
     }
@@ -708,45 +635,71 @@ mod tests {
     use std::fs;
     
     #[test]
-    fn test_bm25_calculation() -> Result<()> {
+    fn test_hnsw_search() -> Result<()> {
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let mut db = VectorDB::new(db_path)?;
         
-        // Add at least one document to the database to avoid division by zero
-        let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "Test document")?;
-        db.index_file(&test_file)?;
+        // Add some test files
+        let test_file1 = temp_dir.path().join("test1.txt");
+        fs::write(&test_file1, "This is a test document about Rust programming")?;
+        db.index_file(&test_file1)?;
+        
+        let test_file2 = temp_dir.path().join("test2.txt");
+        fs::write(&test_file2, "This document is about Python programming")?;
+        db.index_file(&test_file2)?;
+        
+        // Make sure we have an HNSW index
+        assert!(db.hnsw_index.is_some(), "HNSW index should be created by default");
         
         let model = EmbeddingModel::new()?;
         let search = Search::new(db, model);
         
-        let query_embedding = vec![0.1, 0.2, 0.3, 0.0, 0.5];
-        let doc_embedding = vec![0.2, 0.1, 0.3, 0.4, 0.0];
+        // Search for Rust
+        let results = search.search("Rust")?;
         
-        let score = search.calculate_bm25(&query_embedding, &doc_embedding);
-        assert!(score >= 0.0, "BM25 score should be non-negative: {}", score);
+        // We should find at least one result
+        assert!(!results.is_empty(), "Should find at least one result");
+        
+        // The first result should be test1.txt
+        if let Some(result) = results.first() {
+            assert!(result.file_path.contains("test1.txt"), 
+                   "First result should be test1.txt, got {}", result.file_path);
+        }
         
         Ok(())
     }
     
     #[test]
-    fn test_position_boost() -> Result<()> {
+    fn test_file_level_embeddings() -> Result<()> {
         let temp_dir = tempdir()?;
-        let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "First line with test\nSecond line\nThird line with test")?;
-        
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
-        let db = VectorDB::new(db_path)?;
-        let model = EmbeddingModel::new()?;
-        let search = Search::new(db, model);
+        let mut db = VectorDB::new(db_path)?;
         
-        let boost = search.calculate_position_boost(
-            &test_file.to_string_lossy(), 
-            "test"
-        );
+        // Create a test file with multiple functions
+        let test_file = temp_dir.path().join("test.rs");
+        fs::write(&test_file, r#"
+fn function_one() {
+    // This is the first function
+    println!("Function one");
+}
+
+fn function_two() {
+    // This is the second function
+    println!("Function two");
+}
+
+fn main() {
+    function_one();
+    function_two();
+}
+"#)?;
         
-        assert!(boost > 1.0);
+        // Index the file
+        db.index_file(&test_file)?;
+        
+        // Verify that we have exactly one embedding for the file
+        assert_eq!(db.embeddings.len(), 1, "Should have exactly one embedding for one file");
         
         Ok(())
     }
