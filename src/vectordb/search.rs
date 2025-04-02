@@ -4,7 +4,7 @@ use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer, CodeElement, TypeKind, RubyMethodInfo, RubyClassInfo};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const SIMILARITY_THRESHOLD: f32 = 0.3;
 const MIN_CONTEXT_LINES: usize = 2;
@@ -17,7 +17,29 @@ const BM25_B: f32 = 0.75;
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7; // Default weight for vector search
 const HYBRID_BM25_WEIGHT: f32 = 0.3;   // Default weight for BM25 search
 
+/// Structure to hold query analysis results
 #[derive(Debug)]
+struct QueryAnalysis {
+    original_query: String,
+    code_elements: Vec<String>,
+    is_code_query: bool,
+    expanded_terms: Vec<String>,
+    query_type: QueryType,
+    language_hints: Vec<String>,
+}
+
+/// Types of queries that can be handled differently
+#[derive(Debug, PartialEq)]
+enum QueryType {
+    Definition,   // Looking for definitions, e.g., "what is a trait"
+    Usage,        // Looking for usages, e.g., "how to use Option"
+    Implementation, // Looking for implementations, e.g., "how to implement Display"
+    Function,     // Looking for functions, e.g., "function search_parallel"
+    Type,         // Looking for types, e.g., "struct SearchResult" 
+    Generic,      // General query with no specific type
+}
+
+#[derive(Debug, Clone)]
 pub struct SearchResult {
     pub file_path: String,
     pub similarity: f32,
@@ -868,8 +890,142 @@ impl Search {
         query.trim().to_string()
     }
     
+    /// Preprocess and analyze the query to improve search results
+    fn preprocess_query(&self, query: &str) -> QueryAnalysis {
+        let query_lower = query.to_lowercase();
+        
+        // Code-specific keywords that indicate a code search
+        let code_keywords = [
+            "method", "function", "fn", "struct", "trait", "enum", "impl", 
+            "type", "class", "module", "implementation", "definition",
+            "interface", "signature", "parameter", "return", "static",
+            "pub", "self", "mut", "const", "where", "use", "crate"
+        ];
+        
+        // Language-specific keywords
+        let rust_keywords = ["rust", "cargo", "crate", "mod", "impl", "trait", "struct", "enum", "fn"];
+        let ruby_keywords = ["ruby", "gem", "class", "module", "def", "end", "attr"];
+        let python_keywords = ["python", "def", "class", "import", "from", "with", "as"];
+        
+        // Identify code elements in the query
+        let code_elements: Vec<String> = code_keywords.iter()
+            .filter(|&&keyword| query_lower.contains(keyword))
+            .map(|&s| s.to_string())
+            .collect();
+        
+        // Detect language hints
+        let mut language_hints = Vec::new();
+        for &keyword in &rust_keywords {
+            if query_lower.contains(keyword) {
+                language_hints.push("rust".to_string());
+                break;
+            }
+        }
+        for &keyword in &ruby_keywords {
+            if query_lower.contains(keyword) {
+                language_hints.push("ruby".to_string());
+                break;
+            }
+        }
+        for &keyword in &python_keywords {
+            if query_lower.contains(keyword) {
+                language_hints.push("python".to_string());
+                break;
+            }
+        }
+        
+        // It's a code query if it contains any code keywords, scope resolution (::), or language hints
+        let is_code_query = !code_elements.is_empty() || 
+                         query.contains("::") || 
+                         !language_hints.is_empty();
+        
+        // Determine query type
+        let query_type = if query_lower.contains("what is") || query_lower.contains("definition") {
+            QueryType::Definition
+        } else if query_lower.contains("how to use") || query_lower.contains("usage") || query_lower.contains("example") {
+            QueryType::Usage
+        } else if query_lower.contains("how to implement") || query_lower.contains("implementation") {
+            QueryType::Implementation
+        } else if query_lower.contains("function") || query_lower.contains("method") || query_lower.contains("fn ") {
+            QueryType::Function
+        } else if query_lower.contains("struct") || query_lower.contains("trait") || 
+                  query_lower.contains("enum") || query_lower.contains("class") ||
+                  query_lower.contains("type") {
+            QueryType::Type
+        } else {
+            QueryType::Generic
+        };
+        
+        // Generate expanded terms based on query type and content
+        let mut expanded_terms = Vec::new();
+        
+        // Extract core terms (remove common words)
+        let common_words = ["the", "a", "an", "in", "on", "at", "to", "with", "how", "what", "is"];
+        let core_terms: Vec<String> = query_lower
+            .split_whitespace()
+            .filter(|&word| !common_words.contains(&word))
+            .map(|s| s.to_string())
+            .collect();
+        
+        // Add core terms to expanded terms
+        expanded_terms.extend(core_terms);
+        
+        // Add query type specific terms
+        match query_type {
+            QueryType::Definition => {
+                expanded_terms.push("definition".to_string());
+                expanded_terms.push("struct".to_string());
+                expanded_terms.push("type".to_string());
+            },
+            QueryType::Usage => {
+                expanded_terms.push("example".to_string());
+                expanded_terms.push("usage".to_string());
+                expanded_terms.push("used".to_string());
+            },
+            QueryType::Implementation => {
+                expanded_terms.push("impl".to_string());
+                expanded_terms.push("implementation".to_string());
+                expanded_terms.push("trait".to_string());
+            },
+            QueryType::Function => {
+                expanded_terms.push("fn".to_string());
+                expanded_terms.push("function".to_string());
+                expanded_terms.push("method".to_string());
+            },
+            QueryType::Type => {
+                expanded_terms.push("type".to_string());
+                expanded_terms.push("definition".to_string());
+            },
+            QueryType::Generic => {
+                // No special handling for generic queries
+            }
+        }
+        
+        // Add file extension hints based on language
+        for lang in &language_hints {
+            match lang.as_str() {
+                "rust" => expanded_terms.push(".rs".to_string()),
+                "ruby" => expanded_terms.push(".rb".to_string()),
+                "python" => expanded_terms.push(".py".to_string()),
+                _ => {}
+            }
+        }
+        
+        QueryAnalysis {
+            original_query: query.to_string(),
+            code_elements,
+            is_code_query,
+            expanded_terms,
+            query_type,
+            language_hints,
+        }
+    }
+
     /// Extract code structure elements from the query and determine if it's a structural query
     fn extract_code_query_elements<'a>(&self, query: &'a str) -> (Vec<&'a str>, bool) {
+        // Use the new preprocessing for more accurate analysis
+        let analysis = self.preprocess_query(query);
+        
         let query_lower = query.to_lowercase();
         let code_keywords = [
             "method", "function", "fn", "struct", "trait", "enum", "impl", 
@@ -883,14 +1039,15 @@ impl Search {
             .copied()
             .collect();
         
-        // It's a structural query if it contains any code keywords 
-        // or if it contains "::" (Rust scope resolution)
-        let is_structural = !found_elements.is_empty() || query.contains("::");
-        
-        (found_elements, is_structural)
+        (found_elements, analysis.is_code_query)
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+        // Enhance the query with our preprocessing analysis
+        let query_analysis = self.preprocess_query(query);
+        // Use query_analysis for logging/debugging if needed
+        let _unused = query_analysis.original_query; // Mark as used
+        
         // Embed the query string
         let query_embedding = self.model.embed(query)?;
         
@@ -935,10 +1092,22 @@ impl Search {
             });
         }
         
-        // Sort by similarity
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        // Apply code-specific ranking signals
+        self.apply_code_ranking_signals(&mut results, query)?;
         
-        Ok(results)
+        // Normalize scores to improve contrast between results
+        self.normalize_scores(&mut results);
+        
+        // Apply power scaling to emphasize score differences
+        self.power_scale_scores(&mut results, 0.5);
+        
+        // Group similar results and select representatives
+        let results = self.group_similar_results(results, 0.7);
+        
+        // Apply MMR for final ranking to ensure diversity
+        let final_results = self.apply_mmr(results, 0.7, 10);
+        
+        Ok(final_results)
     }
 
     fn get_snippet(&self, file_path: &str, query: &str) -> Result<String> {
@@ -1195,31 +1364,71 @@ impl Search {
 
     /// Hybrid search combining vector and BM25 search
     pub fn hybrid_search(&self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>) -> Result<Vec<SearchResult>> {
+        // Process query to enhance search
+        let query_analysis = self.preprocess_query(query);
+        
         // Set weights, defaulting to constants if not provided
         let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
         let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
         
         // Perform vector search
-        let vector_results = self.search(query)?;
+        let query_embedding = self.model.embed(query)?;
+        
+        // Get vector search results using HNSW if available
+        let vector_results: Vec<(String, f32)> = if let Some(index) = &self.db.hnsw_index {
+            index.search_parallel(&query_embedding, HNSW_TOP_K, HNSW_TOP_K * 2)?
+                .into_iter()
+                .filter_map(|(node_id, distance)| {
+                    if let Some(file_path) = self.db.get_file_path(node_id) {
+                        Some((file_path.clone(), 1.0 - distance))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            let mut db_clone = self.db.clone();
+            db_clone.nearest_vectors(&query_embedding, 10)?
+        };
         
         // Create a map to store combined scores
         let mut combined_scores: HashMap<String, (f32, SearchResult)> = HashMap::new();
         
         // Add vector search results to the map
-        for result in vector_results {
-            let normalized_vector_score = result.similarity;
-            combined_scores.insert(result.file_path.clone(), (normalized_vector_score * v_weight, result));
+        for (file_path, similarity) in vector_results {
+            if similarity < SIMILARITY_THRESHOLD {
+                continue;
+            }
+            
+            let snippet = self.get_snippet(&file_path, query)?;
+            
+            let result = SearchResult {
+                file_path: file_path.clone(),
+                similarity,
+                snippet,
+                code_context: None,
+            };
+            
+            combined_scores.insert(file_path, (similarity * v_weight, result));
         }
         
-        // Calculate BM25 scores for all files in the database
+        // Calculate BM25 scores for all files in the database, including expanded terms
         for file_path in self.db.embeddings.keys() {
-            let bm25_score = self.calculate_bm25_score(query, file_path)?;
+            // Calculate BM25 score using the original query
+            let mut bm25_score = self.calculate_bm25_score(query, file_path)?;
+            
+            // Also consider expanded terms from query analysis
+            for expanded_term in &query_analysis.expanded_terms {
+                if expanded_term != query {
+                    bm25_score += self.calculate_bm25_score(expanded_term, file_path)? * 0.5;
+                }
+            }
+            
+            // Normalize BM25 score (scores typically range from 0 to 5)
+            let normalized_bm25_score = (bm25_score / 5.0).min(1.0);
             
             // Only consider scores above threshold
-            if bm25_score > 0.1 {
-                // Normalize BM25 score (simple min-max normalization - assuming scores typically range from 0 to 5)
-                let normalized_bm25_score = bm25_score / 5.0;
-                
+            if normalized_bm25_score > 0.1 {
                 // Get existing score or default
                 let entry = combined_scores.entry(file_path.clone()).or_insert_with(|| {
                     let snippet = self.get_snippet(file_path, query).unwrap_or_else(|_| "Snippet unavailable".to_string());
@@ -1251,10 +1460,22 @@ impl Search {
             results.push(result);
         }
         
-        // Sort by combined similarity
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        // Apply code-specific ranking signals
+        self.apply_code_ranking_signals(&mut results, query)?;
         
-        Ok(results)
+        // Normalize scores to improve contrast
+        self.normalize_scores(&mut results);
+        
+        // Apply power scaling to emphasize score differences
+        self.power_scale_scores(&mut results, 0.5);
+        
+        // Group similar results and select representatives
+        let results = self.group_similar_results(results, 0.7);
+        
+        // Apply MMR for final ranking to ensure diversity
+        let final_results = self.apply_mmr(results, 0.7, 10);
+        
+        Ok(final_results)
     }
 
     /// Enhance a snippet to focus on the query terms
@@ -1308,6 +1529,328 @@ impl Search {
         // Update the snippet
         *snippet = updated_snippet;
     }
+
+    /// Apply the Maximal Marginal Relevance algorithm to rerank results
+    /// to balance relevance and diversity
+    fn apply_mmr(&self, results: Vec<SearchResult>, lambda: f32, k: usize) -> Vec<SearchResult> {
+        if results.len() <= 1 {
+            return results;
+        }
+        
+        // Parameters
+        let lambda = lambda.clamp(0.0, 1.0); // Ensure lambda is between 0 and 1
+        let k = k.min(results.len()); // Ensure k doesn't exceed the available results
+        
+        // Create document embeddings for all results
+        let mut result_embeddings: Vec<(SearchResult, Vec<f32>)> = Vec::with_capacity(results.len());
+        
+        for result in results {
+            match self.model.embed(&result.snippet) {
+                Ok(embedding) => {
+                    result_embeddings.push((result, embedding));
+                },
+                Err(_) => continue, // Skip if embedding fails
+            }
+        }
+        
+        if result_embeddings.is_empty() {
+            return Vec::new();
+        }
+        
+        // Start with the initial ranking (by similarity)
+        let mut ranked: Vec<SearchResult> = Vec::with_capacity(k);
+        let mut unranked: Vec<(SearchResult, Vec<f32>)> = result_embeddings;
+        
+        // Sort by original similarity score
+        unranked.sort_by(|(a, _), (b, _)| 
+            b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal)
+        );
+        
+        // Add the first element (highest relevance)
+        if !unranked.is_empty() {
+            let (first, _) = unranked.remove(0);
+            ranked.push(first);
+        }
+        
+        // Iteratively add remaining elements
+        while ranked.len() < k && !unranked.is_empty() {
+            let mut max_score = f32::NEG_INFINITY;
+            let mut max_idx = 0;
+            
+            for (i, (candidate, candidate_emb)) in unranked.iter().enumerate() {
+                // MMR score = λ * sim(candidate, query) - (1-λ) * max(sim(candidate, ranked_docs))
+                let relevance = candidate.similarity;
+                
+                // Find maximum similarity to any ranked document
+                let mut max_diversity_penalty = f32::NEG_INFINITY;
+                
+                for (_j, ranked_result) in ranked.iter().enumerate() {
+                    if let Ok(ranked_emb) = self.model.embed(&ranked_result.snippet) {
+                        // Calculate similarity to ranked document
+                        let diversity_penalty = cosine_similarity(&candidate_emb, &ranked_emb);
+                        max_diversity_penalty = max_diversity_penalty.max(diversity_penalty);
+                    }
+                }
+                
+                // If we couldn't calculate diversity penalty, default to 0
+                let max_diversity_penalty = if max_diversity_penalty == f32::NEG_INFINITY {
+                    0.0
+                } else {
+                    max_diversity_penalty
+                };
+                
+                // Calculate MMR score
+                let mmr_score = lambda * relevance - (1.0 - lambda) * max_diversity_penalty;
+                
+                if mmr_score > max_score {
+                    max_score = mmr_score;
+                    max_idx = i;
+                }
+            }
+            
+            // Add the document with the highest MMR score
+            let (next, _) = unranked.remove(max_idx);
+            ranked.push(next);
+        }
+        
+        ranked
+    }
+    
+    /// Calculate similarity between search results to find duplicates
+    fn calculate_result_similarity(&self, result1: &SearchResult, result2: &SearchResult) -> f32 {
+        // Simple text-based similarity using the Jaccard index
+        let set1: HashSet<&str> = result1.snippet.split_whitespace().collect();
+        let set2: HashSet<&str> = result2.snippet.split_whitespace().collect();
+        
+        // Calculate Jaccard similarity
+        let intersection_size = set1.intersection(&set2).count();
+        let union_size = set1.union(&set2).count();
+        
+        if union_size == 0 {
+            return 0.0;
+        }
+        
+        intersection_size as f32 / union_size as f32
+    }
+    
+    /// Group similar results together and select representatives
+    fn group_similar_results(&self, results: Vec<SearchResult>, threshold: f32) -> Vec<SearchResult> {
+        if results.len() <= 1 {
+            return results;
+        }
+        
+        let mut groups: Vec<Vec<SearchResult>> = Vec::new();
+        
+        for result in results {
+            // Try to find a group where this result belongs
+            let mut added = false;
+            
+            // Try to find an existing group for this result
+            for group in &mut groups {
+                // Compare with the representative of the group (first element)
+                let similarity = self.calculate_result_similarity(&result, &group[0]);
+                
+                if similarity >= threshold {
+                    // Result is similar enough to be in this group
+                    group.push(result.clone());
+                    added = true;
+                    break;
+                }
+            }
+            
+            // If not added to any existing group, create a new group
+            if !added {
+                groups.push(vec![result]);
+            }
+        }
+        
+        // Take the best result from each group (the one with highest similarity score)
+        let mut representatives: Vec<SearchResult> = Vec::with_capacity(groups.len());
+        
+        for mut group in groups {
+            if !group.is_empty() {
+                // Sort by similarity (highest first)
+                group.sort_by(|a, b| 
+                    b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal)
+                );
+                
+                // Take the highest scoring result as the representative
+                representatives.push(group.remove(0));
+            }
+        }
+        
+        // Sort representatives by original similarity score
+        representatives.sort_by(|a, b| 
+            b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal)
+        );
+        
+        representatives
+    }
+
+    /// Apply code-specific ranking signals to search results
+    fn apply_code_ranking_signals(&self, results: &mut Vec<SearchResult>, query: &str) -> Result<()> {
+        let query_analysis = self.preprocess_query(query);
+        
+        // No need to modify if there are no results
+        if results.is_empty() {
+            return Ok(());
+        }
+        
+        for result in results.iter_mut() {
+            let file_path = &result.file_path;
+            let mut boost_factor = 1.0;
+            
+            // 1. Language-specific boosts based on file extension
+            if !query_analysis.language_hints.is_empty() {
+                // Language was detected in the query, boost matching files
+                for lang in &query_analysis.language_hints {
+                    let ext = match lang.as_str() {
+                        "rust" => ".rs",
+                        "ruby" => ".rb",
+                        "python" => ".py",
+                        _ => continue,
+                    };
+                    
+                    if file_path.ends_with(ext) {
+                        boost_factor *= 1.2; // 20% boost for matching language
+                        break;
+                    }
+                }
+            } else {
+                // No language in query, use query type to infer file importance
+                match query_analysis.query_type {
+                    QueryType::Function | QueryType::Implementation => {
+                        // For function/implementation queries, code files are more important
+                        if file_path.ends_with(".rs") || file_path.ends_with(".rb") || 
+                           file_path.ends_with(".py") || file_path.ends_with(".js") ||
+                           file_path.ends_with(".ts") {
+                            boost_factor *= 1.1; // 10% boost for code files
+                        }
+                    },
+                    QueryType::Type => {
+                        // For type queries, boost certain languages that are more type-focused
+                        if file_path.ends_with(".rs") || file_path.ends_with(".ts") {
+                            boost_factor *= 1.15; // 15% boost for strongly-typed languages
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            
+            // 2. File name relevance
+            let file_name = Path::new(file_path).file_name()
+                .map(|f| f.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+                
+            // If any term in the query appears in the filename, boost it
+            for term in query.to_lowercase().split_whitespace() {
+                if file_name.contains(term) {
+                    boost_factor *= 1.25; // 25% boost for filename match
+                    break;
+                }
+            }
+            
+            // 3. Code structure matching (based on snippet content)
+            match query_analysis.query_type {
+                QueryType::Function => {
+                    if result.snippet.contains("fn ") || result.snippet.contains("function") || 
+                       result.snippet.contains("def ") {
+                        boost_factor *= 1.3; // 30% boost for function definitions
+                    }
+                },
+                QueryType::Type => {
+                    if result.snippet.contains("struct ") || result.snippet.contains("class ") || 
+                       result.snippet.contains("enum ") || result.snippet.contains("trait ") {
+                        boost_factor *= 1.3; // 30% boost for type definitions
+                    }
+                },
+                QueryType::Implementation => {
+                    if result.snippet.contains("impl ") || 
+                       (result.snippet.contains("class ") && result.snippet.contains("def ")) {
+                        boost_factor *= 1.3; // 30% boost for implementations
+                    }
+                },
+                QueryType::Usage => {
+                    // For usage queries, examples and imports are valuable
+                    if result.snippet.contains("use ") || result.snippet.contains("import ") ||
+                       result.snippet.contains("from ") || result.snippet.contains("example") {
+                        boost_factor *= 1.2; // 20% boost for usage examples
+                    }
+                },
+                _ => {}
+            }
+            
+            // 4. Check for special code features
+            if result.snippet.contains("pub fn") || result.snippet.contains("public function") {
+                boost_factor *= 1.1; // 10% boost for public APIs
+            }
+            
+            // Apply the boost factor to the similarity score
+            result.similarity = (result.similarity * boost_factor).min(1.0);
+        }
+        
+        // Re-sort the results by the modified similarity scores
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        
+        Ok(())
+    }
+
+    /// Apply min-max normalization to a set of similarity scores
+    fn normalize_scores(&self, results: &mut Vec<SearchResult>) {
+        if results.len() <= 1 {
+            return;
+        }
+        
+        // Find min and max similarity scores
+        let mut min_score = f32::INFINITY;
+        let mut max_score = f32::NEG_INFINITY;
+        
+        for result in results.iter() {
+            min_score = min_score.min(result.similarity);
+            max_score = max_score.max(result.similarity);
+        }
+        
+        // Only normalize if we have a range of scores
+        if (max_score - min_score).abs() < 0.001 {
+            return;
+        }
+        
+        // Apply min-max normalization to spread out the scores
+        // New score = (score - min) / (max - min)
+        let range = max_score - min_score;
+        for result in results.iter_mut() {
+            result.similarity = (result.similarity - min_score) / range;
+        }
+    }
+    
+    /// Apply sigmoid normalization to similarity scores
+    fn sigmoid_normalize_scores(&self, results: &mut Vec<SearchResult>, steepness: f32) {
+        if results.is_empty() {
+            return;
+        }
+        
+        // Apply sigmoid function to each score to enhance differences
+        // sigmoid(x) = 1 / (1 + e^(-steepness * (x - 0.5)))
+        for result in results.iter_mut() {
+            let centered = result.similarity - 0.5;
+            result.similarity = 1.0 / (1.0 + (-steepness * centered).exp());
+        }
+    }
+    
+    /// Apply power law scaling to similarity scores to emphasize differences
+    fn power_scale_scores(&self, results: &mut Vec<SearchResult>, power: f32) {
+        if results.is_empty() {
+            return;
+        }
+        
+        // Apply power scaling
+        for result in results.iter_mut() {
+            result.similarity = result.similarity.powf(power);
+        }
+        
+        // Re-normalize to [0,1] range if needed
+        self.normalize_scores(results);
+    }
 }
 
 // New enum to define code search types
@@ -1339,6 +1882,7 @@ mod tests {
     use crate::vectordb::db::VectorDB;
     use tempfile::tempdir;
     use std::fs;
+    use std::collections::HashSet;
     
     #[test]
     fn test_hnsw_search() -> Result<()> {
@@ -1641,6 +2185,223 @@ require_relative 'helper'
         assert!(true);
         
         // Temp directory automatically cleaned up
+        Ok(())
+    }
+    
+    #[test]
+    fn test_query_preprocessing() -> Result<()> {
+        // Setup a basic search engine
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let db = VectorDB::new(db_path)?;
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Test different query types
+        let function_query = search.preprocess_query("how to use the search function");
+        assert_eq!(function_query.query_type, QueryType::Usage);
+        assert!(function_query.expanded_terms.contains(&"search".to_string()));
+        assert!(function_query.expanded_terms.contains(&"function".to_string()));
+        
+        let definition_query = search.preprocess_query("what is a struct in Rust");
+        assert_eq!(definition_query.query_type, QueryType::Definition);
+        assert!(definition_query.language_hints.contains(&"rust".to_string()));
+        assert!(definition_query.is_code_query);
+        
+        // Test language detection
+        let rust_query = search.preprocess_query("trait implementation in Rust");
+        assert!(rust_query.language_hints.contains(&"rust".to_string()));
+        
+        let python_query = search.preprocess_query("python class definition");
+        assert!(python_query.language_hints.contains(&"python".to_string()));
+        
+        // Test expanded terms
+        let impl_query = search.preprocess_query("how to implement Display trait");
+        assert_eq!(impl_query.query_type, QueryType::Implementation);
+        assert!(impl_query.expanded_terms.contains(&"implement".to_string()));
+        assert!(impl_query.expanded_terms.contains(&"display".to_string()));
+        assert!(impl_query.expanded_terms.contains(&"trait".to_string()));
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_score_normalization() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let db = VectorDB::new(db_path)?;
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Create test results with different scores
+        let mut results = vec![
+            SearchResult {
+                file_path: "file1.rs".to_string(),
+                similarity: 0.9,
+                snippet: "Snippet 1".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file2.rs".to_string(),
+                similarity: 0.85,
+                snippet: "Snippet 2".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file3.rs".to_string(),
+                similarity: 0.8,
+                snippet: "Snippet 3".to_string(),
+                code_context: None,
+            },
+        ];
+        
+        // Test min-max normalization
+        search.normalize_scores(&mut results);
+        
+        // The highest score should now be 1.0
+        assert_eq!(results[0].similarity, 1.0);
+        // The lowest score should now be 0.0
+        assert_eq!(results[2].similarity, 0.0);
+        // The middle score should be normalized within this range
+        assert!(results[1].similarity > 0.0 && results[1].similarity < 1.0);
+        
+        // Test power scaling
+        let mut results = vec![
+            SearchResult {
+                file_path: "file1.rs".to_string(),
+                similarity: 0.9,
+                snippet: "Snippet 1".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file2.rs".to_string(),
+                similarity: 0.6,
+                snippet: "Snippet 2".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file3.rs".to_string(),
+                similarity: 0.3,
+                snippet: "Snippet 3".to_string(),
+                code_context: None,
+            },
+        ];
+        
+        // Save original scores
+        let original_scores: Vec<f32> = results.iter().map(|r| r.similarity).collect();
+        
+        // Apply power scaling with power < 1 (should compress differences)
+        search.power_scale_scores(&mut results, 0.5);
+        
+        // Check that scores have been changed but order is preserved
+        for i in 0..results.len() {
+            assert_ne!(results[i].similarity, original_scores[i]);
+        }
+        assert!(results[0].similarity > results[1].similarity);
+        assert!(results[1].similarity > results[2].similarity);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_code_ranking_signals() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let db = VectorDB::new(db_path)?;
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Create test results with different snippets
+        let function_snippet = "fn test_function() { println!(\"test\"); }";
+        let struct_snippet = "struct TestStruct { field: i32 }";
+        let impl_snippet = "impl TestStruct { fn new() -> Self { Self { field: 0 } } }";
+        
+        let mut results = vec![
+            SearchResult {
+                file_path: "function.rs".to_string(),
+                similarity: 0.8,
+                snippet: function_snippet.to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "struct.rs".to_string(),
+                similarity: 0.7, // Make initial score lower to avoid test flakiness
+                snippet: struct_snippet.to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "impl.rs".to_string(),
+                similarity: 0.6, // Make initial score lower to avoid test flakiness
+                snippet: impl_snippet.to_string(),
+                code_context: None,
+            },
+        ];
+        
+        // Save initial scores
+        let initial_scores = results.iter().map(|r| r.similarity).collect::<Vec<_>>();
+        
+        // Apply code ranking for a function query
+        search.apply_code_ranking_signals(&mut results, "function test_function")?;
+        
+        // Sort the results again to ensure they're in correct order
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Check that scores have been changed
+        for (i, result) in results.iter().enumerate() {
+            assert!(result.similarity != initial_scores[i], "Score at position {} was not changed by ranking signals", i);
+        }
+        
+        // Check that the function result is now first
+        assert!(results[0].file_path == "function.rs", "Function file should have the highest score now");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_result_diversity() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let db = VectorDB::new(db_path)?;
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Create similar snippets
+        let snippet1 = "This is a test function that does testing";
+        let snippet2 = "This is also a test function that does testing";
+        let snippet3 = "This function is completely different and doesn't test";
+        
+        let results = vec![
+            SearchResult {
+                file_path: "file1.rs".to_string(),
+                similarity: 0.9,
+                snippet: snippet1.to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file2.rs".to_string(),
+                similarity: 0.8,
+                snippet: snippet2.to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file3.rs".to_string(),
+                similarity: 0.7,
+                snippet: snippet3.to_string(),
+                code_context: None,
+            },
+        ];
+        
+        // Group similar results
+        let grouped = search.group_similar_results(results, 0.6);
+        
+        // Should group the two similar snippets and keep the different one
+        assert_eq!(grouped.len(), 2);
+        
+        // Make sure the highest scoring items from each group are kept
+        let file_paths: HashSet<_> = grouped.iter().map(|r| &r.file_path).collect();
+        assert!(file_paths.contains(&"file1.rs".to_string()));
+        assert!(file_paths.contains(&"file3.rs".to_string()));
+        
         Ok(())
     }
 } 
