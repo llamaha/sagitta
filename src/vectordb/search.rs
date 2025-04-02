@@ -2,8 +2,7 @@ use std::fs;
 use anyhow::Result;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
-use crate::vectordb::parsing::{CodeParser, RustAnalyzer, CodeElement};
-use regex;
+use crate::vectordb::parsing::{CodeParser, RustAnalyzer, CodeElement, TypeKind};
 use std::path::Path;
 use std::collections::HashMap;
 
@@ -46,10 +45,15 @@ impl Search {
         }
     }
 
-    // Enhanced search_code method using RustAnalyzer
+    /// Enhanced search_code method with improved code structure recognition and ranking
     pub fn search_code(&mut self, query: &str, search_type: Option<CodeSearchType>) -> Result<Vec<SearchResult>> {
         // First, use the semantic search to get initial results
         let mut results = self.search(query)?;
+        
+        // Extract query information before borrowing the analyzer
+        let (code_elements, is_structural_query) = self.extract_code_query_elements(query);
+        let method_name = self.extract_method_name_from_query(query);
+        let type_name = self.extract_type_name_from_query(query);
         
         // Check if rust-analyzer is available
         if let Some(analyzer) = &mut self.rust_analyzer {
@@ -66,93 +70,208 @@ impl Search {
                 }
             }
             
-            // Apply advanced code-aware boosts based on search type
+            // Apply code-aware ranking to each result
             for result in &mut results {
-                // Only apply to Rust files
+                // Skip non-Rust files
                 let path = Path::new(&result.file_path);
                 if !path.extension().map_or(false, |ext| ext == "rs") {
                     continue;
                 }
                 
+                // Calculate code structure score based on query type and path
                 let code_boost = match search_type {
                     Some(CodeSearchType::Function) => {
-                        // Look for function references in all files
-                        match analyzer.find_references(query) {
-                            Ok(refs) => {
-                                let refs_in_this_file: Vec<_> = refs.iter()
-                                    .filter(|e| match e {
-                                        CodeElement::Import { span, .. } => {
-                                            span.file_path.to_string_lossy() == result.file_path
-                                        },
-                                        _ => false,
-                                    })
-                                    .collect();
+                        // Search for method implementations
+                        let method_impls = analyzer.find_method_implementations(&method_name);
+                        
+                        // Search for direct method declarations
+                        let methods = if let Some(methods) = analyzer.find_method(&method_name) {
+                            // Filter to those in the current file
+                            methods.iter()
+                                .filter(|m| m.file_path == path)
+                                .collect::<Vec<_>>()
+                        } else {
+                            Vec::new()
+                        };
+                        
+                        if !method_impls.is_empty() {
+                            // Find method implementations in this file
+                            let impls_in_file: Vec<_> = method_impls.iter()
+                                .filter(|m| m.file_path == path)
+                                .collect();
+                            
+                            if !impls_in_file.is_empty() {
+                                // Get the first implementation for context
+                                let first_impl = impls_in_file[0];
                                 
-                                if !refs_in_this_file.is_empty() {
-                                    // Update snippet to include the reference context
-                                    if let Some(first_ref) = refs_in_this_file.first() {
-                                        if let CodeElement::Import { path: _, span } = first_ref {
-                                            if let Ok(content) = fs::read_to_string(&span.file_path) {
-                                                let lines: Vec<_> = content.lines().collect();
-                                                
-                                                // Create context for the snippet
-                                                let start_line = span.start_line.saturating_sub(2);
-                                                let end_line = std::cmp::min(span.end_line + 2, lines.len());
-                                                
-                                                let context = lines[start_line..end_line].join("\n");
-                                                result.code_context = Some(context);
-                                            }
-                                        }
-                                    }
+                                // Generate rich context for the method
+                                if let Some(elements) = analyzer.find_elements_by_name(&method_name).first() {
+                                    result.code_context = Some(analyzer.extract_rich_context(elements));
                                     
-                                    CODE_SEARCH_BOOST
+                                    // Highest boost for exact method implementation matches
+                                    CODE_SEARCH_BOOST * 2.0
                                 } else {
-                                    1.0
+                                    // Create a basic context if we can't find the element
+                                    let containing_type = if let Some(typ) = &first_impl.containing_type {
+                                        format!(" in {}", typ)
+                                    } else {
+                                        String::new()
+                                    };
+                                    
+                                    result.code_context = Some(format!(
+                                        "fn {}({}){} -> {}\n\nLocation: {}:{}",
+                                        first_impl.name,
+                                        first_impl.params.join(", "),
+                                        containing_type,
+                                        first_impl.return_type.as_deref().unwrap_or("()"),
+                                        first_impl.file_path.display(),
+                                        first_impl.span.start_line
+                                    ));
+                                    
+                                    CODE_SEARCH_BOOST * 2.0
                                 }
-                            },
-                            Err(_) => 1.0,
+                            } else {
+                                1.0
+                            }
+                        } else if !methods.is_empty() {
+                            // Found method declarations but not implementations
+                            let method = methods[0];
+                            
+                            // Create context for the method
+                            let containing_type = if let Some(typ) = &method.containing_type {
+                                format!(" in {}", typ)
+                            } else {
+                                String::new()
+                            };
+                            
+                            result.code_context = Some(format!(
+                                "fn {}({}){} -> {}\n\nLocation: {}:{}",
+                                method.name,
+                                method.params.join(", "),
+                                containing_type,
+                                method.return_type.as_deref().unwrap_or("()"),
+                                method.file_path.display(),
+                                method.span.start_line
+                            ));
+                            
+                            // Good boost for method declarations
+                            CODE_SEARCH_BOOST * 1.5
+                        } else if result.snippet.to_lowercase().contains(&method_name.to_lowercase()) {
+                            // Check if the function/method name appears in the snippet
+                            CODE_SEARCH_BOOST * 1.2
+                        } else {
+                            // No boost if no match
+                            1.0
                         }
                     },
                     Some(CodeSearchType::Type) => {
-                        // Look for type references
-                        match analyzer.find_references(query) {
-                            Ok(refs) => {
-                                let refs_in_this_file: Vec<_> = refs.iter()
-                                    .filter(|e| match e {
-                                        CodeElement::Import { span, .. } => {
-                                            span.file_path.to_string_lossy() == result.file_path
-                                        },
-                                        _ => false,
-                                    })
-                                    .collect();
+                        // Find types by name
+                        let types = if let Some(types) = analyzer.find_type(&type_name) {
+                            // Filter to those in the current file
+                            types.iter()
+                                .filter(|t| t.file_path == path)
+                                .collect::<Vec<_>>()
+                        } else {
+                            Vec::new()
+                        };
+                        
+                        if !types.is_empty() {
+                            // Found a type definition
+                            let type_info = types[0];
+                            
+                            // Generate rich context
+                            if let Some(elements) = analyzer.find_elements_by_name(&type_name).first() {
+                                result.code_context = Some(analyzer.extract_rich_context(elements));
                                 
-                                if !refs_in_this_file.is_empty() {
-                                    CODE_SEARCH_BOOST
-                                } else {
-                                    1.0
+                                // Calculate boost based on type kind
+                                match type_info.kind {
+                                    TypeKind::Struct | TypeKind::Enum => CODE_SEARCH_BOOST * 2.0, // Highest for direct definitions
+                                    TypeKind::Trait => CODE_SEARCH_BOOST * 1.8,
+                                    TypeKind::Impl => CODE_SEARCH_BOOST * 1.5,
                                 }
-                            },
-                            Err(_) => 1.0,
+                            } else {
+                                // Create basic context if we can't find the element
+                                let kind = match type_info.kind {
+                                    TypeKind::Struct => "struct",
+                                    TypeKind::Enum => "enum",
+                                    TypeKind::Trait => "trait",
+                                    TypeKind::Impl => "impl",
+                                };
+                                
+                                let methods = if !type_info.methods.is_empty() {
+                                    format!("\nMethods: {}", type_info.methods.join(", "))
+                                } else {
+                                    String::new()
+                                };
+                                
+                                result.code_context = Some(format!(
+                                    "{} {}{}\n\nLocation: {}:{}",
+                                    kind,
+                                    type_info.name,
+                                    methods,
+                                    type_info.file_path.display(),
+                                    type_info.span.start_line
+                                ));
+                                
+                                // Calculate boost based on type kind
+                                match type_info.kind {
+                                    TypeKind::Struct | TypeKind::Enum => CODE_SEARCH_BOOST * 2.0, // Highest for direct definitions
+                                    TypeKind::Trait => CODE_SEARCH_BOOST * 1.8,
+                                    TypeKind::Impl => CODE_SEARCH_BOOST * 1.5,
+                                }
+                            }
+                        } else if result.snippet.to_lowercase().contains(&type_name.to_lowercase()) {
+                            // Check if the type name appears in the snippet
+                            CODE_SEARCH_BOOST * 1.2
+                        } else {
+                            // No boost if no match
+                            1.0
                         }
                     },
                     Some(CodeSearchType::Dependency) => {
-                        // Check using rust-analyzer if the file has a dependency on query
-                        let path = Path::new(&result.file_path);
+                        // Try to parse the file
                         if path.exists() {
                             match analyzer.parse_file(path) {
                                 Ok(parsed) => {
-                                    if parsed.dependencies.iter().any(|dep| dep.contains(query)) {
-                                        // Add the import statement to context
-                                        let import = parsed.elements.iter().find(|e| match e {
-                                            CodeElement::Import { path, .. } => path.contains(query),
-                                            _ => false,
-                                        });
+                                    // Check if the file has a dependency on the query
+                                    let dependencies: Vec<_> = parsed.dependencies.iter()
+                                        .filter(|dep| dep.to_lowercase().contains(&query.to_lowercase()))
+                                        .collect();
+                                    
+                                    if !dependencies.is_empty() {
+                                        // Add the import statements to context
+                                        let imports: Vec<_> = parsed.elements.iter()
+                                            .filter_map(|e| match e {
+                                                CodeElement::Import { path: import_path, span } if 
+                                                    import_path.to_lowercase().contains(&query.to_lowercase()) => {
+                                                    Some(format!("use {}; // at line {}", import_path, span.start_line))
+                                                },
+                                                _ => None,
+                                            })
+                                            .collect();
                                         
-                                        if let Some(CodeElement::Import { path, span: _ }) = import {
-                                            result.code_context = Some(format!("import: {}", path));
-                                            CODE_SEARCH_BOOST * 1.2 // Extra boost for direct imports
+                                        if !imports.is_empty() {
+                                            result.code_context = Some(format!(
+                                                "Dependencies matching '{}':\n{}", 
+                                                query,
+                                                imports.join("\n")
+                                            ));
+                                            
+                                            // Higher boost for direct imports
+                                            CODE_SEARCH_BOOST * 1.8
                                         } else {
-                                            CODE_SEARCH_BOOST
+                                            // Just list the dependencies
+                                            let deps_str = dependencies.iter()
+                                                .map(|s| s.as_str())
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            
+                                            result.code_context = Some(format!(
+                                                "File uses dependencies: {}", 
+                                                deps_str
+                                            ));
+                                            
+                                            CODE_SEARCH_BOOST * 1.3
                                         }
                                     } else {
                                         1.0
@@ -160,75 +279,107 @@ impl Search {
                                 },
                                 Err(_) => 1.0,
                             }
+                        } else if result.snippet.to_lowercase().contains(&format!("use {}::", query.to_lowercase())) {
+                            // Check if the dependency appears in the snippet
+                            CODE_SEARCH_BOOST * 1.1
                         } else {
+                            // No boost if no match
                             1.0
                         }
                     },
                     Some(CodeSearchType::Usage) => {
-                        // Try to find usages with the rust-analyzer
+                        // Find all references to the query
                         match analyzer.find_references(query) {
                             Ok(refs) => {
-                                let refs_in_this_file: Vec<_> = refs.iter()
+                                // Filter references to this file
+                                let refs_in_file: Vec<_> = refs.iter()
                                     .filter(|e| match e {
-                                        CodeElement::Import { span, .. } => {
-                                            span.file_path.to_string_lossy() == result.file_path
-                                        },
-                                        _ => false,
+                                        CodeElement::Function { span, .. } |
+                                        CodeElement::Struct { span, .. } |
+                                        CodeElement::Enum { span, .. } |
+                                        CodeElement::Trait { span, .. } |
+                                        CodeElement::Import { span, .. } |
+                                        CodeElement::TypeAlias { span, .. } |
+                                        CodeElement::Impl { span, .. } => span.file_path == path,
                                     })
                                     .collect();
                                 
-                                if !refs_in_this_file.is_empty() {
-                                    // Get contexts from the first reference
-                                    if let Some(first_ref) = refs_in_this_file.first() {
-                                        if let CodeElement::Import { span, .. } = first_ref {
-                                            if let Ok(content) = fs::read_to_string(&span.file_path) {
-                                                let lines: Vec<_> = content.lines().collect();
-                                                
-                                                // Create context for the snippet
-                                                let start_line = span.start_line.saturating_sub(2);
-                                                let end_line = std::cmp::min(span.end_line + 2, lines.len());
-                                                
-                                                let context = lines[start_line..end_line].join("\n");
-                                                result.code_context = Some(context);
-                                            }
-                                        }
-                                    }
+                                if !refs_in_file.is_empty() {
+                                    // Generate contexts for the references
+                                    let contexts: Vec<_> = refs_in_file.iter()
+                                        .take(3) // Take at most 3 references for context
+                                        .map(|&e| analyzer.extract_rich_context(e))
+                                        .collect();
                                     
-                                    CODE_SEARCH_BOOST * 1.5 // Higher boost for actual usages
-                                } else {
-                                    1.0
-                                }
-                            },
-                            Err(_) => 1.0,
-                        }
-                    },
-                    None => {
-                        // General code search - try to find any references
-                        match analyzer.find_references(query) {
-                            Ok(refs) => {
-                                let refs_in_this_file: Vec<_> = refs.iter()
-                                    .filter(|e| match e {
-                                        CodeElement::Import { span, .. } => {
-                                            span.file_path.to_string_lossy() == result.file_path
-                                        },
-                                        _ => false,
-                                    })
-                                    .collect();
-                                
-                                if !refs_in_this_file.is_empty() {
-                                    CODE_SEARCH_BOOST
+                                    result.code_context = Some(format!(
+                                        "Found {} references to '{}' in file:\n\n{}",
+                                        refs_in_file.len(),
+                                        query,
+                                        contexts.join("\n\n---\n\n")
+                                    ));
+                                    
+                                    // Higher boost for more references
+                                    let usage_count_boost = (1.0 + (refs_in_file.len() as f32 / 5.0)).min(2.0);
+                                    CODE_SEARCH_BOOST * usage_count_boost
                                 } else {
                                     1.0
                                 }
                             },
                             Err(_) => {
-                                // Fall back to the snippet-based relevance
+                                // Check if the query appears in the snippet
                                 if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
-                                    CODE_SEARCH_BOOST
+                                    // Count occurrences as a simple measure of relevance
+                                    let occurrences = result.snippet.to_lowercase().matches(&query.to_lowercase()).count();
+                                    let count_boost = (1.0 + (occurrences as f32 / 3.0)).min(1.5);
+                                    CODE_SEARCH_BOOST * count_boost
                                 } else {
                                     1.0
                                 }
                             },
+                        }
+                    },
+                    None => {
+                        // Default to general code search
+                        if is_structural_query {
+                            // If query contains specific code structure keywords
+                            if code_elements.contains(&"method") || code_elements.contains(&"function") || 
+                               code_elements.contains(&"fn") {
+                                // This is likely looking for a function/method - use the method boost logic
+                                // (Repeat of the method boost logic, but keeping it simple for now)
+                                let method_impls = analyzer.find_method_implementations(&method_name);
+                                
+                                if !method_impls.is_empty() {
+                                    let impls_in_file: Vec<_> = method_impls.iter()
+                                        .filter(|m| m.file_path == path)
+                                        .collect();
+                                    
+                                    if !impls_in_file.is_empty() {
+                                        CODE_SEARCH_BOOST * 2.0
+                                    } else {
+                                        1.0
+                                    }
+                                } else {
+                                    1.0
+                                }
+                            } else {
+                                // Try to find any match in the file
+                                let matches = analyzer.find_elements_by_name(query);
+                                
+                                if !matches.is_empty() {
+                                    CODE_SEARCH_BOOST * 1.5
+                                } else if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                    CODE_SEARCH_BOOST * 1.2
+                                } else {
+                                    1.0
+                                }
+                            }
+                        } else {
+                            // Default to snippet-based relevance
+                            if result.snippet.to_lowercase().contains(&query.to_lowercase()) {
+                                CODE_SEARCH_BOOST * 1.2
+                            } else {
+                                1.0
+                            }
                         }
                     },
                 };
@@ -333,6 +484,99 @@ impl Search {
         
         Ok(results)
     }
+    
+    /// Extract method name from a query like "search_parallel method in HNSWIndex"
+    fn extract_method_name_from_query(&self, query: &str) -> String {
+        let query_lower = query.to_lowercase();
+        
+        // Pattern: <method_name> method in <type>
+        if let Some(method_idx) = query_lower.find(" method in ") {
+            // Extract the method name (everything before " method in ")
+            return query[..method_idx].trim().to_string();
+        }
+        
+        // Pattern: method <method_name> in <type>
+        if let Some(method_idx) = query_lower.find("method ") {
+            let after_method = &query_lower[method_idx + "method ".len()..];
+            if let Some(in_idx) = after_method.find(" in ") {
+                return query[method_idx + "method ".len()..method_idx + "method ".len() + in_idx].trim().to_string();
+            }
+        }
+        
+        // Pattern: function <function_name>
+        if let Some(fn_idx) = query_lower.find("function ") {
+            return query[fn_idx + "function ".len()..].trim().to_string();
+        }
+        
+        // Pattern: fn <function_name>
+        if let Some(fn_idx) = query_lower.find("fn ") {
+            return query[fn_idx + "fn ".len()..].trim().to_string();
+        }
+        
+        // Default: return the entire query, removing common keywords
+        query.replace("method", "")
+             .replace("function", "")
+             .replace("impl", "")
+             .replace("fn", "")
+             .trim()
+             .to_string()
+    }
+    
+    /// Extract type name from a query like "search_parallel method in HNSWIndex"
+    fn extract_type_name_from_query(&self, query: &str) -> String {
+        let query_lower = query.to_lowercase();
+        
+        // Pattern: <method_name> method in <type>
+        // Pattern: <method_name> in <type>
+        if let Some(in_idx) = query_lower.find(" in ") {
+            return query[in_idx + " in ".len()..].trim().to_string();
+        }
+        
+        // Pattern: <type>::<method>
+        if let Some(scope_idx) = query.find("::") {
+            return query[..scope_idx].trim().to_string();
+        }
+        
+        // Pattern: struct <name>
+        if let Some(struct_idx) = query_lower.find("struct ") {
+            return query[struct_idx + "struct ".len()..].trim().to_string();
+        }
+        
+        // Pattern: trait <name>
+        if let Some(trait_idx) = query_lower.find("trait ") {
+            return query[trait_idx + "trait ".len()..].trim().to_string();
+        }
+        
+        // Pattern: enum <name>
+        if let Some(enum_idx) = query_lower.find("enum ") {
+            return query[enum_idx + "enum ".len()..].trim().to_string();
+        }
+        
+        // Default: just return the query
+        query.trim().to_string()
+    }
+    
+    /// Extract code structure elements from the query and determine if it's a structural query
+    fn extract_code_query_elements<'a>(&self, query: &'a str) -> (Vec<&'a str>, bool) {
+        let query_lower = query.to_lowercase();
+        let code_keywords = [
+            "method", "function", "fn", "struct", "trait", "enum", "impl", 
+            "type", "class", "module", "implementation", "definition",
+            "interface", "signature", "parameter", "return", "static",
+            "pub", "self", "mut", "const", "where", "use", "crate"
+        ];
+        
+        let found_elements: Vec<&str> = code_keywords.iter()
+            .filter(|&&keyword| query_lower.contains(keyword))
+            .copied()
+            .collect();
+        
+        // It's a structural query if it contains any code keywords 
+        // or if it contains "::" (Rust scope resolution)
+        let is_structural = !found_elements.is_empty() || query.contains("::");
+        
+        (found_elements, is_structural)
+    }
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
         // Embed the query string
@@ -398,215 +642,173 @@ impl Search {
         let is_method_query = query_lower.contains("method") || 
                               query_lower.contains("function") || 
                               query_lower.contains("fn ");
-
-        // Use a larger context window for method queries
-        let max_context_lines = if is_method_query { 30 } else { MAX_CONTEXT_LINES };
         
-        // Find all matching regions with scores
-        let mut regions: Vec<(usize, f32, usize)> = Vec::new(); // (start_line, score, length)
+        // Check if this is a type-related query
+        let is_type_query = query_lower.contains("struct") ||
+                            query_lower.contains("enum") ||
+                            query_lower.contains("trait") ||
+                            query_lower.contains("class") ||
+                            query_lower.contains("type");
         
-        for i in 0..lines.len() {
-            let window_end = (i + WINDOW_SIZE).min(lines.len());
-            let window = &lines[i..window_end];
-            let window_text = window.join("\n");
-            
-            // Calculate region score based on multiple factors
-            let mut score = 0.0;
-            
-            // 1. Term frequency in the region
-            let window_lower = window_text.to_lowercase();
-            for term in &query_terms {
-                let count = window_lower.matches(term).count();
-                if count > 0 {
-                    score += count as f32 * 2.0;
-                    
-                    // Bonus for exact matches (case-sensitive)
-                    if window_text.contains(term) {
-                        score += 2.0;  // Increased bonus for exact matches
-                    }
-                }
-            }
-            
-            // 2. Code structure bonus
-            let has_fn = window_text.contains("fn ");
-            let has_struct = window_text.contains("struct ");
-            let has_impl = window_text.contains("impl ");
-            let has_brace = window_text.contains("{") || window_text.contains("}");
-            
-            // Higher multipliers for code structures
-            if has_struct {
-                score *= 3.0;  // Highest priority for struct definitions
-            }
-            if has_impl {
-                score *= 2.5;  // High priority for impl blocks
-            }
-            if has_fn {
-                score *= 3.0;  // Increased priority for function definitions
-                
-                // Extra boost for method queries
-                if is_method_query {
-                    score *= 2.0;
-                }
-            }
-            if has_brace {
-                score *= 1.5;  // Bonus for code block boundaries
-            }
-            
-            // 3. Position-based scoring
-            let pos_multiplier = if i < lines.len() {
-                1.0 + (lines.len() - i) as f32 / lines.len() as f32
-            } else {
-                1.0
-            };
-            score *= pos_multiplier;
-            
-            // 4. Semantic similarity
-            if score > 0.0 {
-                if let Ok(window_embedding) = self.model.embed(&window_text) {
-                    if let Ok(query_embedding) = self.model.embed(query) {
-                        let sim = cosine_similarity(&query_embedding, &window_embedding);
-                        score *= 1.0 + sim;  // Use similarity as a boost
-                    }
-                }
-                
-                // Find optimal context size
-                let mut context_start = i;
-                let mut context_length = window_end - i;
-                
-                // Look backwards for context
-                while context_start > 0 && 
-                      context_length < max_context_lines &&
-                      (lines[context_start - 1].contains("{") || 
-                       lines[context_start - 1].trim().is_empty() ||
-                       lines[context_start - 1].starts_with("    ") ||
-                       lines[context_start - 1].contains("impl") ||
-                       lines[context_start - 1].contains("struct") ||
-                       lines[context_start - 1].contains("fn")) {
-                    context_start -= 1;
-                    context_length += 1;
-                }
-                
-                // For method queries, try to capture the entire method body
-                if is_method_query && has_fn {
-                    let mut brace_count = 0;
-                    let mut in_method_body = false;
-                    
-                    // First find start of method
-                    while context_start > 0 {
-                        let line = lines[context_start];
-                        if line.contains("fn ") && !in_method_body {
-                            in_method_body = true;
-                            if line.contains("{") {
-                                brace_count += 1;
-                            }
-                        }
-                        if in_method_body {
-                            break;
-                        }
-                        context_start -= 1;
-                        context_length += 1;
-                        if context_length >= max_context_lines {
-                            break;
-                        }
-                    }
-                    
-                    // Then find end of method body
-                    let mut context_end = window_end;
-                    in_method_body = false;
-                    
-                    // Process the starting line for braces
-                    if context_start < lines.len() {
-                        let start_line = lines[context_start];
-                        if start_line.contains("fn ") {
-                            in_method_body = true;
-                            brace_count += start_line.chars().filter(|&c| c == '{').count();
-                            brace_count -= start_line.chars().filter(|&c| c == '}').count();
-                        }
-                    }
-                    
-                    // Now find closing brace
-                    if in_method_body && brace_count > 0 {
-                        while context_end < lines.len() && 
-                              context_length < max_context_lines * 2 && // Allow longer snippets for methods
-                              brace_count > 0 {
-                            if context_end < lines.len() {
-                                let line = lines[context_end];
-                                brace_count += line.chars().filter(|&c| c == '{').count();
-                                brace_count -= line.chars().filter(|&c| c == '}').count();
-                            }
-                            context_end += 1;
-                            context_length += 1;
-                        }
-                    }
-                } else {
-                    // Regular context expansion for non-method queries
-                    // Look forwards for context
-                    let mut context_end = window_end;
-                    while context_end < lines.len() && 
-                          context_length < max_context_lines &&
-                          (lines[context_end - 1].contains("}") ||
-                           lines[context_end - 1].trim().is_empty() ||
-                           lines[context_end - 1].contains("{") ||
-                           lines[context_end - 1].contains("fn")) {
-                        context_end += 1;
-                        context_length += 1;
-                    }
-                }
-                
-                // Store the region
-                regions.push((context_start, score, context_length));
-            }
-        }
+        // Check if it's an implementation query
+        let is_impl_query = query_lower.contains("impl") ||
+                            query_lower.contains("implementation");
         
-        // Sort regions by score in descending order
-        regions.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
-        // Generate the snippet from the best region
-        if let Some((start_line, _, length)) = regions.first() {
-            let end_line = (*start_line + length).min(lines.len());
-            let relevant_lines = &lines[*start_line..end_line];
-            
-            // Highlight matching terms
-            let mut snippet = String::new();
-            for line in relevant_lines {
-                let mut line_str = line.to_string();
-                
-                // Highlight matching terms with ANSI colors
-                for term in &query_terms {
-                    let term_escaped = regex::escape(term);
-                    let re = regex::Regex::new(&format!(r"(?i){}", term_escaped)).unwrap();
-                    line_str = re.replace_all(&line_str, "\x1b[1;32m$0\x1b[0m").to_string();
-                }
-                
-                snippet.push_str(&line_str);
-                snippet.push('\n');
-            }
-            
-            // Add line numbers
-            let mut numbered_snippet = String::new();
-            for (i, line) in relevant_lines.iter().enumerate() {
-                numbered_snippet.push_str(&format!("{:4} | {}\n", start_line + i + 1, line));
-            }
-            
-            Ok(numbered_snippet)
+        // Extract method or type name from the query
+        let code_element_name = if is_method_query {
+            self.extract_method_name_from_query(query)
+        } else if is_type_query || is_impl_query {
+            self.extract_type_name_from_query(query)
         } else {
-            // Fallback to a simple snippet if no good regions found
-            let mut simple_snippet = String::new();
-            // Fix potential underflow by ensuring we don't subtract more than lines.len()/2
-            let min_context = MIN_CONTEXT_LINES.min(lines.len() / 2);
-            let start = if lines.len() >= min_context * 2 {
-                lines.len() / 2 - min_context
-            } else {
-                0
-            };
-            let end = (start + min_context * 2).min(lines.len());
+            query.to_string()
+        };
+        
+        // First try to find a line that contains all query terms
+        let mut best_line_idx = None;
+        let mut best_score = 0;
+        
+        // Special handling for code-specific queries
+        if is_method_query || is_type_query || is_impl_query {
+            // For method queries, look for lines like "fn method_name" or "impl Type { fn method_name"
+            // For type queries, look for lines like "struct Type" or "enum Type"
+            // For impl queries, look for lines like "impl Type"
+            for (i, line) in lines.iter().enumerate() {
+                let line_lower = line.to_lowercase();
+                
+                if is_method_query {
+                    // Look for function declarations
+                    if (line_lower.contains("fn ") || line_lower.contains("pub fn ")) &&
+                       line_lower.contains(&code_element_name.to_lowercase()) {
+                        best_line_idx = Some(i);
+                        best_score = 100; // Very high score for exact function match
+                        break;
+                    }
+                    
+                    // Look for method implementations in impl blocks
+                    if line_lower.contains("impl") && line.contains("{") {
+                        // Found the start of an impl block, look ahead for the method
+                        for j in i+1..std::cmp::min(i+20, lines.len()) {
+                            let next_line = lines[j].to_lowercase();
+                            if (next_line.contains("fn ") || next_line.contains("pub fn ")) &&
+                               next_line.contains(&code_element_name.to_lowercase()) {
+                                best_line_idx = Some(j);
+                                best_score = 100; // Very high score for exact method match
+                                break;
+                            }
+                        }
+                        if best_score == 100 {
+                            break;
+                        }
+                    }
+                } else if is_type_query {
+                    // Look for type declarations
+                    if (line_lower.contains("struct ") || 
+                        line_lower.contains("enum ") || 
+                        line_lower.contains("trait ") ||
+                        line_lower.contains("type ")) &&
+                       line_lower.contains(&code_element_name.to_lowercase()) {
+                        best_line_idx = Some(i);
+                        best_score = 100; // Very high score for exact type match
+                        break;
+                    }
+                } else if is_impl_query {
+                    // Look for impl blocks
+                    if line_lower.contains("impl ") &&
+                       line_lower.contains(&code_element_name.to_lowercase()) {
+                        best_line_idx = Some(i);
+                        best_score = 100; // Very high score for exact impl match
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If no special code match was found, fall back to general term matching
+        if best_line_idx.is_none() {
+            for (i, line) in lines.iter().enumerate() {
+                let line_lower = line.to_lowercase();
+                
+                let mut score = 0;
+                for term in &query_terms {
+                    if line_lower.contains(term) {
+                        score += 1;
+                    }
+                }
+                
+                if score > best_score {
+                    best_score = score;
+                    best_line_idx = Some(i);
+                }
+            }
+        }
+        
+        // If still no match, just take the first line that contains any query term
+        if best_line_idx.is_none() {
+            for (i, line) in lines.iter().enumerate() {
+                let line_lower = line.to_lowercase();
+                
+                for term in &query_terms {
+                    if line_lower.contains(term) {
+                        best_line_idx = Some(i);
+                        break;
+                    }
+                }
+                
+                if best_line_idx.is_some() {
+                    break;
+                }
+            }
+        }
+        
+        // Get a window of lines around the best match
+        let context_lines = if is_method_query || is_type_query || is_impl_query {
+            MAX_CONTEXT_LINES // More context for code-specific queries
+        } else {
+            WINDOW_SIZE
+        };
+        
+        let snippet = if let Some(line_idx) = best_line_idx {
+            let start = line_idx.saturating_sub(context_lines / 2);
+            let end = std::cmp::min(line_idx + context_lines / 2, lines.len());
             
+            // Format the snippet with line numbers and highlight the match
+            // Only add beginning context marker if we're not at the start
+            let mut result = if start > 0 {
+                "// ...\n".to_string()
+            } else {
+                String::new()
+            };
+            
+            // Add the snippet lines with line numbers
             for i in start..end {
-                simple_snippet.push_str(&format!("{:4} | {}\n", i + 1, lines[i]));
+                let line_num = i + 1; // Line numbers are 1-indexed
+                result.push_str(&format!("{:4}: {}\n", line_num, lines[i]));
             }
             
-            Ok(simple_snippet)
-        }
+            // Only add ending context marker if we're not at the end
+            if end < lines.len() {
+                result.push_str("// ...");
+            }
+            
+            result
+        } else {
+            // If no match found, just return the first few lines
+            let end = std::cmp::min(WINDOW_SIZE, lines.len());
+            let mut result = String::new();
+            
+            for i in 0..end {
+                let line_num = i + 1; // Line numbers are 1-indexed
+                result.push_str(&format!("{:4}: {}\n", line_num, lines[i]));
+            }
+            
+            if end < lines.len() {
+                result.push_str("// ...");
+            }
+            
+            result
+        };
+        
+        Ok(snippet)
     }
 
     /// Calculate BM25 score for lexical search
@@ -741,6 +943,58 @@ impl Search {
         results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
         
         Ok(results)
+    }
+
+    /// Enhance a snippet to focus on the query terms
+    fn enhance_snippet_for_query(&self, snippet: &mut String, query: &str) {
+        let query_lower = query.to_lowercase();
+        let snippet_lower = snippet.to_lowercase();
+        
+        // If the query isn't in the snippet, nothing to do
+        if !snippet_lower.contains(&query_lower) {
+            return;
+        }
+        
+        // Find the position of the query in the snippet
+        let pos = snippet_lower.find(&query_lower).unwrap();
+        
+        // Extract the relevant portion of the snippet
+        let lines: Vec<&str> = snippet.lines().collect();
+        let mut start_line = 0;
+        let mut end_line = lines.len();
+        let mut current_pos = 0;
+        
+        // Find the line containing the query
+        for (i, line) in lines.iter().enumerate() {
+            let line_len = line.len() + 1; // +1 for newline
+            if current_pos <= pos && pos < current_pos + line_len {
+                // Found the line with the match
+                start_line = i.saturating_sub(2); // Include 2 lines before
+                end_line = (i + 3).min(lines.len()); // Include 2 lines after
+                break;
+            }
+            current_pos += line_len;
+        }
+        
+        // Create a new snippet focused on the match
+        let new_snippet = lines[start_line..end_line].join("\n");
+        
+        // Create the updated snippet
+        let mut updated_snippet = String::new();
+        
+        // Add indicators if we truncated the snippet
+        if start_line > 0 {
+            updated_snippet.push_str("... (truncated)\n");
+        }
+        
+        updated_snippet.push_str(&new_snippet);
+        
+        if end_line < lines.len() {
+            updated_snippet.push_str("\n... (truncated)");
+        }
+        
+        // Update the snippet
+        *snippet = updated_snippet;
     }
 }
 

@@ -78,6 +78,9 @@ pub enum VectorDBError {
     
     #[error("General error: {0}")]
     GeneralError(String),
+    
+    #[error("Directory not found: {0}")]
+    DirectoryNotFound(String),
 }
 
 /// Conversion from syn::Error
