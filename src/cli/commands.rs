@@ -116,6 +116,21 @@ pub enum Command {
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
     },
+
+    /// Record feedback for a search result to improve future searches
+    Feedback {
+        /// The search query
+        #[arg(short, long)]
+        query: String,
+        
+        /// The file path of the result
+        #[arg(short, long)]
+        file: String,
+        
+        /// Whether the result was relevant (true) or not (false)
+        #[arg(short, long)]
+        relevant: bool,
+    },
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -404,6 +419,19 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("{}", result.snippet);
                 println!();
             }
+        }
+        Command::Feedback { query, file, relevant } => {
+            // Create search instance to access feedback recording
+            let model = EmbeddingModel::new()?;
+            let mut search = Search::new(db, model);
+            
+            // Record the feedback
+            search.record_result_feedback(&query, &file, relevant)?;
+            
+            println!("Feedback recorded: '{}' {} for query '{}'", 
+                file, 
+                if relevant { "is relevant" } else { "is not relevant" },
+                query);
         }
     }
     Ok(())

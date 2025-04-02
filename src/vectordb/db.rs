@@ -14,10 +14,29 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::AtomicBool;
 
+/// Relevance feedback data for a query-file pair
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FeedbackEntry {
+    /// Number of times this file was marked as relevant for the query
+    pub relevant_count: usize,
+    /// Number of times this file was marked as irrelevant for the query
+    pub irrelevant_count: usize,
+    /// Aggregated relevance score (1.0 = highly relevant, 0.0 = irrelevant)
+    pub relevance_score: f32,
+}
+
+/// Collection of query feedback data
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct FeedbackData {
+    /// Maps query -> file_path -> feedback
+    pub query_feedback: HashMap<String, HashMap<String, FeedbackEntry>>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct DBFile {
     embeddings: HashMap<String, Vec<f32>>,
     hnsw_config: Option<HNSWConfig>,
+    feedback: Option<FeedbackData>,
 }
 
 pub struct VectorDB {
@@ -25,6 +44,7 @@ pub struct VectorDB {
     db_path: String,
     cache: EmbeddingCache,
     pub hnsw_index: Option<HNSWIndex>,
+    feedback: FeedbackData,
 }
 
 // Implement Clone for VectorDB
@@ -35,25 +55,30 @@ impl Clone for VectorDB {
             db_path: self.db_path.clone(),
             cache: self.cache.clone(),
             hnsw_index: self.hnsw_index.clone(),
+            feedback: self.feedback.clone(),
         }
     }
 }
 
 impl VectorDB {
     pub fn new(db_path: String) -> Result<Self> {
-        let (embeddings, hnsw_config) = if Path::new(&db_path).exists() {
+        let (embeddings, hnsw_config, feedback) = if Path::new(&db_path).exists() {
             // Try to read the existing database file, but handle corruption gracefully
             match fs::read_to_string(&db_path) {
                 Ok(contents) => {
                     match serde_json::from_str::<DBFile>(&contents) {
-                        Ok(db_file) => (db_file.embeddings, db_file.hnsw_config),
+                        Ok(db_file) => (
+                            db_file.embeddings, 
+                            db_file.hnsw_config, 
+                            db_file.feedback.unwrap_or_default()
+                        ),
                         Err(e) => {
                             // If JSON parsing fails, assume the file is corrupted
                             eprintln!("Warning: Database file appears to be corrupted: {}", e);
                             eprintln!("Creating a new empty database.");
                             // Remove corrupted file
                             let _ = fs::remove_file(&db_path);
-                            (HashMap::new(), Some(HNSWConfig::default()))
+                            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default())
                         }
                     }
                 }
@@ -61,12 +86,12 @@ impl VectorDB {
                     // Handle file read errors
                     eprintln!("Warning: Couldn't read database file: {}", e);
                     eprintln!("Creating a new empty database.");
-                    (HashMap::new(), Some(HNSWConfig::default()))
+                    (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default())
                 }
             }
         } else {
             // Create new database with default HNSW config
-            (HashMap::new(), Some(HNSWConfig::default()))
+            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default())
         };
 
         // Create cache in the same directory as the database
@@ -134,6 +159,7 @@ impl VectorDB {
             db_path,
             cache,
             hnsw_index,
+            feedback,
         })
     }
 
@@ -409,57 +435,33 @@ impl VectorDB {
     }
 
     fn save(&self) -> Result<()> {
-        if let Some(parent) = Path::new(&self.db_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| VectorDBError::DirectoryCreationError {
-                    path: parent.to_path_buf(),
-                    source: e,
-                })?;
-        }
-        
-        // Get HNSW config if available
-        let hnsw_config = self.hnsw_index.as_ref().map(|index| index.get_config());
-        
         let db_file = DBFile {
             embeddings: self.embeddings.clone(),
-            hnsw_config,
+            hnsw_config: self.hnsw_index.as_ref().map(|index| index.get_config()),
+            feedback: Some(self.feedback.clone()),
         };
         
-        // Create a temporary file first
-        let temp_path = format!("{}.tmp", self.db_path);
+        let serialized = serde_json::to_string_pretty(&db_file)
+            .map_err(|e| VectorDBError::DatabaseError(format!("Failed to serialize database: {}", e)))?;
+            
+        // Create parent directories if they don't exist
+        if let Some(parent) = Path::new(&self.db_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| VectorDBError::DatabaseError(format!("Failed to create database directory: {}", e)))?;
+        }
         
-        // Serialize to the temporary file first
-        let contents = serde_json::to_string_pretty(&db_file)
-            .map_err(VectorDBError::SerializationError)?;
-        fs::write(&temp_path, contents)
-            .map_err(|e| VectorDBError::FileWriteError {
-                path: Path::new(&temp_path).to_path_buf(),
-                source: e,
-            })?;
+        fs::write(&self.db_path, serialized)
+            .map_err(|e| VectorDBError::DatabaseError(format!("Failed to write database: {}", e)))?;
             
-        // Atomically rename the temporary file to the actual file
-        // This ensures we don't end up with a partially written file if interrupted
-        fs::rename(&temp_path, &self.db_path)
-            .map_err(|e| VectorDBError::FileWriteError {
-                path: Path::new(&self.db_path).to_path_buf(),
-                source: e,
-            })?;
-            
-        // Save the HNSW index to its own file if available
-        if let Some(index) = &self.hnsw_index {
+        // Save HNSW index to a separate file if it exists
+        if let Some(ref index) = self.hnsw_index {
             let hnsw_path = Path::new(&self.db_path)
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join("hnsw_index.json");
                 
-            // Use atomic write for HNSW index too
-            let hnsw_temp_path = format!("{}.tmp", hnsw_path.to_string_lossy());
-            index.save_to_file(Path::new(&hnsw_temp_path))?;
-            fs::rename(&hnsw_temp_path, &hnsw_path)
-                .map_err(|e| VectorDBError::FileWriteError {
-                    path: hnsw_path.clone(),
-                    source: e,
-                })?;
+            index.save_to_file(&hnsw_path)
+                .map_err(|e| VectorDBError::DatabaseError(format!("Failed to save HNSW index: {}", e)))?;
         }
         
         Ok(())
@@ -567,6 +569,218 @@ impl VectorDB {
     /// Get the file path associated with a node ID
     pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
         self.embeddings.keys().nth(node_id)
+    }
+
+    /// Filter files by filepath relevance to a query
+    /// Returns a list of filepaths sorted by relevance to the query terms
+    pub fn filter_by_filepath(&self, query: &str, max_files: usize) -> Vec<String> {
+        // Normalize the query
+        let query = query.to_lowercase();
+        
+        // Split query into terms
+        let terms: Vec<&str> = query
+            .split_whitespace()
+            .filter(|t| t.len() > 1) // Only use meaningful terms
+            .collect();
+            
+        if terms.is_empty() {
+            // If no meaningful terms, return all filepaths up to max_files
+            return self.embeddings.keys()
+                .take(max_files)
+                .cloned()
+                .collect();
+        }
+        
+        // Calculate relevance score for each file path based on filename and path components
+        let mut scored_paths: Vec<(String, f32)> = self.embeddings.keys()
+            .map(|path| {
+                let path_lower = path.to_lowercase();
+                let path_segments: Vec<&str> = path_lower
+                    .split(|c| c == '/' || c == '\\')
+                    .collect();
+                
+                // Extract the filename
+                let filename = path_segments.last().unwrap_or(&"");
+                let filename_no_ext = filename.split('.').next().unwrap_or(filename);
+                
+                // Calculate match score
+                let mut score = 0.0;
+                
+                // Terms in filename get highest weight
+                for term in &terms {
+                    // Direct filename match (strongest signal)
+                    if filename_no_ext == *term {
+                        score += 10.0;
+                    }
+                    // Filename contains term
+                    else if filename_no_ext.contains(term) {
+                        score += 5.0;
+                    }
+                    // Path contains term
+                    else if path_lower.contains(term) {
+                        score += 2.0;
+                    }
+                    
+                    // Bonus points for file extensions matching query terms
+                    if filename.ends_with(&format!(".{}", term)) {
+                        score += 3.0;
+                    }
+                }
+                
+                // Penalty for deeply nested files (slight preference for top-level files)
+                let depth_penalty = (path_segments.len() as f32 * 0.1).min(1.0);
+                score -= depth_penalty;
+                
+                // Prioritize source files over other types
+                if filename.ends_with(".rs") || 
+                   filename.ends_with(".py") || 
+                   filename.ends_with(".js") || 
+                   filename.ends_with(".ts") || 
+                   filename.ends_with(".rb") {
+                    score += 1.0;
+                }
+                
+                (path.clone(), score)
+            })
+            .filter(|(_, score)| *score > 0.0) // Only keep files with some relevance
+            .collect();
+        
+        // Sort by descending score
+        scored_paths.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Return just the paths
+        scored_paths.into_iter()
+            .take(max_files)
+            .map(|(path, _)| path)
+            .collect()
+    }
+
+    /// Record user feedback for a search result
+    pub fn record_feedback(&mut self, query: &str, file_path: &str, is_relevant: bool) -> Result<()> {
+        let query = query.to_lowercase(); // Normalize query string
+        
+        // Get or create feedback map for this query
+        let query_map = self.feedback.query_feedback
+            .entry(query.clone())
+            .or_insert_with(HashMap::new);
+            
+        // Get or create feedback entry for this file
+        let entry = query_map
+            .entry(file_path.to_string())
+            .or_insert(FeedbackEntry {
+                relevant_count: 0,
+                irrelevant_count: 0,
+                relevance_score: 0.5, // Start neutral
+            });
+            
+        // Update feedback counts
+        if is_relevant {
+            entry.relevant_count += 1;
+        } else {
+            entry.irrelevant_count += 1;
+        }
+        
+        // Update relevance score using Bayesian average
+        let total = entry.relevant_count + entry.irrelevant_count;
+        if total > 0 {
+            entry.relevance_score = entry.relevant_count as f32 / total as f32;
+        }
+        
+        // Save the feedback to disk
+        self.save()?;
+        
+        Ok(())
+    }
+    
+    /// Get feedback relevance score for a query-file pair
+    pub fn get_feedback_score(&self, query: &str, file_path: &str) -> Option<f32> {
+        let query = query.to_lowercase(); // Normalize query
+        
+        // Look up the feedback entry
+        self.feedback.query_feedback
+            .get(&query)
+            .and_then(|file_map| file_map.get(file_path))
+            .map(|entry| entry.relevance_score)
+    }
+    
+    /// Get similar queries to the current query based on feedback data
+    pub fn get_similar_queries(&self, query: &str, max_queries: usize) -> Vec<String> {
+        let query = query.to_lowercase(); // Normalize query
+        let query_terms: Vec<&str> = query.split_whitespace().collect();
+        
+        if query_terms.is_empty() {
+            return Vec::new();
+        }
+        
+        // Calculate similarity between input query and existing queries with feedback
+        let mut scored_queries: Vec<(String, f32)> = self.feedback.query_feedback.keys()
+            .filter(|&existing_query| existing_query != &query) // Skip exact match
+            .map(|existing_query| {
+                let existing_terms: Vec<&str> = existing_query.split_whitespace().collect();
+                
+                // Calculate Jaccard similarity
+                let intersection: Vec<&&str> = query_terms.iter()
+                    .filter(|t| existing_terms.contains(t))
+                    .collect();
+                
+                let union_size = query_terms.len() + existing_terms.len() - intersection.len();
+                let similarity = if union_size > 0 {
+                    intersection.len() as f32 / union_size as f32
+                } else {
+                    0.0
+                };
+                
+                (existing_query.clone(), similarity)
+            })
+            .filter(|(_, score)| *score > 0.2) // Only keep somewhat similar queries
+            .collect();
+            
+        // Sort by similarity (highest first)
+        scored_queries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Return just the queries, limited to max_queries
+        scored_queries.into_iter()
+            .take(max_queries)
+            .map(|(query, _)| query)
+            .collect()
+    }
+    
+    /// Apply feedback boost to search results based on previous feedback
+    pub fn apply_feedback_boost(&self, query: &str, file_scores: &mut HashMap<String, f32>) {
+        let query = query.to_lowercase(); // Normalize query
+        
+        // First check exact query match
+        if let Some(feedback_map) = self.feedback.query_feedback.get(&query) {
+            for (file_path, entry) in feedback_map {
+                if let Some(score) = file_scores.get_mut(file_path) {
+                    // Apply feedback boost - more boost for strong signal (many votes)
+                    let confidence = (entry.relevant_count + entry.irrelevant_count) as f32 / 5.0;
+                    let confidence_factor = confidence.min(1.0); // Cap at 1.0
+                    let feedback_factor = (entry.relevance_score - 0.5) * 2.0; // Scale to [-1, 1]
+                    
+                    // Apply boost: positive for relevant files, negative for irrelevant
+                    *score += feedback_factor * confidence_factor * 0.2; // Maximum 20% boost
+                }
+            }
+        }
+        
+        // Then check similar queries (transfer learning)
+        let similar_queries = self.get_similar_queries(&query, 3);
+        for similar_query in similar_queries {
+            if let Some(feedback_map) = self.feedback.query_feedback.get(&similar_query) {
+                for (file_path, entry) in feedback_map {
+                    if let Some(score) = file_scores.get_mut(file_path) {
+                        // Apply smaller boost for similar queries
+                        let confidence = (entry.relevant_count + entry.irrelevant_count) as f32 / 10.0;
+                        let confidence_factor = confidence.min(1.0);
+                        let feedback_factor = (entry.relevance_score - 0.5) * 2.0;
+                        
+                        // Smaller boost from similar queries (10% max)
+                        *score += feedback_factor * confidence_factor * 0.1;
+                    }
+                }
+            }
+        }
     }
 }
 

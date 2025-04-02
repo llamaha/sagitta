@@ -3,6 +3,7 @@ use anyhow::Result;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer, CodeElement, TypeKind, RubyMethodInfo, RubyClassInfo};
+use crate::vectordb::hnsw::HNSWIndex;
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 
@@ -1367,28 +1368,97 @@ impl Search {
         // Process query to enhance search
         let query_analysis = self.preprocess_query(query);
         
-        // Set weights, defaulting to constants if not provided
-        let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
-        let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+        // Set weights using dynamic adjustment if not explicitly provided
+        let (v_weight, b_weight) = if vector_weight.is_none() && bm25_weight.is_none() {
+            // Use dynamic weight adjustment
+            self.determine_optimal_weights(query, &query_analysis)
+        } else {
+            // Use provided weights, or defaults if only one is provided
+            let vw = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+            let bw = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+            (vw, bw)
+        };
+        
+        // Use filepath pre-filtering to reduce the search space
+        // Get up to 100 relevant files by path for large repositories
+        let relevant_filepaths = self.db.filter_by_filepath(query, 100);
+        let use_prefiltering = !relevant_filepaths.is_empty() && self.db.embeddings.len() > 1000;
         
         // Perform vector search
         let query_embedding = self.model.embed(query)?;
         
         // Get vector search results using HNSW if available
         let vector_results: Vec<(String, f32)> = if let Some(index) = &self.db.hnsw_index {
-            index.search_parallel(&query_embedding, HNSW_TOP_K, HNSW_TOP_K * 2)?
-                .into_iter()
-                .filter_map(|(node_id, distance)| {
-                    if let Some(file_path) = self.db.get_file_path(node_id) {
-                        Some((file_path.clone(), 1.0 - distance))
-                    } else {
-                        None
+            // Use the full HNSW search if we don't have path filtering or small repo
+            if !use_prefiltering {
+                index.search_parallel(&query_embedding, HNSW_TOP_K, HNSW_TOP_K * 2)?
+                    .into_iter()
+                    .filter_map(|(node_id, distance)| {
+                        if let Some(file_path) = self.db.get_file_path(node_id) {
+                            // Transform distance to similarity score with improved scaling
+                            let raw_similarity = 1.0 - (distance / 2.0);
+                            // Apply scaled similarity to emphasize differences
+                            let scaled_similarity = raw_similarity.powf(0.9);
+                            Some((file_path.clone(), scaled_similarity))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                // For large repos, apply filepath-based pre-filtering
+                // This helps scale better by reducing the search space
+                let mut filtered_results = Vec::new();
+                
+                for filepath in &relevant_filepaths {
+                    if let Some(embedding) = self.db.embeddings.get(filepath) {
+                        // Use the public cosine_similarity function instead of the private cosine_distance
+                        let similarity = cosine_similarity(&query_embedding, embedding);
+                        
+                        // Only include results above threshold
+                        if similarity >= SIMILARITY_THRESHOLD {
+                            filtered_results.push((filepath.clone(), similarity));
+                        }
                     }
-                })
-                .collect()
+                }
+                
+                // Sort by similarity
+                filtered_results.sort_by(|a, b| 
+                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                );
+                
+                // Take top results
+                filtered_results.truncate(HNSW_TOP_K);
+                filtered_results
+            }
         } else {
+            // Fallback to direct vector search if no HNSW index
             let mut db_clone = self.db.clone();
-            db_clone.nearest_vectors(&query_embedding, 10)?
+            
+            if use_prefiltering {
+                // Use filepath pre-filtering for direct vector search too
+                let mut filtered_results = Vec::new();
+                
+                for filepath in &relevant_filepaths {
+                    if let Some(embedding) = self.db.embeddings.get(filepath) {
+                        let similarity = cosine_similarity(&query_embedding, embedding);
+                        if similarity >= SIMILARITY_THRESHOLD {
+                            filtered_results.push((filepath.clone(), similarity));
+                        }
+                    }
+                }
+                
+                // Sort by similarity
+                filtered_results.sort_by(|a, b| 
+                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                );
+                
+                // Take top results
+                filtered_results.truncate(10);
+                filtered_results
+            } else {
+                db_clone.nearest_vectors(&query_embedding, 10)?
+            }
         };
         
         // Create a map to store combined scores
@@ -1412,15 +1482,24 @@ impl Search {
             combined_scores.insert(file_path, (similarity * v_weight, result));
         }
         
-        // Calculate BM25 scores for all files in the database, including expanded terms
-        for file_path in self.db.embeddings.keys() {
+        // Decide which files to calculate BM25 scores for
+        let bm25_candidates = if use_prefiltering {
+            // For large repos, only calculate BM25 for pre-filtered filepaths
+            relevant_filepaths
+        } else {
+            // For smaller repos, calculate for all files
+            self.db.embeddings.keys().cloned().collect()
+        };
+        
+        // Calculate BM25 scores for selected files
+        for file_path in bm25_candidates {
             // Calculate BM25 score using the original query
-            let mut bm25_score = self.calculate_bm25_score(query, file_path)?;
+            let mut bm25_score = self.calculate_bm25_score(query, &file_path)?;
             
             // Also consider expanded terms from query analysis
             for expanded_term in &query_analysis.expanded_terms {
                 if expanded_term != query {
-                    bm25_score += self.calculate_bm25_score(expanded_term, file_path)? * 0.5;
+                    bm25_score += self.calculate_bm25_score(expanded_term, &file_path)? * 0.5;
                 }
             }
             
@@ -1431,7 +1510,7 @@ impl Search {
             if normalized_bm25_score > 0.1 {
                 // Get existing score or default
                 let entry = combined_scores.entry(file_path.clone()).or_insert_with(|| {
-                    let snippet = self.get_snippet(file_path, query).unwrap_or_else(|_| "Snippet unavailable".to_string());
+                    let snippet = self.get_snippet(&file_path, query).unwrap_or_else(|_| "Snippet unavailable".to_string());
                     
                     (0.0, SearchResult {
                         file_path: file_path.clone(),
@@ -1460,14 +1539,38 @@ impl Search {
             results.push(result);
         }
         
+        // Apply feedback boost if available
+        if !results.is_empty() {
+            // Convert results to a HashMap for feedback boosting
+            let mut file_scores: HashMap<String, f32> = results.iter()
+                .map(|r| (r.file_path.clone(), r.similarity))
+                .collect();
+                
+            // Apply feedback boost
+            self.db.apply_feedback_boost(query, &mut file_scores);
+            
+            // Update result scores
+            for result in &mut results {
+                if let Some(boosted_score) = file_scores.get(&result.file_path) {
+                    result.similarity = *boosted_score;
+                }
+            }
+            
+            // Re-sort by updated scores
+            results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        }
+        
         // Apply code-specific ranking signals
         self.apply_code_ranking_signals(&mut results, query)?;
         
         // Normalize scores to improve contrast
         self.normalize_scores(&mut results);
         
+        // Apply sigmoid normalization to emphasize differences
+        self.sigmoid_normalize_scores(&mut results, 4.0);
+        
         // Apply power scaling to emphasize score differences
-        self.power_scale_scores(&mut results, 0.5);
+        self.power_scale_scores(&mut results, 0.75);
         
         // Group similar results and select representatives
         let results = self.group_similar_results(results, 0.7);
@@ -1810,16 +1913,35 @@ impl Search {
             max_score = max_score.max(result.similarity);
         }
         
-        // Only normalize if we have a range of scores
-        if (max_score - min_score).abs() < 0.001 {
+        // Check if all scores are the same (common issue with some queries)
+        let score_range = max_score - min_score;
+        
+        if score_range < 0.001 {
+            // If all scores are the same but high (above 0.9), introduce some artificial differentiation
+            // based on other factors like file path relevance or snippet quality
+            if min_score > 0.9 {
+                // Create artificial differentiation for high-scoring but identical results
+                for (i, result) in results.iter_mut().enumerate() {
+                    // Gradually lower scores based on position, but keep them high
+                    // First result keeps its high score, others get slightly lower scores
+                    let position_penalty = (i as f32 * 0.03).min(0.15);
+                    result.similarity = (result.similarity - position_penalty).max(0.75);
+                }
+            } else {
+                // For low scores that are identical, we still want some differentiation
+                for (i, result) in results.iter_mut().enumerate() {
+                    // Lower scores more aggressively for low-scoring identical results
+                    let position_penalty = (i as f32 * 0.05).min(0.2);
+                    result.similarity = (result.similarity - position_penalty).max(0.3);
+                }
+            }
             return;
         }
         
         // Apply min-max normalization to spread out the scores
         // New score = (score - min) / (max - min)
-        let range = max_score - min_score;
         for result in results.iter_mut() {
-            result.similarity = (result.similarity - min_score) / range;
+            result.similarity = (result.similarity - min_score) / score_range;
         }
     }
     
@@ -1850,6 +1972,64 @@ impl Search {
         
         // Re-normalize to [0,1] range if needed
         self.normalize_scores(results);
+    }
+    
+    /// Determine optimal weights for hybrid search based on query characteristics
+    fn determine_optimal_weights(&self, query: &str, query_analysis: &QueryAnalysis) -> (f32, f32) {
+        // Default weights
+        let mut vector_weight = HYBRID_VECTOR_WEIGHT;
+        let mut bm25_weight = HYBRID_BM25_WEIGHT;
+        
+        // 1. Adjust based on query length - longer queries work better with BM25
+        let query_words = query.split_whitespace().count();
+        if query_words > 5 {
+            // For longer queries, boost BM25
+            vector_weight -= 0.1;
+            bm25_weight += 0.1;
+        } else if query_words <= 2 {
+            // For very short queries, boost vector search
+            vector_weight += 0.1;
+            bm25_weight -= 0.1;
+        }
+        
+        // 2. Adjust based on query content
+        // Code queries work better with vector search
+        if query_analysis.is_code_query {
+            vector_weight += 0.15;
+            bm25_weight -= 0.15;
+        }
+        
+        // 3. Adjust based on query type
+        match query_analysis.query_type {
+            QueryType::Definition | QueryType::Type => {
+                // Definition/type queries work better with vector search
+                vector_weight += 0.05;
+                bm25_weight -= 0.05;
+            },
+            QueryType::Usage => {
+                // Usage queries benefit from lexical matching
+                vector_weight -= 0.1;
+                bm25_weight += 0.1;
+            },
+            _ => {}
+        }
+        
+        // Ensure weights are valid and sum to 1.0
+        vector_weight = vector_weight.clamp(0.1, 0.9);
+        bm25_weight = bm25_weight.clamp(0.1, 0.9);
+        
+        // Normalize weights to sum to 1.0
+        let sum = vector_weight + bm25_weight;
+        vector_weight = vector_weight / sum;
+        bm25_weight = bm25_weight / sum;
+        
+        (vector_weight, bm25_weight)
+    }
+
+    /// Add a method to record user feedback on search results
+    pub fn record_result_feedback(&mut self, query: &str, file_path: &str, relevant: bool) -> Result<()> {
+        // Simply delegate to the database's feedback mechanism
+        Ok(self.db.record_feedback(query, file_path, relevant)?)
     }
 }
 

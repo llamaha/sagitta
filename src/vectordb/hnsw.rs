@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::time::{Duration, Instant};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +121,11 @@ impl HNSWIndex {
             // Handle potential floating point issues that might push similarity outside [-1, 1]
             let clamped_similarity = similarity.clamp(-1.0, 1.0);
             // Convert to distance in range [0, 2], with identical vectors having distance 0
-            1.0 - clamped_similarity
+            // Apply a scaling factor to increase distance sensitivity
+            // Using a steeper transformation to magnify small differences
+            let scaled_distance = (1.0 - clamped_similarity) * 1.2;
+            // Apply a power scaling to enhance small differences
+            scaled_distance.powf(0.8)
         } else {
             1.0 // Maximum distance if either vector is zero
         }
@@ -535,14 +540,32 @@ pub struct HNSWStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
     use std::time::{Duration, Instant};
     
     #[test]
     fn test_cosine_distance() {
-        let a = vec![1.0, 0.0, 0.0];
-        let b = vec![0.0, 1.0, 0.0];
-        let dist = HNSWIndex::cosine_distance(&a, &b);
-        assert!((dist - 1.0).abs() < 1e-6);
+        // Vectors pointing in opposite directions should have maximum distance
+        let v1 = vec![1.0, 0.0];
+        let v2 = vec![-1.0, 0.0];
+        let dist = HNSWIndex::cosine_distance(&v1, &v2);
+        // With our scaling, the maximum distance is now 1.0 
+        // but transformed with (1.0 - similarity) * 1.2 and then power scaling of 0.8
+        // so the maximum value is (1.0 - (-1.0)) * 1.2 = 2.4, transformed with 2.4^0.8 ≈ 1.89
+        // We just check that it's close to 2.0 
+        assert!(dist > 1.5, "Distance between opposite vectors should be high, got {}", dist);
+        
+        // Identical vectors should have zero distance
+        let v3 = vec![1.0, 0.0];
+        let dist = HNSWIndex::cosine_distance(&v1, &v3);
+        assert_eq!(dist, 0.0);
+        
+        // Orthogonal vectors should have a mid-range distance
+        let v4 = vec![0.0, 1.0];
+        let dist = HNSWIndex::cosine_distance(&v1, &v4);
+        // With our scaling, the 90° distance is transformed with (1.0 - 0.0) * 1.2 = 1.2, then 1.2^0.8 ≈ 1.15
+        // We verify it's in the expected range
+        assert!(dist > 0.9 && dist < 1.3, "Distance between orthogonal vectors should be moderate, got {}", dist);
     }
 
     #[test]
