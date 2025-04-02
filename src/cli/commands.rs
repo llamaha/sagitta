@@ -101,29 +101,6 @@ pub enum Command {
 
     /// Clear the database
     Clear,
-
-    /// Query search combining semantic and lexical matches (deprecated, use Query instead)
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use 'query' command instead which performs hybrid search by default"
-    )]
-    Hybrid {
-        /// Search query
-        #[arg(required = true)]
-        query: String,
-        
-        /// Weight for vector search (default: 0.7)
-        #[arg(long = "vector-weight")]
-        vector_weight: Option<f32>,
-        
-        /// Weight for BM25 lexical search (default: 0.3)
-        #[arg(long = "bm25-weight")]
-        bm25_weight: Option<f32>,
-        
-        /// File types to search (e.g. rs,py,txt)
-        #[arg(short = 't', long = "file-types", value_delimiter = ',')]
-        file_types: Option<Vec<String>>,
-    },
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -404,48 +381,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             db.clear()?;
             println!("Database cleared!");
         }
-        Command::Hybrid { query, vector_weight, bm25_weight, file_types } => {
-            let model = EmbeddingModel::new()?;
-            let search = Search::new(db, model);
-            
-            println!("Performing query search (combining semantic and lexical matching)...");
-            
-            // Show weights being used
-            let v_weight = vector_weight.unwrap_or(0.7);
-            let b_weight = bm25_weight.unwrap_or(0.3);
-            println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
-            
-            // Execute the search
-            let mut results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
-
-            // Filter results by file type if specified
-            if let Some(types) = file_types {
-                if !types.is_empty() {
-                    println!("Filtering results by file types: {}", types.join(", "));
-                    results.retain(|result| {
-                        let path = Path::new(&result.file_path);
-                        if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy().to_string();
-                            types.contains(&ext_str)
-                        } else {
-                            false
-                        }
-                    });
-                }
-            }
-
-            if results.is_empty() {
-                println!("No results found.");
-                return Ok(());
-            }
-
-            println!("\nQuery search results for: {}\n", query);
-            for (i, result) in results.iter().enumerate() {
-                println!("{}. {} (score: {:.2})", i + 1, result.file_path, result.similarity);
-                println!("{}", result.snippet);
-                println!();
-            }
-        }
     }
     Ok(())
 }
@@ -591,11 +526,11 @@ mod tests {
     }
 
     #[test]
-    fn test_hybrid_search_command() -> Result<()> {
+    fn test_query_search_command() -> Result<()> {
         // Create temporary directory for test files
         let temp_dir = tempdir()?;
         let db_dir = tempdir()?;
-        let db_path = db_dir.path().join("test_hybrid.db").to_string_lossy().to_string();
+        let db_path = db_dir.path().join("test_query.db").to_string_lossy().to_string();
         
         // Create test files with different content
         let test_file1 = temp_dir.path().join("test1.rs");
@@ -611,7 +546,7 @@ mod tests {
         db.index_file(&test_file1)?;
         db.index_file(&test_file2)?;
         
-        // Test new Query command with hybrid search enabled (default)
+        // Test Query command with hybrid search enabled (default)
         let query_command = Command::Query { 
             query: "search".to_string(),
             vector_only: false,
@@ -636,19 +571,6 @@ mod tests {
         // Execute vector-only command
         let result = execute_command(vector_command, db.clone());
         assert!(result.is_ok(), "Query command with vector-only should execute without error");
-        
-        // Test deprecated Hybrid command
-        #[allow(deprecated)]
-        let deprecated_command = Command::Hybrid { 
-            query: "search".to_string(),
-            vector_weight: None,
-            bm25_weight: None,
-            file_types: Some(vec!["rs".to_string()]),
-        };
-        
-        // Execute deprecated command
-        let result = execute_command(deprecated_command, db);
-        assert!(result.is_ok(), "Deprecated Hybrid command should still execute without error");
 
         Ok(())
     }
