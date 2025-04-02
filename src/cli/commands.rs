@@ -47,6 +47,21 @@ pub enum Command {
         query: String,
     },
 
+    /// Hybrid search combining semantic and lexical matches
+    Hybrid {
+        /// Search query
+        #[arg(required = true)]
+        query: String,
+        
+        /// Weight for vector search (default: 0.7)
+        #[arg(long = "vector-weight")]
+        vector_weight: Option<f32>,
+        
+        /// Weight for BM25 lexical search (default: 0.3)
+        #[arg(long = "bm25-weight")]
+        bm25_weight: Option<f32>,
+    },
+
     /// Code-aware search for functions, types, etc.
     CodeSearch {
         /// Search query
@@ -168,6 +183,31 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             for (i, result) in results.iter().enumerate() {
                 println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
+                println!("{}", result.snippet);
+                println!();
+            }
+        }
+        Command::Hybrid { query, vector_weight, bm25_weight } => {
+            let model = EmbeddingModel::new()?;
+            let search = Search::new(db, model);
+            
+            println!("Performing hybrid search (combining semantic and lexical matching)...");
+            
+            // Show weights being used
+            let v_weight = vector_weight.unwrap_or(0.7);
+            let b_weight = bm25_weight.unwrap_or(0.3);
+            println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+            
+            let results = search.hybrid_search(&query, vector_weight, bm25_weight)?;
+
+            if results.is_empty() {
+                println!("No results found.");
+                return Ok(());
+            }
+
+            println!("\nHybrid search results for: {}\n", query);
+            for (i, result) in results.iter().enumerate() {
+                println!("{}. {} (score: {:.2})", i + 1, result.file_path, result.similarity);
                 println!("{}", result.snippet);
                 println!();
             }
@@ -476,6 +516,43 @@ mod tests {
         let hnsw_stats_after = db_reloaded.stats().hnsw_stats;
         assert!(hnsw_stats_after.is_some(), "HNSW index should persist after reload");
         
+        Ok(())
+    }
+
+    #[test]
+    fn test_hybrid_search_command() -> Result<()> {
+        // Create temporary directory for test files
+        let temp_dir = tempdir()?;
+        let db_dir = tempdir()?;
+        let db_path = db_dir.path().join("test_hybrid.db").to_string_lossy().to_string();
+        
+        // Create test files with different content
+        let test_file1 = temp_dir.path().join("test1.rs");
+        fs::write(&test_file1, "fn search_function() { println!(\"Finding things\"); }")?;
+        
+        let test_file2 = temp_dir.path().join("test2.rs");
+        fs::write(&test_file2, "// This is a file about searching\nfn other_function() {}")?;
+        
+        // Create and setup database
+        let mut db = VectorDB::new(db_path.clone())?;
+        
+        // Index the files
+        db.index_file(&test_file1)?;
+        db.index_file(&test_file2)?;
+        
+        // Create test hybrid search command
+        let command = Command::Hybrid { 
+            query: "search".to_string(),
+            vector_weight: Some(0.6),
+            bm25_weight: Some(0.4)
+        };
+        
+        // Capture stdout to verify output
+        let result = execute_command(command, db);
+        
+        // Just verify the command executes without error
+        assert!(result.is_ok(), "Hybrid search command should execute without error");
+
         Ok(())
     }
 } 

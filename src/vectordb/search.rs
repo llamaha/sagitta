@@ -5,6 +5,7 @@ use crate::vectordb::db::VectorDB;
 use crate::vectordb::parsing::{CodeParser, RustAnalyzer, CodeElement};
 use regex;
 use std::path::Path;
+use std::collections::HashMap;
 
 const SIMILARITY_THRESHOLD: f32 = 0.3;
 const MIN_CONTEXT_LINES: usize = 2;
@@ -12,6 +13,10 @@ const MAX_CONTEXT_LINES: usize = 8;
 const WINDOW_SIZE: usize = 8;
 const HNSW_TOP_K: usize = 30; // Increased from 20 for better recall
 const CODE_SEARCH_BOOST: f32 = 1.5; // Boost for code-aware search results
+const BM25_K1: f32 = 1.5;
+const BM25_B: f32 = 0.75;
+const HYBRID_VECTOR_WEIGHT: f32 = 0.7; // Default weight for vector search
+const HYBRID_BM25_WEIGHT: f32 = 0.3;   // Default weight for BM25 search
 
 #[derive(Debug)]
 pub struct SearchResult {
@@ -603,6 +608,140 @@ impl Search {
             Ok(simple_snippet)
         }
     }
+
+    /// Calculate BM25 score for lexical search
+    fn calculate_bm25_score(&self, query: &str, file_path: &str) -> Result<f32> {
+        // Read file content
+        let content = match fs::read_to_string(file_path) {
+            Ok(content) => content,
+            Err(_) => return Ok(0.0), // Return zero score if file can't be read
+        };
+
+        // Tokenize the query and content
+        let query_terms: Vec<&str> = query.split_whitespace().collect();
+        let content_terms: Vec<&str> = content.split_whitespace().collect();
+        
+        // Document length in terms
+        let doc_length = content_terms.len() as f32;
+        
+        // Calculate average document length if we have data
+        let avg_doc_length = if !self.db.embeddings.is_empty() {
+            // Approximate based on file sizes
+            let total_sizes: usize = self.db.embeddings.keys()
+                .map(|path| fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0))
+                .sum();
+            (total_sizes / self.db.embeddings.len()) as f32
+        } else {
+            doc_length // fallback to current document length
+        };
+        
+        // Calculate term frequencies in document
+        let mut term_freqs = HashMap::new();
+        for term in &content_terms {
+            *term_freqs.entry(term.to_lowercase()).or_insert(0) += 1;
+        }
+        
+        // Calculate BM25 score
+        let mut score = 0.0;
+        for query_term in &query_terms {
+            let query_term = query_term.to_lowercase();
+            
+            // Get term frequency in document
+            let term_freq = *term_freqs.get(&query_term).unwrap_or(&0) as f32;
+            
+            if term_freq > 0.0 {
+                // Calculate IDF (inverse document frequency)
+                // For simplicity, we'll use a rough approximation
+                let containing_docs = 1.0; // At minimum this document contains it
+                
+                // Calculate IDF component
+                let idf = ((self.db.embeddings.len() as f32 + 1.0) / (containing_docs + 0.5)).ln();
+                
+                // Calculate TF component with BM25 formula
+                let numerator = term_freq * (BM25_K1 + 1.0);
+                let denominator = term_freq + BM25_K1 * (1.0 - BM25_B + BM25_B * doc_length / avg_doc_length);
+                
+                let tf = numerator / denominator;
+                
+                // Add to score
+                score += idf * tf;
+                
+                // Give bonus for exact matches (case-sensitive)
+                if content.contains(query_term.as_str()) {
+                    score *= 1.2;
+                }
+            }
+        }
+        
+        // Normalize score
+        score /= query_terms.len() as f32;
+        
+        Ok(score)
+    }
+
+    /// Hybrid search combining vector and BM25 search
+    pub fn hybrid_search(&self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>) -> Result<Vec<SearchResult>> {
+        // Set weights, defaulting to constants if not provided
+        let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+        let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+        
+        // Perform vector search
+        let vector_results = self.search(query)?;
+        
+        // Create a map to store combined scores
+        let mut combined_scores: HashMap<String, (f32, SearchResult)> = HashMap::new();
+        
+        // Add vector search results to the map
+        for result in vector_results {
+            let normalized_vector_score = result.similarity;
+            combined_scores.insert(result.file_path.clone(), (normalized_vector_score * v_weight, result));
+        }
+        
+        // Calculate BM25 scores for all files in the database
+        for file_path in self.db.embeddings.keys() {
+            let bm25_score = self.calculate_bm25_score(query, file_path)?;
+            
+            // Only consider scores above threshold
+            if bm25_score > 0.1 {
+                // Normalize BM25 score (simple min-max normalization - assuming scores typically range from 0 to 5)
+                let normalized_bm25_score = bm25_score / 5.0;
+                
+                // Get existing score or default
+                let entry = combined_scores.entry(file_path.clone()).or_insert_with(|| {
+                    let snippet = self.get_snippet(file_path, query).unwrap_or_else(|_| "Snippet unavailable".to_string());
+                    
+                    (0.0, SearchResult {
+                        file_path: file_path.clone(),
+                        similarity: 0.0,
+                        snippet,
+                        code_context: None,
+                    })
+                });
+                
+                // Add weighted BM25 score to existing score
+                entry.0 += normalized_bm25_score * b_weight;
+            }
+        }
+        
+        // Convert map back to a results vector
+        let mut results = Vec::new();
+        for (_, (combined_score, mut result)) in combined_scores {
+            // Update the result similarity to the combined score
+            result.similarity = combined_score;
+            
+            // Skip if below threshold
+            if result.similarity < SIMILARITY_THRESHOLD {
+                continue;
+            }
+            
+            results.push(result);
+        }
+        
+        // Sort by combined similarity
+        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        
+        Ok(results)
+    }
 }
 
 // New enum to define code search types
@@ -786,6 +925,92 @@ fn main() {
             assert!(result.code_context.is_some());
             assert!(result.code_context.unwrap().contains("TestStruct"));
         }
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_bm25_calculation() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let mut db = VectorDB::new(db_path)?;
+        
+        // Create a test file with known content
+        let test_file = temp_dir.path().join("test.txt");
+        fs::write(&test_file, "This is a test document about Rust programming language")?;
+        db.index_file(&test_file)?;
+        
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Test BM25 with various queries
+        let score1 = search.calculate_bm25_score("Rust", &test_file.to_string_lossy())?;
+        let score2 = search.calculate_bm25_score("Python", &test_file.to_string_lossy())?;
+        let score3 = search.calculate_bm25_score("test document", &test_file.to_string_lossy())?;
+        
+        // Rust is in the document, should have positive score
+        assert!(score1 > 0.0, "BM25 score for 'Rust' should be positive");
+        
+        // Python is not in the document, should have 0 score
+        assert_eq!(score2, 0.0, "BM25 score for 'Python' should be 0");
+        
+        // Multiple matching terms should have higher score than single term
+        assert!(score3 > score1, "BM25 score for multiple matching terms should be higher");
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_hybrid_search() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
+        let mut db = VectorDB::new(db_path)?;
+        
+        // Create test files with different content
+        let test_file1 = temp_dir.path().join("test1.txt");
+        fs::write(&test_file1, "This document discusses Rust programming concepts in detail")?;
+        db.index_file(&test_file1)?;
+        
+        let test_file2 = temp_dir.path().join("test2.txt");
+        fs::write(&test_file2, "Python is a high-level programming language")?;
+        db.index_file(&test_file2)?;
+        
+        let test_file3 = temp_dir.path().join("test3.txt");
+        fs::write(&test_file3, "Rust and Python are both popular programming languages")?;
+        db.index_file(&test_file3)?;
+        
+        let model = EmbeddingModel::new()?;
+        let search = Search::new(db, model);
+        
+        // Test hybrid search for "Rust programming"
+        let results = search.hybrid_search("Rust programming", None, None)?;
+        
+        // Should find at least one result
+        assert!(!results.is_empty(), "Hybrid search should find at least one result");
+        
+        // The first result should be either test1.txt or test3.txt, both mention Rust
+        if let Some(first) = results.first() {
+            let path = first.file_path.clone();
+            assert!(
+                path.contains("test1.txt") || path.contains("test3.txt"),
+                "First result should be test1.txt or test3.txt, got: {}", path
+            );
+        }
+        
+        // Test with different weights
+        let vector_results = search.search("programming languages")?;
+        let hybrid_results = search.hybrid_search(
+            "programming languages", 
+            Some(0.3), // Lower vector weight
+            Some(0.7)  // Higher BM25 weight
+        )?;
+        
+        // Just verify that we get results for both
+        assert!(!vector_results.is_empty());
+        assert!(!hybrid_results.is_empty());
+        
+        // In this case with these weights, there's a good chance the results order would be different
+        // since we're heavily favoring lexical matching over semantic matching
         
         Ok(())
     }
