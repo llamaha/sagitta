@@ -38,3 +38,7 @@ ort = "1.16.0"
 
 [dev-dependencies]
 tempfile = "3.10"
+
+[[bin]]
+name = "model_inspector"
+path = "model_inspector.rs"
