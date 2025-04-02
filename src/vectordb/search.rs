@@ -1924,24 +1924,26 @@ impl Search {
                 for (i, result) in results.iter_mut().enumerate() {
                     // Gradually lower scores based on position, but keep them high
                     // First result keeps its high score, others get slightly lower scores
-                    let position_penalty = (i as f32 * 0.03).min(0.15);
-                    result.similarity = (result.similarity - position_penalty).max(0.75);
+                    let position_penalty = (i as f32 * 0.02).min(0.12); // Reduced penalty for more gradual scaling
+                    result.similarity = (result.similarity - position_penalty).max(0.80); // Higher minimum to preserve high scores
                 }
             } else {
                 // For low scores that are identical, we still want some differentiation
                 for (i, result) in results.iter_mut().enumerate() {
-                    // Lower scores more aggressively for low-scoring identical results
-                    let position_penalty = (i as f32 * 0.05).min(0.2);
-                    result.similarity = (result.similarity - position_penalty).max(0.3);
+                    // Lower scores more gradually for low-scoring identical results
+                    let position_penalty = (i as f32 * 0.03).min(0.15); // Reduced penalty for more gradual scaling
+                    result.similarity = (result.similarity - position_penalty).max(0.35); // Higher minimum
                 }
             }
             return;
         }
         
-        // Apply min-max normalization to spread out the scores
-        // New score = (score - min) / (max - min)
+        // Apply modified min-max normalization to spread out the scores while preserving some of the original distribution
+        // New method: score = 0.2 + 0.8 * (score - min) / (max - min)
+        // This keeps scores within 0.2-1.0 range, preserving more nuance than full 0-1 normalization
         for result in results.iter_mut() {
-            result.similarity = (result.similarity - min_score) / score_range;
+            let normalized = (result.similarity - min_score) / score_range;
+            result.similarity = 0.2 + (0.8 * normalized);
         }
     }
     
@@ -1951,11 +1953,12 @@ impl Search {
             return;
         }
         
-        // Apply sigmoid function to each score to enhance differences
-        // sigmoid(x) = 1 / (1 + e^(-steepness * (x - 0.5)))
+        // Apply modified sigmoid function to each score to enhance differences while preserving gradation
+        // Modified sigmoid: sigmoid(x) = 0.1 + 0.9 / (1 + e^(-steepness * (x - 0.6)))
+        // This keeps scores in a 0.1-1.0 range and centers the curve at 0.6 instead of 0.5
         for result in results.iter_mut() {
-            let centered = result.similarity - 0.5;
-            result.similarity = 1.0 / (1.0 + (-steepness * centered).exp());
+            let centered = result.similarity - 0.6; // Center at 0.6 to provide more differentiation in higher scores
+            result.similarity = 0.1 + (0.9 / (1.0 + (-steepness * centered).exp()));
         }
     }
     
@@ -1965,13 +1968,35 @@ impl Search {
             return;
         }
         
-        // Apply power scaling
-        for result in results.iter_mut() {
-            result.similarity = result.similarity.powf(power);
+        // Calculate average score before scaling to help determine the appropriate normalization method
+        let avg_score = results.iter().map(|r| r.similarity).sum::<f32>() / results.len() as f32;
+        
+        // Apply power scaling with different strategy based on average score
+        if avg_score > 0.7 {
+            // For high average scores, use a higher power to better differentiate between top results
+            for result in results.iter_mut() {
+                // Apply a progressive power scale that gets stronger as scores approach 1.0
+                let scaled_power = power * (0.5 + result.similarity * 0.5); // Power scales from 0.5*power to power
+                result.similarity = result.similarity.powf(scaled_power);
+            }
+        } else {
+            // For lower average scores, use a gentler approach
+            for result in results.iter_mut() {
+                result.similarity = result.similarity.powf(power);
+            }
         }
         
-        // Re-normalize to [0,1] range if needed
-        self.normalize_scores(results);
+        // Apply a more nuanced normalization after power scaling
+        let min_score = results.iter().map(|r| r.similarity).fold(f32::INFINITY, |a, b| a.min(b));
+        let max_score = results.iter().map(|r| r.similarity).fold(f32::NEG_INFINITY, |a, b| a.max(b));
+        
+        // Only renormalize if we have a reasonable range
+        if max_score - min_score > 0.001 {
+            for result in results.iter_mut() {
+                // Keep scores in the 0.15-1.0 range to preserve more nuance
+                result.similarity = 0.15 + 0.85 * ((result.similarity - min_score) / (max_score - min_score));
+            }
+        }
     }
     
     /// Determine optimal weights for hybrid search based on query characteristics
@@ -2438,12 +2463,47 @@ require_relative 'helper'
         // Test min-max normalization
         search.normalize_scores(&mut results);
         
-        // The highest score should now be 1.0
+        // The highest score should now be 1.0 (0.2 + 0.8 * 1.0)
         assert_eq!(results[0].similarity, 1.0);
-        // The lowest score should now be 0.0
-        assert_eq!(results[2].similarity, 0.0);
+        // The lowest score should now be 0.2 (0.2 + 0.8 * 0.0)
+        assert_eq!(results[2].similarity, 0.2);
         // The middle score should be normalized within this range
-        assert!(results[1].similarity > 0.0 && results[1].similarity < 1.0);
+        assert!(results[1].similarity > 0.2 && results[1].similarity < 1.0);
+        
+        // Test sigmoid normalization
+        let mut sigmoid_results = vec![
+            SearchResult {
+                file_path: "file1.rs".to_string(),
+                similarity: 0.9,
+                snippet: "Snippet 1".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file2.rs".to_string(),
+                similarity: 0.7,
+                snippet: "Snippet 2".to_string(),
+                code_context: None,
+            },
+            SearchResult {
+                file_path: "file3.rs".to_string(),
+                similarity: 0.5,
+                snippet: "Snippet 3".to_string(),
+                code_context: None,
+            },
+        ];
+        
+        // Apply sigmoid normalization
+        search.sigmoid_normalize_scores(&mut sigmoid_results, 4.0);
+        
+        // Check that sigmoid normalization preserves order
+        assert!(sigmoid_results[0].similarity > sigmoid_results[1].similarity);
+        assert!(sigmoid_results[1].similarity > sigmoid_results[2].similarity);
+        
+        // Check that scores are in the range [0.1, 1.0]
+        for result in &sigmoid_results {
+            assert!(result.similarity >= 0.1);
+            assert!(result.similarity <= 1.0);
+        }
         
         // Test power scaling
         let mut results = vec![
@@ -2479,6 +2539,12 @@ require_relative 'helper'
         }
         assert!(results[0].similarity > results[1].similarity);
         assert!(results[1].similarity > results[2].similarity);
+        
+        // Check that scores are within the expected range [0.15, 1.0]
+        for result in &results {
+            assert!(result.similarity >= 0.15);
+            assert!(result.similarity <= 1.0);
+        }
         
         Ok(())
     }
