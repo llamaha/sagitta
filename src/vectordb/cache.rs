@@ -8,6 +8,7 @@ use std::fs;
 use crate::vectordb::error::{Result, VectorDBError};
 use std::io::{Read, Seek, SeekFrom};
 use std::convert::TryInto;
+use crate::vectordb::embedding::EmbeddingModelType;
 
 const CACHE_TTL: u64 = 3600; // 1 hour in seconds
 
@@ -16,6 +17,7 @@ struct CacheEntry {
     embedding: Vec<f32>,
     timestamp: u64,
     file_hash: u64,
+    model_type: EmbeddingModelType,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,6 +30,7 @@ pub struct EmbeddingCache {
     cache_path: String,
     ttl: u64,
     last_cleaned: Instant,
+    current_model_type: EmbeddingModelType,
 }
 
 impl Clone for EmbeddingCache {
@@ -37,6 +40,7 @@ impl Clone for EmbeddingCache {
             cache_path: self.cache_path.clone(),
             ttl: self.ttl,
             last_cleaned: self.last_cleaned,
+            current_model_type: self.current_model_type.clone(),
         }
     }
 }
@@ -75,7 +79,18 @@ impl EmbeddingCache {
             cache_path,
             ttl,
             last_cleaned: Instant::now(),
+            current_model_type: EmbeddingModelType::Basic,
         })
+    }
+    
+    /// Set the current model type
+    pub fn set_model_type(&mut self, model_type: EmbeddingModelType) {
+        self.current_model_type = model_type;
+    }
+    
+    /// Get the current model type
+    pub fn model_type(&self) -> &EmbeddingModelType {
+        &self.current_model_type
     }
 
     pub fn get(&self, file_path: &str) -> Option<&Vec<f32>> {
@@ -86,7 +101,8 @@ impl EmbeddingCache {
                 .ok()?
                 .as_secs();
             
-            if now - entry.timestamp < self.ttl {
+            // Check both TTL and model type match
+            if now - entry.timestamp < self.ttl && entry.model_type == self.current_model_type {
                 Some(&entry.embedding)
             } else {
                 None
@@ -106,6 +122,7 @@ impl EmbeddingCache {
             embedding,
             timestamp: now,
             file_hash,
+            model_type: self.current_model_type.clone(),
         };
 
         self.entries.insert(file_path, entry);
@@ -187,9 +204,18 @@ impl EmbeddingCache {
                 .ok()
                 .map(|duration| duration.as_secs())
                 .unwrap_or(0);
-            now - entry.timestamp < self.ttl
+            
+            // Only keep entries that are still valid and match the current model type
+            now - entry.timestamp < self.ttl && entry.model_type == self.current_model_type
         });
         self.last_cleaned = Instant::now();
+    }
+    
+    /// Invalidate cache entries that don't match the current model type
+    pub fn invalidate_different_model_types(&mut self) {
+        self.entries.retain(|_, entry| {
+            entry.model_type == self.current_model_type
+        });
     }
 }
 
@@ -239,6 +265,7 @@ mod tests {
             embedding: embedding.clone(),
             timestamp: 0, // Very old timestamp
             file_hash: 12345u64,
+            model_type: EmbeddingModelType::Basic,
         };
         
         cache.entries.insert("test".to_string(), entry);
@@ -255,6 +282,7 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             file_hash: 12345u64,
+            model_type: EmbeddingModelType::Basic,
         };
         
         cache.entries.insert("test2".to_string(), entry2);
@@ -262,6 +290,39 @@ mod tests {
         // Should be retrievable
         let retrieved = cache.get("test2");
         assert!(retrieved.is_some());
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_cache_model_type() -> Result<()> {
+        let dir = tempdir()?;
+        let cache_path = dir.path().join("cache.json").to_string_lossy().to_string();
+        
+        let mut cache = EmbeddingCache::new(cache_path.clone())?;
+        assert_eq!(cache.len(), 0);
+        
+        // Insert an item with Basic model type
+        let embedding = vec![1.0, 2.0, 3.0];
+        let file_hash = 12345u64;
+        cache.set_model_type(EmbeddingModelType::Basic);
+        cache.insert("test".to_string(), embedding.clone(), file_hash)?;
+        
+        // Change model type to ONNX
+        cache.set_model_type(EmbeddingModelType::ONNX);
+        
+        // Get the item - should be None because model type doesn't match
+        let retrieved = cache.get("test");
+        assert!(retrieved.is_none());
+        
+        // Insert a new item with ONNX model type
+        let embedding2 = vec![4.0, 5.0, 6.0];
+        cache.insert("test2".to_string(), embedding2.clone(), file_hash)?;
+        
+        // Get the ONNX item - should exist
+        let retrieved = cache.get("test2");
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap(), &embedding2);
         
         Ok(())
     }

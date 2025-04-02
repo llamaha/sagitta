@@ -6,5 +6,6 @@ pub mod hnsw;
 pub mod parsing;
 pub mod search;
 pub mod tokenizer;
+pub mod onnx;
 
 pub use db::VectorDB;

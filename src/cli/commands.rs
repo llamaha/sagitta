@@ -1,10 +1,10 @@
 use clap::Parser;
 use anyhow::Result;
 use crate::vectordb::VectorDB;
-use crate::vectordb::embedding::EmbeddingModel;
+use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::search::{Search, CodeSearchType};
 use crate::vectordb::parsing::{RustAnalyzer, CodeElement};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use colored::Colorize;
 use walkdir::WalkDir;
@@ -37,6 +37,18 @@ pub enum Command {
         /// Number of threads to use for indexing (defaults to available CPUs)
         #[arg(short = 'j', long = "threads")]
         threads: Option<usize>,
+        
+        /// Use ONNX-based embedding model
+        #[arg(long = "onnx")]
+        use_onnx: bool,
+        
+        /// Path to ONNX model file
+        #[arg(long = "onnx-model")]
+        onnx_model: Option<String>,
+        
+        /// Path to ONNX tokenizer directory
+        #[arg(long = "onnx-tokenizer")]
+        onnx_tokenizer: Option<String>,
     },
 
     /// Search for files by content
@@ -73,6 +85,25 @@ pub enum Command {
         search_type: Option<String>,
     },
     
+    /// Configure the embedding model
+    Model {
+        /// Use basic embedding model
+        #[arg(long = "basic")]
+        use_basic: bool,
+        
+        /// Use ONNX embedding model (requires model and tokenizer paths)
+        #[arg(long = "onnx")]
+        use_onnx: bool,
+        
+        /// Path to ONNX model file
+        #[arg(long = "onnx-model")]
+        onnx_model: Option<String>,
+        
+        /// Path to ONNX tokenizer directory
+        #[arg(long = "onnx-tokenizer")]
+        onnx_tokenizer: Option<String>,
+    },
+    
     /// Parse code in a directory and show analysis
     ParseCode {
         /// Directory containing code to parse
@@ -105,8 +136,40 @@ pub enum Command {
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
-        Command::Index { dir, file_types, threads } => {
+        Command::Index { dir, file_types, threads, use_onnx, onnx_model, onnx_tokenizer } => {
             println!("Indexing files in {}...", dir);
+            
+            // Set the embedding model type and paths if ONNX is specified
+            if use_onnx {
+                // Get or use default paths
+                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
+                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
+                
+                // Set ONNX paths
+                db.set_onnx_paths(
+                    Some(PathBuf::from(model_path)),
+                    Some(PathBuf::from(tokenizer_path))
+                );
+                
+                // Set the model type to ONNX
+                match db.set_embedding_model_type(EmbeddingModelType::ONNX) {
+                    Ok(_) => {
+                        println!("Using ONNX-based embedding model:");
+                        println!("  - Model: {}", model_path);
+                        println!("  - Tokenizer: {}", tokenizer_path);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to use ONNX model: {}", e);
+                        eprintln!("Falling back to basic embedding model.");
+                        // Ensure we're using the basic model
+                        let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
+                    }
+                }
+            } else {
+                // Ensure we're using the basic model
+                let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
+                println!("Using basic embedding model");
+            }
             
             // Set up signal handler for clean shutdown
             let running = Arc::new(AtomicBool::new(true));
@@ -154,7 +217,8 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
         }
         Command::Query { query, vector_only, vector_weight, bm25_weight, file_types } => {
-            let model = EmbeddingModel::new()?;
+            // Create embedding model based on the database configuration
+            let model = create_embedding_model(&db)?;
             let search = Search::new(db, model);
             
             // Determine search type based on flags
@@ -211,7 +275,8 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
         }
         Command::CodeSearch { query, search_type } => {
-            let model = EmbeddingModel::new()?;
+            // Create embedding model based on the database configuration
+            let model = create_embedding_model(&db)?;
             let mut search = Search::new(db, model);
             
             // Parse the search type
@@ -248,6 +313,57 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("   {}:", "Snippet".green());
                 println!("   {}", result.snippet.replace("\n", "\n   "));
                 println!();
+            }
+        }
+        Command::Model { use_basic, use_onnx, onnx_model, onnx_tokenizer } => {
+            // Configure the embedding model
+            if use_basic && use_onnx {
+                println!("Cannot specify both --basic and --onnx. Please choose one model type.");
+                return Ok(());
+            }
+            
+            if use_basic {
+                // Set the model type to Basic
+                db.set_embedding_model_type(EmbeddingModelType::Basic)?;
+                println!("Set embedding model to Basic.");
+            } else if use_onnx {
+                // Get or use default paths
+                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
+                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
+                
+                // Set ONNX paths
+                db.set_onnx_paths(
+                    Some(PathBuf::from(model_path)),
+                    Some(PathBuf::from(tokenizer_path))
+                );
+                
+                // Set the model type to ONNX
+                match db.set_embedding_model_type(EmbeddingModelType::ONNX) {
+                    Ok(_) => {
+                        println!("Set embedding model to ONNX:");
+                        println!("  - Model: {}", model_path);
+                        println!("  - Tokenizer: {}", tokenizer_path);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to set ONNX model: {}", e);
+                    }
+                }
+            } else {
+                // Just display the current model type
+                let model_type = db.embedding_model_type();
+                println!("Current embedding model: {:?}", model_type);
+                
+                if *model_type == EmbeddingModelType::ONNX {
+                    println!("ONNX model paths:");
+                    println!("  - Model: {}", db.onnx_model_path().map_or_else(
+                        || "Not set".to_string(), 
+                        |p| p.to_string_lossy().to_string()
+                    ));
+                    println!("  - Tokenizer: {}", db.onnx_tokenizer_path().map_or_else(
+                        || "Not set".to_string(), 
+                        |p| p.to_string_lossy().to_string()
+                    ));
+                }
             }
         }
         Command::ParseCode { dir, file_types, show_functions, show_structs, show_imports } => {
@@ -354,8 +470,22 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let stats = db.stats();
             println!("Indexed files: {}", stats.indexed_files);
             println!("Embedding dimension: {}", stats.embedding_dimension);
+            println!("Embedding model: {:?}", stats.embedding_model_type);
             println!("Database path: {}", stats.db_path);
             println!("Cached files: {}", stats.cached_files);
+            
+            // Display ONNX paths if using ONNX model
+            if stats.embedding_model_type == EmbeddingModelType::ONNX {
+                println!("ONNX model paths:");
+                println!("  - Model: {}", db.onnx_model_path().map_or_else(
+                    || "Not set".to_string(), 
+                    |p| p.to_string_lossy().to_string()
+                ));
+                println!("  - Tokenizer: {}", db.onnx_tokenizer_path().map_or_else(
+                    || "Not set".to_string(), 
+                    |p| p.to_string_lossy().to_string()
+                ));
+            }
             
             // Display HNSW stats if available
             if let Some(hnsw_stats) = stats.hnsw_stats {
@@ -385,6 +515,27 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     Ok(())
 }
 
+/// Creates the embedding model based on the database configuration
+fn create_embedding_model(db: &VectorDB) -> Result<EmbeddingModel> {
+    match db.embedding_model_type() {
+        EmbeddingModelType::Basic => {
+            EmbeddingModel::new()
+                .map_err(|e| anyhow::Error::msg(format!("Failed to create basic embedding model: {}", e)))
+        },
+        EmbeddingModelType::ONNX => {
+            if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
+                EmbeddingModel::new_with_onnx(model_path, tokenizer_path)
+                    .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
+            } else {
+                // Fallback to basic model if ONNX paths aren't set properly
+                eprintln!("Warning: ONNX model paths not set correctly, falling back to basic embedding model");
+                EmbeddingModel::new()
+                    .map_err(|e| anyhow::Error::msg(format!("Failed to create basic embedding model: {}", e)))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +563,9 @@ mod tests {
             dir: temp_dir.path().to_string_lossy().to_string(),
             file_types: vec!["rs".to_string()],
             threads: None,
+            use_onnx: false,
+            onnx_model: None,
+            onnx_tokenizer: None,
         };
         
         execute_command(command, db)?;
