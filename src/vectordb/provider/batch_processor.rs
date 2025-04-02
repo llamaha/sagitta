@@ -16,6 +16,18 @@ pub struct BatchProcessorConfig {
     pub max_wait_time: Duration,
     /// Whether to use dynamic batching based on sequence length
     pub dynamic_batching: bool,
+    /// Maximum sequence length variance allowed in a batch
+    pub max_seq_length_variance: usize,
+    /// Retry count for failed batches
+    pub max_retries: usize,
+    /// Timeout for each batch processing attempt
+    pub batch_timeout: Duration,
+    /// Whether to use adaptive batching to adjust batch size based on system load
+    pub adaptive_batching: bool,
+    /// Target latency for adaptive batching
+    pub target_latency: Duration,
+    /// Maximum parallelism for batch processing
+    pub max_parallelism: usize,
 }
 
 impl Default for BatchProcessorConfig {
@@ -24,11 +36,18 @@ impl Default for BatchProcessorConfig {
             max_batch_size: 16,
             max_wait_time: Duration::from_millis(50),
             dynamic_batching: true,
+            max_seq_length_variance: 32,
+            max_retries: 3,
+            batch_timeout: Duration::from_secs(30),
+            adaptive_batching: false,
+            target_latency: Duration::from_millis(100),
+            max_parallelism: num_cpus::get(),
         }
     }
 }
 
 /// A request for embedding a text
+#[derive(Clone)]
 struct EmbeddingRequest {
     /// The tokenized input
     tokenized: TokenizerOutput,
@@ -52,6 +71,19 @@ pub struct BatchProcessor {
     embedding_dim: usize,
     /// Whether the processor is running
     running: Mutex<bool>,
+}
+
+impl Clone for BatchProcessor {
+    fn clone(&self) -> Self {
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            session_manager: Arc::clone(&self.session_manager),
+            tokenizer_cache: Arc::clone(&self.tokenizer_cache),
+            config: self.config.clone(),
+            embedding_dim: self.embedding_dim,
+            running: Mutex::new(*self.running.lock().unwrap()),
+        }
+    }
 }
 
 impl BatchProcessor {
@@ -129,9 +161,44 @@ impl BatchProcessor {
         let mut batch = Vec::new();
         let max_batch_size = self.config.max_batch_size;
         
-        // Get up to max_batch_size requests
-        while !queue.is_empty() && batch.len() < max_batch_size {
-            batch.push(queue.pop_front().unwrap());
+        // If queue is empty, return immediately
+        if queue.is_empty() {
+            return batch;
+        }
+        
+        if self.config.dynamic_batching {
+            // Group requests by similar sequence length for better efficiency
+            
+            // First, peek at the first request to get initial sequence length
+            let first_seq_length = queue.front().map(|req| req.tokenized.input_ids.len()).unwrap_or(0);
+            
+            // Collect requests of similar sequence length
+            let mut i = 0;
+            while i < queue.len() && batch.len() < max_batch_size {
+                let req = &queue[i];
+                let current_seq_length = req.tokenized.input_ids.len();
+                
+                // Check if this request fits within our variance window
+                if batch.is_empty() || 
+                   (current_seq_length >= first_seq_length.saturating_sub(self.config.max_seq_length_variance) &&
+                    current_seq_length <= first_seq_length + self.config.max_seq_length_variance) {
+                    batch.push(queue.remove(i).unwrap());
+                } else {
+                    // Skip this request for now, as it has a different sequence length
+                    i += 1;
+                }
+            }
+        } else {
+            // Simple FIFO batch collection
+            while !queue.is_empty() && batch.len() < max_batch_size {
+                batch.push(queue.pop_front().unwrap());
+            }
+        }
+        
+        // If using adaptive batching, adjust batch size based on recent performance
+        if self.config.adaptive_batching && !batch.is_empty() {
+            // Implementation will be added in a future enhancement
+            // This would track batch processing times and adjust batch sizes accordingly
         }
         
         batch
@@ -143,6 +210,59 @@ impl BatchProcessor {
             return Ok(Vec::new());
         }
         
+        // Set up timeout for batch processing
+        let timeout = Instant::now() + self.config.batch_timeout;
+        let mut retry_count = 0;
+        let mut last_error = None;
+        
+        // Retry loop for resilience
+        while retry_count < self.config.max_retries && Instant::now() < timeout {
+            match self.process_batch_with_session(batch) {
+                Ok(results) => {
+                    // Successfully processed the batch
+                    return Ok(results);
+                }
+                Err(e) => {
+                    // Record the error and retry
+                    eprintln!("Batch processing error (attempt {}/{}): {}", 
+                             retry_count + 1, self.config.max_retries, e);
+                    last_error = Some(e);
+                    retry_count += 1;
+                    
+                    // Exponential backoff before retry
+                    if retry_count < self.config.max_retries {
+                        let backoff_ms = 2u64.pow(retry_count as u32) * 10;
+                        std::thread::sleep(Duration::from_millis(backoff_ms));
+                    }
+                }
+            }
+        }
+        
+        // If we've exhausted retries, return error results for all requests
+        if let Some(err) = last_error {
+            eprintln!("Failed to process batch after {} retries: {}", 
+                     self.config.max_retries, err);
+            
+            // Return individual errors for each request
+            let err_msg = format!(
+                "Batch processing failed after {} retries: {}", 
+                self.config.max_retries, err
+            );
+            
+            let mut error_results = Vec::with_capacity(batch.len());
+            for _ in 0..batch.len() {
+                error_results.push(Err(Error::msg(err_msg.clone())));
+            }
+            
+            Ok(error_results)
+        } else {
+            // This should not happen, but handle it anyway
+            Err(Error::msg("Batch processing timed out"))
+        }
+    }
+    
+    /// Process a batch with a specific session - internal implementation
+    fn process_batch_with_session(&self, batch: &[EmbeddingRequest]) -> Result<Vec<Result<Vec<f32>>>> {
         // Get a session
         let session_guard = self.session_manager.get_session_guard()?;
         let session = session_guard.session();
@@ -184,12 +304,29 @@ impl BatchProcessor {
             _ => return Err(Error::msg("Failed to create input tensors")),
         };
         
-        // Run inference
+        // Run inference with a timeout guard
         let outputs = session.run(inputs)?;
+        
+        // Validate output
+        if outputs.len() < 2 {
+            return Err(Error::msg(format!(
+                "Model returned unexpected number of outputs: got {}, expected at least 2", 
+                outputs.len()
+            )));
+        }
         
         // Extract pooler output (second output tensor)
         let pooler_output = outputs[1].try_extract()?;
         let pooler_view = pooler_output.view();
+        
+        // Validate pooler output shape
+        let output_shape = pooler_view.shape();
+        if output_shape.len() != 2 || output_shape[0] != batch_size {
+            return Err(Error::msg(format!(
+                "Unexpected pooler output shape: got {:?}, expected [{}, {}]", 
+                output_shape, batch_size, self.embedding_dim
+            )));
+        }
         
         // Extract individual embeddings
         let mut results = Vec::with_capacity(batch_size);
@@ -222,10 +359,18 @@ impl BatchProcessor {
     
     /// Queue a text for embedding
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        // Tokenize the text
-        let tokenized = self.tokenizer_cache.tokenize(text)?;
+        // Use a timeout for the entire embedding process
+        let timeout = Instant::now() + self.config.batch_timeout;
         
-        // Create a channel for the result
+        // Try tokenization first - if this fails, don't bother queuing
+        let tokenized = match self.tokenizer_cache.tokenize(text) {
+            Ok(tokenized) => tokenized,
+            Err(e) => {
+                return Err(Error::msg(format!("Failed to tokenize text: {}", e)));
+            }
+        };
+        
+        // Create a channel for the result with bounded capacity
         let (sender, receiver) = std::sync::mpsc::channel();
         
         // Create a request
@@ -235,24 +380,130 @@ impl BatchProcessor {
             result_sender: sender,
         };
         
-        // Add the request to the queue
-        {
-            let mut queue = self.queue.lock().unwrap();
-            queue.push_back(request);
+        // Add the request to the queue with retry logic
+        let mut queued = false;
+        let mut retry_count = 0;
+        
+        // Create a new request clone for each attempt
+        while !queued && retry_count < self.config.max_retries && Instant::now() < timeout {
+            // Try to acquire the queue lock with a timeout
+            match self.queue.try_lock() {
+                Ok(mut queue) => {
+                    queue.push_back(request.clone());
+                    queued = true;
+                },
+                Err(_) => {
+                    // If we couldn't get the lock, wait briefly and retry
+                    retry_count += 1;
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
         }
         
-        // Wait for the result
-        receiver.recv().unwrap_or_else(|_| {
-            Err(Error::msg("Failed to receive embedding result"))
-        })
+        // If we couldn't queue the request, return an error
+        if !queued {
+            return Err(Error::msg("Failed to queue embedding request: queue lock unavailable"));
+        }
+        
+        // Wait for the result with remaining timeout
+        let remaining_time = timeout.saturating_duration_since(Instant::now());
+        match receiver.recv_timeout(remaining_time) {
+            Ok(result) => result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                Err(Error::msg(format!("Timed out waiting for embedding result after {:?}", self.config.batch_timeout)))
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                Err(Error::msg("Batch processor channel disconnected"))
+            }
+        }
     }
     
-    /// Embed multiple texts
+    /// Embed multiple texts with improved parallel processing
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        // Process each text
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed(text)?);
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // For a small number of texts, process them serially
+        if texts.len() <= 4 {
+            // Process each text
+            let mut results = Vec::with_capacity(texts.len());
+            for text in texts {
+                results.push(self.embed(text)?);
+            }
+            return Ok(results);
+        }
+        
+        // For larger batches, use parallel processing with a thread pool
+        use std::sync::mpsc;
+        use std::thread;
+        
+        let parallelism = std::cmp::min(self.config.max_parallelism, texts.len());
+        let (tx, rx) = mpsc::channel();
+        
+        // Distribute texts among worker threads
+        let chunk_size = (texts.len() + parallelism - 1) / parallelism;
+        
+        let mut handles = Vec::with_capacity(parallelism);
+        let self_arc = Arc::new(self.clone());
+        
+        for chunk_idx in 0..parallelism {
+            let start = chunk_idx * chunk_size;
+            let end = std::cmp::min(start + chunk_size, texts.len());
+            
+            if start >= end {
+                continue; // Skip empty chunks
+            }
+            
+            // Create a chunk of texts for this worker
+            let chunk = texts[start..end].iter().map(|&s| s.to_string()).collect::<Vec<_>>();
+            let processor = Arc::clone(&self_arc);
+            let tx = tx.clone();
+            
+            // Spawn a worker thread
+            let handle = thread::spawn(move || {
+                for (idx, text) in chunk.iter().enumerate() {
+                    let abs_idx = start + idx;
+                    let result = processor.embed(text);
+                    tx.send((abs_idx, result)).expect("Failed to send embedding result");
+                }
+            });
+            
+            handles.push(handle);
+        }
+        
+        // Drop the original sender to avoid deadlock
+        drop(tx);
+        
+        // Collect results in order
+        let mut results = vec![Vec::new(); texts.len()];
+        let mut errors = Vec::new();
+        
+        for _ in 0..texts.len() {
+            match rx.recv() {
+                Ok((idx, Ok(embedding))) => {
+                    results[idx] = embedding;
+                },
+                Ok((idx, Err(e))) => {
+                    errors.push((idx, e));
+                },
+                Err(e) => {
+                    return Err(Error::msg(format!("Failed to receive embedding result: {}", e)));
+                }
+            }
+        }
+        
+        // Wait for all threads to finish
+        for handle in handles {
+            if let Err(e) = handle.join() {
+                eprintln!("Worker thread panicked: {:?}", e);
+            }
+        }
+        
+        // If there were any errors, report the first one
+        if !errors.is_empty() {
+            let (idx, err) = &errors[0];
+            return Err(Error::msg(format!("Failed to embed text at index {}: {}", idx, err)));
         }
         
         Ok(results)
