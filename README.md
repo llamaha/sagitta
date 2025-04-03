@@ -41,14 +41,25 @@ cp target/release/vectordb-cli ~/.local/bin/
 
 #### ONNX Model Files
 
-The ONNX model files are stored in Git LFS. If you build from source, make sure to:
+The ONNX model files are stored in Git LFS and are required for optimal performance. The installation script will handle this automatically if Git LFS is installed.
 
-1. Install Git LFS: `git lfs install`
-2. Clone with LFS support: `git lfs pull`
+**Important**: For proper installation, make sure to install Git LFS first:
+```bash
+# Debian/Ubuntu
+sudo apt-get install git-lfs
 
-Or download the model files manually and place them in one of the following locations:
-- `./onnx/all-minilm-l6-v2.onnx` (current directory)
-- `$HOME/.vectordb-cli/models/all-minilm-l6-v2.onnx` (user's home directory)
+# macOS
+brew install git-lfs
+
+# After installation, set up Git LFS
+git lfs install
+```
+
+Without Git LFS, the installation script will still work but will create placeholder model files that aren't functional.
+
+The model files will be placed in one of these locations:
+- `./onnx/all-minilm-l6-v2.onnx` (when built from source)
+- `$HOME/.vectordb-cli/models/all-minilm-l6-v2.onnx` (when installed via script)
 
 You can also specify custom model paths:
 ```bash

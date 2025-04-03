@@ -17,6 +17,21 @@ check_command() {
 
 check_command cargo "Install Rust from https://rustup.rs/"
 check_command curl "Install curl using your system's package manager"
+check_command git "Install git using your system's package manager"
+
+# Check if Git LFS is installed
+GIT_LFS_INSTALLED=false
+if command -v git-lfs &> /dev/null; then
+    GIT_LFS_INSTALLED=true
+else
+    echo "Warning: Git LFS is not installed. ONNX models will not be properly downloaded."
+    echo "For best results, install Git LFS first:"
+    echo "  - On Debian/Ubuntu: sudo apt-get install git-lfs"
+    echo "  - On macOS: brew install git-lfs"
+    echo "  - More info: https://git-lfs.github.com/"
+    echo ""
+    echo "Proceeding with limited installation..."
+fi
 
 # Determine OS type
 PLATFORM="unknown"
@@ -47,14 +62,12 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
-# Download ONNX model and tokenizer files
-MODEL_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/pytorch_model.bin"
+# Download tokenizer files
+echo "Downloading tokenizer files to $MODELS_DIR..."
 TOKENIZER_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 CONFIG_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json"
 SPECIAL_TOKENS_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json"
 TOKENIZER_CONFIG_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json"
-
-echo "Downloading ONNX model files to $MODELS_DIR..."
 
 # Function to download file with progress bar
 download_file() {
@@ -67,24 +80,6 @@ download_file "$TOKENIZER_URL" "$MODELS_DIR/tokenizer.json"
 download_file "$CONFIG_URL" "$MODELS_DIR/config.json"
 download_file "$SPECIAL_TOKENS_URL" "$MODELS_DIR/special_tokens_map.json"
 download_file "$TOKENIZER_CONFIG_URL" "$MODELS_DIR/tokenizer_config.json"
-
-# For the actual ONNX model, either download a pre-converted one or convert ourselves
-# For this example, we'll use a mock ONNX file since actual conversion requires more setup
-echo "Creating ONNX model file..."
-ONNX_MODEL_PATH="$MODELS_DIR/all-minilm-l6-v2.onnx"
-
-# Check if the file already exists
-if [ -f "$ONNX_MODEL_PATH" ]; then
-    echo "ONNX model file already exists at $ONNX_MODEL_PATH"
-else
-    # In a real script, we would convert the PyTorch model to ONNX
-    # For now, we're just creating a placeholder file
-    echo "Warning: Creating a placeholder ONNX model file for demonstration."
-    echo "In a production environment, you would need to convert the PyTorch model to ONNX."
-    echo "This placeholder will not work for actual searches."
-    echo "PLACEHOLDER ONNX MODEL" > "$ONNX_MODEL_PATH"
-    echo "For real usage, please download and convert a proper ONNX model."
-fi
 
 # Set environment variables
 ENV_FILE="$INSTALL_DIR/env.sh"
@@ -101,40 +96,57 @@ echo "Run 'source $ENV_FILE' to set up environment variables."
 # Build and install vectordb-cli
 echo "Building vectordb-cli from source..."
 
-# Check if we're in the vectordb-cli repo
-if [ -f "Cargo.toml" ] && grep -q "name = \"vectordb-cli\"" "Cargo.toml"; then
-    echo "Building from current directory..."
-    cargo build --release
-    
-    # Install the binary
-    cp "target/release/vectordb-cli" "$BIN_DIR/"
-    
-    # Copy uninstall script to installation directory
-    mkdir -p "$INSTALL_DIR/scripts"
-    cp "scripts/uninstall.sh" "$INSTALL_DIR/scripts/"
-    chmod +x "$INSTALL_DIR/scripts/uninstall.sh"
-else
-    # Otherwise, we need to clone the repo
-    TEMP_DIR=$(mktemp -d)
-    echo "Cloning repository to $TEMP_DIR..."
-    
+# Create temporary directory for cloning
+TEMP_DIR=$(mktemp -d)
+echo "Cloning repository to $TEMP_DIR..."
+
+# Clone the repository with Git LFS if available
+if [ "$GIT_LFS_INSTALLED" = true ]; then
+    git lfs install
     git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
     cd "$TEMP_DIR"
-    
-    cargo build --release
-    
-    # Install the binary
-    cp "target/release/vectordb-cli" "$BIN_DIR/"
-    
-    # Copy uninstall script to installation directory
-    mkdir -p "$INSTALL_DIR/scripts"
-    cp "scripts/uninstall.sh" "$INSTALL_DIR/scripts/"
-    chmod +x "$INSTALL_DIR/scripts/uninstall.sh"
-    
-    # Clean up
-    cd - > /dev/null
-    rm -rf "$TEMP_DIR"
+    git lfs pull
+else
+    git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
+    cd "$TEMP_DIR"
 fi
+
+# Copy the ONNX model from the repository if available
+ONNX_MODEL_PATH="$MODELS_DIR/all-minilm-l6-v2.onnx"
+REPO_MODEL_PATH="$TEMP_DIR/onnx/all-minilm-l6-v2.onnx"
+
+if [ -f "$REPO_MODEL_PATH" ]; then
+    echo "Copying ONNX model from repository..."
+    cp "$REPO_MODEL_PATH" "$ONNX_MODEL_PATH"
+    echo "ONNX model file installed at $ONNX_MODEL_PATH"
+else
+    echo "Warning: Could not find ONNX model in the repository."
+    if [ -f "$ONNX_MODEL_PATH" ]; then
+        echo "Using existing ONNX model file at $ONNX_MODEL_PATH"
+    else
+        echo "Warning: Creating a placeholder ONNX model file for demonstration."
+        echo "In a production environment, you would need a proper ONNX model file."
+        echo "This placeholder will not work for actual searches."
+        echo "PLACEHOLDER ONNX MODEL" > "$ONNX_MODEL_PATH"
+        echo "For real usage, please download and convert a proper ONNX model."
+    fi
+fi
+
+# Build the project
+echo "Building the project..."
+cargo build --release
+
+# Install the binary
+cp "target/release/vectordb-cli" "$BIN_DIR/"
+
+# Copy uninstall script to installation directory
+mkdir -p "$INSTALL_DIR/scripts"
+cp "scripts/uninstall.sh" "$INSTALL_DIR/scripts/"
+chmod +x "$INSTALL_DIR/scripts/uninstall.sh"
+
+# Clean up
+cd - > /dev/null
+rm -rf "$TEMP_DIR"
 
 echo "Installation completed!"
 echo ""
