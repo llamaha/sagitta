@@ -10,8 +10,10 @@ use crate::vectordb::snippet_extractor::{SnippetExtractor, SnippetContext};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use log::{debug, info, warn, error, trace};
+use regex;
 
-const SIMILARITY_THRESHOLD: f32 = 0.3;
+const SIMILARITY_THRESHOLD: f32 = 0.5; // Increased from 0.3
+const DEFAULT_MAX_RESULTS: usize = 20; // New constant for default max results
 const MIN_CONTEXT_LINES: usize = 2;
 const MAX_CONTEXT_LINES: usize = 8;
 const WINDOW_SIZE: usize = 8;
@@ -197,6 +199,11 @@ impl Search {
 
     /// Search for code with enhanced language-specific understanding
     pub fn search_code(&mut self, query: &str, search_type: Option<CodeSearchType>) -> Result<Vec<SearchResult>> {
+        self.search_code_with_limit(query, search_type, DEFAULT_MAX_RESULTS)
+    }
+
+    /// Search for code with enhanced language-specific understanding and a limit on the number of results
+    pub fn search_code_with_limit(&mut self, query: &str, search_type: Option<CodeSearchType>, max_results: usize) -> Result<Vec<SearchResult>> {
         // First, analyze the query to understand what the user is looking for
         let query_analysis = self.analyze_query(query);
         
@@ -204,7 +211,7 @@ impl Search {
         let search_type = search_type.or_else(|| self.determine_search_type(&query_analysis));
         
         // First, use the semantic search to get initial results
-        let mut results = self.search(query)?;
+        let mut results = self.search_with_limit(query, max_results * 2)?; // Get more results initially
         
         // Apply the path-based ranking improvements
         apply_path_ranking(&mut results, query, &self.path_weights);
@@ -224,8 +231,11 @@ impl Search {
         // Process Ruby files with enhanced Rails support
         self.process_ruby_results(&mut results, query, search_type)?;
         
-        // Return the sorted results
-        Ok(results)
+        // Apply the MMR algorithm to ensure diversity
+        let diverse_results = self.apply_mmr(results, 0.6, max_results); // Lower lambda for more diversity
+        
+        // Return the sorted and limited results
+        Ok(diverse_results)
     }
     
     /// Extract method name from a query like "search_parallel method in HNSWIndex"
@@ -498,6 +508,11 @@ impl Search {
 
     /// Standard search using vector similarity
     pub fn search(&mut self, query: &str) -> Result<Vec<SearchResult>> {
+        self.search_with_limit(query, DEFAULT_MAX_RESULTS)
+    }
+
+    /// Standard search using vector similarity with a limit on the number of results
+    pub fn search_with_limit(&mut self, query: &str, max_results: usize) -> Result<Vec<SearchResult>> {
         debug!("Performing vector search for query: {}", query);
         
         // Validate query
@@ -621,15 +636,28 @@ impl Search {
         final_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
         
         // Apply result diversity to avoid redundant results
-        let diverse_results = self.apply_mmr(final_results, 0.7, HNSW_TOP_K);
+        let diverse_results = self.apply_mmr(final_results, 0.7, max_results.min(HNSW_TOP_K));
         
-        debug!("Search complete, returning {} results", diverse_results.len());
+        // Limit the number of results
+        let limited_results = if diverse_results.len() > max_results {
+            debug!("Limiting results to {} (from {})", max_results, diverse_results.len());
+            diverse_results[0..max_results].to_vec()
+        } else {
+            diverse_results
+        };
         
-        Ok(diverse_results)
+        debug!("Search complete, returning {} results", limited_results.len());
+        
+        Ok(limited_results)
     }
     
     /// Hybrid search combining vector similarity and BM25 lexical matching
     pub fn hybrid_search(&mut self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>) -> Result<Vec<SearchResult>> {
+        self.hybrid_search_with_limit(query, vector_weight, bm25_weight, DEFAULT_MAX_RESULTS)
+    }
+    
+    /// Hybrid search combining vector similarity and BM25 lexical matching with a limit on the number of results
+    pub fn hybrid_search_with_limit(&mut self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>, max_results: usize) -> Result<Vec<SearchResult>> {
         debug!("Performing hybrid search for query: {}", query);
         
         // If the query is empty, return empty results
@@ -658,13 +686,13 @@ impl Search {
         
         // Perform vector search (semantic search part)
         debug!("Performing vector search component");
-        let vector_results = self.search(query)?;
+        let vector_results = self.search_with_limit(query, max_results * 2)?; // Get more results for combining
         debug!("Vector search returned {} results", vector_results.len());
         
         // If we're only using vector search, return those results
         if b_weight <= 0.0 {
             debug!("BM25 weight is 0, returning vector-only results");
-            return Ok(vector_results);
+            return Ok(vector_results.into_iter().take(max_results).collect());
         }
         
         // Collect the file paths from vector results - we don't use this yet, but will in the future
@@ -704,8 +732,8 @@ impl Search {
         // Sort BM25 results by score in descending order
         bm25_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
         
-        // Keep only top results from BM25 (same number as vector results or minimum 10)
-        let top_k = vector_results.len().max(10);
+        // Keep only top results from BM25
+        let top_k = max_results.max(10);
         if bm25_results.len() > top_k {
             debug!("Trimming BM25 results to top {}", top_k);
             bm25_results.truncate(top_k);
@@ -758,8 +786,12 @@ impl Search {
             }
         }
         
-        debug!("Hybrid search complete, returning {} results", combined_results.len());
-        Ok(combined_results)
+        // Apply final diversity and limit the results
+        debug!("Applying MMR for diversity and limiting results");
+        let diverse_results = self.apply_mmr(combined_results, 0.6, max_results); // Lower lambda value for more diversity
+        
+        debug!("Hybrid search complete, returning {} results", diverse_results.len());
+        Ok(diverse_results)
     }
     
     /// Determine optimal weights for hybrid search based on query analysis
@@ -832,15 +864,24 @@ impl Search {
             return results;
         }
         
+        debug!("Applying MMR for diversity with lambda={} and k={}", lambda, k);
+        
         // Parameters
         let lambda = lambda.clamp(0.0, 1.0); // Ensure lambda is between 0 and 1
         let k = k.min(results.len()); // Ensure k doesn't exceed the available results
+        
+        // Track unique file paths to promote path diversity
+        let mut seen_paths = HashSet::new();
+        let mut seen_path_prefixes = HashSet::new();
         
         // Create document embeddings for all results
         let mut result_embeddings: Vec<(SearchResult, Vec<f32>)> = Vec::with_capacity(results.len());
         
         for result in results {
-            match self.model.embed(&result.snippet) {
+            // Create a normalized version of the snippet for better similarity detection
+            let normalized_snippet = normalize_text(&result.snippet);
+            
+            match self.model.embed(&normalized_snippet) {
                 Ok(embedding) => {
                     result_embeddings.push((result, embedding));
                 },
@@ -854,6 +895,7 @@ impl Search {
         
         // Start with the initial ranking (by similarity)
         let mut ranked: Vec<SearchResult> = Vec::with_capacity(k);
+        let mut ranked_embeddings: Vec<Vec<f32>> = Vec::with_capacity(k);
         let mut unranked: Vec<(SearchResult, Vec<f32>)> = result_embeddings;
         
         // Sort by original similarity score
@@ -863,52 +905,114 @@ impl Search {
         
         // Add the first element (highest relevance)
         if !unranked.is_empty() {
-            let (first, _) = unranked.remove(0);
+            let (first, first_emb) = unranked.remove(0);
+            
+            // Add to tracking sets
+            seen_paths.insert(first.file_path.clone());
+            if let Some(prefix) = Self::extract_path_prefix(&first.file_path) {
+                seen_path_prefixes.insert(prefix);
+            }
+            
             ranked.push(first);
+            ranked_embeddings.push(first_emb);
         }
         
         // Iteratively add remaining elements
         while ranked.len() < k && !unranked.is_empty() {
             let mut max_score = f32::NEG_INFINITY;
             let mut max_idx = 0;
+            let mut max_path_diversity_boost = 0.0;
             
             for (i, (candidate, candidate_emb)) in unranked.iter().enumerate() {
+                // Calculate path diversity boost
+                let path_diversity_boost = Self::calculate_path_diversity_boost(
+                    &candidate.file_path, 
+                    &seen_paths, 
+                    &seen_path_prefixes
+                );
+                
                 // MMR score = λ * sim(candidate, query) - (1-λ) * max(sim(candidate, ranked_docs))
-                let relevance = candidate.similarity;
+                let relevance = candidate.similarity + path_diversity_boost;
                 
                 // Find maximum similarity to any ranked document
-                let mut max_diversity_penalty = f32::NEG_INFINITY;
+                let mut max_diversity_penalty: f32 = 0.0;
                 
-                for (_j, ranked_result) in ranked.iter().enumerate() {
-                    if let Ok(ranked_emb) = self.model.embed(&ranked_result.snippet) {
-                        // Calculate similarity to ranked document
-                        let diversity_penalty = cosine_similarity(&candidate_emb, &ranked_emb);
-                        max_diversity_penalty = max_diversity_penalty.max(diversity_penalty);
-                    }
+                for ranked_emb in &ranked_embeddings {
+                    // Calculate similarity to ranked document
+                    let similarity = cosine_similarity(&candidate_emb, ranked_emb);
+                    max_diversity_penalty = max_diversity_penalty.max(similarity);
                 }
-                
-                // If we couldn't calculate diversity penalty, default to 0
-                let max_diversity_penalty = if max_diversity_penalty == f32::NEG_INFINITY {
-                    0.0
-                } else {
-                    max_diversity_penalty
-                };
                 
                 // Calculate MMR score
                 let mmr_score = lambda * relevance - (1.0 - lambda) * max_diversity_penalty;
                 
-                if mmr_score > max_score {
-                    max_score = mmr_score;
+                // Check for content similarity (prevent near-duplicate snippets)
+                let has_similar_content = ranked.iter().any(|r| {
+                    text_similarity(&r.snippet, &candidate.snippet) > 0.8
+                });
+                
+                // If this candidate has similar content to an existing result, penalize heavily
+                let final_score = if has_similar_content {
+                    mmr_score * 0.5 // 50% penalty for similar content
+                } else {
+                    mmr_score
+                };
+                
+                if final_score > max_score {
+                    max_score = final_score;
                     max_idx = i;
+                    max_path_diversity_boost = path_diversity_boost;
                 }
             }
             
-            // Add the document with the highest MMR score
-            let (next, _) = unranked.remove(max_idx);
+            // Add the result with the maximum MMR score
+            let (next, next_emb) = unranked.remove(max_idx);
+            
+            // Update tracking sets
+            seen_paths.insert(next.file_path.clone());
+            if let Some(prefix) = Self::extract_path_prefix(&next.file_path) {
+                seen_path_prefixes.insert(prefix);
+            }
+            
+            // Log the selection with diversity information
+            debug!("MMR selected file: {} (sim: {:.2}, diversity boost: {:.2})", 
+                  next.file_path, next.similarity, max_path_diversity_boost);
+            
             ranked.push(next);
+            ranked_embeddings.push(next_emb);
         }
         
+        debug!("MMR algorithm completed, returning {} diverse results", ranked.len());
         ranked
+    }
+
+    /// Extract the path prefix (e.g., directory) from a file path
+    fn extract_path_prefix(file_path: &str) -> Option<String> {
+        let path = std::path::Path::new(file_path);
+        path.parent().map(|p| p.to_string_lossy().to_string())
+    }
+    
+    /// Calculate a diversity boost based on path uniqueness
+    fn calculate_path_diversity_boost(
+        file_path: &str, 
+        seen_paths: &HashSet<String>, 
+        seen_path_prefixes: &HashSet<String>
+    ) -> f32 {
+        // If we've seen this exact path, no boost
+        if seen_paths.contains(file_path) {
+            return 0.0;
+        }
+        
+        // Check if we've seen files from the same directory
+        if let Some(prefix) = Self::extract_path_prefix(file_path) {
+            if seen_path_prefixes.contains(&prefix) {
+                return 0.05; // Small boost for new file in same directory
+            } else {
+                return 0.15; // Larger boost for new directory
+            }
+        }
+        
+        0.1 // Default boost for unique file
     }
     
     /// Calculate similarity between search results to find duplicates
@@ -1601,16 +1705,71 @@ pub enum CodeSearchType {
     Route,      // Search for Rails routes
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(a, b)| a * b).sum();
-    let norm_a: f32 = a.iter().map(|a| a * a).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|b| b * b).sum::<f32>().sqrt();
+/// Normalize text by removing extra whitespace, converting to lowercase etc.
+fn normalize_text(text: &str) -> String {
+    // Convert to lowercase
+    let lowercase = text.to_lowercase();
     
-    if norm_a > 0.0 && norm_b > 0.0 {
-        // Ensure similarity stays within the [-1, 1] bounds
-        (dot_product / (norm_a * norm_b)).clamp(-1.0, 1.0)
+    // Replace multiple whitespace with single space
+    let re_whitespace = regex::Regex::new(r"\s+").unwrap();
+    let normalized = re_whitespace.replace_all(&lowercase, " ").to_string();
+    
+    // Remove common punctuation
+    let re_punctuation = regex::Regex::new(r#"[.,;:!?()\[\]{}'""]"#).unwrap();
+    let normalized = re_punctuation.replace_all(&normalized, "").to_string();
+    
+    normalized.trim().to_string()
+}
+
+/// Calculate similarity between two text snippets
+fn text_similarity(text1: &str, text2: &str) -> f32 {
+    let normalized1 = normalize_text(text1);
+    let normalized2 = normalize_text(text2);
+    
+    // If either text is empty, return 0 similarity
+    if normalized1.is_empty() || normalized2.is_empty() {
+        return 0.0;
+    }
+    
+    // Split into words
+    let words1: HashSet<&str> = normalized1.split_whitespace().collect();
+    let words2: HashSet<&str> = normalized2.split_whitespace().collect();
+    
+    // Count intersection and union
+    let intersection_count = words1.intersection(&words2).count();
+    let union_count = words1.union(&words2).count();
+    
+    // Calculate Jaccard similarity
+    if union_count == 0 {
+        0.0
     } else {
-        0.0 // Zero similarity if either vector has zero norm
+        intersection_count as f32 / union_count as f32
+    }
+}
+
+/// Calculate cosine similarity between two vectors
+fn cosine_similarity(vec1: &[f32], vec2: &[f32]) -> f32 {
+    if vec1.len() != vec2.len() || vec1.is_empty() {
+        return 0.0;
+    }
+    
+    let mut dot_product = 0.0;
+    let mut norm1 = 0.0;
+    let mut norm2 = 0.0;
+    
+    for i in 0..vec1.len() {
+        dot_product += vec1[i] * vec2[i];
+        norm1 += vec1[i] * vec1[i];
+        norm2 += vec2[i] * vec2[i];
+    }
+    
+    norm1 = norm1.sqrt();
+    norm2 = norm2.sqrt();
+    
+    if norm1 == 0.0 || norm2 == 0.0 {
+        0.0
+    } else {
+        dot_product / (norm1 * norm2)
     }
 }
 
@@ -1663,7 +1822,7 @@ mod tests {
         // Try both search methods
         let hybrid_results = search.hybrid_search("Rust programming", None, None)?;
         
-        println!("Found {} hybrid results for 'Rust programming' query", hybrid_results.len());
+        println!("Found {} hybrid results for \"Rust programming\" query", hybrid_results.len());
         for (i, result) in hybrid_results.iter().enumerate() {
             println!("Hybrid Result {}: file={}, similarity={}", i, result.file_path, result.similarity);
         }
@@ -2290,4 +2449,4 @@ require_relative 'helper'
         
         Ok(())
     }
-} 
+} // End of mod tests

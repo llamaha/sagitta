@@ -58,6 +58,10 @@ pub enum Command {
         #[arg(required = true)]
         query: String,
         
+        /// Maximum number of results to return (default: 20)
+        #[arg(short = 'l', long = "limit")]
+        max_results: Option<usize>,
+        
         /// Use only vector search (without hybrid BM25 combination)
         #[arg(long = "vector-only")]
         vector_only: bool,
@@ -81,6 +85,10 @@ pub enum Command {
         #[arg(required = true)]
         query: String,
 
+        /// Maximum number of results to return (default: 20)
+        #[arg(short = 'l', long = "limit")]
+        max_results: Option<usize>,
+        
         /// Type of code search (function, type, dependency, usage)
         #[arg(short = 't', long = "type")]
         search_type: Option<String>,
@@ -245,8 +253,13 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::Query { query, vector_only, vector_weight, bm25_weight, file_types } => {
+        Command::Query { query, max_results, vector_only, vector_weight, bm25_weight, file_types } => {
             debug!("Executing Query command: \"{}\"", query);
+            
+            // Get the max_results value or use the default
+            let limit = max_results.unwrap_or(20);
+            debug!("Using max_results limit: {}", limit);
+            println!("Limiting results to a maximum of {}", limit);
             
             // Use get_embedding_model for embedding logic
             let model_type = db.embedding_model_type();
@@ -259,7 +272,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     let mut results = if vector_only {
                         debug!("Performing vector-only search");
                         println!("Performing vector-only search...");
-                        search.search(&query)?
+                        search.search_with_limit(&query, limit)?
                     } else {
                         debug!("Performing hybrid search (vector + BM25)");
                         println!("Performing query search (combining semantic and lexical matching)...");
@@ -270,7 +283,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         debug!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
                         println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
                         
-                        search.hybrid_search(&query, vector_weight, bm25_weight)?
+                        search.hybrid_search_with_limit(&query, vector_weight, bm25_weight, limit)?
                     };
 
                     // Filter results by file type if specified
@@ -322,7 +335,12 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::CodeSearch { query, search_type } => {
+        Command::CodeSearch { query, max_results, search_type } => {
+            // Get the max_results value or use the default
+            let limit = max_results.unwrap_or(20);
+            debug!("Using max_results limit: {}", limit);
+            println!("Limiting code search results to a maximum of {}", limit);
+            
             // Use get_embedding_model for embedding logic
             let model_type = db.embedding_model_type();
             match get_embedding_model(model_type, &db) {
@@ -343,7 +361,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     };
                     
                     // Execute the code-aware search
-                    let results = search.search_code(&query, code_search_type)?;
+                    let results = search.search_code_with_limit(&query, code_search_type, limit)?;
 
                     if results.is_empty() {
                         println!("No code results found.");
