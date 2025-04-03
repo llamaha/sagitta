@@ -23,14 +23,14 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 
 // Module exports
-pub mod basic;
+pub mod fast;
 pub mod onnx;
 pub mod session_manager;
 pub mod tokenizer_cache;
 pub mod batch_processor;
 
 // Re-export provider implementations
-pub use basic::BasicEmbeddingProvider;
+pub use fast::FastEmbeddingProvider;
 pub use onnx::OnnxEmbeddingProvider;
 pub use onnx::OptimizedOnnxEmbeddingProvider;
 

@@ -96,9 +96,9 @@ pub enum Command {
     
     /// Configure the embedding model
     Model {
-        /// Use basic embedding model
-        #[arg(long = "basic")]
-        use_basic: bool,
+        /// Use fast embedding model (less accurate but much faster)
+        #[arg(long = "fast")]
+        use_fast: bool,
         
         /// Use ONNX embedding model (requires model and tokenizer paths)
         #[arg(long = "onnx")]
@@ -179,25 +179,25 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                             Err(e) => {
                                 error!("Failed to use ONNX model: {}", e);
                                 eprintln!("Failed to use ONNX model: {}", e);
-                                eprintln!("Falling back to basic embedding model.");
-                                // Ensure we're using the basic model
-                                let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
+                                eprintln!("Falling back to fast embedding model.");
+                                // Ensure we're using the fast model
+                                let _ = db.set_embedding_model_type(EmbeddingModelType::Fast);
                             }
                         }
                     },
                     Err(e) => {
                         error!("Failed to set ONNX model paths: {}", e);
                         eprintln!("Failed to set ONNX model paths: {}", e);
-                        eprintln!("Falling back to basic embedding model.");
-                        // Ensure we're using the basic model
-                        let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
+                        eprintln!("Falling back to fast embedding model.");
+                        // Ensure we're using the fast model
+                        let _ = db.set_embedding_model_type(EmbeddingModelType::Fast);
                     }
                 }
             } else {
-                // Ensure we're using the basic model
-                debug!("Using basic embedding model for indexing");
-                let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
-                println!("Using basic embedding model");
+                // Ensure we're using the fast model
+                debug!("Using fast embedding model for indexing");
+                let _ = db.set_embedding_model_type(EmbeddingModelType::Fast);
+                println!("Using fast embedding model (faster but less accurate)");
             }
             
             // Set up signal handler for clean shutdown
@@ -435,17 +435,17 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::Model { use_basic, use_onnx, onnx_model, onnx_tokenizer } => {
+        Command::Model { use_fast, use_onnx, onnx_model, onnx_tokenizer } => {
             // Configure the embedding model
-            if use_basic && use_onnx {
-                println!("Cannot specify both --basic and --onnx. Please choose one model type.");
+            if use_fast && use_onnx {
+                println!("Cannot specify both --fast and --onnx. Please choose one model type.");
                 return Ok(());
             }
             
-            if use_basic {
-                // Set the model type to Basic
-                db.set_embedding_model_type(EmbeddingModelType::Basic)?;
-                println!("Set embedding model to Basic.");
+            if use_fast {
+                // Set the model type to Fast
+                db.set_embedding_model_type(EmbeddingModelType::Fast)?;
+                println!("Set embedding model to Fast (faster but less accurate).");
             } else if use_onnx {
                 // Get or use default paths
                 let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
@@ -460,7 +460,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         // Now set the model type to ONNX
                         match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                             Ok(_) => {
-                                println!("Set embedding model to ONNX:");
+                                println!("Set embedding model to ONNX (more accurate but slower):");
                                 println!("  - Model: {}", model_path);
                                 println!("  - Tokenizer: {}", tokenizer_path);
                             },
@@ -478,16 +478,23 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 let model_type = db.embedding_model_type();
                 println!("Current embedding model: {:?}", model_type);
                 
-                if *model_type == EmbeddingModelType::Onnx {
-                    println!("ONNX model paths:");
-                    println!("  - Model: {}", db.onnx_model_path().map_or_else(
-                        || "Not set".to_string(), 
-                        |p| p.to_string_lossy().to_string()
-                    ));
-                    println!("  - Tokenizer: {}", db.onnx_tokenizer_path().map_or_else(
-                        || "Not set".to_string(), 
-                        |p| p.to_string_lossy().to_string()
-                    ));
+                match model_type {
+                    EmbeddingModelType::Onnx => {
+                        println!("ONNX model (more accurate but slower):");
+                        println!("  - Model: {}", db.onnx_model_path().map_or_else(
+                            || "Not set".to_string(), 
+                            |p| p.to_string_lossy().to_string()
+                        ));
+                        println!("  - Tokenizer: {}", db.onnx_tokenizer_path().map_or_else(
+                            || "Not set".to_string(), 
+                            |p| p.to_string_lossy().to_string()
+                        ));
+                    },
+                    EmbeddingModelType::Fast => {
+                        println!("Fast model (faster indexing and queries but less accurate)");
+                        println!("  - Use this model for large codebases or when speed is critical");
+                        println!("  - Switch to ONNX for higher quality results");
+                    }
                 }
             }
         }
@@ -660,8 +667,8 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
 fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow::Result<EmbeddingModel> {
     debug!("Creating embedding model of type: {:?}", model_type);
     match model_type {
-        EmbeddingModelType::Basic => {
-            debug!("Creating basic embedding model");
+        EmbeddingModelType::Fast => {
+            debug!("Creating fast embedding model");
             Ok(EmbeddingModel::new())
         },
         EmbeddingModelType::Onnx => {
@@ -671,9 +678,9 @@ fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow
                 EmbeddingModel::new_onnx(model_path, tokenizer_path)
                     .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
             } else {
-                // Fallback to basic model
-                warn!("ONNX paths not set, falling back to basic model");
-                println!("Warning: ONNX paths not set, falling back to basic model");
+                // Fallback to fast model
+                warn!("ONNX paths not set, falling back to fast model");
+                println!("Warning: ONNX paths not set, falling back to fast model (less accurate but quicker)");
                 Ok(EmbeddingModel::new())
             }
         }

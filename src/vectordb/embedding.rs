@@ -3,28 +3,29 @@ use std::path::Path;
 use serde::{Serialize, Deserialize};
 use crate::vectordb::provider::{
     EmbeddingProvider, 
-    BasicEmbeddingProvider, 
+    FastEmbeddingProvider, 
     OnnxEmbeddingProvider
 };
 
 // Use the embedding dimensions from the providers
-use crate::vectordb::provider::basic::BASIC_EMBEDDING_DIM;
+use crate::vectordb::provider::fast::FAST_EMBEDDING_DIM;
 
 // For backward compatibility 
-pub const EMBEDDING_DIM: usize = BASIC_EMBEDDING_DIM;
+pub const EMBEDDING_DIM: usize = FAST_EMBEDDING_DIM;
 
 /// The type of embedding model to use
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum EmbeddingModelType {
-    /// Simple token-based embeddings (default)
-    Basic,
+    /// Simple token-based embeddings (faster but less accurate)
+    Fast,
     /// ONNX model-based embeddings
     Onnx,
 }
 
 impl Default for EmbeddingModelType {
     fn default() -> Self {
-        EmbeddingModelType::Basic
+        // ONNX is now the default for better accuracy
+        EmbeddingModelType::Onnx
     }
 }
 
@@ -38,13 +39,13 @@ impl Clone for EmbeddingModel {
     fn clone(&self) -> Self {
         // When cloning, create a new instance based on the current model type
         match self.model_type {
-            EmbeddingModelType::Basic => {
+            EmbeddingModelType::Fast => {
                 Self::new()
             },
             EmbeddingModelType::Onnx => {
                 // For ONNX models, we can't clone directly
-                // Log a warning and return a basic model
-                eprintln!("Warning: ONNX model cannot be cloned. Creating a new basic model instead.");
+                // Log a warning and return a fast model
+                eprintln!("Warning: ONNX model cannot be cloned. Creating a fast model instead.");
                 Self::new()
             }
         }
@@ -52,17 +53,19 @@ impl Clone for EmbeddingModel {
 }
 
 impl EmbeddingModel {
-    /// Creates a new EmbeddingModel with the Basic provider
+    /// Creates a new EmbeddingModel with the Fast provider
+    /// This provider is much faster but less accurate than ONNX
     pub fn new() -> Self {
-        let provider = Box::new(BasicEmbeddingProvider::new());
+        let provider = Box::new(FastEmbeddingProvider::new());
         
         Self {
             provider,
-            model_type: EmbeddingModelType::Basic,
+            model_type: EmbeddingModelType::Fast,
         }
     }
     
     /// Creates a new EmbeddingModel with the ONNX provider
+    /// This provider is more accurate but slower than Fast
     pub fn new_onnx(model_path: &Path, tokenizer_path: &Path) -> Result<Self> {
         let provider = Box::new(OnnxEmbeddingProvider::new(model_path, tokenizer_path)?);
         
@@ -98,12 +101,12 @@ mod tests {
     use super::*;
     
     #[test]
-    fn test_basic_embedding() {
+    fn test_fast_embedding() {
         let model = EmbeddingModel::new();
         let text = "fn main() { let x = 42; }";
         let embedding = model.embed(text).unwrap();
         
-        assert_eq!(embedding.len(), BASIC_EMBEDDING_DIM);
+        assert_eq!(embedding.len(), FAST_EMBEDDING_DIM);
         assert!(!embedding.iter().all(|&x| x == 0.0));
         
         // Test that embeddings are deterministic
@@ -118,8 +121,8 @@ mod tests {
         let embeddings = model.embed_batch(&texts.iter().map(|s| *s).collect::<Vec<_>>()).unwrap();
         
         assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), BASIC_EMBEDDING_DIM);
-        assert_eq!(embeddings[1].len(), BASIC_EMBEDDING_DIM);
+        assert_eq!(embeddings[0].len(), FAST_EMBEDDING_DIM);
+        assert_eq!(embeddings[1].len(), FAST_EMBEDDING_DIM);
         
         // Different texts should have different embeddings
         assert_ne!(embeddings[0], embeddings[1]);

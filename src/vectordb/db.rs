@@ -102,7 +102,7 @@ impl VectorDB {
                             // Remove corrupted file
                             let _ = fs::remove_file(&db_path);
                             debug!("Creating a new empty database");
-                            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
+                            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Fast, None, None)
                         }
                     }
                 }
@@ -112,13 +112,13 @@ impl VectorDB {
                     eprintln!("Warning: Couldn't read database file: {}", e);
                     eprintln!("Creating a new empty database.");
                     debug!("Creating a new empty database");
-                    (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
+                    (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Fast, None, None)
                 }
             }
         } else {
             // Create new database with default HNSW config
             debug!("Database file doesn't exist, creating new database");
-            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
+            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Fast, None, None)
         };
 
         // Create cache in the same directory as the database
@@ -307,7 +307,7 @@ impl VectorDB {
                 }
             }
         } else {
-            // Basic model doesn't need validation
+            // Fast model doesn't need validation
             self.embedding_model_type = model_type;
         }
         
@@ -325,7 +325,7 @@ impl VectorDB {
     /// Create the appropriate embedding model based on configuration
     fn create_embedding_model(&self) -> Result<EmbeddingModel> {
         match &self.embedding_model_type {
-            EmbeddingModelType::Basic => {
+            EmbeddingModelType::Fast => {
                 Ok(EmbeddingModel::new())
             },
             EmbeddingModelType::Onnx => {
@@ -333,8 +333,8 @@ impl VectorDB {
                     EmbeddingModel::new_onnx(model_path, tokenizer_path)
                         .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
                 } else {
-                    // Fallback to basic model if paths aren't set
-                    eprintln!("Warning: ONNX model paths not set, falling back to basic embedding model");
+                    // Fallback to fast model if paths aren't set
+                    eprintln!("Warning: ONNX model paths not set, falling back to fast embedding model");
                     Ok(EmbeddingModel::new())
                 }
             }
@@ -578,7 +578,7 @@ impl VectorDB {
                                         match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
                                             Ok(model) => Some(model),
                                             Err(e) => {
-                                                // Log the ONNX error and fall back to basic model
+                                                // Log the ONNX error and fall back to fast model
                                                 let error_msg = format!("ONNX model loading failed: {}", e);
                                                 onnx_errors.lock().unwrap().push(error_msg.clone());
                                                 onnx_loading_errors.store(true, Ordering::SeqCst);
@@ -588,8 +588,8 @@ impl VectorDB {
                                         }
                                     },
                                     _ => {
-                                        // Fallback to basic model if ONNX paths aren't available
-                                        let error_msg = "ONNX paths not fully set, falling back to basic embedding model".to_string();
+                                        // Fallback to fast model if ONNX paths aren't available
+                                        let error_msg = "ONNX paths not fully set, falling back to fast embedding model".to_string();
                                         onnx_errors.lock().unwrap().push(error_msg.clone());
                                         onnx_loading_errors.store(true, Ordering::SeqCst);
                                         eprintln!("{}", error_msg);
@@ -597,7 +597,7 @@ impl VectorDB {
                                     }
                                 }
                             } else {
-                                // Use basic model as requested
+                                // Use fast model as requested
                                 Some(EmbeddingModel::new())
                             };
                         }
@@ -651,12 +651,12 @@ impl VectorDB {
                         println!("  - {}", error);
                     }
                     
-                    // Warn that we're falling back to basic model for all embeddings
-                    println!("\nWARNING: Due to ONNX model errors, falling back to basic embedding model for all files.");
+                    // Warn that we're falling back to fast model for all embeddings
+                    println!("\nWARNING: Due to ONNX model errors, falling back to fast embedding model for all files.");
                     println!("         To fix this, set a valid ONNX model using the 'model --onnx' command with correct paths.");
                     
-                    // Update the model type to Basic since ONNX failed
-                    self.embedding_model_type = EmbeddingModelType::Basic;
+                    // Update the model type to Fast since ONNX failed
+                    self.embedding_model_type = EmbeddingModelType::Fast;
                 }
             }
             
@@ -761,7 +761,7 @@ impl VectorDB {
             self.embeddings.values().next().unwrap().len()
         } else {
             match &self.embedding_model_type {
-                EmbeddingModelType::Basic => EMBEDDING_DIM,
+                EmbeddingModelType::Fast => EMBEDDING_DIM,
                 EmbeddingModelType::Onnx => ONNX_EMBEDDING_DIM,
             }
         };
@@ -813,7 +813,7 @@ impl VectorDB {
     }
     
     /// Calculate cosine distance between two vectors (for search)
-    fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+    pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
         let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();

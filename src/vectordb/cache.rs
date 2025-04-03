@@ -79,7 +79,7 @@ impl EmbeddingCache {
             cache_path,
             ttl,
             last_cleaned: Instant::now(),
-            current_model_type: EmbeddingModelType::Basic,
+            current_model_type: EmbeddingModelType::Fast,
         })
     }
     
@@ -265,7 +265,7 @@ mod tests {
             embedding: embedding.clone(),
             timestamp: 0, // Very old timestamp
             file_hash: 12345u64,
-            model_type: EmbeddingModelType::Basic,
+            model_type: EmbeddingModelType::Fast,
         };
         
         cache.entries.insert("test".to_string(), entry);
@@ -282,7 +282,7 @@ mod tests {
                 .unwrap()
                 .as_secs(),
             file_hash: 12345u64,
-            model_type: EmbeddingModelType::Basic,
+            model_type: EmbeddingModelType::Fast,
         };
         
         cache.entries.insert("test2".to_string(), entry2);
@@ -302,10 +302,10 @@ mod tests {
         let mut cache = EmbeddingCache::new(cache_path.clone())?;
         assert_eq!(cache.len(), 0);
         
-        // Insert an item with Basic model type
+        // Insert an item with Fast model type
         let embedding = vec![1.0, 2.0, 3.0];
         let file_hash = 12345u64;
-        cache.set_model_type(EmbeddingModelType::Basic);
+        cache.set_model_type(EmbeddingModelType::Fast);
         cache.insert("test".to_string(), embedding.clone(), file_hash)?;
         
         // Change model type to Onnx

@@ -555,16 +555,31 @@ impl Search {
                 })
                 .collect()
         } else {
-            debug!("HNSW index not available, falling back to brute force search");
+            debug!("Using brute force search (slower)");
             
-            // Clone the DB to allow for the mutable borrow in nearest_vectors
-            let mut db_clone = self.db.clone();
+            // Fall back to brute force search
+            let mut results: Vec<_> = self.db.embeddings.iter()
+                .map(|(path, embedding)| {
+                    let distance = VectorDB::cosine_distance(embedding, &query_embedding);
+                    let similarity = 1.0 - distance;
+                    (path.clone(), similarity)
+                })
+                .collect();
             
-            // Fall back to direct search
-            let nearest = db_clone.nearest_vectors(&query_embedding, HNSW_TOP_K)?;
-            debug!("Brute force search returned {} nearest neighbors", nearest.len());
+            debug!("Brute force search returned {} results", results.len());
             
-            nearest.into_iter()
+            // Sort by similarity (highest first)
+            results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            
+            // Take top K results
+            let top_k = results.len().min(HNSW_TOP_K);
+            if results.len() > top_k {
+                debug!("Limiting brute force results to top {}", top_k);
+                results.truncate(top_k);
+            }
+            
+            // Convert to SearchResult objects
+            results.into_iter()
                 .map(|(file_path, similarity)| {
                     SearchResult {
                         file_path,
@@ -576,15 +591,15 @@ impl Search {
                 .collect()
         };
         
-        // Filter results with low similarity
-        debug!("Filtering results with similarity below {}", SIMILARITY_THRESHOLD);
+        // Filter by similarity threshold
         let results_count = results.len();
-        let mut filtered_results = Vec::new();
-        for result in results {
-            if result.similarity >= SIMILARITY_THRESHOLD {
-                filtered_results.push(result);
-            }
-        }
+        let threshold = SIMILARITY_THRESHOLD;
+        debug!("Filtering results with threshold {}", threshold);
+        
+        let filtered_results: Vec<_> = results.into_iter()
+            .filter(|r| r.similarity >= threshold)
+            .collect();
+            
         debug!("Filtered {} results below threshold, {} remaining", 
                results_count - filtered_results.len(), filtered_results.len());
         
@@ -636,17 +651,16 @@ impl Search {
         final_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
         
         // Apply result diversity to avoid redundant results
-        let diverse_results = self.apply_mmr(final_results, 0.7, max_results.min(HNSW_TOP_K));
+        let diverse_results = self.apply_mmr(final_results, 0.7, max_results);
         
-        // Limit the number of results
+        // Always strictly limit to max_results, no exceptions
         let limited_results = if diverse_results.len() > max_results {
-            debug!("Limiting results to {} (from {})", max_results, diverse_results.len());
             diverse_results[0..max_results].to_vec()
         } else {
             diverse_results
         };
         
-        debug!("Search complete, returning {} results", limited_results.len());
+        debug!("Search complete, returning {} results (limit was {})", limited_results.len(), max_results);
         
         Ok(limited_results)
     }
@@ -684,114 +698,179 @@ impl Search {
             (v, b)
         };
         
+        // Set a larger search scope for internal queries
+        let internal_limit = max_results * 3;
+        
         // Perform vector search (semantic search part)
         debug!("Performing vector search component");
-        let vector_results = self.search_with_limit(query, max_results * 2)?; // Get more results for combining
+        let vector_results = self.search_with_limit(query, internal_limit)?; // Get more results for combining
         debug!("Vector search returned {} results", vector_results.len());
         
         // If we're only using vector search, return those results
         if b_weight <= 0.0 {
             debug!("BM25 weight is 0, returning vector-only results");
+            // Apply strict limit and return
             return Ok(vector_results.into_iter().take(max_results).collect());
         }
         
         // Collect the file paths from vector results - we don't use this yet, but will in the future
-        let _vector_files: HashSet<String> = vector_results.iter()
+        let vector_file_paths: HashSet<_> = vector_results.iter()
             .map(|r| r.file_path.clone())
             .collect();
         
-        // Get all file paths from the database
-        debug!("Getting all file paths from database");
-        let all_files = self.get_all_file_paths()?;
-        debug!("Database contains {} total files", all_files.len());
-        
-        // Calculate BM25 scores for all files
-        debug!("Calculating BM25 scores for all files");
+        // Perform BM25 lexical search
+        debug!("Performing BM25 lexical search component");
         let mut bm25_results = Vec::new();
-        for file_path in all_files {
-            match self.calculate_bm25_score(query, &file_path) {
-                Ok(score) => {
-                    if score > 0.0 {
-                        debug!("BM25 score for {}: {:.4}", file_path, score);
-                        bm25_results.push(SearchResult {
-                            file_path,
-                            similarity: score,
-                            snippet: String::new(),
-                            code_context: None,
-                        });
-                    }
-                },
+        
+        // Extract query terms for BM25
+        let query_terms: Vec<&str> = query.split_whitespace().collect();
+        
+        // Calculate BM25 scores for each file in the database
+        for file_path in self.get_file_paths() {
+            // Skip if we can't read the file
+            let score = match self.calculate_bm25_score(query, file_path) {
+                Ok(score) => score,
                 Err(e) => {
                     warn!("Failed to calculate BM25 score for {}: {}", file_path, e);
+                    continue;
                 }
+            };
+            
+            // Skip files with no matches
+            if score <= 0.0 {
+                continue;
             }
+            
+            // Add to BM25 results
+            bm25_results.push(SearchResult {
+                file_path: file_path.to_string(),
+                similarity: score,
+                snippet: String::new(),
+                code_context: None,
+            });
         }
         
-        debug!("BM25 calculation returned {} results with positive scores", bm25_results.len());
+        debug!("Raw BM25 search returned {} results", bm25_results.len());
         
         // Sort BM25 results by score in descending order
         bm25_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
         
         // Keep only top results from BM25
-        let top_k = max_results.max(10);
+        let top_k = internal_limit;
         if bm25_results.len() > top_k {
             debug!("Trimming BM25 results to top {}", top_k);
             bm25_results.truncate(top_k);
         }
         
-        // Combine results from both methods
-        debug!("Combining vector and BM25 results with weights v={:.2}, b={:.2}", v_weight, b_weight);
+        // Combine vector and BM25 results
+        debug!("Combining vector and BM25 results");
         let mut combined_results = Vec::new();
+        let mut seen_files = HashSet::new();
         
-        // Process vector results first
-        for mut result in vector_results {
-            // Apply vector weight
-            result.similarity *= v_weight;
-            combined_results.push(result);
+        // Process vector results first (with semantic weight)
+        for result in vector_results {
+            let file_path = result.file_path.clone();
+            
+            // Skip duplicates
+            if seen_files.contains(&file_path) {
+                continue;
+            }
+            
+            seen_files.insert(file_path);
+            
+            // Get BM25 score for this file if available
+            let bm25_score = bm25_results.iter()
+                .find(|r| r.file_path == result.file_path)
+                .map(|r| r.similarity)
+                .unwrap_or(0.0);
+            
+            // Combine scores using weighted formula
+            let vector_score = result.similarity;
+            let combined_score = v_weight * vector_score + b_weight * bm25_score;
+            
+            // Add the file with combined score
+            let mut combined_result = result;
+            combined_result.similarity = combined_score;
+            
+            combined_results.push(combined_result);
         }
         
-        // Add BM25 results, combining if file already exists from vector search
-        for mut result in bm25_results {
-            // Apply BM25 weight
-            result.similarity *= b_weight;
+        // Add any BM25 results not already included from vector results
+        for result in bm25_results {
+            let file_path = result.file_path.clone();
             
-            // Check if file is already in the combined results (from vector search)
-            if let Some(pos) = combined_results.iter().position(|r| r.file_path == result.file_path) {
-                // Combine scores: add BM25 score to the existing vector score
-                combined_results[pos].similarity += result.similarity;
-                debug!("Combined score for {}: {:.4}", result.file_path, combined_results[pos].similarity);
-            } else {
-                // New result from BM25 only
-                combined_results.push(result);
+            // Skip duplicates
+            if seen_files.contains(&file_path) {
+                continue;
+            }
+            
+            seen_files.insert(file_path);
+            
+            // Combine scores (no vector score for these)
+            let bm25_score = result.similarity;
+            let combined_score = b_weight * bm25_score;
+            
+            // Only include if above threshold
+            if combined_score >= SIMILARITY_THRESHOLD * 0.7 {
+                let mut combined_result = result;
+                combined_result.similarity = combined_score;
+                
+                combined_results.push(combined_result);
             }
         }
         
-        // Sort by combined score
-        debug!("Sorting combined results");
-        combined_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
-        
-        // Generate snippets for results that don't have them yet
-        debug!("Generating snippets for combined results");
+        // Generate snippets for all results
+        debug!("Generating snippets for {} combined results", combined_results.len());
         for result in &mut combined_results {
-            if result.snippet.is_empty() {
-                match self.get_snippet(&result.file_path, query) {
-                    Ok(snippet) => {
+            match self.snippet_extractor.extract_snippet(&result.file_path, query) {
+                Ok(snippet_context) => {
+                    result.snippet = snippet_context.snippet_text;
+                    
+                    // Add code context if available
+                    if snippet_context.relevant_method.is_some() || snippet_context.relevant_type.is_some() {
+                        let context_type = if snippet_context.relevant_method.is_some() {
+                            "method"
+                        } else {
+                            "type"
+                        };
+                        
+                        result.code_context = Some(format!(
+                            "Found relevant {} at lines {}-{}", 
+                            context_type,
+                            snippet_context.start_line,
+                            snippet_context.end_line
+                        ));
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to generate snippet for {}: {}", result.file_path, e);
+                    // Fall back to the simpler method
+                    if let Ok(snippet) = self.get_snippet(&result.file_path, query) {
                         result.snippet = snippet;
-                    },
-                    Err(e) => {
-                        warn!("Failed to generate snippet for {}: {}", result.file_path, e);
-                        result.snippet = format!("Failed to read file: {}", e);
+                    } else {
+                        result.snippet = "Failed to generate snippet".to_string();
                     }
                 }
             }
         }
         
+        // Sort by combined score
+        combined_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+        
         // Apply final diversity and limit the results
         debug!("Applying MMR for diversity and limiting results");
         let diverse_results = self.apply_mmr(combined_results, 0.6, max_results); // Lower lambda value for more diversity
         
-        debug!("Hybrid search complete, returning {} results", diverse_results.len());
-        Ok(diverse_results)
+        // Strictly limit to max_results
+        let limited_results = if diverse_results.len() > max_results {
+            diverse_results[0..max_results].to_vec()
+        } else {
+            diverse_results
+        };
+        
+        debug!("Hybrid search complete, returning {} results (limit was {})", limited_results.len(), max_results);
+        
+        Ok(limited_results)
     }
     
     /// Determine optimal weights for hybrid search based on query analysis
@@ -1689,6 +1768,11 @@ impl Search {
                 Ok(0.0) // File couldn't be read, return zero score
             }
         }
+    }
+
+    /// Get all file paths from the database
+    fn get_file_paths(&self) -> Vec<&String> {
+        self.db.embeddings.keys().collect()
     }
 }
 
