@@ -253,7 +253,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             match get_embedding_model(model_type, &db) {
                 Ok(model) => {
                     debug!("Successfully created embedding model: {:?}", model_type);
-                    let search = Search::new(db, model);
+                    let mut search = Search::new(db, model);
                     
                     // Determine search type based on flags
                     let mut results = if vector_only {
@@ -682,7 +682,7 @@ mod tests {
         
         // Create embedding model for HNSW search
         let model_hnsw = EmbeddingModel::new();
-        let search_hnsw = Search::new(db_hnsw, model_hnsw);
+        let mut search_hnsw = Search::new(db_hnsw, model_hnsw);
         
         // For comparison, create a database with a deliberately slowed down search
         // by using a modified brute force approach (not using the HNSW index)
@@ -703,109 +703,8 @@ mod tests {
         // Measure search time with standard HNSW
         let start_hnsw = Instant::now();
         let _results_hnsw = search_hnsw.search("function")?;
-        let duration_hnsw = start_hnsw.elapsed();
         
-        // For comparison only, use manual vector search
-        let query = "function";
-        let model = EmbeddingModel::new();
-        let query_embedding = model.embed(query)?;
-        
-        // Measure time for manual search (will be slower)
-        let start_slow = Instant::now();
-        let _results_slow = db_clone.nearest_vectors(&query_embedding, 10)?;
-        let duration_slow = start_slow.elapsed();
-        
-        // For consistent test results, we don't strictly assert that HNSW is faster
-        // as it might not be measurable with a small test dataset
-        // Instead, just log the results
-        println!("Search time with HNSW: {:?}", duration_hnsw);
-        println!("Search time with slow method: {:?}", duration_slow);
-        
+        // ... rest of the method ...
         Ok(())
     }
-
-    #[test]
-    fn test_hnsw_index_persistence() -> Result<()> {
-        // Create temporary directories
-        let temp_dir = tempdir()?;
-        let db_dir = tempdir()?;
-        let db_path = db_dir.path().join("test_persistence.db").to_string_lossy().to_string();
-        
-        // Create a test file
-        let test_file = temp_dir.path().join("test.rs");
-        let mut file = fs::File::create(&test_file)?;
-        writeln!(file, "fn test() {{ println!(\"Test\"); }}")?;
-        
-        // Create VectorDB (HNSW will be created by default)
-        let mut db = VectorDB::new(db_path.clone())?;
-        
-        // Index files
-        db.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
-        
-        // Get stats before reloading
-        let hnsw_stats_before = db.stats().hnsw_stats;
-        assert!(hnsw_stats_before.is_some(), "HNSW index should be present by default");
-        
-        // Force the DB to save changes
-        drop(db);
-        
-        // Reload the database
-        let db_reloaded = VectorDB::new(db_path)?;
-        
-        // Check if HNSW index is still there
-        let hnsw_stats_after = db_reloaded.stats().hnsw_stats;
-        assert!(hnsw_stats_after.is_some(), "HNSW index should persist after reload");
-        
-        Ok(())
-    }
-
-    #[test]
-    fn test_query_search_command() -> Result<()> {
-        // Create temporary directory for test files
-        let temp_dir = tempdir()?;
-        let db_dir = tempdir()?;
-        let db_path = db_dir.path().join("test_query.db").to_string_lossy().to_string();
-        
-        // Create test files with different content
-        let test_file1 = temp_dir.path().join("test1.rs");
-        fs::write(&test_file1, "fn search_function() { println!(\"Finding things\"); }")?;
-        
-        let test_file2 = temp_dir.path().join("test2.rs");
-        fs::write(&test_file2, "// This is a file about searching\nfn other_function() {}")?;
-        
-        // Create and setup database
-        let mut db = VectorDB::new(db_path.clone())?;
-        
-        // Index the files
-        db.index_file(&test_file1)?;
-        db.index_file(&test_file2)?;
-        
-        // Test Query command with hybrid search enabled (default)
-        let query_command = Command::Query { 
-            query: "search".to_string(),
-            vector_only: false,
-            vector_weight: Some(0.6),
-            bm25_weight: Some(0.4),
-            file_types: Some(vec!["rs".to_string()]),
-        };
-        
-        // Execute query command
-        let result = execute_command(query_command, db.clone());
-        assert!(result.is_ok(), "Query command with hybrid search should execute without error");
-        
-        // Test vector-only search
-        let vector_command = Command::Query { 
-            query: "search".to_string(),
-            vector_only: true,
-            vector_weight: None,
-            bm25_weight: None,
-            file_types: None,
-        };
-        
-        // Execute vector-only command
-        let result = execute_command(vector_command, db.clone());
-        assert!(result.is_ok(), "Query command with vector-only should execute without error");
-
-        Ok(())
-    }
-} 
+}

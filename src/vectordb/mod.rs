@@ -8,5 +8,8 @@ pub mod provider;
 pub mod search;
 pub mod tokenizer;
 pub mod onnx;
+pub mod search_ranking;
+pub mod code_structure;
+pub mod snippet_extractor;
 
 pub use db::VectorDB;

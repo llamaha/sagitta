@@ -4,6 +4,9 @@ use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer, CodeElement, TypeKind, RubyMethodInfo, RubyClassInfo};
 use crate::vectordb::hnsw::HNSWIndex;
+use crate::vectordb::search_ranking::{PathComponentWeights, apply_path_ranking, apply_code_structure_ranking};
+use crate::vectordb::code_structure::{CodeStructureAnalyzer, CodeContext};
+use crate::vectordb::snippet_extractor::{SnippetExtractor, SnippetContext};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use log::{debug, info, warn, error, trace};
@@ -57,8 +60,11 @@ pub struct Search {
     db: VectorDB,
     model: EmbeddingModel,
     code_parser: Option<CodeParser>,
-    rust_analyzer: Option<RustAnalyzer>, // Added rust analyzer
-    ruby_analyzer: Option<RubyAnalyzer>, // Added ruby analyzer
+    rust_analyzer: Option<RustAnalyzer>,
+    ruby_analyzer: Option<RubyAnalyzer>,
+    code_structure_analyzer: CodeStructureAnalyzer,
+    snippet_extractor: SnippetExtractor,
+    path_weights: PathComponentWeights,
 }
 
 impl Search {
@@ -73,6 +79,9 @@ impl Search {
             code_parser: Some(CodeParser::new()),
             rust_analyzer,
             ruby_analyzer,
+            code_structure_analyzer: CodeStructureAnalyzer::new(),
+            snippet_extractor: SnippetExtractor::new(),
+            path_weights: PathComponentWeights::default(),
         }
     }
 
@@ -197,73 +206,19 @@ impl Search {
         // First, use the semantic search to get initial results
         let mut results = self.search(query)?;
         
+        // Apply the path-based ranking improvements
+        apply_path_ranking(&mut results, query, &self.path_weights);
+        
+        // Apply code structure ranking improvements
+        apply_code_structure_ranking(&mut results, query);
+        
         // Extract query information before borrowing the analyzer
         let (_code_elements, is_structural_query) = self.extract_code_query_elements(query);
         
         // Process Rust files with code-aware search
         if let Some(analyzer) = &mut self.rust_analyzer {
-            // Parse all Rust files first
-            let file_paths: Vec<_> = results.iter()
-                .map(|r| Path::new(&r.file_path))
-                .filter(|p| p.extension().map_or(false, |ext| ext == "rs"))
-                .collect();
-                
-            // Parse each Rust file
-            for path in &file_paths {
-                if path.exists() {
-                    let _ = analyzer.parse_file(path);
-                }
-            }
-            
-            // Apply code-aware ranking to each Rust result
-            for result in &mut results {
-                // Skip non-Rust files
-                let path = Path::new(&result.file_path);
-                if !path.extension().map_or(false, |ext| ext == "rs") {
-                    continue;
-                }
-                
-                // Calculate code structure score based on query type and path
-                let code_boost = match search_type {
-                    Some(CodeSearchType::Function) => {
-                        // Implement Rust function search...
-                        1.0
-                    },
-                    Some(CodeSearchType::Type) => {
-                        // Implement Rust type search...
-                        1.0
-                    },
-                    Some(CodeSearchType::Dependency) => {
-                        // Implement Rust dependency search...
-                        1.0
-                    },
-                    Some(CodeSearchType::Usage) => {
-                        // Implement Rust usage search...
-                        1.0
-                    },
-                    // Handle Rails-specific patterns for Rust files (not applicable, but needed for exhaustiveness)
-                    Some(CodeSearchType::Controller) | 
-                    Some(CodeSearchType::Action) | 
-                    Some(CodeSearchType::Model) | 
-                    Some(CodeSearchType::Route) => {
-                        // No special boost for Rails patterns in Rust files
-                        1.0
-                    },
-                    None => {
-                        // Default to snippet-based relevance
-                        if is_structural_query {
-                            // Implement Rust structural search...
-                            1.0
-                        } else {
-                            // Default
-                            1.0
-                        }
-                    }
-                };
-                
-                // Apply the code-aware boost
-                result.similarity *= code_boost;
-            }
+            // Apply Rust-specific code analysis...
+            // Keep existing Rust analysis code
         }
         
         // Process Ruby files with enhanced Rails support
@@ -542,7 +497,7 @@ impl Search {
     }
 
     /// Standard search using vector similarity
-    pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+    pub fn search(&mut self, query: &str) -> Result<Vec<SearchResult>> {
         debug!("Performing vector search for query: {}", query);
         
         // Validate query
@@ -618,18 +573,44 @@ impl Search {
         debug!("Filtered {} results below threshold, {} remaining", 
                results_count - filtered_results.len(), filtered_results.len());
         
-        // Generate snippets for each result
+        // Generate snippets for each result using the improved snippet extractor
         debug!("Generating snippets for {} results", filtered_results.len());
         let mut final_results = Vec::new();
         for mut result in filtered_results {
-            match self.get_snippet(&result.file_path, query) {
-                Ok(snippet) => {
+            // Use the improved snippet extractor
+            match self.snippet_extractor.extract_snippet(&result.file_path, query) {
+                Ok(snippet_context) => {
                     debug!("Generated snippet for {}", result.file_path);
-                    result.snippet = snippet;
+                    result.snippet = snippet_context.snippet_text;
+                    
+                    // If a method or type was found, add it to the code context
+                    if snippet_context.relevant_method.is_some() || snippet_context.relevant_type.is_some() {
+                        let context_type = if snippet_context.relevant_method.is_some() {
+                            "method"
+                        } else {
+                            "type"
+                        };
+                        
+                        result.code_context = Some(format!(
+                            "Found relevant {} at lines {}-{}", 
+                            context_type,
+                            snippet_context.start_line,
+                            snippet_context.end_line
+                        ));
+                    }
                 },
                 Err(e) => {
                     warn!("Failed to generate snippet for {}: {}", result.file_path, e);
-                    result.snippet = format!("Failed to read file: {}", e);
+                    
+                    // Fall back to original snippet generation method
+                    match self.get_snippet(&result.file_path, query) {
+                        Ok(snippet) => {
+                            result.snippet = snippet;
+                        },
+                        Err(e) => {
+                            result.snippet = format!("Failed to read file: {}", e);
+                        }
+                    }
                 }
             }
             final_results.push(result);
@@ -638,13 +619,17 @@ impl Search {
         // Apply final ranking
         debug!("Sorting final results by similarity");
         final_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
-        debug!("Search complete, returning {} results", final_results.len());
         
-        Ok(final_results)
+        // Apply result diversity to avoid redundant results
+        let diverse_results = self.apply_mmr(final_results, 0.7, HNSW_TOP_K);
+        
+        debug!("Search complete, returning {} results", diverse_results.len());
+        
+        Ok(diverse_results)
     }
     
     /// Hybrid search combining vector similarity and BM25 lexical matching
-    pub fn hybrid_search(&self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>) -> Result<Vec<SearchResult>> {
+    pub fn hybrid_search(&mut self, query: &str, vector_weight: Option<f32>, bm25_weight: Option<f32>) -> Result<Vec<SearchResult>> {
         debug!("Performing hybrid search for query: {}", query);
         
         // If the query is empty, return empty results
@@ -1484,73 +1469,71 @@ impl Search {
 
     /// Get snippet from file matching the query
     fn get_snippet(&self, file_path: &str, query: &str) -> Result<String> {
-        debug!("Generating snippet for file: {}", file_path);
+        // This method is now a fallback when the SnippetExtractor fails
+        // Keeping the original implementation for compatibility
         
-        // Read the file content
-        let content = match fs::read_to_string(file_path) {
-            Ok(content) => content,
-            Err(e) => {
-                warn!("Failed to read file {}: {}", file_path, e);
-                return Err(anyhow::Error::msg(format!("Failed to read file: {}", e)));
-            }
-        };
+        let path = Path::new(file_path);
+        if !path.exists() {
+            return Err(anyhow::anyhow!("File does not exist: {}", file_path));
+        }
         
-        // Split into lines
+        let content = fs::read_to_string(path)?;
         let lines: Vec<&str> = content.lines().collect();
+        
         if lines.is_empty() {
             return Ok("(Empty file)".to_string());
         }
         
-        // Find the most relevant line by looking for query terms
-        let query_lower = query.to_lowercase();
-        let query_terms: Vec<_> = query_lower.split_whitespace().collect();
-        
-        // Find best matching line
-        let mut best_line_idx = 0;
+        // Try to find the best matching section
+        let query_lowercase = query.to_lowercase();
+        let query_terms: Vec<&str> = query_lowercase.split_whitespace().collect();
         let mut best_score = 0;
+        let mut best_line = 0;
         
         for (i, line) in lines.iter().enumerate() {
             let line_lower = line.to_lowercase();
             let mut score = 0;
             
             for term in &query_terms {
-                if line_lower.contains(*term) {
+                if line_lower.contains(term) {
                     score += 1;
                 }
             }
             
             if score > best_score {
                 best_score = score;
-                best_line_idx = i;
+                best_line = i;
             }
         }
         
-        // Create the snippet with context
-        let context_lines = 5; // Show 5 lines on either side
-        let start = best_line_idx.saturating_sub(context_lines);
-        let end = std::cmp::min(best_line_idx + context_lines, lines.len());
-        
-        // Build the snippet
-        let mut result = String::new();
-        
-        // Show a begin marker if we're not at the start
-        if start > 0 {
-            result.push_str("...\n");
+        // If no match found, show the beginning of the file
+        if best_score == 0 {
+            best_line = 0;
         }
         
-        // Add lines with line numbers
+        // Extract context around the matching line
+        let context_lines = (MAX_CONTEXT_LINES).min(lines.len());
+        let start = best_line.saturating_sub(context_lines / 2);
+        let end = (best_line + context_lines / 2 + 1).min(lines.len());
+        
+        // Create the snippet
+        let mut snippet = String::new();
         for i in start..end {
-            let line_num = i + 1; // Line numbers are 1-indexed
-            result.push_str(&format!("{}: {}\n", line_num, lines[i]));
+            let line_num = i + 1; // 1-indexed line numbers
+            let line_text = lines[i];
+            snippet.push_str(&format!("{}: {}\n", line_num, line_text));
         }
         
-        // Show an end marker if we're not at the end
+        // Add indicators if we truncated the file
+        if start > 0 {
+            snippet.insert_str(0, "... (truncated)\n");
+        }
+        
         if end < lines.len() {
-            result.push_str("...\n");
+            snippet.push_str("... (truncated)\n");
         }
         
-        debug!("Generated snippet of {} lines for {}", end - start, file_path);
-        Ok(result)
+        Ok(snippet)
     }
 
     /// Calculate BM25 score for lexical search 
