@@ -40,6 +40,8 @@ struct DBFile {
     hnsw_config: Option<HNSWConfig>,
     feedback: Option<FeedbackData>,
     embedding_model_type: Option<EmbeddingModelType>,
+    onnx_model_path: Option<String>,
+    onnx_tokenizer_path: Option<String>,
 }
 
 pub struct VectorDB {
@@ -71,7 +73,7 @@ impl Clone for VectorDB {
 
 impl VectorDB {
     pub fn new(db_path: String) -> Result<Self> {
-        let (embeddings, hnsw_config, feedback, embedding_model_type) = if Path::new(&db_path).exists() {
+        let (embeddings, hnsw_config, feedback, embedding_model_type, onnx_model_path, onnx_tokenizer_path) = if Path::new(&db_path).exists() {
             // Try to read the existing database file, but handle corruption gracefully
             match fs::read_to_string(&db_path) {
                 Ok(contents) => {
@@ -81,6 +83,8 @@ impl VectorDB {
                             db_file.hnsw_config, 
                             db_file.feedback.unwrap_or_default(),
                             db_file.embedding_model_type.unwrap_or_default(),
+                            db_file.onnx_model_path.map(PathBuf::from),
+                            db_file.onnx_tokenizer_path.map(PathBuf::from),
                         ),
                         Err(e) => {
                             // If JSON parsing fails, assume the file is corrupted
@@ -88,7 +92,7 @@ impl VectorDB {
                             eprintln!("Creating a new empty database.");
                             // Remove corrupted file
                             let _ = fs::remove_file(&db_path);
-                            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic)
+                            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
                         }
                     }
                 }
@@ -96,12 +100,12 @@ impl VectorDB {
                     // Handle file read errors
                     eprintln!("Warning: Couldn't read database file: {}", e);
                     eprintln!("Creating a new empty database.");
-                    (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic)
+                    (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
                 }
             }
         } else {
             // Create new database with default HNSW config
-            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic)
+            (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
         };
 
         // Create cache in the same directory as the database
@@ -174,8 +178,8 @@ impl VectorDB {
             hnsw_index,
             feedback,
             embedding_model_type,
-            onnx_model_path: None,
-            onnx_tokenizer_path: None,
+            onnx_model_path,
+            onnx_tokenizer_path,
         })
     }
     
@@ -574,6 +578,8 @@ impl VectorDB {
             hnsw_config: self.hnsw_index.as_ref().map(|i| i.get_config()),
             feedback: Some(self.feedback.clone()),
             embedding_model_type: Some(self.embedding_model_type.clone()),
+            onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         };
         
         // Create temporary file for atomic write
