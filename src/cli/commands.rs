@@ -324,7 +324,30 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     
                     for (i, result) in results.iter().enumerate() {
                         println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
-                        println!("{}", result.snippet);
+                        
+                        // Limit the snippet size to avoid displaying entire files
+                        let max_lines = 20; // Reasonable number of lines to display
+                        let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+                        
+                        // If snippet is too large, only show a subset with indication
+                        if snippet_lines.len() > max_lines {
+                            // Show first few lines
+                            for line in &snippet_lines[0..max_lines/2] {
+                                println!("{}", line);
+                            }
+                            
+                            // Show ellipsis to indicate truncation
+                            println!("... [truncated {} lines] ...", snippet_lines.len() - max_lines);
+                            
+                            // Show last few lines
+                            for line in &snippet_lines[snippet_lines.len() - max_lines/2..] {
+                                println!("{}", line);
+                            }
+                        } else {
+                            // Show entire snippet if it's reasonably sized
+                            println!("{}", result.snippet);
+                        }
+                        
                         println!();
                     }
                 },
@@ -379,7 +402,30 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         }
                         
                         println!("   {}:", "Snippet".green());
-                        println!("   {}", result.snippet.replace("\n", "\n   "));
+                        
+                        // Limit the snippet size to avoid displaying entire files
+                        let max_lines = 20; // Reasonable number of lines to display
+                        let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+                        
+                        // If snippet is too large, only show a subset with indication
+                        if snippet_lines.len() > max_lines {
+                            // Show first few lines
+                            for line in &snippet_lines[0..max_lines/2] {
+                                println!("   {}", line);
+                            }
+                            
+                            // Show ellipsis to indicate truncation
+                            println!("   ... [truncated {} lines] ...", snippet_lines.len() - max_lines);
+                            
+                            // Show last few lines
+                            for line in &snippet_lines[snippet_lines.len() - max_lines/2..] {
+                                println!("   {}", line);
+                            }
+                        } else {
+                            // Show entire snippet if it's reasonably sized
+                            println!("   {}", result.snippet.replace("\n", "\n   "));
+                        }
+                        
                         println!();
                     }
                 },

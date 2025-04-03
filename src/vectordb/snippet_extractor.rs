@@ -165,24 +165,81 @@ impl SnippetExtractor {
                 }
             }
             
-            actual_end_line = i + 1;
+            if brace_count <= 0 && i > end_line {
+                actual_end_line = i + 1;
+                break;
+            }
         }
         
-        // Expand the context around the method
-        let context_lines = DEFAULT_CONTEXT_LINES.min(lines.len());
-        let start = start_line.saturating_sub(context_lines);
-        let end = (actual_end_line + context_lines).min(lines.len());
+        // Calculate the method size and limit if too large
+        let method_size = actual_end_line - start_line;
+        let max_method_size = 30; // Maximum size for showing entire method
         
-        // Extract the snippet with line numbers
+        let context_lines = if method_size > max_method_size {
+            // For large methods, show smaller context
+            2
+        } else {
+            // For smaller methods, use default context
+            DEFAULT_CONTEXT_LINES.min(lines.len())
+        };
+        
+        // Add context around the method
+        let start = start_line.saturating_sub(context_lines);
+        
+        // Handle large methods appropriately
         let mut snippet = String::new();
-        for i in start..end {
-            snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+        
+        if method_size > max_method_size {
+            // For large methods, show the signature plus beginning and end
+            let signature_end = start_line + 5.min(method_size); // Show signature + few lines
+            
+            // Show method signature and beginning
+            for i in start..signature_end {
+                snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+            }
+            
+            // Add truncation indicator
+            snippet.push_str("... [method body truncated] ...\n");
+            
+            // Show end of method
+            let end_section_start = actual_end_line.saturating_sub(5);
+            for i in end_section_start..actual_end_line {
+                if i < lines.len() {
+                    snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                }
+            }
+            
+            // Show additional context after the method
+            let end = (actual_end_line + context_lines).min(lines.len());
+            for i in actual_end_line..end {
+                if i < lines.len() {
+                    snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                }
+            }
+        } else {
+            // For smaller methods, show the entire method with context
+            let end = (actual_end_line + context_lines).min(lines.len());
+            
+            // Add truncation indicator if needed
+            if start > 0 {
+                snippet.push_str("... (truncated above)\n");
+            }
+            
+            // Show the full method and context
+            for i in start..end {
+                snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+            }
+            
+            // Add truncation indicator if needed
+            if end < lines.len() {
+                snippet.push_str("... (truncated below)\n");
+            }
         }
         
         Ok(SnippetContext {
             snippet_text: snippet,
             start_line: start + 1,
-            end_line: end,
+            end_line: actual_end_line,
             file_path: file_path.to_string(),
             relevant_method: Some(method.clone()),
             relevant_type: None,
@@ -222,33 +279,81 @@ impl SnippetExtractor {
                 }
             }
             
-            actual_end_line = i + 1;
+            if brace_count <= 0 && i > end_line {
+                actual_end_line = i + 1;
+                break;
+            }
         }
         
-        // Limit the size of large type definitions
-        if actual_end_line - start_line > MAX_CONTEXT_LINES * 2 {
-            actual_end_line = start_line + MAX_CONTEXT_LINES;
-        }
+        // Calculate the type size and limit if too large
+        let type_size = actual_end_line - start_line;
+        let max_type_size = 35; // Maximum size for showing entire type definition
+        
+        let context_lines = if type_size > max_type_size {
+            // For large types, show smaller context
+            2
+        } else {
+            // For smaller types, use default context
+            DEFAULT_CONTEXT_LINES.min(lines.len())
+        };
         
         // Add context around the type definition
-        let context_lines = DEFAULT_CONTEXT_LINES.min(lines.len());
         let start = start_line.saturating_sub(context_lines);
-        let end = (actual_end_line + 2).min(lines.len()); // Show a bit of the type body
         
-        // Extract the snippet with line numbers
+        // Handle large type definitions appropriately
         let mut snippet = String::new();
-        for i in start..end {
-            snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
-        }
         
-        if actual_end_line < lines.len() && end < lines.len() {
-            snippet.push_str("... (truncated)\n");
+        if type_size > max_type_size {
+            // For large types, show the declaration plus beginning and end
+            let declaration_end = start_line + 8.min(type_size); // Show declaration + few lines
+            
+            // Show type declaration and beginning
+            for i in start..declaration_end {
+                snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+            }
+            
+            // Add truncation indicator
+            snippet.push_str("... [type body truncated] ...\n");
+            
+            // Show end of type definition
+            let end_section_start = actual_end_line.saturating_sub(5);
+            for i in end_section_start..actual_end_line {
+                if i < lines.len() {
+                    snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                }
+            }
+            
+            // Show additional context after the type
+            let end = (actual_end_line + context_lines).min(lines.len());
+            for i in actual_end_line..end {
+                if i < lines.len() {
+                    snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                }
+            }
+        } else {
+            // For smaller types, show the entire definition with context
+            let end = (actual_end_line + context_lines).min(lines.len());
+            
+            // Add truncation indicator if needed
+            if start > 0 {
+                snippet.push_str("... (truncated above)\n");
+            }
+            
+            // Show the full type and context
+            for i in start..end {
+                snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+            }
+            
+            // Add truncation indicator if needed
+            if end < lines.len() {
+                snippet.push_str("... (truncated below)\n");
+            }
         }
         
         Ok(SnippetContext {
             snippet_text: snippet,
             start_line: start + 1,
-            end_line: end,
+            end_line: actual_end_line,
             file_path: file_path.to_string(),
             relevant_method: None,
             relevant_type: Some(type_info.clone()),
@@ -261,14 +366,14 @@ impl SnippetExtractor {
     fn extract_content_based_snippet(&self, content: &str, file_path: &str, query_terms: &[String]) -> Result<SnippetContext> {
         let lines: Vec<&str> = content.lines().collect();
         
-        // Find the best matching line
-        let mut best_line = 0;
-        let mut best_score = 0;
+        // Find all matching lines with their scores
+        let mut scored_lines: Vec<(usize, usize)> = Vec::new(); // (line_index, score)
         
         for (i, line) in lines.iter().enumerate() {
             let line_lower = line.to_lowercase();
             let mut score = 0;
             
+            // Score based on query terms
             for term in query_terms {
                 if line_lower.contains(term) {
                     score += 1;
@@ -278,41 +383,133 @@ impl SnippetExtractor {
             // Boost lines with specific code indicators
             if line_lower.contains("fn ") || line_lower.contains("def ") || 
                line_lower.contains("class ") || line_lower.contains("struct ") ||
-               line_lower.contains("trait ") || line_lower.contains("module ") {
-                score += 1;
+               line_lower.contains("trait ") || line_lower.contains("module ") ||
+               line_lower.contains("impl ") || line_lower.contains("pub ") {
+                score += 2; // Higher boost for important code elements
             }
             
-            if score > best_score {
-                best_score = score;
-                best_line = i;
+            // Only consider lines with positive scores
+            if score > 0 {
+                scored_lines.push((i, score));
             }
         }
         
-        // If no match found, just return the beginning of the file
-        if best_score == 0 {
-            best_line = 0;
+        // Sort by score in descending order
+        scored_lines.sort_by(|a, b| b.1.cmp(&a.1));
+        
+        // Find the best section with multiple matched lines if possible
+        let absolute_max_lines = 35; // Maximum snippet size
+        let context_lines = DEFAULT_CONTEXT_LINES.min(lines.len());
+        
+        // If we have multiple matches, try to find the best cluster
+        if scored_lines.len() > 1 {
+            // Group nearby matches to find the most relevant section of code
+            let mut best_section_start = 0;
+            let mut best_section_end = 0;
+            let mut best_section_score = 0;
+            
+            // Try each high-scoring line as a potential center of a section
+            for &(line_idx, line_score) in scored_lines.iter().take(5) { // Consider top 5 matches
+                let section_start = line_idx.saturating_sub(context_lines);
+                let section_end = (line_idx + context_lines + 1).min(lines.len());
+                
+                // Count how many other matched lines fall within this section
+                let section_score = scored_lines.iter()
+                    .filter(|&&(idx, _)| idx >= section_start && idx < section_end)
+                    .map(|&(_, score)| score)
+                    .sum::<usize>() + line_score; // Include the center line's score
+                
+                if section_score > best_section_score {
+                    best_section_score = section_score;
+                    best_section_start = section_start;
+                    best_section_end = section_end;
+                }
+            }
+            
+            // Use the best section if we found one
+            if best_section_score > 0 {
+                // Hard limit on length
+                let section_length = best_section_end - best_section_start;
+                let max_lines = absolute_max_lines.min(section_length);
+                
+                if section_length > max_lines {
+                    // If section is too large, center it around the highest scoring line in the section
+                    let best_line_in_section = scored_lines.iter()
+                        .filter(|&&(idx, _)| idx >= best_section_start && idx < best_section_end)
+                        .map(|&(idx, _)| idx)
+                        .next()
+                        .unwrap_or(best_section_start + section_length / 2);
+                    
+                    let half_max = max_lines / 2;
+                    best_section_start = best_line_in_section.saturating_sub(half_max);
+                    best_section_end = (best_line_in_section + half_max).min(lines.len());
+                }
+                
+                // Extract the snippet
+                let mut snippet = String::new();
+                for i in best_section_start..best_section_end {
+                    snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                }
+                
+                // Add truncation indicator if appropriate
+                if best_section_start > 0 {
+                    snippet.insert_str(0, "... (truncated above)\n");
+                }
+                if best_section_end < lines.len() {
+                    snippet.push_str("... (truncated below)\n");
+                }
+                
+                return Ok(SnippetContext {
+                    snippet_text: snippet,
+                    start_line: best_section_start + 1,
+                    end_line: best_section_end,
+                    file_path: file_path.to_string(),
+                    relevant_method: None,
+                    relevant_type: None,
+                    is_definition: false,
+                    is_usage: true,
+                });
+            }
         }
         
+        // Fallback: If we don't have good clusters, use the best single line
+        let best_line = if !scored_lines.is_empty() {
+            scored_lines[0].0 // Use the highest scoring line
+        } else {
+            0 // Default to first line if no matches
+        };
+        
         // Extract context around the best line
-        let context_lines = DEFAULT_CONTEXT_LINES.min(lines.len());
         let start = best_line.saturating_sub(context_lines);
         let end = (best_line + context_lines + 1).min(lines.len());
         
+        // Hard limit on snippet size
+        let max_lines = absolute_max_lines.min(lines.len());
+        let actual_end = end.min(start + max_lines);
+        
         // Extract the snippet with line numbers
         let mut snippet = String::new();
-        for i in start..end {
+        for i in start..actual_end {
             snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+        }
+        
+        // Add truncation indicators
+        if start > 0 {
+            snippet.insert_str(0, "... (truncated above)\n");
+        }
+        if actual_end < lines.len() {
+            snippet.push_str("... (truncated below)\n");
         }
         
         Ok(SnippetContext {
             snippet_text: snippet,
             start_line: start + 1,
-            end_line: end,
+            end_line: actual_end,
             file_path: file_path.to_string(),
             relevant_method: None,
             relevant_type: None,
             is_definition: false,
-            is_usage: best_score > 0,
+            is_usage: !scored_lines.is_empty(),
         })
     }
     
