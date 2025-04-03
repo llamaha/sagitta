@@ -14,6 +14,7 @@ use num_cpus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use ctrlc;
+use log::{debug, info, warn, error, trace};
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -140,13 +141,18 @@ pub enum Command {
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
         Command::Index { dir, file_types, threads, use_onnx, onnx_model, onnx_tokenizer } => {
+            debug!("Executing Index command for directory: {}", dir);
             println!("Indexing files in {}...", dir);
             
             // Set the embedding model type and paths if ONNX is specified
             if use_onnx {
+                debug!("ONNX model specified for indexing");
                 // Get or use default paths
                 let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
                 let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
+                
+                debug!("Using ONNX model path: {}", model_path);
+                debug!("Using ONNX tokenizer path: {}", tokenizer_path);
                 
                 // Set ONNX paths
                 match db.set_onnx_paths(
@@ -157,11 +163,13 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         // Now set the model type to ONNX
                         match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                             Ok(_) => {
+                                debug!("Successfully set embedding model type to ONNX");
                                 println!("Using ONNX-based embedding model:");
                                 println!("  - Model: {}", model_path);
                                 println!("  - Tokenizer: {}", tokenizer_path);
                             },
                             Err(e) => {
+                                error!("Failed to use ONNX model: {}", e);
                                 eprintln!("Failed to use ONNX model: {}", e);
                                 eprintln!("Falling back to basic embedding model.");
                                 // Ensure we're using the basic model
@@ -170,6 +178,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         }
                     },
                     Err(e) => {
+                        error!("Failed to set ONNX model paths: {}", e);
                         eprintln!("Failed to set ONNX model paths: {}", e);
                         eprintln!("Falling back to basic embedding model.");
                         // Ensure we're using the basic model
@@ -178,6 +187,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             } else {
                 // Ensure we're using the basic model
+                debug!("Using basic embedding model for indexing");
                 let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
                 println!("Using basic embedding model");
             }
@@ -188,6 +198,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             // Handle Ctrl+C gracefully
             ctrlc::set_handler(move || {
+                debug!("Interrupt signal received");
                 println!("\nInterrupt received, finishing current operations and shutting down...");
                 r.store(false, Ordering::SeqCst);
                 unsafe { INTERRUPT_RECEIVED = true; }
@@ -196,6 +207,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             // Set thread count if specified
             let num_cpus = num_cpus::get();
             if let Some(thread_count) = threads {
+                debug!("Setting thread count to {} (of {} available CPUs)", thread_count, num_cpus);
                 println!("Using {} threads for indexing ({} CPUs available)...", 
                          thread_count, num_cpus);
                 rayon::ThreadPoolBuilder::new()
@@ -203,47 +215,59 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     .build_global()
                     .unwrap_or_else(|e| println!("Failed to set thread count: {}", e));
             } else {
+                debug!("Using all {} available CPUs for indexing", num_cpus);
                 println!("Using all {} available CPUs for indexing...", num_cpus);
             }
             
             let start = Instant::now();
             
             // Check for interrupt periodically during indexing
+            debug!("Starting directory indexing: {}, file types: {:?}", dir, file_types);
             match db.index_directory(&dir, &file_types) {
                 Ok(_) => {
                     let duration = start.elapsed();
                     if unsafe { INTERRUPT_RECEIVED } {
+                        debug!("Indexing was interrupted but data saved safely");
                         println!("Indexing was interrupted but data has been saved safely.");
                     } else {
+                        debug!("Indexing completed successfully in {:.2} seconds", duration.as_secs_f32());
                         println!("Indexing complete in {:.2} seconds!", duration.as_secs_f32());
                     }
                 },
                 Err(e) => {
                     if unsafe { INTERRUPT_RECEIVED } {
+                        debug!("Indexing was interrupted but data saved safely");
                         println!("Indexing was interrupted but data has been saved safely.");
                     } else {
+                        error!("Indexing failed: {}", e);
                         return Err(e.into());
                     }
                 }
             }
         }
         Command::Query { query, vector_only, vector_weight, bm25_weight, file_types } => {
+            debug!("Executing Query command: \"{}\"", query);
+            
             // Use get_embedding_model for embedding logic
             let model_type = db.embedding_model_type();
             match get_embedding_model(model_type, &db) {
                 Ok(model) => {
+                    debug!("Successfully created embedding model: {:?}", model_type);
                     let search = Search::new(db, model);
                     
                     // Determine search type based on flags
                     let mut results = if vector_only {
+                        debug!("Performing vector-only search");
                         println!("Performing vector-only search...");
                         search.search(&query)?
                     } else {
+                        debug!("Performing hybrid search (vector + BM25)");
                         println!("Performing query search (combining semantic and lexical matching)...");
                         
                         // Show weights being used
                         let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
                         let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+                        debug!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
                         println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
                         
                         search.hybrid_search(&query, vector_weight, bm25_weight)?
@@ -252,6 +276,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     // Filter results by file type if specified
                     if let Some(types) = file_types {
                         if !types.is_empty() {
+                            debug!("Filtering results by file types: {:?}", types);
                             println!("Filtering results by file types: {}", types.join(", "));
                             results.retain(|result| {
                                 let path = Path::new(&result.file_path);
@@ -266,6 +291,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     }
 
                     if results.is_empty() {
+                        debug!("No results found for query: \"{}\"", query);
                         println!("No results found.");
                         return Ok(());
                     }
@@ -276,8 +302,10 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                                           query.to_lowercase().contains("fn ");
 
                     if is_method_query {
+                        debug!("Presenting method search results, {} results found", results.len());
                         println!("\nSearch results for methods: {}\n", query);
                     } else {
+                        debug!("Presenting general search results, {} results found", results.len());
                         println!("\nSearch results for: {}\n", query);
                     }
                     
@@ -288,6 +316,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     }
                 },
                 Err(e) => {
+                    error!("Error creating embedding model: {}", e);
                     eprintln!("Error creating embedding model: {}", e);
                     return Ok(());
                 }
@@ -564,35 +593,22 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
 }
 
 /// Creates the embedding model based on the database configuration
-fn create_embedding_model(db: &VectorDB) -> Result<EmbeddingModel> {
-    match db.embedding_model_type() {
-        EmbeddingModelType::Basic => {
-            Ok(EmbeddingModel::new())
-        },
-        EmbeddingModelType::Onnx => {
-            if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
-                EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                    .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
-            } else {
-                // Fallback to basic model if ONNX paths aren't set properly
-                eprintln!("Warning: ONNX model paths not set correctly, falling back to basic embedding model");
-                Ok(EmbeddingModel::new())
-            }
-        }
-    }
-}
-
 fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow::Result<EmbeddingModel> {
+    debug!("Creating embedding model of type: {:?}", model_type);
     match model_type {
         EmbeddingModelType::Basic => {
+            debug!("Creating basic embedding model");
             Ok(EmbeddingModel::new())
         },
         EmbeddingModelType::Onnx => {
             if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
+                debug!("Creating ONNX embedding model with paths: model={}, tokenizer={}", 
+                       model_path.display(), tokenizer_path.display());
                 EmbeddingModel::new_onnx(model_path, tokenizer_path)
                     .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
             } else {
                 // Fallback to basic model
+                warn!("ONNX paths not set, falling back to basic model");
                 println!("Warning: ONNX paths not set, falling back to basic model");
                 Ok(EmbeddingModel::new())
             }

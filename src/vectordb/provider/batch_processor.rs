@@ -545,7 +545,7 @@ mod tests {
         
         // Create tokenizer cache
         let tokenizer_config = TokenizerCacheConfig::default();
-        let tokenizer_cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), tokenizer_config).unwrap();
+        let tokenizer_cache = TokenizerCache::new(&tokenizer_path, tokenizer_config).unwrap();
         
         // Create batch processor
         let batch_config = BatchProcessorConfig::default();
@@ -577,7 +577,7 @@ mod tests {
         
         // Create tokenizer cache
         let tokenizer_config = TokenizerCacheConfig::default();
-        let tokenizer_cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), tokenizer_config).unwrap();
+        let tokenizer_cache = TokenizerCache::new(&tokenizer_path, tokenizer_config).unwrap();
         
         // Create batch processor
         let batch_config = BatchProcessorConfig::default();
@@ -618,7 +618,7 @@ mod tests {
         
         // Create tokenizer cache
         let tokenizer_config = TokenizerCacheConfig::default();
-        let tokenizer_cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), tokenizer_config).unwrap();
+        let tokenizer_cache = TokenizerCache::new(&tokenizer_path, tokenizer_config).unwrap();
         
         // Create batch processor
         let batch_config = BatchProcessorConfig::default();

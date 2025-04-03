@@ -8,6 +8,7 @@ use ort::{Environment, Session, SessionBuilder, Value, GraphOptimizationLevel};
 use crate::vectordb::provider::session_manager::{SessionManager, SessionConfig};
 use crate::vectordb::provider::tokenizer_cache::{TokenizerCache, TokenizerCacheConfig};
 use crate::vectordb::provider::batch_processor::{BatchProcessor, BatchProcessorConfig};
+use log::{debug, info, warn, error};
 
 /// Dimension of the ONNX MiniLM embeddings
 pub const ONNX_EMBEDDING_DIM: usize = 384;
@@ -25,23 +26,31 @@ pub struct OnnxEmbeddingProvider {
 impl OnnxEmbeddingProvider {
     /// Creates a new OnnxEmbeddingProvider from the given model and tokenizer paths
     pub fn new(model_path: &Path, tokenizer_path: &Path) -> Result<Self> {
+        debug!("Creating ONNX embedding provider with model: {}", model_path.display());
+        
         // Load tokenizer
         let tokenizer_json_path = tokenizer_path.join("tokenizer.json");
+        debug!("Loading tokenizer from: {}", tokenizer_json_path.display());
+        
         let tokenizer = Tokenizer::from_file(tokenizer_json_path)
             .map_err(|e| Error::msg(format!("Failed to load tokenizer: {}", e)))?;
         
+        debug!("Tokenizer loaded successfully");
+        
         // Create ONNX environment and session
+        debug!("Creating ONNX environment");
         let environment = Environment::builder()
             .with_name("MiniLM")
             .build()?
             .into_arc();
         
+        debug!("Creating ONNX session with model path: {}", model_path.display());
         let session = SessionBuilder::new(&environment)?
             .with_optimization_level(GraphOptimizationLevel::Level1)?
             .with_intra_threads(num_cpus::get() as i16)?
             .with_model_from_file(model_path)?;
         
-        println!("ONNX model loaded successfully from {}", model_path.display());
+        debug!("ONNX model loaded successfully from {}", model_path.display());
         
         Ok(Self {
             tokenizer,

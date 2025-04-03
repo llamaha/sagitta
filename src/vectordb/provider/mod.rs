@@ -116,7 +116,7 @@ mod tests {
         let model_path = std::path::PathBuf::from("onnx/all-minilm-l12-v2.onnx");
         let tokenizer_path = std::path::PathBuf::from("onnx/minilm_tokenizer.json");
         
-        if !model_path.exists() || !tokenizer_path.parent().unwrap().exists() {
+        if !model_path.exists() || !tokenizer_path.exists() {
             println!("Skipping test_create_optimized_components because model/tokenizer files aren't available");
             return;
         }
@@ -124,7 +124,7 @@ mod tests {
         // Create components
         let components = create_optimized_components(
             &model_path,
-            tokenizer_path.parent().unwrap(),
+            &tokenizer_path,
             onnx::ONNX_EMBEDDING_DIM,
         );
         

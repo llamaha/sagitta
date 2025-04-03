@@ -54,9 +54,15 @@ pub struct TokenizerCache {
 impl TokenizerCache {
     /// Create a new tokenizer cache
     pub fn new(tokenizer_path: &Path, config: TokenizerCacheConfig) -> Result<Arc<Self>> {
+        // Handle the case where tokenizer_path might be a directory or a file
+        let tokenizer_json_path = if tokenizer_path.is_dir() {
+            tokenizer_path.join("tokenizer.json")
+        } else {
+            tokenizer_path.to_path_buf()
+        };
+        
         // Load the tokenizer from the file
-        let tokenizer_json_path = tokenizer_path.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(tokenizer_json_path)
+        let tokenizer = Tokenizer::from_file(&tokenizer_json_path)
             .map_err(|e| Error::msg(format!("Failed to load tokenizer: {}", e)))?;
         
         // Create the LRU cache with NonZeroUsize capacity
@@ -156,7 +162,7 @@ mod tests {
     
     #[test]
     fn test_tokenizer_creation() {
-        // Skip if tokenizer isn't available
+        // Use correct path to tokenizer directory
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
         if !tokenizer_path.exists() {
             println!("Skipping test_tokenizer_creation because tokenizer file isn't available");
@@ -165,13 +171,13 @@ mod tests {
         
         // Create a tokenizer cache with default config
         let config = TokenizerCacheConfig::default();
-        let cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), config);
+        let cache = TokenizerCache::new(&tokenizer_path, config);
         assert!(cache.is_ok());
     }
     
     #[test]
     fn test_tokenization() {
-        // Skip if tokenizer isn't available
+        // Use correct path to tokenizer directory
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
         if !tokenizer_path.exists() {
             println!("Skipping test_tokenization because tokenizer file isn't available");
@@ -182,7 +188,7 @@ mod tests {
         let config = TokenizerCacheConfig::default();
         let expected_seq_length = config.max_seq_length; // Store the value before moving config
         
-        let cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), config).unwrap();
+        let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
         
         // Tokenize some text
         let text = "Hello, world!";
@@ -196,7 +202,7 @@ mod tests {
     
     #[test]
     fn test_cache_hit() {
-        // Skip if tokenizer isn't available
+        // Use correct path to tokenizer directory
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
         if !tokenizer_path.exists() {
             println!("Skipping test_cache_hit because tokenizer file isn't available");
@@ -205,7 +211,7 @@ mod tests {
         
         // Create a tokenizer cache with default config
         let config = TokenizerCacheConfig::default();
-        let cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), config).unwrap();
+        let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
         
         // Tokenize the same text twice
         let text = "Hello, world!";
@@ -223,7 +229,7 @@ mod tests {
     
     #[test]
     fn test_cache_expiry() {
-        // Skip if tokenizer isn't available
+        // Use correct path to tokenizer directory
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
         if !tokenizer_path.exists() {
             println!("Skipping test_cache_expiry because tokenizer file isn't available");
@@ -233,7 +239,7 @@ mod tests {
         // Create a tokenizer cache with a very short TTL
         let mut config = TokenizerCacheConfig::default();
         config.cache_ttl = Duration::from_millis(10);
-        let cache = TokenizerCache::new(&tokenizer_path.parent().unwrap(), config).unwrap();
+        let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
         
         // Tokenize some text
         let text = "Hello, world!";

@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::AtomicBool;
 use std::io::Write;
+use log::{debug, info, warn, error, trace};
 
 /// Relevance feedback data for a query-file pair
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -73,38 +74,50 @@ impl Clone for VectorDB {
 
 impl VectorDB {
     pub fn new(db_path: String) -> Result<Self> {
+        debug!("Creating VectorDB with database path: {}", db_path);
+        
         let (embeddings, hnsw_config, feedback, embedding_model_type, onnx_model_path, onnx_tokenizer_path) = if Path::new(&db_path).exists() {
+            debug!("Database file exists, attempting to load");
             // Try to read the existing database file, but handle corruption gracefully
             match fs::read_to_string(&db_path) {
                 Ok(contents) => {
+                    debug!("Database file read successfully, parsing JSON");
                     match serde_json::from_str::<DBFile>(&contents) {
-                        Ok(db_file) => (
-                            db_file.embeddings, 
-                            db_file.hnsw_config, 
-                            db_file.feedback.unwrap_or_default(),
-                            db_file.embedding_model_type.unwrap_or_default(),
-                            db_file.onnx_model_path.map(PathBuf::from),
-                            db_file.onnx_tokenizer_path.map(PathBuf::from),
-                        ),
+                        Ok(db_file) => {
+                            debug!("Database parsed successfully: {} embeddings", db_file.embeddings.len());
+                            (
+                                db_file.embeddings, 
+                                db_file.hnsw_config, 
+                                db_file.feedback.unwrap_or_default(),
+                                db_file.embedding_model_type.unwrap_or_default(),
+                                db_file.onnx_model_path.map(PathBuf::from),
+                                db_file.onnx_tokenizer_path.map(PathBuf::from),
+                            )
+                        },
                         Err(e) => {
                             // If JSON parsing fails, assume the file is corrupted
+                            error!("Database file appears to be corrupted: {}", e);
                             eprintln!("Warning: Database file appears to be corrupted: {}", e);
                             eprintln!("Creating a new empty database.");
                             // Remove corrupted file
                             let _ = fs::remove_file(&db_path);
+                            debug!("Creating a new empty database");
                             (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
                         }
                     }
                 }
                 Err(e) => {
                     // Handle file read errors
+                    error!("Couldn't read database file: {}", e);
                     eprintln!("Warning: Couldn't read database file: {}", e);
                     eprintln!("Creating a new empty database.");
+                    debug!("Creating a new empty database");
                     (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
                 }
             }
         } else {
             // Create new database with default HNSW config
+            debug!("Database file doesn't exist, creating new database");
             (HashMap::new(), Some(HNSWConfig::default()), FeedbackData::default(), EmbeddingModelType::Basic, None, None)
         };
 
@@ -116,20 +129,28 @@ impl VectorDB {
             .to_string_lossy()
             .to_string();
         
+        debug!("Creating embedding cache at: {}", cache_path);
+        
         // Try to create cache, but handle potential cache corruption
         let mut cache = match EmbeddingCache::new(cache_path.clone()) {
-            Ok(cache) => cache,
+            Ok(cache) => {
+                debug!("Cache loaded successfully");
+                cache
+            },
             Err(e) => {
+                error!("Couldn't load cache: {}", e);
                 eprintln!("Warning: Couldn't load cache: {}", e);
                 eprintln!("Creating a new empty cache.");
                 // Try to remove the corrupted cache file
                 let _ = fs::remove_file(&cache_path);
                 // Create a new empty cache
+                debug!("Creating a new empty cache");
                 EmbeddingCache::new(cache_path)?
             }
         };
         
         // Configure the cache with the embedding model type
+        debug!("Setting cache model type to: {:?}", embedding_model_type);
         cache.set_model_type(embedding_model_type.clone());
         
         // Check for an HNSW index file
@@ -137,39 +158,52 @@ impl VectorDB {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("hnsw_index.json");
+        
+        debug!("Looking for HNSW index at: {}", hnsw_path.display());
             
         // Try to load the index from file, or build a new one if config exists
         let hnsw_index = if hnsw_path.exists() {
+            debug!("HNSW index file exists, attempting to load");
             match HNSWIndex::load_from_file(&hnsw_path) {
-                Ok(index) => Some(index),
+                Ok(index) => {
+                    debug!("HNSW index loaded successfully");
+                    Some(index)
+                },
                 Err(e) => {
                     // If loading fails, clean up and rebuild the index
+                    error!("Couldn't load HNSW index: {}", e);
                     eprintln!("Warning: Couldn't load HNSW index: {}", e);
                     eprintln!("Creating a new index or rebuilding from embeddings.");
                     // Try to remove corrupted file
                     let _ = fs::remove_file(&hnsw_path);
                     
                     // Rebuild the index if we have a configuration
+                    debug!("Rebuilding HNSW index from embeddings");
                     hnsw_config.map(|config| {
                         let mut index = HNSWIndex::new(config);
                         // Rebuild the index from embeddings
                         for (_, embedding) in &embeddings {
                             let _ = index.insert(embedding.clone());
                         }
+                        debug!("HNSW index rebuilt with {} embeddings", embeddings.len());
                         index
                     })
                 }
             }
         } else {
             // No index file, build from scratch with default or provided config
+            debug!("No HNSW index file found, creating new index");
             let config = hnsw_config.unwrap_or_else(HNSWConfig::default);
             let mut index = HNSWIndex::new(config);
             // Build the index from embeddings if any exist
             for (_, embedding) in &embeddings {
                 let _ = index.insert(embedding.clone());
             }
+            debug!("New HNSW index created with {} embeddings", embeddings.len());
             Some(index)
         };
+        
+        debug!("VectorDB initialization complete");
 
         Ok(Self {
             embeddings,
@@ -1018,6 +1052,19 @@ impl VectorDB {
     /// Get the ONNX tokenizer path
     pub fn onnx_tokenizer_path(&self) -> Option<&PathBuf> {
         self.onnx_tokenizer_path.as_ref()
+    }
+
+    // Add a method to safely access the HNSW index
+    pub fn hnsw_index(&self) -> Option<&HNSWIndex> {
+        if let Some(index) = &self.hnsw_index {
+            debug!("HNSW index accessed: {} nodes, {} layers", 
+                   index.stats().total_nodes, 
+                   index.stats().layers);
+            Some(index)
+        } else {
+            debug!("HNSW index requested but not available");
+            None
+        }
     }
 }
 
