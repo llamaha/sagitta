@@ -434,79 +434,102 @@ impl BatchProcessor {
             return Ok(results);
         }
         
-        // For larger batches, use parallel processing with a thread pool
-        use std::sync::mpsc;
-        use std::thread;
+        // True batch processing for larger batches
+        // Tokenize all texts first
+        let mut tokenized_texts = Vec::with_capacity(texts.len());
+        let mut failed_indices = Vec::new();
         
-        let parallelism = std::cmp::min(self.config.max_parallelism, texts.len());
-        let (tx, rx) = mpsc::channel();
-        
-        // Distribute texts among worker threads
-        let chunk_size = (texts.len() + parallelism - 1) / parallelism;
-        
-        let mut handles = Vec::with_capacity(parallelism);
-        let self_arc = Arc::new(self.clone());
-        
-        for chunk_idx in 0..parallelism {
-            let start = chunk_idx * chunk_size;
-            let end = std::cmp::min(start + chunk_size, texts.len());
-            
-            if start >= end {
-                continue; // Skip empty chunks
-            }
-            
-            // Create a chunk of texts for this worker
-            let chunk = texts[start..end].iter().map(|&s| s.to_string()).collect::<Vec<_>>();
-            let processor = Arc::clone(&self_arc);
-            let tx = tx.clone();
-            
-            // Spawn a worker thread
-            let handle = thread::spawn(move || {
-                for (idx, text) in chunk.iter().enumerate() {
-                    let abs_idx = start + idx;
-                    let result = processor.embed(text);
-                    tx.send((abs_idx, result)).expect("Failed to send embedding result");
-                }
-            });
-            
-            handles.push(handle);
-        }
-        
-        // Drop the original sender to avoid deadlock
-        drop(tx);
-        
-        // Collect results in order
-        let mut results = vec![Vec::new(); texts.len()];
-        let mut errors = Vec::new();
-        
-        for _ in 0..texts.len() {
-            match rx.recv() {
-                Ok((idx, Ok(embedding))) => {
-                    results[idx] = embedding;
-                },
-                Ok((idx, Err(e))) => {
-                    errors.push((idx, e));
-                },
+        for (idx, text) in texts.iter().enumerate() {
+            match self.tokenizer_cache.tokenize(text) {
+                Ok(tokenized) => tokenized_texts.push((idx, tokenized)),
                 Err(e) => {
-                    return Err(Error::msg(format!("Failed to receive embedding result: {}", e)));
+                    eprintln!("Failed to tokenize text at index {}: {}", idx, e);
+                    failed_indices.push((idx, Error::msg(format!("Tokenization failed: {}", e))));
                 }
             }
         }
         
-        // Wait for all threads to finish
-        for handle in handles {
-            if let Err(e) = handle.join() {
-                eprintln!("Worker thread panicked: {:?}", e);
+        if tokenized_texts.is_empty() {
+            if let Some((idx, err)) = failed_indices.first() {
+                return Err(Error::msg(format!("Failed to tokenize text at index {}: {}", idx, err)));
+            }
+            return Ok(Vec::new());
+        }
+        
+        // Set up storage for results
+        let mut results = vec![None; texts.len()];
+        
+        // Group by similar sequence lengths for efficient batch processing
+        // Sort by sequence length for better batching
+        tokenized_texts.sort_by_key(|(_, t)| t.input_ids.len());
+        
+        // Process in batches
+        let max_batch_size = self.config.max_batch_size;
+        let mut current_batch = Vec::new();
+        let mut current_batch_indices = Vec::new();
+        
+        for (orig_idx, tokenized) in tokenized_texts {
+            // Add to current batch
+            current_batch.push(EmbeddingRequest {
+                tokenized,
+                created_at: Instant::now(),
+                result_sender: std::sync::mpsc::channel().0, // Dummy sender, not used in direct batch processing
+            });
+            current_batch_indices.push(orig_idx);
+            
+            // Process batch when it reaches max size
+            if current_batch.len() >= max_batch_size {
+                self.process_current_batch(&mut current_batch, &current_batch_indices, &mut results)?;
+                current_batch.clear();
+                current_batch_indices.clear();
             }
         }
         
-        // If there were any errors, report the first one
-        if !errors.is_empty() {
-            let (idx, err) = &errors[0];
-            return Err(Error::msg(format!("Failed to embed text at index {}: {}", idx, err)));
+        // Process any remaining items in the last batch
+        if !current_batch.is_empty() {
+            self.process_current_batch(&mut current_batch, &current_batch_indices, &mut results)?;
         }
         
-        Ok(results)
+        // Fill in missing results with errors or collect final results
+        let mut final_results = Vec::with_capacity(texts.len());
+        for (idx, result) in results.into_iter().enumerate() {
+            if let Some(embedding) = result {
+                final_results.push(embedding);
+            } else {
+                // Check if this was a tokenization failure
+                if failed_indices.iter().any(|(i, _)| *i == idx) {
+                    // Return the specific error for this index
+                    if let Some((_, err)) = failed_indices.iter().find(|(i, _)| *i == idx) {
+                        return Err(Error::msg(format!("Failed to process text at index {}: {}", idx, err)));
+                    }
+                }
+                // Otherwise, it's an unknown failure
+                return Err(Error::msg(format!("Failed to process text at index {}: unknown error", idx)));
+            }
+        }
+        
+        Ok(final_results)
+    }
+    
+    /// Helper method to process a batch and store results
+    fn process_current_batch(&self, batch: &[EmbeddingRequest], indices: &[usize], results: &mut [Option<Vec<f32>>]) -> Result<()> {
+        match self.process_batch_with_session(batch) {
+            Ok(batch_results) => {
+                // Store results at their original indices
+                for (i, result) in batch_results.into_iter().enumerate() {
+                    if i < indices.len() {
+                        let original_idx = indices[i];
+                        if let Ok(embedding) = result {
+                            results[original_idx] = Some(embedding);
+                        }
+                    }
+                }
+                Ok(())
+            },
+            Err(e) => {
+                Err(Error::msg(format!("Failed to process batch: {}", e)))
+            }
+        }
     }
     
     /// Stop the batch processor
