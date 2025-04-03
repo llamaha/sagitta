@@ -184,52 +184,101 @@ impl VectorDB {
     }
     
     /// Configure the ONNX embedding model paths
-    pub fn set_onnx_paths(&mut self, model_path: Option<PathBuf>, tokenizer_path: Option<PathBuf>) {
-        self.onnx_model_path = model_path;
-        self.onnx_tokenizer_path = tokenizer_path;
+    pub fn set_onnx_paths(&mut self, model_path: Option<PathBuf>, tokenizer_path: Option<PathBuf>) -> Result<()> {
+        // Validate paths if provided
+        if let Some(model_path) = &model_path {
+            if !model_path.exists() {
+                return Err(VectorDBError::EmbeddingError(
+                    format!("ONNX model file not found: {}", model_path.display())
+                ));
+            }
+        }
+        
+        if let Some(tokenizer_path) = &tokenizer_path {
+            if !tokenizer_path.exists() {
+                return Err(VectorDBError::EmbeddingError(
+                    format!("ONNX tokenizer file not found: {}", tokenizer_path.display())
+                ));
+            }
+        }
+        
+        // If both paths are set, try to create the model to verify it works
+        if let (Some(model_path_ref), Some(tokenizer_path_ref)) = (&model_path, &tokenizer_path) {
+            match EmbeddingModel::new_onnx(model_path_ref, tokenizer_path_ref) {
+                Ok(_) => {
+                    // Model created successfully, safe to set the paths
+                    self.onnx_model_path = model_path;
+                    self.onnx_tokenizer_path = tokenizer_path;
+                    
+                    // Update cache model settings
+                    self.cache.set_model_type(EmbeddingModelType::Onnx);
+                    self.cache.invalidate_different_model_types();
+                    
+                    self.save()?;
+                },
+                Err(e) => {
+                    return Err(VectorDBError::EmbeddingError(
+                        format!("Failed to initialize ONNX model with provided paths: {}", e)
+                    ));
+                }
+            }
+        } else {
+            // If clearing paths or only setting one, just update the paths
+            self.onnx_model_path = model_path;
+            self.onnx_tokenizer_path = tokenizer_path;
+            self.save()?;
+        }
+        
+        Ok(())
     }
     
     /// Set the embedding model type
     pub fn set_embedding_model_type(&mut self, model_type: EmbeddingModelType) -> Result<()> {
-        // Check if we're changing model type
-        if self.embedding_model_type != model_type {
-            // If switching to ONNX, verify paths are set
-            if model_type == EmbeddingModelType::Onnx {
-                if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
-                    return Err(VectorDBError::EmbeddingError(
-                        "ONNX model and tokenizer paths must be set before using ONNX embeddings".into()
-                    ).into());
-                }
-                
-                // Verify paths exist
-                let model_path = self.onnx_model_path.as_ref().unwrap();
-                let tokenizer_path = self.onnx_tokenizer_path.as_ref().unwrap();
-                
-                if !model_path.exists() {
-                    return Err(VectorDBError::FileReadError {
-                        path: model_path.clone(),
-                        source: std::io::Error::new(std::io::ErrorKind::NotFound, "ONNX model file not found"),
-                    }.into());
-                }
-                
-                if !tokenizer_path.exists() {
-                    return Err(VectorDBError::FileReadError {
-                        path: tokenizer_path.clone(),
-                        source: std::io::Error::new(std::io::ErrorKind::NotFound, "ONNX tokenizer directory not found"),
-                    }.into());
-                }
+        // If switching to ONNX, validate that we can actually create an embedding model
+        if model_type == EmbeddingModelType::Onnx {
+            // Check if ONNX paths are set
+            if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
+                return Err(VectorDBError::EmbeddingError(
+                    "Cannot set ONNX model type: model or tokenizer paths not set".to_string()
+                ));
             }
             
-            let model_type_clone = model_type.clone();
-            self.embedding_model_type = model_type_clone;
-            self.cache.set_model_type(model_type);
+            // Validate that the ONNX model can actually be created
+            let onnx_model_path = self.onnx_model_path.as_ref().unwrap();
+            let onnx_tokenizer_path = self.onnx_tokenizer_path.as_ref().unwrap();
             
-            // Invalidate cache entries from different model type
-            self.cache.invalidate_different_model_types();
+            // Verify the paths exist
+            if !onnx_model_path.exists() {
+                return Err(VectorDBError::EmbeddingError(
+                    format!("ONNX model file not found: {}", onnx_model_path.display())
+                ));
+            }
             
-            // Save the updated configuration
-            self.save()?;
+            if !onnx_tokenizer_path.exists() {
+                return Err(VectorDBError::EmbeddingError(
+                    format!("ONNX tokenizer file not found: {}", onnx_tokenizer_path.display())
+                ));
+            }
+            
+            // Try to create the model to ensure it works
+            match EmbeddingModel::new_onnx(onnx_model_path, onnx_tokenizer_path) {
+                Ok(_) => {
+                    // Model created successfully, safe to set the model type
+                    self.embedding_model_type = model_type;
+                },
+                Err(e) => {
+                    return Err(VectorDBError::EmbeddingError(
+                        format!("Failed to initialize ONNX model: {}", e)
+                    ));
+                }
+            }
+        } else {
+            // Basic model doesn't need validation
+            self.embedding_model_type = model_type;
         }
+        
+        // Save the updated configuration
+        self.save()?;
         
         Ok(())
     }
@@ -339,7 +388,20 @@ impl VectorDB {
 
         // If not in cache, generate new embedding for the entire file
         let model = self.create_embedding_model()
-            .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
+            .map_err(|e| {
+                // Log the error with more detail
+                if self.embedding_model_type == EmbeddingModelType::Onnx {
+                    eprintln!("Error creating ONNX embedding model: {}", e);
+                    if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
+                        eprintln!("ONNX model paths missing - model: {:?}, tokenizer: {:?}", 
+                                 self.onnx_model_path, self.onnx_tokenizer_path);
+                    } else {
+                        eprintln!("ONNX model paths are set but model creation failed");
+                    }
+                }
+                VectorDBError::EmbeddingError(e.to_string())
+            })?;
+        
         let contents = fs::read_to_string(file_path)
             .map_err(|e| VectorDBError::FileReadError {
                 path: file_path.to_path_buf(),
@@ -434,6 +496,10 @@ impl VectorDB {
             let processed_files = Arc::new(AtomicUsize::new(0));
             let save_triggered = Arc::new(AtomicBool::new(false));
             
+            // Track ONNX loading errors for reporting
+            let onnx_loading_errors = Arc::new(AtomicBool::new(false));
+            let onnx_errors = Arc::new(Mutex::new(Vec::<String>::new()));
+            
             // Create a progress bar
             let progress_bar = ProgressBar::new(file_count as u64);
             progress_bar.set_style(ProgressStyle::default_bar()
@@ -481,12 +547,22 @@ impl VectorDB {
                                         match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
                                             Ok(model) => Some(model),
                                             Err(e) => {
-                                                eprintln!("Error creating ONNX model: {}", e);
+                                                // Record the error for reporting later
+                                                let error_msg = format!("Error creating ONNX model: {}", e);
+                                                onnx_errors.lock().unwrap().push(error_msg.clone());
+                                                onnx_loading_errors.store(true, Ordering::SeqCst);
+                                                eprintln!("{}", error_msg);
+                                                
+                                                // Fallback to basic model if ONNX model fails
                                                 Some(EmbeddingModel::new())
                                             }
                                         }
                                     } else {
                                         // Fallback to basic model if ONNX paths aren't available
+                                        let error_msg = "ONNX paths not fully set, falling back to basic embedding model".to_string();
+                                        onnx_errors.lock().unwrap().push(error_msg.clone());
+                                        onnx_loading_errors.store(true, Ordering::SeqCst);
+                                        eprintln!("{}", error_msg);
                                         Some(EmbeddingModel::new())
                                     }
                                 }
@@ -531,6 +607,24 @@ impl VectorDB {
             // Update HNSW index if one was created in parallel
             if let Some(index_lock) = hnsw_index_option {
                 self.hnsw_index = Some(index_lock.lock().unwrap().clone());
+            }
+            
+            // Check if ONNX model loading failed and we need to update the database settings
+            if onnx_loading_errors.load(Ordering::SeqCst) {
+                if self.embedding_model_type == EmbeddingModelType::Onnx {
+                    // Print all collected errors
+                    println!("\nONNX Model Errors:");
+                    for error in onnx_errors.lock().unwrap().iter() {
+                        println!("  - {}", error);
+                    }
+                    
+                    // Warn that we're falling back to basic model for all embeddings
+                    println!("\nWARNING: Due to ONNX model errors, falling back to basic embedding model for all files.");
+                    println!("         To fix this, set a valid ONNX model using the 'model --onnx' command with correct paths.");
+                    
+                    // Update the model type to Basic since ONNX failed
+                    self.embedding_model_type = EmbeddingModelType::Basic;
+                }
             }
             
             // Check if we need to save

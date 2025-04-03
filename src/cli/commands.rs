@@ -149,20 +149,28 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
                 
                 // Set ONNX paths
-                db.set_onnx_paths(
+                match db.set_onnx_paths(
                     Some(PathBuf::from(model_path)),
                     Some(PathBuf::from(tokenizer_path))
-                );
-                
-                // Set the model type to ONNX
-                match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
+                ) {
                     Ok(_) => {
-                        println!("Using ONNX-based embedding model:");
-                        println!("  - Model: {}", model_path);
-                        println!("  - Tokenizer: {}", tokenizer_path);
+                        // Now set the model type to ONNX
+                        match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
+                            Ok(_) => {
+                                println!("Using ONNX-based embedding model:");
+                                println!("  - Model: {}", model_path);
+                                println!("  - Tokenizer: {}", tokenizer_path);
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to use ONNX model: {}", e);
+                                eprintln!("Falling back to basic embedding model.");
+                                // Ensure we're using the basic model
+                                let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
+                            }
+                        }
                     },
                     Err(e) => {
-                        eprintln!("Failed to use ONNX model: {}", e);
+                        eprintln!("Failed to set ONNX model paths: {}", e);
                         eprintln!("Falling back to basic embedding model.");
                         // Ensure we're using the basic model
                         let _ = db.set_embedding_model_type(EmbeddingModelType::Basic);
@@ -351,20 +359,25 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
                 
                 // Set ONNX paths
-                db.set_onnx_paths(
+                match db.set_onnx_paths(
                     Some(PathBuf::from(model_path)),
                     Some(PathBuf::from(tokenizer_path))
-                );
-                
-                // Set the model type to ONNX
-                match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
+                ) {
                     Ok(_) => {
-                        println!("Set embedding model to ONNX:");
-                        println!("  - Model: {}", model_path);
-                        println!("  - Tokenizer: {}", tokenizer_path);
+                        // Now set the model type to ONNX
+                        match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
+                            Ok(_) => {
+                                println!("Set embedding model to ONNX:");
+                                println!("  - Model: {}", model_path);
+                                println!("  - Tokenizer: {}", tokenizer_path);
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to set ONNX model: {}", e);
+                            }
+                        }
                     },
                     Err(e) => {
-                        eprintln!("Failed to set ONNX model: {}", e);
+                        eprintln!("Failed to set ONNX model paths: {}", e);
                     }
                 }
             } else {
