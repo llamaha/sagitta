@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use ctrlc;
 use log::{debug, info, warn, error, trace};
+use dirs;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -39,15 +40,15 @@ pub enum Command {
         #[arg(short = 'j', long = "threads")]
         threads: Option<usize>,
         
-        /// Use ONNX-based embedding model
-        #[arg(long = "onnx")]
-        use_onnx: bool,
+        /// Use fast embedding model instead of the default ONNX model (faster but less accurate)
+        #[arg(long = "fast")]
+        use_fast: bool,
         
-        /// Path to ONNX model file
+        /// Path to ONNX model file (default: ./onnx/all-minilm-l6-v2.onnx)
         #[arg(long = "onnx-model")]
         onnx_model: Option<String>,
         
-        /// Path to ONNX tokenizer directory
+        /// Path to ONNX tokenizer directory (default: ./onnx)
         #[arg(long = "onnx-tokenizer")]
         onnx_tokenizer: Option<String>,
     },
@@ -96,19 +97,19 @@ pub enum Command {
     
     /// Configure the embedding model
     Model {
-        /// Use fast embedding model (less accurate but much faster)
+        /// Use fast embedding model instead of the default ONNX model (faster but less accurate)
         #[arg(long = "fast")]
         use_fast: bool,
         
-        /// Use ONNX embedding model (requires model and tokenizer paths)
+        /// Use ONNX embedding model (explicitly set, this is the default)
         #[arg(long = "onnx")]
         use_onnx: bool,
         
-        /// Path to ONNX model file
+        /// Path to ONNX model file (default: ./onnx/all-minilm-l6-v2.onnx)
         #[arg(long = "onnx-model")]
         onnx_model: Option<String>,
         
-        /// Path to ONNX tokenizer directory
+        /// Path to ONNX tokenizer directory (default: ./onnx)
         #[arg(long = "onnx-tokenizer")]
         onnx_tokenizer: Option<String>,
     },
@@ -141,23 +142,20 @@ pub enum Command {
 
     /// Clear the database
     Clear,
-
-    /// Run the Phase 2 ONNX Optimization Demo
-    Phase2Demo,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
-        Command::Index { dir, file_types, threads, use_onnx, onnx_model, onnx_tokenizer } => {
+        Command::Index { dir, file_types, threads, use_fast, onnx_model, onnx_tokenizer } => {
             debug!("Executing Index command for directory: {}", dir);
             println!("Indexing files in {}...", dir);
             
-            // Set the embedding model type and paths if ONNX is specified
-            if use_onnx {
-                debug!("ONNX model specified for indexing");
+            // Default to using ONNX model unless fast model is explicitly requested
+            if !use_fast {
+                debug!("Using ONNX model for indexing (default)");
                 // Get or use default paths
-                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
-                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
+                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx");
                 
                 debug!("Using ONNX model path: {}", model_path);
                 debug!("Using ONNX tokenizer path: {}", tokenizer_path);
@@ -172,13 +170,30 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                             Ok(_) => {
                                 debug!("Successfully set embedding model type to ONNX");
-                                println!("Using ONNX-based embedding model:");
+                                println!("Using ONNX-based embedding model (default):");
                                 println!("  - Model: {}", model_path);
                                 println!("  - Tokenizer: {}", tokenizer_path);
                             },
                             Err(e) => {
                                 error!("Failed to use ONNX model: {}", e);
                                 eprintln!("Failed to use ONNX model: {}", e);
+                                eprintln!("Model error: {}. Checking if model files exist...", e);
+                                
+                                let model_file_exists = Path::new(model_path).exists();
+                                let tokenizer_file_exists = Path::new(&format!("{}/tokenizer.json", tokenizer_path)).exists();
+                                
+                                if !model_file_exists || !tokenizer_file_exists {
+                                    eprintln!("ONNX model files not found:");
+                                    if !model_file_exists {
+                                        eprintln!("  - Model file not found: {}", model_path);
+                                    }
+                                    if !tokenizer_file_exists {
+                                        eprintln!("  - Tokenizer file not found: {}/tokenizer.json", tokenizer_path);
+                                    }
+                                    eprintln!("\nPlease ensure model files are available or set correct paths.");
+                                    eprintln!("You can run with --fast flag to use the fast embedding model instead.");
+                                }
+                                
                                 eprintln!("Falling back to fast embedding model.");
                                 // Ensure we're using the fast model
                                 let _ = db.set_embedding_model_type(EmbeddingModelType::Fast);
@@ -194,10 +209,10 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     }
                 }
             } else {
-                // Ensure we're using the fast model
-                debug!("Using fast embedding model for indexing");
+                // Use the fast model as requested
+                debug!("Using fast embedding model for indexing (as requested)");
                 let _ = db.set_embedding_model_type(EmbeddingModelType::Fast);
-                println!("Using fast embedding model (faster but less accurate)");
+                println!("Using fast embedding model (faster but less accurate) as requested");
             }
             
             // Set up signal handler for clean shutdown
@@ -263,6 +278,18 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             // Use get_embedding_model for embedding logic
             let model_type = db.embedding_model_type();
+            debug!("Current model type: {:?}", model_type);
+            
+            match model_type {
+                EmbeddingModelType::Onnx => {
+                    println!("Using ONNX model for semantic search (default)");
+                },
+                EmbeddingModelType::Fast => {
+                    println!("Using fast model for search (less accurate but faster)");
+                    println!("Run 'vectordb-cli model --onnx' to use the ONNX model for better results.");
+                }
+            }
+            
             match get_embedding_model(model_type, &db) {
                 Ok(model) => {
                     debug!("Successfully created embedding model: {:?}", model_type);
@@ -275,7 +302,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         search.search_with_limit(&query, limit)?
                     } else {
                         debug!("Performing hybrid search (vector + BM25)");
-                        println!("Performing query search (combining semantic and lexical matching)...");
+                        println!("Performing hybrid search (combining semantic and lexical matching)...");
                         
                         // Show weights being used
                         let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
@@ -354,6 +381,36 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 Err(e) => {
                     error!("Error creating embedding model: {}", e);
                     eprintln!("Error creating embedding model: {}", e);
+                    
+                    // Check if this is likely due to missing ONNX files
+                    if model_type == &EmbeddingModelType::Onnx {
+                        let model_path = db.onnx_model_path().map_or_else(
+                            || "onnx/all-minilm-l6-v2.onnx".to_string(), 
+                            |p| p.to_string_lossy().to_string()
+                        );
+                        let tokenizer_path = db.onnx_tokenizer_path().map_or_else(
+                            || "onnx".to_string(), 
+                            |p| p.to_string_lossy().to_string()
+                        );
+                        
+                        let model_file_exists = Path::new(&model_path).exists();
+                        let tokenizer_file_exists = Path::new(&format!("{}/tokenizer.json", tokenizer_path)).exists();
+                        
+                        if !model_file_exists || !tokenizer_file_exists {
+                            eprintln!("\nONNX model files not found:");
+                            if !model_file_exists {
+                                eprintln!("  - Model file not found: {}", model_path);
+                            }
+                            if !tokenizer_file_exists {
+                                eprintln!("  - Tokenizer file not found: {}/tokenizer.json", tokenizer_path);
+                            }
+                            eprintln!("\nYou can do one of the following:");
+                            eprintln!("1. Switch to the fast model: vectordb-cli model --fast");
+                            eprintln!("2. Make sure the ONNX files are in the correct location");
+                            eprintln!("3. Specify custom paths: vectordb-cli model --onnx --onnx-model /path/to/model.onnx --onnx-tokenizer /path/to/tokenizer");
+                        }
+                    }
+                    
                     return Ok(());
                 }
             }
@@ -436,64 +493,74 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
         }
         Command::Model { use_fast, use_onnx, onnx_model, onnx_tokenizer } => {
-            // Configure the embedding model
+            debug!("Executing Model command");
+            
+            // Validate that we're not getting conflicting flags
             if use_fast && use_onnx {
-                println!("Cannot specify both --fast and --onnx. Please choose one model type.");
+                println!("Error: Cannot use both --fast and --onnx flags together.");
+                println!("Please specify either --fast for the fast model or --onnx for the ONNX model.");
                 return Ok(());
             }
             
-            if use_fast {
-                // Set the model type to Fast
-                db.set_embedding_model_type(EmbeddingModelType::Fast)?;
-                println!("Set embedding model to Fast (faster but less accurate).");
-            } else if use_onnx {
-                // Get or use default paths
-                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l12-v2.onnx");
-                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx/minilm_tokenizer.json");
+            // Default to ONNX if neither is specified
+            let use_onnx = use_onnx || !use_fast;
+            
+            if use_onnx {
+                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx");
                 
-                // Set ONNX paths
+                debug!("Setting model type to ONNX with paths: {} and {}", model_path, tokenizer_path);
+                
                 match db.set_onnx_paths(
                     Some(PathBuf::from(model_path)),
                     Some(PathBuf::from(tokenizer_path))
                 ) {
                     Ok(_) => {
-                        // Now set the model type to ONNX
                         match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
                             Ok(_) => {
-                                println!("Set embedding model to ONNX (more accurate but slower):");
-                                println!("  - Model: {}", model_path);
-                                println!("  - Tokenizer: {}", tokenizer_path);
+                                println!("Successfully set embedding model to ONNX model:");
+                                println!("  - Model path: {}", model_path);
+                                println!("  - Tokenizer path: {}", tokenizer_path);
+                                
+                                // Verify the files exist
+                                let model_file_exists = Path::new(model_path).exists();
+                                let tokenizer_file_exists = Path::new(&format!("{}/tokenizer.json", tokenizer_path)).exists();
+                                
+                                if !model_file_exists || !tokenizer_file_exists {
+                                    println!("\nWarning: Some model files were not found:");
+                                    if !model_file_exists {
+                                        println!("  - Model file not found: {}", model_path);
+                                    }
+                                    if !tokenizer_file_exists {
+                                        println!("  - Tokenizer file not found: {}/tokenizer.json", tokenizer_path);
+                                    }
+                                    println!("\nPlease ensure these files are available before indexing or searching.");
+                                }
                             },
                             Err(e) => {
-                                eprintln!("Failed to set ONNX model: {}", e);
+                                error!("Failed to set embedding model type to ONNX: {}", e);
+                                eprintln!("Error: Failed to set embedding model type to ONNX: {}", e);
+                                return Err(e.into());
                             }
                         }
                     },
                     Err(e) => {
-                        eprintln!("Failed to set ONNX model paths: {}", e);
+                        error!("Failed to set ONNX model paths: {}", e);
+                        eprintln!("Error: Failed to set ONNX model paths: {}", e);
+                        return Err(e.into());
                     }
                 }
             } else {
-                // Print embedding statistics
-                let model_type = db.embedding_model_type();
-                println!("Current embedding model: {:?}", model_type);
-                
-                match model_type {
-                    EmbeddingModelType::Onnx => {
-                        println!("ONNX model (more accurate but slower):");
-                        println!("  - Model: {}", db.onnx_model_path().map_or_else(
-                            || "Not set".to_string(), 
-                            |p| p.to_string_lossy().to_string()
-                        ));
-                        println!("  - Tokenizer: {}", db.onnx_tokenizer_path().map_or_else(
-                            || "Not set".to_string(), 
-                            |p| p.to_string_lossy().to_string()
-                        ));
+                debug!("Setting model type to Fast");
+                match db.set_embedding_model_type(EmbeddingModelType::Fast) {
+                    Ok(_) => {
+                        println!("Successfully set embedding model to Fast model.");
+                        println!("Note: Fast model is quicker but less accurate than the ONNX model.");
                     },
-                    EmbeddingModelType::Fast => {
-                        println!("Fast model (faster indexing and queries but less accurate)");
-                        println!("  - Use this model for large codebases or when speed is critical");
-                        println!("  - Switch to ONNX for higher quality results");
+                    Err(e) => {
+                        error!("Failed to set embedding model type to Fast: {}", e);
+                        eprintln!("Error: Failed to set embedding model type to Fast: {}", e);
+                        return Err(e.into());
                     }
                 }
             }
@@ -640,24 +707,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             }
         }
         Command::Clear => {
+            println!("Clearing the database...");
             db.clear()?;
-            println!("Database cleared!");
-        }
-        Command::Phase2Demo => {
-            #[cfg(feature = "onnx")]
-            {
-                println!("ONNX Phase 2 Demo would run here if implemented.");
-                println!("This is a placeholder for the ONNX optimization demo.");
-                return Ok(());
-            }
-            
-            #[cfg(not(feature = "onnx"))]
-            {
-                println!("Error: ONNX feature is not enabled.");
-                println!("Please rebuild with:");
-                println!("  cargo build --features onnx");
-                return Ok(());
-            }
+            println!("Database cleared successfully.");
         }
     }
     Ok(())
@@ -672,17 +724,90 @@ fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow
             Ok(EmbeddingModel::new())
         },
         EmbeddingModelType::Onnx => {
-            if let (Some(model_path), Some(tokenizer_path)) = (db.onnx_model_path(), db.onnx_tokenizer_path()) {
-                debug!("Creating ONNX embedding model with paths: model={}, tokenizer={}", 
-                       model_path.display(), tokenizer_path.display());
-                EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                    .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX embedding model: {}", e)))
-            } else {
-                // Fallback to fast model
-                warn!("ONNX paths not set, falling back to fast model");
-                println!("Warning: ONNX paths not set, falling back to fast model (less accurate but quicker)");
-                Ok(EmbeddingModel::new())
+            debug!("Creating ONNX embedding model");
+            
+            let home_dir = dirs::home_dir();
+            
+            // Try different locations for the model files
+            let possible_model_locations = vec![
+                // First check the paths set in the database
+                db.onnx_model_path().map(|p| p.to_owned()),
+                
+                // Then check in the current directory
+                Some(PathBuf::from("onnx/all-minilm-l6-v2.onnx")),
+                
+                // Then check in the user's home directory
+                home_dir.as_ref().map(|h| h.join(".vectordb-cli").join("models").join("all-minilm-l6-v2.onnx")),
+                
+                // Check environment variable if set
+                std::env::var("VECTORDB_ONNX_MODEL").ok().map(PathBuf::from),
+            ];
+            
+            // Try different locations for the tokenizer
+            let possible_tokenizer_locations = vec![
+                // First check the paths set in the database
+                db.onnx_tokenizer_path().map(|p| p.to_owned()),
+                
+                // Then check in the current directory
+                Some(PathBuf::from("onnx")),
+                
+                // Then check in the user's home directory
+                home_dir.as_ref().map(|h| h.join(".vectordb-cli").join("models")),
+                
+                // Check environment variable if set
+                std::env::var("VECTORDB_ONNX_TOKENIZER").ok().map(PathBuf::from),
+            ];
+            
+            let mut errors = Vec::new();
+            
+            // Try each model/tokenizer path combination
+            for model_path in possible_model_locations.iter().flatten() {
+                for tokenizer_path in possible_tokenizer_locations.iter().flatten() {
+                    debug!("Trying ONNX model: {}, tokenizer: {}", 
+                           model_path.display(), tokenizer_path.display());
+                    
+                    // Check if files exist before attempting to load
+                    if !model_path.exists() {
+                        trace!("Model file does not exist: {}", model_path.display());
+                        continue;
+                    }
+                    
+                    let tokenizer_json = tokenizer_path.join("tokenizer.json");
+                    if !tokenizer_json.exists() {
+                        trace!("Tokenizer file does not exist: {}", tokenizer_json.display());
+                        continue;
+                    }
+                    
+                    // Try to create the model with this path combination
+                    match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
+                        Ok(model) => {
+                            info!("Successfully loaded ONNX model from: {}, tokenizer: {}", 
+                                  model_path.display(), tokenizer_path.display());
+                            return Ok(model);
+                        },
+                        Err(e) => {
+                            debug!("Failed to load ONNX model from: {}, tokenizer: {}, error: {}", 
+                                   model_path.display(), tokenizer_path.display(), e);
+                            errors.push(format!("Path: {}, tokenizer: {} - Error: {}", 
+                                       model_path.display(), tokenizer_path.display(), e));
+                        }
+                    }
+                }
             }
+            
+            // If we reach here, all attempts failed
+            let error_details = if errors.is_empty() {
+                "No valid ONNX model files found".to_string()
+            } else {
+                format!("All attempts to load ONNX model failed, last error: {}", 
+                         errors.last().unwrap_or(&"Unknown error".to_string()))
+            };
+            
+            warn!("Falling back to fast model due to ONNX model loading failure");
+            warn!("{}", error_details);
+            println!("Warning: ONNX model could not be loaded, falling back to fast model (less accurate but quicker)");
+            
+            Ok(EmbeddingModel::new())
         }
     }
 }
@@ -714,7 +839,7 @@ mod tests {
             dir: temp_dir.path().to_string_lossy().to_string(),
             file_types: vec!["rs".to_string()],
             threads: None,
-            use_onnx: false,
+            use_fast: false,
             onnx_model: None,
             onnx_tokenizer: None,
         };

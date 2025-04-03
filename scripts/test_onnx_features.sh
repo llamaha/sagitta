@@ -86,8 +86,8 @@ if [ "$SIMULATION_MODE" == "false" ]; then
         --samples-file "temp/sample_code.txt"
 
     # Try a real semantic search query on our code
-    echo "Testing Phase 2 Demo..."
-    cargo run --release --bin vectordb-cli -- phase2-demo
+    # Testing ONNX semantic search directly instead of the removed Phase 2 Demo
+    echo "Testing ONNX semantic search capabilities..."
 
     # Run a regular query using the ONNX model
     echo "Testing semantic search on codebase..."
@@ -108,7 +108,6 @@ if [ "$SIMULATION_MODE" == "false" ]; then
 else
     # Simply print what would be executed in simulation mode
     echo "SIMULATION: Testing benchmarks (skipped)"
-    echo "SIMULATION: Testing Phase 2 Demo (skipped)"
     echo "SIMULATION: Testing semantic search (skipped)"
     
     # Check that the code compiles properly
