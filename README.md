@@ -16,7 +16,7 @@ A CLI tool for semantic code search and analysis.
 
 ```bash
 # Download and run the installation script
-curl -L https://raw.githubusercontent.com/yourusername/vectordb-cli/main/scripts/install.sh | bash
+curl -L https://gitlab.com/amulvany/vectordb-cli/-/raw/main/scripts/install.sh | bash
 
 # Add to your shell configuration (~/.bashrc, ~/.zshrc, etc.)
 echo 'source $HOME/.vectordb-cli/env.sh' >> ~/.bashrc
@@ -29,7 +29,7 @@ source ~/.bashrc
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/vectordb-cli.git
+git clone https://gitlab.com/amulvany/vectordb-cli.git
 cd vectordb-cli
 
 # Build with ONNX support (default)
@@ -104,7 +104,7 @@ vectordb-cli model --fast
 
 ```bash
 # Run the uninstallation script
-~/.vectordb-cli/uninstall.sh
+bash $HOME/.vectordb-cli/scripts/uninstall.sh
 ```
 
 Or manually:

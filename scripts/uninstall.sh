@@ -7,7 +7,7 @@ echo "This will remove vectordb-cli and its data."
 # Define installation directories
 INSTALL_DIR="$HOME/.vectordb-cli"
 BIN_PATH="$HOME/.local/bin/vectordb-cli"
-DATA_DIR="$(dirs::data_local_dir 2>/dev/null || echo "$HOME/.local/share")/vectordb-cli"
+DATA_DIR="$HOME/.local/share/vectordb-cli"
 
 # Confirm before proceeding
 read -p "Are you sure you want to uninstall vectordb-cli? [y/N] " -n 1 -r

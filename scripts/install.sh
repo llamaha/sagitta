@@ -108,18 +108,28 @@ if [ -f "Cargo.toml" ] && grep -q "name = \"vectordb-cli\"" "Cargo.toml"; then
     
     # Install the binary
     cp "target/release/vectordb-cli" "$BIN_DIR/"
+    
+    # Copy uninstall script to installation directory
+    mkdir -p "$INSTALL_DIR/scripts"
+    cp "scripts/uninstall.sh" "$INSTALL_DIR/scripts/"
+    chmod +x "$INSTALL_DIR/scripts/uninstall.sh"
 else
     # Otherwise, we need to clone the repo
     TEMP_DIR=$(mktemp -d)
     echo "Cloning repository to $TEMP_DIR..."
     
-    git clone https://github.com/yourusername/vectordb-cli.git "$TEMP_DIR"
+    git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
     cd "$TEMP_DIR"
     
     cargo build --release
     
     # Install the binary
     cp "target/release/vectordb-cli" "$BIN_DIR/"
+    
+    # Copy uninstall script to installation directory
+    mkdir -p "$INSTALL_DIR/scripts"
+    cp "scripts/uninstall.sh" "$INSTALL_DIR/scripts/"
+    chmod +x "$INSTALL_DIR/scripts/uninstall.sh"
     
     # Clean up
     cd - > /dev/null
