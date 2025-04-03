@@ -16,21 +16,16 @@ check_command() {
 }
 
 check_command cargo "Install Rust from https://rustup.rs/"
-check_command curl "Install curl using your system's package manager"
 check_command git "Install git using your system's package manager"
 
-# Check if Git LFS is installed
-GIT_LFS_INSTALLED=false
-if command -v git-lfs &> /dev/null; then
-    GIT_LFS_INSTALLED=true
-else
-    echo "Warning: Git LFS is not installed. ONNX models will not be properly downloaded."
-    echo "For best results, install Git LFS first:"
+# Check for Git LFS
+if ! command -v git-lfs &> /dev/null; then
+    echo "Error: Git LFS is required but not installed."
+    echo "Please install Git LFS first:"
     echo "  - On Debian/Ubuntu: sudo apt-get install git-lfs"
     echo "  - On macOS: brew install git-lfs"
     echo "  - More info: https://git-lfs.github.com/"
-    echo ""
-    echo "Proceeding with limited installation..."
+    exit 1
 fi
 
 # Determine OS type
@@ -62,25 +57,6 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
-# Download tokenizer files
-echo "Downloading tokenizer files to $MODELS_DIR..."
-TOKENIZER_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
-CONFIG_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json"
-SPECIAL_TOKENS_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/special_tokens_map.json"
-TOKENIZER_CONFIG_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json"
-
-# Function to download file with progress bar
-download_file() {
-    echo "Downloading $1..."
-    curl -# -L -o "$2" "$1"
-}
-
-# Download tokenizer files
-download_file "$TOKENIZER_URL" "$MODELS_DIR/tokenizer.json"
-download_file "$CONFIG_URL" "$MODELS_DIR/config.json"
-download_file "$SPECIAL_TOKENS_URL" "$MODELS_DIR/special_tokens_map.json"
-download_file "$TOKENIZER_CONFIG_URL" "$MODELS_DIR/tokenizer_config.json"
-
 # Set environment variables
 ENV_FILE="$INSTALL_DIR/env.sh"
 
@@ -93,50 +69,26 @@ EOF
 echo "Created environment file at $ENV_FILE"
 echo "Run 'source $ENV_FILE' to set up environment variables."
 
-# Build and install vectordb-cli
-echo "Building vectordb-cli from source..."
+# Build and install vectordb-cli with Git LFS
+echo "Setting up Git LFS..."
+git lfs install
 
-# Create temporary directory for cloning
+echo "Cloning vectordb-cli repository with LFS support..."
 TEMP_DIR=$(mktemp -d)
-echo "Cloning repository to $TEMP_DIR..."
+git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
+cd "$TEMP_DIR"
 
-# Clone the repository with Git LFS if available
-if [ "$GIT_LFS_INSTALLED" = true ]; then
-    git lfs install
-    git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
-    cd "$TEMP_DIR"
-    git lfs pull
-else
-    git clone https://gitlab.com/amulvany/vectordb-cli.git "$TEMP_DIR"
-    cd "$TEMP_DIR"
-fi
+echo "Fetching LFS objects (ONNX model files)..."
+git lfs pull
 
-# Copy the ONNX model from the repository if available
-ONNX_MODEL_PATH="$MODELS_DIR/all-minilm-l6-v2.onnx"
-REPO_MODEL_PATH="$TEMP_DIR/onnx/all-minilm-l6-v2.onnx"
+echo "Copying ONNX model and tokenizer files..."
+mkdir -p "$MODELS_DIR"
+cp -v onnx/* "$MODELS_DIR/"
 
-if [ -f "$REPO_MODEL_PATH" ]; then
-    echo "Copying ONNX model from repository..."
-    cp "$REPO_MODEL_PATH" "$ONNX_MODEL_PATH"
-    echo "ONNX model file installed at $ONNX_MODEL_PATH"
-else
-    echo "Warning: Could not find ONNX model in the repository."
-    if [ -f "$ONNX_MODEL_PATH" ]; then
-        echo "Using existing ONNX model file at $ONNX_MODEL_PATH"
-    else
-        echo "Warning: Creating a placeholder ONNX model file for demonstration."
-        echo "In a production environment, you would need a proper ONNX model file."
-        echo "This placeholder will not work for actual searches."
-        echo "PLACEHOLDER ONNX MODEL" > "$ONNX_MODEL_PATH"
-        echo "For real usage, please download and convert a proper ONNX model."
-    fi
-fi
-
-# Build the project
-echo "Building the project..."
+echo "Building vectordb-cli..."
 cargo build --release
 
-# Install the binary
+echo "Installing vectordb-cli binary..."
 cp "target/release/vectordb-cli" "$BIN_DIR/"
 
 # Copy uninstall script to installation directory

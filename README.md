@@ -12,6 +12,24 @@ A CLI tool for semantic code search and analysis.
 
 ## Installation
 
+### Prerequisites
+
+- **Git LFS**: Required for downloading ONNX model files
+  ```bash
+  # Debian/Ubuntu
+  sudo apt-get install git-lfs
+  
+  # macOS
+  brew install git-lfs
+  
+  # After installation
+  git lfs install
+  ```
+- **Rust**: Required for building the project
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+
 ### Option 1: Easy Installation Script (Recommended)
 
 ```bash
@@ -25,12 +43,14 @@ echo 'source $HOME/.vectordb-cli/env.sh' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### Option 2: Build from Source
+### Option 2: Manual Installation
 
 ```bash
-# Clone the repository
+# Clone the repository with Git LFS support
+git lfs install
 git clone https://gitlab.com/amulvany/vectordb-cli.git
 cd vectordb-cli
+git lfs pull
 
 # Build with ONNX support (default)
 cargo build --release
@@ -41,27 +61,15 @@ cp target/release/vectordb-cli ~/.local/bin/
 
 #### ONNX Model Files
 
-The ONNX model files are stored in Git LFS and are required for optimal performance. The installation script will handle this automatically if Git LFS is installed.
+The ONNX model files are stored in Git LFS and are required for the application to work properly. The installation script ensures these files are properly downloaded and copied to the right location.
 
-**Important**: For proper installation, make sure to install Git LFS first:
-```bash
-# Debian/Ubuntu
-sudo apt-get install git-lfs
-
-# macOS
-brew install git-lfs
-
-# After installation, set up Git LFS
-git lfs install
-```
-
-Without Git LFS, the installation script will still work but will create placeholder model files that aren't functional.
+**Important**: Git LFS is a required dependency for this project. Without it, the ONNX models won't be downloaded correctly and the semantic search functionality won't work.
 
 The model files will be placed in one of these locations:
-- `./onnx/all-minilm-l6-v2.onnx` (when built from source)
-- `$HOME/.vectordb-cli/models/all-minilm-l6-v2.onnx` (when installed via script)
+- `./onnx/` (in the cloned repository)
+- `$HOME/.vectordb-cli/models/` (when installed via script)
 
-You can also specify custom model paths:
+You can also specify custom model paths using environment variables:
 ```bash
 export VECTORDB_ONNX_MODEL=/path/to/your/model.onnx
 export VECTORDB_ONNX_TOKENIZER=/path/to/your/tokenizer_directory
