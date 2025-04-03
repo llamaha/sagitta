@@ -1,3 +1,8 @@
+*.onnx filter=lfs diff=lfs merge=lfs -text
+onnx/model.onnx filter=lfs diff=lfs merge=lfs -text
+onnx/vocab.txt filter=lfs diff=lfs merge=lfs -text
+onnx/tokenizer.json filter=lfs diff=lfs merge=lfs -text
+onnx/tokenizer_config.json filter=lfs diff=lfs merge=lfs -text 
 *.onnx !text !filter !merge !diff
 onnx/vocab.txt !text !filter !merge !diff
 onnx/tokenizer.json !text !filter !merge !diff
