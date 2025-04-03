@@ -566,32 +566,28 @@ impl VectorDB {
                         index_lock.lock().unwrap().insert(embedding).ok();
                     }
                 } else {
-                    // Get or initialize thread-local embedding model
-                    EMBEDDING_MODEL.with(|model_cell| {
-                        let mut model_ref = model_cell.borrow_mut();
-                        if model_ref.is_none() {
-                            // Lazy initialization of embedding model based on model type
-                            *model_ref = match embedding_model_type {
-                                EmbeddingModelType::Basic => {
-                                    Some(EmbeddingModel::new())
-                                },
-                                EmbeddingModelType::Onnx => {
-                                    if let (Some(model_path), Some(tokenizer_path)) = 
-                                        (onnx_model_path.as_ref(), onnx_tokenizer_path.as_ref()) {
+                    // Not in cache, need to generate an embedding
+                    // Try to get or create the embedding model (thread-local)
+                    EMBEDDING_MODEL.with(|model_ref| {
+                        if model_ref.borrow().is_none() {
+                            // Initialize the model for this thread
+                            *model_ref.borrow_mut() = if embedding_model_type == EmbeddingModelType::Onnx {
+                                // Try to create an ONNX model
+                                match (onnx_model_path.as_ref(), onnx_tokenizer_path.as_ref()) {
+                                    (Some(model_path), Some(tokenizer_path)) => {
                                         match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
                                             Ok(model) => Some(model),
                                             Err(e) => {
-                                                // Record the error for reporting later
-                                                let error_msg = format!("Error creating ONNX model: {}", e);
+                                                // Log the ONNX error and fall back to basic model
+                                                let error_msg = format!("ONNX model loading failed: {}", e);
                                                 onnx_errors.lock().unwrap().push(error_msg.clone());
                                                 onnx_loading_errors.store(true, Ordering::SeqCst);
                                                 eprintln!("{}", error_msg);
-                                                
-                                                // Fallback to basic model if ONNX model fails
                                                 Some(EmbeddingModel::new())
                                             }
                                         }
-                                    } else {
+                                    },
+                                    _ => {
                                         // Fallback to basic model if ONNX paths aren't available
                                         let error_msg = "ONNX paths not fully set, falling back to basic embedding model".to_string();
                                         onnx_errors.lock().unwrap().push(error_msg.clone());
@@ -600,10 +596,13 @@ impl VectorDB {
                                         Some(EmbeddingModel::new())
                                     }
                                 }
+                            } else {
+                                // Use basic model as requested
+                                Some(EmbeddingModel::new())
                             };
                         }
                         
-                        if let Some(model) = &*model_ref {
+                        if let Some(model) = &*model_ref.borrow() {
                             if let Ok(contents) = fs::read_to_string(file_path) {
                                 if let Ok(embedding) = model.embed(&contents) {
                                     // Get file hash for cache
@@ -623,7 +622,6 @@ impl VectorDB {
                     });
                 }
                 
-                // Update progress
                 let current = processed_files.fetch_add(1, Ordering::SeqCst) + 1;
                 progress_bar.set_position(current as u64);
                 
@@ -636,6 +634,7 @@ impl VectorDB {
             });
             
             // Update main data structures with results from parallel processing
+            debug!("Updating main data structures with {} entries from parallel processing", embeddings.lock().unwrap().len());
             self.embeddings.extend(embeddings.lock().unwrap().drain());
             
             // Update HNSW index if one was created in parallel
@@ -664,6 +663,10 @@ impl VectorDB {
             // Check if we need to save
             if save_triggered.load(Ordering::SeqCst) || was_interrupted.load(Ordering::SeqCst) {
                 println!("Saving progress...");
+                self.save()?;
+            } else {
+                // Ensure we save even if no save was triggered during processing
+                debug!("Saving final database state with {} embeddings", self.embeddings.len());
                 self.save()?;
             }
             
