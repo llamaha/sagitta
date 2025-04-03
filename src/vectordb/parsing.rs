@@ -11,6 +11,7 @@ use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, It
 use syn::parse_file;
 use walkdir;
 use syn::spanned::Spanned;
+use regex::Regex;
 
 /// Representation of a code element in the AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1505,12 +1506,69 @@ pub struct RubyAnalyzer {
     method_map: HashMap<String, Vec<RubyMethodInfo>>,
     /// Class map to quickly find classes by name
     class_map: HashMap<String, Vec<RubyClassInfo>>,
+    /// Rails patterns matcher
+    rails_patterns: RailsPatterns,
     /// Parser for Ruby code
     parser: Parser,
     /// Queries for extracting Ruby code elements
     method_query: Query,
     class_query: Query,
     module_query: Query,
+}
+
+/// Rails-specific patterns for better Ruby on Rails code understanding
+#[derive(Debug, Clone)]
+pub struct RailsPatterns {
+    /// Is this likely a Rails project?
+    pub is_rails_project: bool,
+    /// Controller pattern matcher
+    pub controller_pattern: Regex,
+    /// Model pattern matcher
+    pub model_pattern: Regex,
+    /// Helper pattern matcher
+    pub helper_pattern: Regex,
+    /// View pattern matcher
+    pub view_pattern: Regex,
+    /// Routes pattern matcher
+    pub routes_pattern: Regex,
+    /// Active Record method patterns
+    pub active_record_methods: HashSet<String>,
+    /// Controller action methods
+    pub controller_actions: HashSet<String>,
+}
+
+impl Default for RailsPatterns {
+    fn default() -> Self {
+        let mut active_record_methods = HashSet::new();
+        for method in &[
+            "find", "find_by", "where", "create", "update", "destroy", 
+            "save", "validate", "validates", "belongs_to", "has_many",
+            "has_one", "has_and_belongs_to_many", "scope", "order", "limit",
+            "joins", "includes", "merge", "select", "group", "having"
+        ] {
+            active_record_methods.insert(method.to_string());
+        }
+        
+        let mut controller_actions = HashSet::new();
+        for action in &[
+            "index", "show", "new", "create", "edit", "update", "destroy",
+            "before_action", "after_action", "around_action", "skip_before_action",
+            "respond_to", "render", "redirect_to", "params"
+        ] {
+            controller_actions.insert(action.to_string());
+        }
+        
+        Self {
+            is_rails_project: false,
+            controller_pattern: Regex::new(r"(?i)_controller\.rb$").unwrap(),
+            model_pattern: Regex::new(r"(?i)^app/models/.*\.rb$").unwrap(),
+            helper_pattern: Regex::new(r"(?i)_helper\.rb$").unwrap(),
+            view_pattern: Regex::new(r"(?i)^app/views/.*\.(erb|haml|slim)$").unwrap(),
+            routes_pattern: Regex::new(r"(?i)routes\.rb$").unwrap(),
+            active_record_methods,
+            controller_actions,
+        }
+    }
 }
 
 /// Detailed information about a Ruby method
@@ -1522,6 +1580,8 @@ pub struct RubyMethodInfo {
     pub containing_class: Option<String>,
     pub containing_module: Option<String>,
     pub is_class_method: bool,
+    pub is_controller_action: bool, // NEW: Rails controller action flag
+    pub is_model_method: bool,      // NEW: Rails model method flag
     pub span: CodeSpan,
     pub file_path: PathBuf,
 }
@@ -1606,6 +1666,13 @@ impl<'a> RubyVisitor<'a> {
                 // Find containing class and module
                 let (containing_class, containing_module) = self.find_containing_scope(node);
                 
+                // Determine method type and role in Rails context
+                let (is_controller_action, is_model_method) = self.determine_rails_method_role(
+                    method_name,
+                    &containing_class,
+                    &self.file_path
+                );
+                
                 // Add method to elements
                 self.elements.push(CodeElement::Function {
                     name: method_name.to_string(),
@@ -1623,6 +1690,8 @@ impl<'a> RubyVisitor<'a> {
                     containing_class,
                     containing_module,
                     is_class_method,
+                    is_controller_action, // NEW: Rails controller action flag
+                    is_model_method,      // NEW: Rails model method flag
                     span,
                     file_path: self.file_path.clone(),
                 });
@@ -1902,6 +1971,37 @@ impl<'a> RubyVisitor<'a> {
             end_column: end_point.column,
         }
     }
+    
+    /// Determine if a method is a Rails controller action or model method
+    fn determine_rails_method_role(&self, method_name: &str, class_name: &Option<String>, file_path: &Path) -> (bool, bool) {
+        let file_path_str = file_path.to_string_lossy();
+        
+        // Check if this is a controller action
+        let is_controller_action = if let Some(class_name) = class_name {
+            (class_name.ends_with("Controller") || 
+             self.parser.rails_patterns.controller_pattern.is_match(&file_path_str)) && 
+            (self.parser.rails_patterns.controller_actions.contains(method_name) ||
+             !method_name.starts_with('_')) // Most public methods in controllers are actions
+        } else {
+            false
+        };
+        
+        // Check if this is a model method
+        let is_model_method = if let Some(class_name) = class_name {
+            (self.parser.rails_patterns.model_pattern.is_match(&file_path_str) ||
+             (!class_name.ends_with("Controller") && 
+              !class_name.ends_with("Helper") && 
+              !class_name.contains("Concern"))) &&
+            (self.parser.rails_patterns.active_record_methods.contains(method_name) ||
+             method_name.starts_with("scope_") || 
+             method_name.starts_with("validate_") ||
+             method_name.starts_with("find_"))
+        } else {
+            false
+        };
+        
+        (is_controller_action, is_model_method)
+    }
 }
 
 impl RubyAnalyzer {
@@ -1917,25 +2017,39 @@ impl RubyAnalyzer {
         
         // Queries for Ruby code elements
         let method_query = Query::new(ruby_lang,
-            "(method name: (identifier) @method.name) @method.def").expect("Invalid Ruby method query");
+            r#"
+            (method 
+              name: (identifier) @method.name
+            ) @method.def
+            "#).expect("Invalid Ruby method query");
             
         let class_query = Query::new(ruby_lang,
-            "(class name: (constant) @class.name) @class.def").expect("Invalid Ruby class query");
+            r#"
+            (class 
+              name: (constant) @class.name
+              superclass: (constant)? @class.parent
+            ) @class.def
+            "#).expect("Invalid Ruby class query");
             
         let module_query = Query::new(ruby_lang,
-            "(module name: (constant) @module.name) @module.def").expect("Invalid Ruby module query");
+            r#"
+            (module 
+              name: (constant) @module.name
+            ) @module.def
+            "#).expect("Invalid Ruby module query");
 
         Ok(Self {
             parsed_files: HashMap::new(),
             method_map: HashMap::new(),
             class_map: HashMap::new(),
+            rails_patterns: RailsPatterns::default(),
             parser,
             method_query,
             class_query,
             module_query,
         })
     }
-
+    
     /// Load and parse all Ruby files in a project directory
     pub fn load_project(&mut self, project_dir: &Path) -> Result<(), VectorDBError> {
         if !project_dir.exists() || !project_dir.is_dir() {
@@ -2126,6 +2240,8 @@ impl RubyAnalyzer {
                         containing_class: None,
                         containing_module: None,
                         is_class_method: false, // Default to instance method
+                        is_controller_action: false, // Will be set later
+                        is_model_method: false,     // Will be set later
                         span: span.clone(),
                         file_path: file_path.to_path_buf(),
                     };
@@ -2163,45 +2279,170 @@ impl RubyAnalyzer {
                 .push(class_info);
         }
     }
+    
+    /// Find controller actions by name - implements the interface needed by search.rs
+    pub fn find_controller_actions(&self, action_name: &str) -> Vec<&RubyMethodInfo> {
+        let mut results = Vec::new();
+        
+        if let Some(methods) = self.method_map.get(action_name) {
+            for method in methods {
+                if self.is_likely_controller_action(method) {
+                    results.push(method);
+                }
+            }
+        }
+        
+        results
+    }
+    
+    /// Find model methods by name - implements the interface needed by search.rs
+    pub fn find_model_methods(&self, method_name: &str) -> Vec<&RubyMethodInfo> {
+        let mut results = Vec::new();
+        
+        if let Some(methods) = self.method_map.get(method_name) {
+            for method in methods {
+                if self.is_likely_model_method(method) {
+                    results.push(method);
+                }
+            }
+        }
+        
+        results
+    }
+    
+    /// Helper method to determine if a method is likely a controller action
+    fn is_likely_controller_action(&self, method: &RubyMethodInfo) -> bool {
+        // Check if the file name follows controller pattern
+        let file_path_str = method.file_path.to_string_lossy();
+        let is_controller_file = file_path_str.contains("_controller.rb") || 
+                                file_path_str.contains("/controllers/");
+        
+        // Check if the class name follows controller pattern
+        let is_controller_class = method.containing_class
+            .as_ref()
+            .map_or(false, |c| c.ends_with("Controller"));
+        
+        // Check if it's a public method (doesn't start with underscore)
+        let is_public_method = !method.name.starts_with('_');
+        
+        // Check if it's a known controller action name
+        let is_known_action = self.rails_patterns.controller_actions.contains(&method.name);
+        
+        // A method is likely a controller action if:
+        // 1. It's in a controller file
+        // 2. It's in a controller class
+        // 3. It's either a known action or a public method
+        (is_controller_file || is_controller_class) && (is_known_action || is_public_method)
+    }
+    
+    /// Helper method to determine if a method is likely a model method
+    fn is_likely_model_method(&self, method: &RubyMethodInfo) -> bool {
+        // Check if the file name follows model pattern
+        let file_path_str = method.file_path.to_string_lossy();
+        let is_model_file = file_path_str.contains("/models/") ||
+                           (file_path_str.contains(".rb") && 
+                            !file_path_str.contains("_controller.rb") && 
+                            !file_path_str.contains("_helper.rb"));
+        
+        // Check if it's a known ActiveRecord method
+        let is_active_record_method = self.rails_patterns.active_record_methods.contains(&method.name) ||
+                                     method.name.starts_with("scope_") || 
+                                     method.name.starts_with("validate_") ||
+                                     method.name.starts_with("find_");
+        
+        // A method is likely a model method if:
+        // 1. It's in a model file
+        // 2. It's a known ActiveRecord method
+        is_model_file && is_active_record_method
+    }
+    
+    /// Find all controller classes
+    pub fn find_controllers(&self) -> Vec<&RubyClassInfo> {
+        let mut results = Vec::new();
+        
+        for (class_name, classes) in &self.class_map {
+            if class_name.ends_with("Controller") {
+                for class_info in classes {
+                    results.push(class_info);
+                }
+            }
+        }
+        
+        results
+    }
+    
+    /// Find all model classes
+    pub fn find_models(&self) -> Vec<&RubyClassInfo> {
+        let mut results = Vec::new();
+        
+        for (_, classes) in &self.class_map {
+            for class_info in classes {
+                let file_path_str = class_info.file_path.to_string_lossy();
+                if file_path_str.contains("/models/") {
+                    results.push(class_info);
+                }
+            }
+        }
+        
+        results
+    }
 
-    /// Extract rich context for a Ruby element
+    /// Extract rich context for a Ruby element, with enhanced Rails support
     pub fn extract_rich_context(&self, element: &CodeElement) -> String {
         match element {
             CodeElement::Function { name, params, body, span, .. } => {
                 let mut context = String::new();
                 
                 // Check if this is a class method
-                let is_class_method = if let Some(method_infos) = self.method_map.get(name) {
+                let method_info = if let Some(method_infos) = self.method_map.get(name) {
                     method_infos.iter()
-                        .any(|m| m.span.file_path == span.file_path && m.is_class_method)
+                        .find(|m| m.span.file_path == span.file_path)
                 } else {
-                    false
+                    None
                 };
                 
-                // Add method definition with appropriate prefix
-                if is_class_method {
-                    context.push_str(&format!("def self.{}(", name));
-                } else {
-                    context.push_str(&format!("def {}(", name));
-                }
-                
-                context.push_str(&params.join(", "));
-                context.push_str(")\n");
-                
-                // Add method body (simplified)
-                context.push_str("  # Method body\n");
-                context.push_str("end\n");
-                
-                // Try to add class context if available
-                if let Some(method_infos) = self.method_map.get(name) {
-                    for method_info in method_infos {
-                        if method_info.span.file_path == span.file_path {
-                            if let Some(class_name) = &method_info.containing_class {
-                                context = format!("# In class {}\n{}", class_name, context);
-                                break;
-                            }
-                        }
+                // Add Rails-specific context if available
+                if let Some(method_info) = method_info {
+                    if self.is_likely_controller_action(method_info) {
+                        context.push_str("# Rails Controller Action\n");
+                    } else if self.is_likely_model_method(method_info) {
+                        context.push_str("# Rails Model Method\n");
                     }
+                    
+                    // Add method definition with appropriate prefix
+                    if method_info.is_class_method {
+                        context.push_str(&format!("def self.{}(", name));
+                    } else {
+                        context.push_str(&format!("def {}(", name));
+                    }
+                    
+                    context.push_str(&params.join(", "));
+                    context.push_str(")\n");
+                    
+                    // Try to extract small snippet from actual body
+                    if body.len() > 100 {
+                        let preview: String = body.lines()
+                            .take(5)
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        context.push_str(&format!("  {}\n  # ...\n", preview));
+                    } else {
+                        context.push_str(&format!("  {}\n", body));
+                    }
+                    
+                    context.push_str("end\n");
+                    
+                    // Try to add class context if available
+                    if let Some(class_name) = &method_info.containing_class {
+                        context = format!("# In class {}\n{}", class_name, context);
+                    }
+                } else {
+                    // Fallback to simpler context
+                    context.push_str(&format!("def {}(", name));
+                    context.push_str(&params.join(", "));
+                    context.push_str(")\n");
+                    context.push_str("  # Method body\n");
+                    context.push_str("end\n");
                 }
                 
                 context
@@ -2210,26 +2451,66 @@ impl RubyAnalyzer {
                 // For Ruby, Struct elements represent classes
                 let mut context = String::new();
                 
+                // Check if this is a Rails controller or model
+                let is_controller = name.ends_with("Controller");
+                let is_model = if let Some(class_infos) = self.class_map.get(name) {
+                    class_infos.iter().any(|c| {
+                        let file_path_str = c.file_path.to_string_lossy();
+                        file_path_str.contains("/models/")
+                    })
+                } else {
+                    false
+                };
+                
+                // Add Rails-specific header
+                if is_controller {
+                    context.push_str("# Rails Controller\n");
+                } else if is_model {
+                    context.push_str("# Rails Model\n");
+                }
+                
                 // Add class definition
-                context.push_str(&format!("class {}\n", name));
+                context.push_str(&format!("class {}", name));
                 
                 // Add parent class if available
                 if let Some(class_infos) = self.class_map.get(name) {
                     for class_info in class_infos {
                         if class_info.span.file_path == span.file_path {
                             if let Some(parent) = &class_info.parent_class {
-                                context = format!("class {} < {}\n", name, parent);
+                                context = format!("class {} < {}", name, parent);
                                 break;
                             }
                         }
                     }
                 }
+                context.push_str("\n");
                 
-                // List methods
+                // List methods with Rails-specific annotations
                 if !methods.is_empty() {
-                    context.push_str("  # Methods:\n");
                     for method in methods {
-                        context.push_str(&format!("  # - {}\n", method));
+                        let method_info = if let Some(method_infos) = self.method_map.get(method) {
+                            method_infos.iter()
+                                .find(|m| 
+                                    m.containing_class.as_deref() == Some(name) && 
+                                    m.span.file_path == span.file_path
+                                )
+                        } else {
+                            None
+                        };
+                        
+                        if let Some(method_info) = method_info {
+                            if self.is_likely_controller_action(method_info) {
+                                context.push_str(&format!("  # Action: {}\n", method));
+                            } else if self.is_likely_model_method(method_info) {
+                                context.push_str(&format!("  # Model method: {}\n", method));
+                            } else if method_info.is_class_method {
+                                context.push_str(&format!("  # Class method: {}\n", method));
+                            } else {
+                                context.push_str(&format!("  # Instance method: {}\n", method));
+                            }
+                        } else {
+                            context.push_str(&format!("  # Method: {}\n", method));
+                        }
                     }
                 }
                 
