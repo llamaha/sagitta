@@ -7,6 +7,9 @@ use std::fs;
 use crate::vectordb::error::VectorDBError;
 use tree_sitter_rust::language as rust_language;
 use tree_sitter_ruby::language as ruby_language;
+use tree_sitter_go::language as go_language;
+use tree_sitter_javascript::language as javascript_language;
+use tree_sitter_typescript::language_typescript as typescript_language;
 use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, ItemTrait, UseTree};
 use syn::parse_file;
 use walkdir;
@@ -83,6 +86,16 @@ pub struct CodeParser {
     rust_query_struct: Query,
     ruby_query_method: Query,
     ruby_query_class: Query,
+    go_query_func: Query,
+    go_query_struct: Query,
+    go_query_interface: Query,
+    js_query_function: Query,
+    js_query_class: Query,
+    js_query_import: Query,
+    ts_query_function: Query,
+    ts_query_class: Query,
+    ts_query_interface: Query,
+    ts_query_type: Query,
 }
 
 /// Advanced Rust code analyzer using syn crate
@@ -404,6 +417,52 @@ impl CodeParser {
         let ruby_query_class = Query::new(ruby_lang,
             "(class name: (constant) @class.name) @class.def").expect("Invalid Ruby class query");
 
+        // Load Go grammar
+        let go_lang = go_language();
+        
+        // Queries for Go code elements
+        let go_query_func = Query::new(go_lang,
+            "(function_declaration name: (identifier) @function.name) @function.def").expect("Invalid Go function query");
+            
+        let go_query_struct = Query::new(go_lang,
+            "(type_declaration (type_spec name: (type_identifier) @struct.name type: (struct_type))) @struct.def").expect("Invalid Go struct query");
+        
+        let go_query_interface = Query::new(go_lang,
+            "(type_declaration (type_spec name: (type_identifier) @interface.name type: (interface_type))) @interface.def").expect("Invalid Go interface query");
+
+        // Load JavaScript grammar
+        let js_lang = javascript_language();
+        
+        // Queries for JavaScript code elements
+        let js_query_function = Query::new(js_lang,
+            "[(function_declaration name: (identifier) @function.name) @function.def
+             (method_definition name: (property_identifier) @method.name) @method.def
+             (arrow_function) @arrow.def]").expect("Invalid JavaScript function query");
+             
+        let js_query_class = Query::new(js_lang,
+            "(class_declaration name: (identifier) @class.name) @class.def").expect("Invalid JavaScript class query");
+
+        let js_query_import = Query::new(js_lang,
+            "(import_statement source: (string) @import.source) @import.statement").expect("Invalid JavaScript import query");
+
+        // Load TypeScript grammar
+        let ts_lang = typescript_language();
+        
+        // Queries for TypeScript code elements - reusing JavaScript queries where appropriate
+        let ts_query_function = Query::new(ts_lang,
+            "[(function_declaration name: (identifier) @function.name) @function.def
+             (method_definition name: (property_identifier) @method.name) @method.def
+             (arrow_function) @arrow.def]").expect("Invalid TypeScript function query");
+             
+        let ts_query_class = Query::new(ts_lang,
+            "(class_declaration name: (type_identifier) @class.name) @class.def").expect("Invalid TypeScript class query");
+
+        let ts_query_interface = Query::new(ts_lang,
+            "(interface_declaration name: (type_identifier) @interface.name) @interface.def").expect("Invalid TypeScript interface query");
+            
+        let ts_query_type = Query::new(ts_lang,
+            "(type_alias_declaration name: (type_identifier) @type.name) @type.def").expect("Invalid TypeScript type query");
+
         CodeParser {
             parser,
             parsed_files: HashMap::new(),
@@ -411,6 +470,16 @@ impl CodeParser {
             rust_query_struct,
             ruby_query_method,
             ruby_query_class,
+            go_query_func,
+            go_query_struct,
+            go_query_interface,
+            js_query_function,
+            js_query_class,
+            js_query_import,
+            ts_query_function,
+            ts_query_class,
+            ts_query_interface,
+            ts_query_type,
         }
     }
 
@@ -431,6 +500,9 @@ impl CodeParser {
         let language = match file_path.extension().and_then(|ext| ext.to_str()) {
             Some("rs") => "rust",
             Some("rb") => "ruby",
+            Some("go") => "go",
+            Some("js") | Some("jsx") => "javascript",
+            Some("ts") | Some("tsx") => "typescript",
             // For testing purposes, treat any file as rust if no extension is provided
             None => "rust",
             // Add more languages as needed
@@ -441,6 +513,9 @@ impl CodeParser {
         match language {
             "rust" => self.parse_rust_file(&file_path, &content)?,
             "ruby" => self.parse_ruby_file(&file_path, &content)?,
+            "go" => self.parse_go_file(&file_path, &content)?,
+            "javascript" => self.parse_javascript_file(&file_path, &content)?,
+            "typescript" => self.parse_typescript_file(&file_path, &content)?,
             _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
         }
 
@@ -1015,6 +1090,365 @@ File: {}:{}",
             },
             _ => format!("{:?}", element),
         }
+    }
+
+    /// Parse a Go source file
+    fn parse_go_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        // Set parser to use Go language
+        let go_lang = go_language();
+        self.parser.set_language(go_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set Go language".to_string()))?;
+            
+        // Parse the file using tree-sitter
+        let tree = self.parser.parse(content, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse Go file".to_string()))?;
+        
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+
+        // Extract functions using queries
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.go_query_func, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // Get the function name
+            let func_name = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_func.capture_names()[capture.index as usize].as_str();
+                if capture_name == "function.name" {
+                    Some(content[capture.node.byte_range()].to_string())
+                } else {
+                    None
+                }
+            }) {
+                Some(name) => name,
+                None => continue,
+            };
+            
+            // Get the function definition node
+            let func_node = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_func.capture_names()[capture.index as usize].as_str();
+                if capture_name == "function.def" {
+                    Some(capture.node)
+                } else {
+                    None
+                }
+            }) {
+                Some(node) => node,
+                None => continue,
+            };
+            
+            // Extract function details
+            let body = content[func_node.byte_range()].to_string();
+            let span = self.node_to_span(func_node, file_path);
+            
+            // Add function to elements
+            elements.push(CodeElement::Function {
+                name: func_name,
+                params: Vec::new(), // We're keeping this simple for now
+                return_type: None,
+                body,
+                span,
+            });
+        }
+        
+        // Extract structs
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.go_query_struct, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // Get the struct name
+            let struct_name = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_struct.capture_names()[capture.index as usize].as_str();
+                if capture_name == "struct.name" {
+                    Some(content[capture.node.byte_range()].to_string())
+                } else {
+                    None
+                }
+            }) {
+                Some(name) => name,
+                None => continue,
+            };
+            
+            // Get the struct definition node
+            let struct_node = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_struct.capture_names()[capture.index as usize].as_str();
+                if capture_name == "struct.def" {
+                    Some(capture.node)
+                } else {
+                    None
+                }
+            }) {
+                Some(node) => node,
+                None => continue,
+            };
+            
+            // Create code span
+            let span = self.node_to_span(struct_node, file_path);
+            
+            // Add struct to elements
+            elements.push(CodeElement::Struct {
+                name: struct_name,
+                fields: Vec::new(), // We're keeping this simple for now
+                methods: Vec::new(),
+                span,
+            });
+        }
+        
+        // Extract imports
+        self.extract_go_imports(&tree.root_node(), content, &mut elements, &mut dependencies);
+
+        // Create the parsed file representation
+        let parsed_file = ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "go".to_string(),
+        };
+
+        // Store the parsed file
+        self.parsed_files.insert(file_path.clone(), parsed_file);
+
+        Ok(())
+    }
+
+    /// Extract imports from Go source code
+    fn extract_go_imports(&self, node: &Node, content: &str, elements: &mut Vec<CodeElement>, dependencies: &mut HashSet<String>) {
+        let mut cursor = node.walk();
+        
+        for child in node.children(&mut cursor) {
+            if child.kind() == "import_declaration" {
+                let mut import_cursor = child.walk();
+                
+                for import_spec in child.children(&mut import_cursor) {
+                    if import_spec.kind() == "import_spec" {
+                        let mut import_path = String::new();
+                        
+                        let mut spec_cursor = import_spec.walk();
+                        for spec_child in import_spec.children(&mut spec_cursor) {
+                            if spec_child.kind() == "interpreted_string_literal" {
+                                import_path = content[spec_child.byte_range()].to_string();
+                                import_path = import_path.trim_matches('"').to_string();
+                                break;
+                            }
+                        }
+                        
+                        if !import_path.is_empty() {
+                            // Create code span
+                            let span = CodeSpan {
+                                file_path: PathBuf::new(), // Will be set later
+                                start_line: import_spec.start_position().row + 1,
+                                start_column: import_spec.start_position().column + 1,
+                                end_line: import_spec.end_position().row + 1,
+                                end_column: import_spec.end_position().column + 1,
+                            };
+                            
+                            // Add import to elements
+                            elements.push(CodeElement::Import {
+                                path: import_path.clone(),
+                                span,
+                            });
+                            
+                            // Add dependency
+                            dependencies.insert(import_path);
+                        }
+                    }
+                }
+            }
+            
+            // Continue recursively
+            self.extract_go_imports(&child, content, elements, dependencies);
+        }
+    }
+    
+    /// Parse a JavaScript source file
+    fn parse_javascript_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        // Set parser to use JavaScript language
+        let js_lang = javascript_language();
+        self.parser.set_language(js_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set JavaScript language".to_string()))?;
+            
+        // Parse the file using tree-sitter
+        let tree = self.parser.parse(content, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse JavaScript file".to_string()))?;
+        
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+        
+        // Extract functions and methods using queries
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.js_query_function, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // For functions and methods
+            if let Some(func_node) = query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.js_query_function.capture_names()[capture.index as usize].as_str();
+                if capture_name == "function.def" || capture_name == "method.def" {
+                    Some(capture.node)
+                } else {
+                    None
+                }
+            }) {
+                // Get the function name
+                let name = match query_match.captures.iter().find_map(|capture| {
+                    let capture_name = self.js_query_function.capture_names()[capture.index as usize].as_str();
+                    if capture_name == "function.name" || capture_name == "method.name" {
+                        Some(content[capture.node.byte_range()].to_string())
+                    } else {
+                        None
+                    }
+                }) {
+                    Some(name) => name,
+                    None => continue, // Skip if no name found (e.g., anonymous function)
+                };
+                
+                // Extract parameters
+                let params = self.extract_js_function_params(func_node, content);
+                
+                // Extract body
+                let body = content[func_node.byte_range()].to_string();
+                
+                // Create code span
+                let span = self.node_to_span(func_node, file_path);
+                
+                // Add function to elements
+                elements.push(CodeElement::Function {
+                    name,
+                    params,
+                    return_type: None, // JavaScript doesn't have explicit return types
+                    body,
+                    span,
+                });
+            }
+        }
+
+        // Create the parsed file representation
+        let parsed_file = ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "javascript".to_string(),
+        };
+
+        // Store the parsed file
+        self.parsed_files.insert(file_path.clone(), parsed_file);
+
+        Ok(())
+    }
+
+    /// Extract JavaScript function parameters
+    fn extract_js_function_params(&self, node: Node, content: &str) -> Vec<String> {
+        let mut params = Vec::new();
+        
+        if let Some(formal_params) = self.find_node(node, "formal_parameters") {
+            let mut cursor = formal_params.walk();
+            
+            for child in formal_params.children(&mut cursor) {
+                match child.kind() {
+                    "identifier" => {
+                        // Simple parameter
+                        params.push(content[child.byte_range()].to_string());
+                    },
+                    "required_parameter" | "optional_parameter" => {
+                        // TypeScript or complex parameter
+                        if let Some(param_name) = self.find_node(child, "identifier") {
+                            params.push(content[param_name.byte_range()].to_string());
+                        }
+                    },
+                    "rest_parameter" => {
+                        // Rest parameter
+                        if let Some(param_name) = self.find_node(child, "identifier") {
+                            params.push(format!("...{}", content[param_name.byte_range()].to_string()));
+                        }
+                    },
+                    "object_pattern" => {
+                        // Destructured object parameter
+                        params.push("{...}".to_string());
+                    },
+                    "array_pattern" => {
+                        // Destructured array parameter
+                        params.push("[...]".to_string());
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        params
+    }
+
+    /// Parse a TypeScript source file
+    fn parse_typescript_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        // Set parser to use TypeScript language
+        let ts_lang = typescript_language();
+        self.parser.set_language(ts_lang)
+            .map_err(|_| VectorDBError::ParserError("Failed to set TypeScript language".to_string()))?;
+            
+        // Parse the file using tree-sitter
+        let tree = self.parser.parse(content, None)
+            .ok_or_else(|| VectorDBError::ParserError("Failed to parse TypeScript file".to_string()))?;
+        
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+
+        // Extract functions and methods
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.ts_query_function, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // For functions and methods
+            if let Some(func_node) = query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.ts_query_function.capture_names()[capture.index as usize].as_str();
+                if capture_name == "function.def" || capture_name == "method.def" {
+                    Some(capture.node)
+                } else {
+                    None
+                }
+            }) {
+                // Get the function name
+                let name = match query_match.captures.iter().find_map(|capture| {
+                    let capture_name = self.ts_query_function.capture_names()[capture.index as usize].as_str();
+                    if capture_name == "function.name" || capture_name == "method.name" {
+                        Some(content[capture.node.byte_range()].to_string())
+                    } else {
+                        None
+                    }
+                }) {
+                    Some(name) => name,
+                    None => continue,
+                };
+                
+                // Extract parameters
+                let params = self.extract_js_function_params(func_node, content);
+                
+                // Extract function body
+                let body = content[func_node.byte_range()].to_string();
+                
+                // Create code span
+                let span = self.node_to_span(func_node, file_path);
+                
+                // Add function to elements
+                elements.push(CodeElement::Function {
+                    name,
+                    params,
+                    return_type: None,
+                    body,
+                    span,
+                });
+            }
+        }
+
+        // Create the parsed file representation
+        let parsed_file = ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "typescript".to_string(),
+        };
+
+        // Store the parsed file
+        self.parsed_files.insert(file_path.clone(), parsed_file);
+
+        Ok(())
     }
 }
 
