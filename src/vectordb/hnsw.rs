@@ -527,7 +527,7 @@ impl HNSWIndex {
 }
 
 /// Statistics for a single layer in the HNSW index
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LayerStats {
     /// Number of nodes in this layer
     pub nodes: usize,
@@ -536,7 +536,7 @@ pub struct LayerStats {
 }
 
 /// Overall statistics for the HNSW index
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HNSWStats {
     /// Total number of nodes in the index
     pub total_nodes: usize,

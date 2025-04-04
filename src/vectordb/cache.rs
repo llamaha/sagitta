@@ -9,6 +9,7 @@ use crate::vectordb::error::{Result, VectorDBError};
 use std::io::{Read, Seek, SeekFrom};
 use std::convert::TryInto;
 use crate::vectordb::embedding::EmbeddingModelType;
+use std::time::Duration;
 
 const CACHE_TTL: u64 = 3600; // 1 hour in seconds
 
@@ -112,6 +113,12 @@ impl EmbeddingCache {
         }
     }
 
+    /// Thread-safe version of get_file_hash for parallel processing
+    pub fn get_file_hash_thread_safe(path: &Path) -> Result<u64> {
+        Self::get_file_hash(path)
+    }
+
+    /// Insert an embedding into the cache and save it
     pub fn insert(&mut self, file_path: String, embedding: Vec<f32>, file_hash: u64) -> Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -128,6 +135,31 @@ impl EmbeddingCache {
         self.entries.insert(file_path, entry);
         self.save()?;
         Ok(())
+    }
+
+    /// Thread-safe version that prepares a cache entry without updating the cache directly
+    /// Returns the embedding for use by the main thread. The caller is responsible for updating the cache.
+    pub fn prepare_cache_entry(&self, embedding: Vec<f32>, file_hash: u64) -> (Vec<f32>, CacheEntry) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| VectorDBError::CacheError(e.to_string()))
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs();
+
+        let entry = CacheEntry {
+            embedding: embedding.clone(),
+            timestamp: now,
+            file_hash,
+            model_type: self.current_model_type.clone(),
+        };
+
+        (embedding, entry)
+    }
+    
+    /// Insert a pre-prepared cache entry without saving
+    /// To be used for batch operations where save() will be called after many inserts
+    pub fn insert_without_save(&mut self, file_path: String, entry: CacheEntry) {
+        self.entries.insert(file_path, entry);
     }
 
     pub fn clear(&mut self) -> Result<()> {
