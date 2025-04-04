@@ -466,6 +466,13 @@ impl VectorDB {
     pub fn index_directory(&mut self, dir: &str, file_types: &[String]) -> Result<()> {
         let dir_path = Path::new(dir);
         
+        // Use all supported file types if none are specified
+        let file_types_to_use = if file_types.is_empty() {
+            VectorDB::get_supported_file_types()
+        } else {
+            file_types.to_vec()
+        };
+        
         // Collect all eligible files first
         let mut eligible_files = Vec::new();
         for entry in WalkDir::new(dir_path) {
@@ -474,7 +481,7 @@ impl VectorDB {
                 let path = entry.path();
                 if let Some(ext) = path.extension() {
                     let ext = ext.to_string_lossy().to_string();
-                    if file_types.contains(&ext) {
+                    if file_types_to_use.contains(&ext) {
                         eligible_files.push(path.to_path_buf());
                     }
                 }
@@ -897,10 +904,8 @@ impl VectorDB {
                 
                 // Prioritize source files over other types
                 if filename.ends_with(".rs") || 
-                   filename.ends_with(".py") || 
-                   filename.ends_with(".js") || 
-                   filename.ends_with(".ts") || 
-                   filename.ends_with(".rb") {
+                   filename.ends_with(".rb") || 
+                   filename.ends_with(".go") {
                     score += 1.0;
                 }
                 
@@ -1068,6 +1073,15 @@ impl VectorDB {
             debug!("HNSW index requested but not available");
             None
         }
+    }
+
+    /// Get a list of all supported file types
+    pub fn get_supported_file_types() -> Vec<String> {
+        vec![
+            "rs".to_string(),  // Rust
+            "rb".to_string(),  // Ruby
+            "go".to_string(),  // Go
+        ]
     }
 }
 

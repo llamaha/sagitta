@@ -21,6 +21,7 @@ pub enum CodeLanguage {
     Python,
     JavaScript,
     TypeScript,
+    Go,
     Unknown,
 }
 
@@ -97,6 +98,7 @@ impl CodeStructureAnalyzer {
             CodeLanguage::Python => self.analyze_python_file(&content, file_path),
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => 
                 self.analyze_js_ts_file(&content, file_path, language),
+            CodeLanguage::Go => self.analyze_go_file(&content, file_path),
             CodeLanguage::Unknown => self.analyze_generic_file(&content, file_path),
         };
         
@@ -114,6 +116,7 @@ impl CodeStructureAnalyzer {
             Some("py") => CodeLanguage::Python,
             Some("js") => CodeLanguage::JavaScript,
             Some("ts") | Some("tsx") => CodeLanguage::TypeScript,
+            Some("go") => CodeLanguage::Go,
             _ => CodeLanguage::Unknown,
         }
     }
@@ -136,6 +139,9 @@ impl CodeStructureAnalyzer {
             },
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => {
                 r"(?m)(?:function\s+([a-zA-Z0-9_]+)|([a-zA-Z0-9_]+)\s*=\s*function|\s*([a-zA-Z0-9_]+)\s*\([^)]*\)\s*{)"
+            },
+            CodeLanguage::Go => {
+                r"(?m)^\s*func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*\("
             },
             CodeLanguage::Unknown => {
                 // Generic pattern that might work across multiple languages
@@ -207,6 +213,19 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::Go => {
+                    if let Some(name) = cap.get(1) {
+                        let signature = cap.get(0).map_or("", |m| m.as_str()).to_string();
+                        
+                        methods.push(MethodInfo {
+                            name: name.as_str().to_string(),
+                            span: (0, 0),
+                            signature,
+                            containing_type: None,
+                            is_public: true,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         methods.push(MethodInfo {
@@ -253,6 +272,9 @@ impl CodeStructureAnalyzer {
             },
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => {
                 (r"(?m)(?:class|interface|enum)\s+([a-zA-Z0-9_]+)(?:\s+extends\s+([a-zA-Z0-9_]+))?", TypeKind::Class)
+            },
+            CodeLanguage::Go => {
+                (r"(?m)^\s*type\s+([a-zA-Z0-9_]+)\s+(struct|interface|\w+)", TypeKind::Struct)
             },
             CodeLanguage::Unknown => {
                 (r"(?m)(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)", TypeKind::Unknown)
@@ -320,6 +342,26 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::Go => {
+                    if let Some(name) = cap.get(1) {
+                        let kind = if let Some(type_kind) = cap.get(2) {
+                            match type_kind.as_str() {
+                                "struct" => TypeKind::Struct,
+                                "interface" => TypeKind::Interface,
+                                _ => TypeKind::Unknown,
+                            }
+                        } else {
+                            TypeKind::Unknown
+                        };
+                        
+                        types.push(TypeInfo {
+                            name: name.as_str().to_string(),
+                            kind,
+                            span: (0, 0),
+                            containing_module: None,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         types.push(TypeInfo {
@@ -366,6 +408,9 @@ impl CodeStructureAnalyzer {
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => {
                 r#"(?m)(?:import\s+.*\s+from\s+['"]([a-zA-Z0-9_@/.-]+)['"]|require\s*\(\s*['"]([a-zA-Z0-9_@/.-]+)['"])"#
             },
+            CodeLanguage::Go => {
+                r#"(?m)^\s*import\s+(?:"([^"]+)"|(\((?:\s*"[^"]+"\s*)+\)))"#
+            },
             CodeLanguage::Unknown => {
                 r#"(?m)(?:import|require|use|include)\s+['"]?([a-zA-Z0-9_./]+)['"]?"#
             },
@@ -401,6 +446,7 @@ impl CodeStructureAnalyzer {
                         CodeLanguage::Python => !import.module_name.starts_with("."),
                         CodeLanguage::JavaScript | CodeLanguage::TypeScript => 
                             !import.module_name.starts_with(".") && !import.module_name.starts_with("/"),
+                        CodeLanguage::Go => !import.module_name.starts_with("."),
                         CodeLanguage::Unknown => false,
                     };
                     
@@ -469,6 +515,63 @@ impl CodeStructureAnalyzer {
             types,
             imports,
             language,
+        }
+    }
+    
+    /// Analyze Go files for code structure
+    fn analyze_go_file(&self, content: &str, file_path: &str) -> CodeContext {
+        let methods = self.extract_methods(content, &CodeLanguage::Go);
+        let types = self.extract_types(content, &CodeLanguage::Go);
+        let imports = self.extract_imports(content, &CodeLanguage::Go);
+        
+        // Process import blocks separately with a more specialized regex
+        let mut additional_imports = Vec::new();
+        let import_block_regex = regex::Regex::new(r#"(?m)import\s+\(\s*((?:"[^"]+"\s*)+)\)"#).unwrap_or_else(|_| {
+            warn!("Failed to compile Go import block regex");
+            regex::Regex::new(r"x^").unwrap()
+        });
+        
+        let single_import_regex = regex::Regex::new(r#"(?m)"([^"]+)""#).unwrap_or_else(|_| {
+            warn!("Failed to compile Go single import regex");
+            regex::Regex::new(r"x^").unwrap()
+        });
+        
+        for block_cap in import_block_regex.captures_iter(content) {
+            if let Some(block_content) = block_cap.get(1) {
+                // Extract each import from the block
+                for import_cap in single_import_regex.captures_iter(block_content.as_str()) {
+                    if let Some(module_name) = import_cap.get(1) {
+                        additional_imports.push(ImportInfo {
+                            module_name: module_name.as_str().to_string(),
+                            span: (0, 0), // We'll calculate these later
+                            is_external: true, // Assume external by default
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Calculate line numbers for the additional imports
+        let lines: Vec<&str> = content.lines().collect();
+        for import in &mut additional_imports {
+            for (i, line) in lines.iter().enumerate() {
+                if line.contains(&format!("\"{}\"", import.module_name)) {
+                    import.span = (i + 1, i + 1); // Use 1-indexed line numbers
+                    break;
+                }
+            }
+        }
+        
+        // Combine the imports
+        let mut all_imports = imports;
+        all_imports.extend(additional_imports);
+        
+        CodeContext {
+            file_path: file_path.to_string(),
+            methods,
+            types,
+            imports: all_imports,
+            language: CodeLanguage::Go,
         }
     }
     

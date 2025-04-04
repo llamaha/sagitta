@@ -8,6 +8,7 @@ A CLI tool for semantic code search and analysis.
 - Fast token-based search for larger codebases
 - Hybrid search combining semantic and lexical matching
 - Code-aware search for functions, types, and more
+- Support for multiple languages: Rust, Ruby, and Go
 - Cross-platform support (Linux, macOS)
 
 ## Installation
@@ -84,7 +85,7 @@ export VECTORDB_ONNX_TOKENIZER=/path/to/your/tokenizer_directory
 vectordb-cli index ./your/code/directory
 
 # Index with specific file types
-vectordb-cli index ./your/code/directory --file-types rs,py,js,java
+vectordb-cli index ./your/code/directory --file-types rs,rb,go
 
 # Use fast model instead of ONNX (for large codebases)
 vectordb-cli index ./your/code/directory --fast

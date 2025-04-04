@@ -321,7 +321,7 @@ impl Search {
         
         // Check for common programming language names
         let languages = [
-            "rust", "ruby", "python", "javascript", "typescript", "java", "go",
+            "rust", "ruby", "go",
             "c++", "c#", "php", "swift", "kotlin", "rails"
         ];
         
@@ -349,7 +349,7 @@ impl Search {
         // Language-specific keywords
         let rust_keywords = ["rust", "cargo", "crate", "mod", "impl", "trait", "struct", "enum", "fn"];
         let ruby_keywords = ["ruby", "gem", "class", "module", "def", "end", "attr"];
-        let python_keywords = ["python", "def", "class", "import", "from", "with", "as"];
+        let go_keywords = ["go", "golang", "func", "interface", "struct", "package", "import"];
         
         // Identify code elements in the query
         let code_elements: Vec<String> = code_keywords.iter()
@@ -371,9 +371,9 @@ impl Search {
                 break;
             }
         }
-        for &keyword in &python_keywords {
+        for &keyword in &go_keywords {
             if query_lower.contains(keyword) {
-                language_hints.push("python".to_string());
+                language_hints.push("go".to_string());
                 break;
             }
         }
@@ -470,7 +470,7 @@ impl Search {
             match lang.as_str() {
                 "rust" => expanded_terms.push(".rs".to_string()),
                 "ruby" => expanded_terms.push(".rb".to_string()),
-                "python" => expanded_terms.push(".py".to_string()),
+                "go" => expanded_terms.push(".go".to_string()),
                 _ => {}
             }
         }
@@ -1185,7 +1185,7 @@ impl Search {
                     let ext = match lang.as_str() {
                         "rust" => ".rs",
                         "ruby" => ".rb",
-                        "python" => ".py",
+                        "go" => ".go",
                         _ => continue,
                     };
                     
@@ -1200,7 +1200,7 @@ impl Search {
                     QueryType::Function | QueryType::Implementation => {
                         // For function/implementation queries, code files are more important
                         if file_path.ends_with(".rs") || file_path.ends_with(".rb") || 
-                           file_path.ends_with(".py") || file_path.ends_with(".js") ||
+                           file_path.ends_with(".go") || file_path.ends_with(".js") ||
                            file_path.ends_with(".ts") {
                             boost_factor *= 1.1; // 10% boost for code files
                         }
@@ -2278,7 +2278,6 @@ require_relative 'helper'
     
     #[test]
     fn test_query_preprocessing() -> Result<()> {
-        // Setup a basic search engine
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("db.json").to_string_lossy().to_string();
         let db = VectorDB::new(db_path)?;
@@ -2300,8 +2299,8 @@ require_relative 'helper'
         let rust_query = search.preprocess_query("trait implementation in Rust");
         assert!(rust_query.language_hints.contains(&"rust".to_string()));
         
-        let python_query = search.preprocess_query("python class definition");
-        assert!(python_query.language_hints.contains(&"python".to_string()));
+        let go_query = search.preprocess_query("go struct definition");
+        assert!(go_query.language_hints.contains(&"go".to_string()));
         
         // Test expanded terms
         let impl_query = search.preprocess_query("how to implement Display trait");

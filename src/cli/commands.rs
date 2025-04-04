@@ -32,7 +32,7 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
 
-        /// File types to index (e.g. rs,py,txt)
+        /// File types to index (e.g. rs,rb,go)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Vec<String>,
         
@@ -75,7 +75,7 @@ pub enum Command {
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
         
-        /// File types to search (e.g. rs,py,txt)
+        /// File types to search (e.g. rs,rb,go)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
     },
@@ -120,8 +120,8 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
         
-        /// File types to parse (e.g. rs,py)
-        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs")]
+        /// File types to parse (e.g. rs,rb,go)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs,rb,go")]
         file_types: Vec<String>,
         
         /// Show functions defined in the code
@@ -837,7 +837,8 @@ mod tests {
         // Execute the index command (HNSW should be created by default now)
         let command = Command::Index {
             dir: temp_dir.path().to_string_lossy().to_string(),
-            file_types: vec!["rs".to_string()],
+            // Use supported file types
+            file_types: vec![],  // Empty to test auto-detection of file types
             threads: None,
             use_fast: false,
             onnx_model: None,
@@ -874,7 +875,8 @@ mod tests {
         let mut db_hnsw = VectorDB::new(db_path_hnsw)?;
         
         // Index with HNSW enabled (default)
-        db_hnsw.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        // Use supported file types
+        db_hnsw.index_directory(&temp_dir.path().to_string_lossy(), &VectorDB::get_supported_file_types())?;
         
         // Create embedding model for HNSW search
         let model_hnsw = EmbeddingModel::new();
@@ -886,7 +888,8 @@ mod tests {
         let mut db_slow = VectorDB::new(db_path_slow)?;
         
         // Index without accessing HNSW functionality
-        db_slow.index_directory(&temp_dir.path().to_string_lossy(), &["rs".to_string()])?;
+        // Use supported file types
+        db_slow.index_directory(&temp_dir.path().to_string_lossy(), &VectorDB::get_supported_file_types())?;
         
         // We'll clone the database which will do a shallow clone, allowing us to use
         // a slower search method for comparison purposes
