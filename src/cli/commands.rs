@@ -154,8 +154,16 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             if !use_fast {
                 debug!("Using ONNX model for indexing (default)");
                 // Get or use default paths
-                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l6-v2.onnx");
-                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx");
+                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL").ok();
+                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER").ok();
+                
+                let model_path = onnx_model.as_deref().or_else(|| 
+                    env_model_path.as_deref()
+                ).unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                
+                let tokenizer_path = onnx_tokenizer.as_deref().or_else(|| 
+                    env_tokenizer_path.as_deref()
+                ).unwrap_or("onnx");
                 
                 debug!("Using ONNX model path: {}", model_path);
                 debug!("Using ONNX tokenizer path: {}", tokenizer_path);
@@ -506,8 +514,16 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let use_onnx = use_onnx || !use_fast;
             
             if use_onnx {
-                let model_path = onnx_model.as_deref().unwrap_or("onnx/all-minilm-l6-v2.onnx");
-                let tokenizer_path = onnx_tokenizer.as_deref().unwrap_or("onnx");
+                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL").ok();
+                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER").ok();
+                
+                let model_path = onnx_model.as_deref().or_else(|| 
+                    env_model_path.as_deref()
+                ).unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                
+                let tokenizer_path = onnx_tokenizer.as_deref().or_else(|| 
+                    env_tokenizer_path.as_deref()
+                ).unwrap_or("onnx");
                 
                 debug!("Setting model type to ONNX with paths: {} and {}", model_path, tokenizer_path);
                 
