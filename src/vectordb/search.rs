@@ -7,6 +7,7 @@ use crate::vectordb::hnsw::HNSWIndex;
 use crate::vectordb::search_ranking::{PathComponentWeights, apply_path_ranking, apply_code_structure_ranking};
 use crate::vectordb::code_structure::{CodeStructureAnalyzer, CodeContext};
 use crate::vectordb::snippet_extractor::{SnippetExtractor, SnippetContext};
+use crate::vectordb::code_ranking::{CodeRankingEngine, RankingConfig, RankingWeights};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use log::{debug, info, warn, error, trace};
@@ -71,6 +72,7 @@ pub struct Search {
     code_structure_analyzer: CodeStructureAnalyzer,
     snippet_extractor: SnippetExtractor,
     path_weights: PathComponentWeights,
+    ranking_engine: CodeRankingEngine,
 }
 
 impl Search {
@@ -88,6 +90,7 @@ impl Search {
             code_structure_analyzer: CodeStructureAnalyzer::new(),
             snippet_extractor: SnippetExtractor::new(),
             path_weights: PathComponentWeights::default(),
+            ranking_engine: CodeRankingEngine::new(),
         }
     }
 
@@ -222,6 +225,14 @@ impl Search {
         
         // Apply code structure ranking improvements
         apply_code_structure_ranking(&mut results, query);
+        
+        // Apply enhanced code ranking algorithm
+        if let Err(e) = self.ranking_engine.rank_results(&mut results, query) {
+            warn!("Enhanced ranking failed: {}", e);
+        } else {
+            // Add explanation factors to results
+            self.ranking_engine.add_explanation_factors(&mut results);
+        }
         
         // Extract query information before borrowing the analyzer
         let (_code_elements, is_structural_query) = self.extract_code_query_elements(query);
@@ -1414,108 +1425,10 @@ impl Search {
 
     /// Apply code-specific ranking signals to search results
     fn apply_code_ranking_signals(&self, results: &mut Vec<SearchResult>, query: &str) -> Result<()> {
-        let query_analysis = self.preprocess_query(query);
-        
-        // No need to modify if there are no results
-        if results.is_empty() {
-            return Ok(());
-        }
-        
-        for result in results.iter_mut() {
-            let file_path = &result.file_path;
-            let mut boost_factor = 1.0;
-            
-            // 1. Language-specific boosts based on file extension
-            if !query_analysis.language_hints.is_empty() {
-                // Language was detected in the query, boost matching files
-                for lang in &query_analysis.language_hints {
-                    let ext = match lang.as_str() {
-                        "rust" => ".rs",
-                        "ruby" => ".rb",
-                        "go" => ".go",
-                        _ => continue,
-                    };
-                    
-                    if file_path.ends_with(ext) {
-                        boost_factor *= 1.2; // 20% boost for matching language
-                        break;
-                    }
-                }
-            } else {
-                // No language in query, use query type to infer file importance
-                match query_analysis.query_type {
-                    QueryType::Function | QueryType::Implementation => {
-                        // For function/implementation queries, code files are more important
-                        if file_path.ends_with(".rs") || file_path.ends_with(".rb") || 
-                           file_path.ends_with(".go") || file_path.ends_with(".js") ||
-                           file_path.ends_with(".ts") {
-                            boost_factor *= 1.1; // 10% boost for code files
-                        }
-                    },
-                    QueryType::Type => {
-                        // For type queries, boost certain languages that are more type-focused
-                        if file_path.ends_with(".rs") || file_path.ends_with(".ts") {
-                            boost_factor *= 1.15; // 15% boost for strongly-typed languages
-                        }
-                    },
-                    _ => {}
-                }
-            }
-            
-            // 2. File name relevance
-            let file_name = Path::new(file_path).file_name()
-                .map(|f| f.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-                
-            // If any term in the query appears in the filename, boost it
-            for term in query.to_lowercase().split_whitespace() {
-                if file_name.contains(term) {
-                    boost_factor *= 1.25; // 25% boost for filename match
-                    break;
-                }
-            }
-            
-            // 3. Code structure matching (based on snippet content)
-            match query_analysis.query_type {
-                QueryType::Function => {
-                    if result.snippet.contains("fn ") || result.snippet.contains("function") || 
-                       result.snippet.contains("def ") {
-                        boost_factor *= 1.3; // 30% boost for function definitions
-                    }
-                },
-                QueryType::Type => {
-                    if result.snippet.contains("struct ") || result.snippet.contains("class ") || 
-                       result.snippet.contains("enum ") || result.snippet.contains("trait ") {
-                        boost_factor *= 1.3; // 30% boost for type definitions
-                    }
-                },
-                QueryType::Implementation => {
-                    if result.snippet.contains("impl ") || 
-                       (result.snippet.contains("class ") && result.snippet.contains("def ")) {
-                        boost_factor *= 1.3; // 30% boost for implementations
-                    }
-                },
-                QueryType::Usage => {
-                    // For usage queries, examples and imports are valuable
-                    if result.snippet.contains("use ") || result.snippet.contains("import ") ||
-                       result.snippet.contains("from ") || result.snippet.contains("example") {
-                        boost_factor *= 1.2; // 20% boost for usage examples
-                    }
-                },
-                _ => {}
-            }
-            
-            // 4. Check for special code features
-            if result.snippet.contains("pub fn") || result.snippet.contains("public function") {
-                boost_factor *= 1.1; // 10% boost for public APIs
-            }
-            
-            // Apply the boost factor to the similarity score
-            result.similarity = (result.similarity * boost_factor).min(1.0);
-        }
-        
-        // Re-sort the results by the modified similarity scores
-        results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        // Use our enhanced ranking engine instead of the older implementation
+        let mut ranking_engine = CodeRankingEngine::new();
+        ranking_engine.rank_results(results, query)?;
+        ranking_engine.add_explanation_factors(results);
         
         Ok(())
     }

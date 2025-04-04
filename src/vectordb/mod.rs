@@ -14,5 +14,6 @@ pub mod snippet_extractor;
 pub mod path_relevance;
 pub mod repo;
 pub mod repo_manager;
+pub mod code_ranking;
 
 pub use db::VectorDB;
