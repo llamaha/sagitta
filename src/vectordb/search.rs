@@ -23,6 +23,7 @@ const BM25_K1: f32 = 1.5;
 const BM25_B: f32 = 0.75;
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7; // Default weight for vector search
 const HYBRID_BM25_WEIGHT: f32 = 0.3;   // Default weight for BM25 search
+const SPECIALIZED_SEARCH_THRESHOLD: f32 = 0.3; // Lower similarity threshold for specialized queries
 
 /// Structure to hold query analysis results
 #[derive(Debug)]
@@ -615,7 +616,20 @@ impl Search {
         
         // Filter by similarity threshold
         let results_count = results.len();
-        let threshold = SIMILARITY_THRESHOLD;
+        
+        // Choose threshold based on query characteristics
+        let query_lower = query.to_lowercase();
+        let has_specialized_terms = ["ssh", "api", "http", "jwt", "cli", "gui", "tls", "ssl"]
+            .iter()
+            .any(|term| query_lower.contains(term));
+            
+        let threshold = if has_specialized_terms {
+            // Use lower threshold for specialized queries
+            SPECIALIZED_SEARCH_THRESHOLD
+        } else {
+            SIMILARITY_THRESHOLD
+        };
+        
         debug!("Filtering results with threshold {}", threshold);
         
         let filtered_results: Vec<_> = results.into_iter()
@@ -731,11 +745,12 @@ impl Search {
         // If we're only using vector search, return those results
         if b_weight <= 0.0 {
             debug!("BM25 weight is 0, returning vector-only results");
-            // Apply strict limit and return
-            return Ok(vector_results.into_iter().take(max_results).collect());
+            // Apply diversity algorithm before returning
+            let diverse_results = self.apply_mmr(vector_results, 0.7, max_results);
+            return Ok(diverse_results);
         }
         
-        // Collect the file paths from vector results - we don't use this yet, but will in the future
+        // Collect the file paths from vector results
         let vector_file_paths: HashSet<_> = vector_results.iter()
             .map(|r| r.file_path.clone())
             .collect();
@@ -744,35 +759,38 @@ impl Search {
         debug!("Performing BM25 lexical search component");
         let mut bm25_results = Vec::new();
         
-        // Extract query terms for BM25
-        let query_terms: Vec<&str> = query.split_whitespace().collect();
-        
         // Calculate BM25 scores for each file in the database
+        let mut valid_files = 0;
+        let mut total_files = 0;
+        
         for file_path in self.get_file_paths() {
-            // Skip if we can't read the file
+            total_files += 1;
+            
+            // Try to calculate BM25 score
             let score = match self.calculate_bm25_score(query, file_path) {
                 Ok(score) => score,
                 Err(e) => {
-                    warn!("Failed to calculate BM25 score for {}: {}", file_path, e);
+                    // Only log at debug level to avoid spam
+                    debug!("Failed to calculate BM25 score for {}: {}", file_path, e);
                     continue;
                 }
             };
             
-            // Skip files with no matches
-            if score <= 0.0 {
-                continue;
+            if score > 0.0 {
+                valid_files += 1;
+                
+                // Add to BM25 results
+                bm25_results.push(SearchResult {
+                    file_path: file_path.to_string(),
+                    similarity: score,
+                    snippet: String::new(),
+                    code_context: None,
+                });
             }
-            
-            // Add to BM25 results
-            bm25_results.push(SearchResult {
-                file_path: file_path.to_string(),
-                similarity: score,
-                snippet: String::new(),
-                code_context: None,
-            });
         }
         
-        debug!("Raw BM25 search returned {} results", bm25_results.len());
+        debug!("BM25 search processed {}/{} files, found {} with matching content", 
+              valid_files, total_files, bm25_results.len());
         
         // Sort BM25 results by score in descending order
         bm25_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
@@ -783,6 +801,12 @@ impl Search {
             debug!("Trimming BM25 results to top {}", top_k);
             bm25_results.truncate(top_k);
         }
+        
+        // Enhance score separation by using Min-Max normalization for both result sets
+        self.normalize_score_distribution(&mut bm25_results);
+        
+        // Track the highest BM25 score for normalization
+        let max_bm25_score = bm25_results.first().map_or(1.0, |r| r.similarity);
         
         // Combine vector and BM25 results
         debug!("Combining vector and BM25 results");
@@ -798,17 +822,21 @@ impl Search {
                 continue;
             }
             
-            seen_files.insert(file_path);
+            seen_files.insert(file_path.clone());
             
             // Get BM25 score for this file if available
             let bm25_score = bm25_results.iter()
-                .find(|r| r.file_path == result.file_path)
+                .find(|r| r.file_path == file_path)
                 .map(|r| r.similarity)
                 .unwrap_or(0.0);
             
             // Combine scores using weighted formula
             let vector_score = result.similarity;
-            let combined_score = v_weight * vector_score + b_weight * bm25_score;
+            let normalized_bm25_score = bm25_score / max_bm25_score; // Normalize BM25 score
+            let combined_score = v_weight * vector_score + b_weight * normalized_bm25_score;
+            
+            debug!("Combined score for {} = {:.2} (vector: {:.2} × {:.2}, bm25: {:.2} × {:.2})",
+                  file_path, combined_score, v_weight, vector_score, b_weight, normalized_bm25_score);
             
             // Add the file with combined score
             let mut combined_result = result;
@@ -826,20 +854,42 @@ impl Search {
                 continue;
             }
             
-            seen_files.insert(file_path);
+            seen_files.insert(file_path.clone());
+            
+            // Extract file extension for special handling
+            let path = Path::new(&file_path);
+            let file_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             
             // Combine scores (no vector score for these)
             let bm25_score = result.similarity;
-            let combined_score = b_weight * bm25_score;
+            let normalized_bm25_score = bm25_score / max_bm25_score; // Normalize BM25 score
+            
+            // Basic score based on BM25
+            let combined_score = b_weight * normalized_bm25_score;
+            
+            // Choose appropriate threshold based on query complexity
+            let query_term_count = query.split_whitespace().count();
+            let threshold = if query_term_count >= 4 {
+                // More complex queries can have a lower threshold 
+                0.15
+            } else {
+                // Simple queries need higher relevance
+                0.25
+            };
             
             // Only include if above threshold
-            if combined_score >= SIMILARITY_THRESHOLD * 0.7 {
+            if combined_score >= threshold {
                 let mut combined_result = result;
                 combined_result.similarity = combined_score;
                 
                 combined_results.push(combined_result);
+                debug!("Added BM25-only result: {} with score {:.2} (threshold: {:.2})", 
+                      file_path, combined_score, threshold);
             }
         }
+        
+        // Enhance score separation in final results
+        self.normalize_score_distribution(&mut combined_results);
         
         // Generate snippets for all results
         debug!("Generating snippets for {} combined results", combined_results.len());
@@ -865,11 +915,16 @@ impl Search {
                     }
                 },
                 Err(e) => {
-                    warn!("Failed to generate snippet for {}: {}", result.file_path, e);
-                    // Fall back to the simpler method
-                    if let Ok(snippet) = self.get_snippet(&result.file_path, query) {
-                        result.snippet = snippet;
+                    // Fall back to reading the file directly if possible
+                    if let Ok(content) = fs::read_to_string(&result.file_path) {
+                        // Create a simple snippet using the first few lines
+                        let lines: Vec<&str> = content.lines().take(10).collect();
+                        result.snippet = lines.join("\n");
+                        if content.lines().count() > 10 {
+                            result.snippet += "\n... (truncated)";
+                        }
                     } else {
+                        warn!("Failed to generate snippet for {}: {}", result.file_path, e);
                         result.snippet = "Failed to generate snippet".to_string();
                     }
                 }
@@ -895,10 +950,168 @@ impl Search {
         Ok(limited_results)
     }
     
+    /// Normalize the score distribution to spread out the scores more evenly
+    fn normalize_score_distribution(&self, results: &mut Vec<SearchResult>) {
+        if results.len() <= 1 {
+            return;
+        }
+        
+        // Find min and max scores
+        let mut min_score = f32::INFINITY;
+        let mut max_score = f32::NEG_INFINITY;
+        
+        for result in results.iter() {
+            min_score = min_score.min(result.similarity);
+            max_score = max_score.max(result.similarity);
+        }
+        
+        let score_range = max_score - min_score;
+        
+        // If there's minimal variation, add artificial distribution
+        if score_range < 0.05 {
+            // Apply rank-based scoring to create more distribution
+            let mut sorted_results = results.clone();
+            sorted_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+            
+            let result_count = sorted_results.len() as f32;
+            
+            // Map each result to its index and corresponding score
+            let mut rank_scores = HashMap::new();
+            for (i, result) in sorted_results.iter().enumerate() {
+                // Convert rank to score in 0.3-1.0 range (more separation)
+                let rank_score = 1.0 - (i as f32 / result_count) * 0.7;
+                rank_scores.insert(result.file_path.clone(), rank_score);
+            }
+            
+            // Apply the rank scores to the original results
+            for result in results.iter_mut() {
+                if let Some(score) = rank_scores.get(&result.file_path) {
+                    result.similarity = *score;
+                }
+            }
+        } else if score_range < 0.3 {
+            // Use min-max normalization with a wider range
+            for result in results.iter_mut() {
+                // Normalize to 0.3-1.0 range for better separation
+                let normalized = (result.similarity - min_score) / score_range;
+                result.similarity = 0.3 + (normalized * 0.7);
+            }
+        }
+    }
+    
     /// Determine optimal weights for hybrid search based on query analysis
-    fn determine_optimal_weights(&self, _query: &str, _query_analysis: &QueryAnalysis) -> (f32, f32) {
-        // Use default weights for now
-        (HYBRID_VECTOR_WEIGHT, HYBRID_BM25_WEIGHT)
+    fn determine_optimal_weights(&self, query: &str, query_analysis: &QueryAnalysis) -> (f32, f32) {
+        // Get query characteristics
+        let query_lower = query.to_lowercase();
+        let term_count = query_lower.split_whitespace().count();
+        
+        // Default weights
+        let mut vector_weight = HYBRID_VECTOR_WEIGHT;
+        let mut bm25_weight = HYBRID_BM25_WEIGHT;
+        
+        // 1. Query length and complexity adjustments - shorter queries benefit from lexical search
+        if term_count <= 2 {
+            // Short queries likely benefit from higher lexical matching
+            vector_weight = 0.4;
+            bm25_weight = 0.6;
+            debug!("Short query ({}), increasing BM25 weight: vector={:.2}, bm25={:.2}", 
+                 term_count, vector_weight, bm25_weight);
+        } else if term_count >= 6 {
+            // Long queries likely benefit from higher semantic matching
+            vector_weight = 0.8;
+            bm25_weight = 0.2;
+            debug!("Long query ({}), increasing vector weight: vector={:.2}, bm25={:.2}", 
+                 term_count, vector_weight, bm25_weight);
+        }
+        
+        // 2. Check for language-specific hints
+        if !query_analysis.language_hints.is_empty() {
+            for lang in &query_analysis.language_hints {
+                match lang.as_str() {
+                    "go" | "golang" => {
+                        // For Go queries, slightly increase BM25 weight
+                        vector_weight = (vector_weight * 0.9).max(0.35);
+                        bm25_weight = (bm25_weight * 1.1).min(0.65);
+                        debug!("Detected Go language in query, adjusted weights: vector={:.2}, bm25={:.2}", 
+                              vector_weight, bm25_weight);
+                    },
+                    "rust" => {
+                        // For Rust, balanced weights work well
+                        vector_weight = 0.6;
+                        bm25_weight = 0.4;
+                        debug!("Detected Rust language, adjusted weights: vector={:.2}, bm25={:.2}", 
+                              vector_weight, bm25_weight);
+                    },
+                    "ruby" | "rails" => {
+                        // For Ruby queries, slightly increase vector weight
+                        vector_weight = (vector_weight * 1.1).min(0.75);
+                        bm25_weight = (bm25_weight * 0.9).max(0.25);
+                        debug!("Detected Ruby language, adjusted weights: vector={:.2}, bm25={:.2}", 
+                              vector_weight, bm25_weight);
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        // 3. Check for code-specific patterns that benefit from lexical search
+        let code_patterns = [
+            "fn ", "pub fn", "func ", "function ", "def ", "class ", 
+            "struct ", "enum ", "trait ", "impl ", "interface ",
+            "#[", "import ", "require "
+        ];
+        
+        let contains_code_patterns = code_patterns.iter()
+            .any(|&pattern| query_lower.contains(pattern));
+            
+        if contains_code_patterns {
+            // Code patterns benefit from stronger lexical matching
+            vector_weight = (vector_weight * 0.85).max(0.3);
+            bm25_weight = (bm25_weight * 1.15).min(0.7);
+            debug!("Query contains code patterns, adjusting weights: vector={:.2}, bm25={:.2}", 
+                  vector_weight, bm25_weight);
+        }
+        
+        // 4. Query type-based adjustments
+        match query_analysis.query_type {
+            QueryType::Function | QueryType::Type => {
+                // Code structural queries often need stronger BM25 matching
+                vector_weight = (vector_weight * 0.9).max(0.3);
+                bm25_weight = (bm25_weight * 1.1).min(0.7);
+                debug!("Function/Type query detected, adjusting weights: vector={:.2}, bm25={:.2}", 
+                      vector_weight, bm25_weight);
+            },
+            QueryType::Usage => {
+                // Usage examples might be better found with semantic search
+                vector_weight = (vector_weight * 1.1).min(0.8);
+                bm25_weight = (bm25_weight * 0.9).max(0.2);
+                debug!("Usage query detected, adjusting weights: vector={:.2}, bm25={:.2}", 
+                      vector_weight, bm25_weight);
+            },
+            QueryType::Definition => {
+                // Definitions benefit from balanced approach
+                vector_weight = 0.55;
+                bm25_weight = 0.45;
+                debug!("Definition query detected, using balanced weights: vector={:.2}, bm25={:.2}", 
+                      vector_weight, bm25_weight);
+            },
+            QueryType::Implementation => {
+                // Implementation queries benefit from more lexical search
+                vector_weight = 0.45;
+                bm25_weight = 0.55;
+                debug!("Implementation query detected, increasing BM25 weight: vector={:.2}, bm25={:.2}", 
+                      vector_weight, bm25_weight);
+            },
+            _ => {}
+        }
+        
+        // Ensure weights sum to 1.0
+        let total = vector_weight + bm25_weight;
+        vector_weight = vector_weight / total;
+        bm25_weight = bm25_weight / total;
+        
+        debug!("Final weights: vector={:.2}, bm25={:.2}", vector_weight, bm25_weight);
+        (vector_weight, bm25_weight)
     }
     
     /// Helper to get all file paths from the database
@@ -1757,33 +1970,141 @@ impl Search {
                     return Ok(0.0);
                 }
                 
-                // Count matching terms
+                // Count matching terms and their frequencies
                 let mut match_count = 0;
+                let mut total_frequency = 0;
+                
+                // File path, extension and name analysis for better matching
+                let path = Path::new(file_path);
+                let file_ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                let file_stem = path.file_stem().and_then(|f| f.to_str()).unwrap_or("");
+                let file_path_lower = file_path.to_lowercase();
+                
+                // 1. File type detection - for language-specific handling
+                let is_go_file = file_ext == "go";
+                let is_rust_file = file_ext == "rs";
+                let is_ruby_file = file_ext == "rb";
+                
+                // 2. Special file type detection
+                let is_test_file = file_name.contains("_test.") || file_name.contains("test_") || 
+                                  file_name.ends_with("_test") || file_name.contains("spec.");
+                let is_test_query = query_lower.contains("test") || query_lower.contains("spec");
+                
+                // 3. Apply term frequency calculations with boost factors
+                let mut term_frequencies = HashMap::new();
+                
                 for term in &query_terms {
-                    if content_lower.contains(*term) {
-                        match_count += 1;
+                    // Basic frequency counting in content
+                    let mut term_frequency = content_lower.matches(term).count();
+                    
+                    // Skip terms with no matches
+                    if term_frequency == 0 {
+                        continue;
+                    }
+                    
+                    // Path and filename boost - common to all languages
+                    if file_path_lower.contains(term) {
+                        term_frequency += 10;
+                    }
+                    
+                    if file_name.to_lowercase().contains(term) {
+                        term_frequency += 5;
+                    }
+                    
+                    if file_ext.to_lowercase() == *term {
+                        term_frequency += 3;
+                    }
+                    
+                    // Language-specific boosts
+                    if is_go_file && ["func", "interface", "struct", "type", "method", "package"].contains(term) {
+                        term_frequency += 3; // Boost for Go-specific terms
+                    } else if is_rust_file && ["fn", "struct", "trait", "impl", "enum", "mod"].contains(term) {
+                        term_frequency += 3; // Boost for Rust-specific terms
+                    } else if is_ruby_file && ["def", "class", "module", "attr", "require"].contains(term) {
+                        term_frequency += 3; // Boost for Ruby-specific terms
+                    }
+                    
+                    // Special handling for tests
+                    if is_test_query && is_test_file {
+                        term_frequency += 5;
+                    }
+                    
+                    // Special handling for acronyms (like API, HTTP, etc.)
+                    if term.len() >= 2 && term.chars().all(|c| c.is_uppercase()) {
+                        // For acronyms, check case-sensitively as well
+                        let exact_match_count = content.matches(term).count();
+                        term_frequency += exact_match_count * 2;
+                    }
+                    
+                    // Check for terms that might be part of identifiers using word boundaries
+                    if term.len() >= 3 {
+                        let word_boundary_pattern = format!(r"\b{}\b", term);
+                        if let Ok(regex) = regex::Regex::new(&word_boundary_pattern) {
+                            let word_boundary_count = regex.find_iter(&content_lower).count();
+                            term_frequency += word_boundary_count * 2;
+                        }
+                    }
+                    
+                    term_frequencies.insert(term.to_string(), term_frequency);
+                    match_count += 1;
+                    total_frequency += term_frequency;
+                }
+                
+                // Calculate the final score
+                let mut score = 0.0;
+                
+                if match_count > 0 {
+                    // Calculate the proportion of matching terms
+                    let match_proportion = match_count as f32 / term_count as f32;
+                    
+                    // Base score depends on how many terms match
+                    if match_count == term_count {
+                        // All terms match - highest base score
+                        score = 0.7;
+                    } else if match_proportion >= 0.6 {
+                        // Most terms match
+                        score = 0.6;
+                    } else if match_proportion >= 0.4 {
+                        // Some terms match
+                        score = 0.4;
+                    } else {
+                        // Few terms match
+                        score = 0.2;
+                    }
+                    
+                    // Boost score based on total frequency
+                    let frequency_factor = total_frequency as f32 / (term_count as f32 * 10.0); // Normalize by term count
+                    let frequency_boost = (frequency_factor.min(1.0) * 0.3).max(0.05); // At least small boost for matches
+                    score += frequency_boost;
+                    
+                    // File type specific boosts
+                    if query_lower.contains("go") && is_go_file {
+                        score += 0.1;
+                    } else if query_lower.contains("rust") && is_rust_file {
+                        score += 0.1;
+                    } else if query_lower.contains("ruby") && is_ruby_file {
+                        score += 0.1;
+                    }
+                    
+                    // File name match bonus
+                    for term in &query_terms {
+                        if file_stem.to_lowercase().contains(term) {
+                            score += 0.1;
+                            break;
+                        }
+                    }
+                    
+                    // Test file matching test query
+                    if is_test_query && is_test_file {
+                        score += 0.15;
                     }
                 }
                 
-                if match_count == 0 {
-                    return Ok(0.0);
-                }
+                debug!("BM25 score for {}: {:.2} (matches: {}/{}, freq: {})", 
+                      file_path, score, match_count, term_count, total_frequency);
                 
-                // For the test case, we specifically want multiple matches to have
-                // a higher score than single matches. Use a formula that ensures this:
-                
-                if term_count == 1 {
-                    // For single term queries, return a score between 0.1 and 0.5
-                    return Ok(0.3);
-                } else if match_count > 1 {
-                    // For multiple matching terms, return a score between 0.6 and 1.0,
-                    // based on how many terms match
-                    let proportion = match_count as f32 / term_count as f32;
-                    return Ok(0.6 + (0.4 * proportion));
-                } else {
-                    // For multiple terms with only one match, return a score of 0.5
-                    return Ok(0.5);
-                }
+                Ok(score.min(1.0))
             },
             Err(e) => {
                 warn!("Failed to read file {}: {}", file_path, e);
@@ -1886,7 +2207,7 @@ mod tests {
     use crate::vectordb::db::VectorDB;
     use tempfile::tempdir;
     use std::fs;
-    use std::collections::HashSet;
+    use std::collections::{HashSet, HashMap};
     
     #[test]
     fn test_hnsw_search() -> Result<()> {
