@@ -105,7 +105,29 @@ vectordb-cli code-search "database connection"
 
 # Search by code type
 vectordb-cli code-search "user authentication" --type function
+
+# Parse and search through code structure
+vectordb-cli parse-code "function update_user"
 ```
+
+### Understanding Search Options
+
+vectordb-cli offers different search modes optimized for various use cases:
+
+#### Regular Query (`query` command)
+- **Use Cases**: Better for conceptual, high-level searches where you're exploring ideas or topics rather than specific implementations. For example, "vector embedding concepts" or "algorithms for nearest neighbor search".
+- **Ranking Priorities**: Prioritizes semantic similarity and concept matching across documentation, comments, and code.
+- **Result Formatting**: Returns broader contextual snippets including comments and surrounding code to provide more context.
+
+#### Code Search (`code-search` command)
+- **Use Cases**: Optimized for finding specific implementation details, function definitions, or structural elements in code. Works better for queries like "clap Parser implementation for command arguments."
+- **Ranking Priorities**: Prioritizes code structure, symbols, function signatures, and implementation patterns.
+- **Result Formatting**: Specifically identifies relevant methods, provides code context, and formats the results to highlight implementation details.
+
+#### Parse Code (`parse-code` command)
+- **Use Cases**: Ideal for searching through code structure and understanding how code is organized. Works well for finding specific functions, classes, or types across your codebase.
+- **Ranking Priorities**: Focuses on code organization, symbol resolution, and structural relationships.
+- **Result Formatting**: Presents results organized by code structure, showing hierarchy and relationships between code elements.
 
 ### Configure Model
 
