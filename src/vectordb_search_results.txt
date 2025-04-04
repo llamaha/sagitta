@@ -1,0 +1,411 @@
+Clearing index...
+Database cleared!
+Indexing Rust code...
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+Query: "query about authentication"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "query about data processing"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "query about configuration"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+
+Testing Ruby in /home/adam/repos/gitlab/ee/app/controllers/admin
+-------------------
+Clearing index...
+Database cleared!
+Indexing Rust code...
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+Query: "code that verifies user permissions or handles authentication tokens"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "implementations for collecting metrics, logging events, or tracking user behavior"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "code that manages application settings, toggles features, or handles configuration"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+Clearing index...
+Database cleared!
+Indexing Rust code...
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+Query: "code that verifies user permissions or handles authentication tokens"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "implementations for collecting metrics, logging events, or tracking user behavior"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "code that manages application settings, toggles features, or handles configuration"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+Clearing index...
+Database cleared!
+Indexing Rust code...
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+Query: "code that verifies user permissions or handles authentication tokens"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "implementations for collecting metrics, logging events, or tracking user behavior"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+
+Query: "code that manages application settings, toggles features, or handles configuration"
+------------------------
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+------------------------
+Running: vectordb-cli clear 2>&1
+Command completed in 0s with status: 0
+Output:
+Database cleared!
+
+Running: vectordb-cli index ./ 2>&1
+Command completed in 0s with status: 0
+Output:
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+-----------------------------------------
+QUERY: "code that verifies user permissions or handles authentication tokens"
+-----------------------------------------
+Running: vectordb-cli query "code that verifies user permissions or handles authentication tokens" 2>&1
+Command completed in 0s with status: 0
+Output:
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "implementations for collecting metrics, logging events, or tracking user behavior"
+-----------------------------------------
+Running: vectordb-cli query "implementations for collecting metrics, logging events, or tracking user behavior" 2>&1
+Command completed in 0s with status: 0
+Output:
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "code that manages application settings, toggles features, or handles configuration"
+-----------------------------------------
+Running: vectordb-cli query "code that manages application settings, toggles features, or handles configuration" 2>&1
+Command completed in 0s with status: 0
+Output:
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+Running: vectordb-cli clear 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli clear
+Database cleared!
+
+Running: vectordb-cli index ./ 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli index ./
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+-----------------------------------------
+QUERY: "code that verifies user permissions or handles authentication tokens"
+-----------------------------------------
+Running: vectordb-cli query "code that verifies user permissions or handles authentication tokens" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that verifies user permissions or handles authentication tokens'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "implementations for collecting metrics, logging events, or tracking user behavior"
+-----------------------------------------
+Running: vectordb-cli query "implementations for collecting metrics, logging events, or tracking user behavior" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'implementations for collecting metrics, logging events, or tracking user behavior'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "code that manages application settings, toggles features, or handles configuration"
+-----------------------------------------
+Running: vectordb-cli query "code that manages application settings, toggles features, or handles configuration" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that manages application settings, toggles features, or handles configuration'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+Running: vectordb-cli clear 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli clear
+Database cleared!
+
+Running: vectordb-cli index ./ 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli index ./
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+-----------------------------------------
+QUERY: "code that verifies user permissions or handles authentication tokens"
+-----------------------------------------
+Running: vectordb-cli query "code that verifies user permissions or handles authentication tokens" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that verifies user permissions or handles authentication tokens'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "implementations for collecting metrics, logging events, or tracking user behavior"
+-----------------------------------------
+Running: vectordb-cli query "implementations for collecting metrics, logging events, or tracking user behavior" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'implementations for collecting metrics, logging events, or tracking user behavior'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "code that manages application settings, toggles features, or handles configuration"
+-----------------------------------------
+Running: vectordb-cli query "code that manages application settings, toggles features, or handles configuration" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that manages application settings, toggles features, or handles configuration'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+Running: vectordb-cli clear 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli clear
+Database cleared!
+
+Running: vectordb-cli index ./ 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli index ./
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+-----------------------------------------
+QUERY: "code that verifies user permissions or handles authentication tokens"
+-----------------------------------------
+Running: vectordb-cli query "code that verifies user permissions or handles authentication tokens" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that verifies user permissions or handles authentication tokens'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "implementations for collecting metrics, logging events, or tracking user behavior"
+-----------------------------------------
+Running: vectordb-cli query "implementations for collecting metrics, logging events, or tracking user behavior" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'implementations for collecting metrics, logging events, or tracking user behavior'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "code that manages application settings, toggles features, or handles configuration"
+-----------------------------------------
+Running: vectordb-cli query "code that manages application settings, toggles features, or handles configuration" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that manages application settings, toggles features, or handles configuration'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+Running: vectordb-cli clear 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli clear
+Database cleared!
+
+Running: vectordb-cli index ./ 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli index ./
+Indexing files in ./...
+Using fast embedding model (faster but less accurate)
+Using all 20 available CPUs for indexing...
+Found 0 files to index. Processing in parallel...
+Indexing complete!
+Indexing complete in 0.00 seconds!
+
+-----------------------------------------
+QUERY: "code that verifies user permissions or handles authentication tokens"
+-----------------------------------------
+Running: vectordb-cli query "code that verifies user permissions or handles authentication tokens" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that verifies user permissions or handles authentication tokens'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "implementations for collecting metrics, logging events, or tracking user behavior"
+-----------------------------------------
+Running: vectordb-cli query "implementations for collecting metrics, logging events, or tracking user behavior" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'implementations for collecting metrics, logging events, or tracking user behavior'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+
+-----------------------------------------
+QUERY: "code that manages application settings, toggles features, or handles configuration"
+-----------------------------------------
+Running: vectordb-cli query "code that manages application settings, toggles features, or handles configuration" 2>&1
+Command completed in 0s with status: 0
+Output:
++++ vectordb-cli query 'code that manages application settings, toggles features, or handles configuration'
+Limiting results to a maximum of 20
+Performing query search (combining semantic and lexical matching)...
+Using weights: vector=0.70, bm25=0.30
+No results found.
+
+

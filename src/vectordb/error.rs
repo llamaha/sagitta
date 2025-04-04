@@ -81,6 +81,12 @@ pub enum VectorDBError {
     
     #[error("Directory not found: {0}")]
     DirectoryNotFound(String),
+    
+    #[error("Repository error: {0}")]
+    RepositoryError(String),
+    
+    #[error("Error deserializing data: {0}")]
+    DeserializationError(String),
 }
 
 /// Conversion from syn::Error

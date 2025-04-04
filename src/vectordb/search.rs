@@ -57,10 +57,13 @@ pub struct SearchResult {
     pub similarity: f32,
     pub snippet: String,
     pub code_context: Option<String>, // Added code context
+    pub repository: Option<String>,   // Repository name
+    pub branch: Option<String>,       // Branch name
+    pub commit: Option<String>,       // Commit hash
 }
 
 pub struct Search {
-    db: VectorDB,
+    pub db: VectorDB,
     model: EmbeddingModel,
     code_parser: Option<CodeParser>,
     rust_analyzer: Option<RustAnalyzer>,
@@ -574,6 +577,9 @@ impl Search {
                         similarity,
                         snippet: String::new(),
                         code_context: None,
+                        repository: None,
+                        branch: None,
+                        commit: None,
                     }
                 })
                 .collect()
@@ -609,6 +615,9 @@ impl Search {
                         similarity,
                         snippet: String::new(),
                         code_context: None,
+                        repository: None,
+                        branch: None,
+                        commit: None,
                     }
                 })
                 .collect()
@@ -785,6 +794,9 @@ impl Search {
                     similarity: score,
                     snippet: String::new(),
                     code_context: None,
+                    repository: None,
+                    branch: None,
+                    commit: None,
                 });
             }
         }
@@ -2117,6 +2129,134 @@ impl Search {
     fn get_file_paths(&self) -> Vec<&String> {
         self.db.embeddings.keys().collect()
     }
+
+    /// Search across multiple repositories
+    pub fn multi_repo_search(&mut self, query: &str, options: SearchOptions) -> Result<Vec<SearchResult>> {
+        debug!("Performing multi-repository search for query: {}", query);
+        
+        let mut all_results = Vec::new();
+        
+        // Get repositories to search (clone to avoid borrow checker issues)
+        let repos_to_search = if let Some(repo_ids) = &options.repositories {
+            // Filter to requested repositories
+            repo_ids.iter()
+                .filter_map(|id| {
+                    // Clone each repository to avoid borrowing issues
+                    self.db.repo_manager.get_repository(id).cloned()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            // Use all active repositories (cloned)
+            self.db.repo_manager.list_active_repositories()
+                .into_iter()
+                .cloned()
+                .collect()
+        };
+        
+        if repos_to_search.is_empty() {
+            debug!("No repositories to search. Will search in standard mode.");
+            // If no repositories, just do a regular search
+            let results = self.hybrid_search_with_limit(
+                query, 
+                options.vector_weight, 
+                options.bm25_weight, 
+                options.max_results
+            )?;
+            return Ok(results);
+        }
+        
+        debug!("Searching across {} repositories", repos_to_search.len());
+        
+        // Save current DB state
+        let original_repo_id = self.db.current_repo_id().cloned();
+        let original_branch = self.db.current_branch().cloned();
+        
+        // Search each repository
+        for repo in repos_to_search {
+            debug!("Searching repository: {} ({})", repo.name, repo.id);
+            
+            // Determine which branches to search
+            let branches_to_search = if let Some(branches_map) = &options.branches {
+                if let Some(branches) = branches_map.get(&repo.id) {
+                    branches.clone()
+                } else {
+                    // If no branches specified for this repo, use active branch
+                    vec![repo.active_branch.clone()]
+                }
+            } else {
+                // Default to active branch
+                vec![repo.active_branch.clone()]
+            };
+            
+            debug!("Searching branches: {:?}", branches_to_search);
+            
+            // Search each branch
+            for branch in branches_to_search {
+                debug!("Searching branch: {}", branch);
+                
+                // Switch to this repo/branch context
+                match self.db.switch_repository(&repo.id, Some(&branch)) {
+                    Ok(_) => {
+                        // Perform search in this context
+                        let mut branch_results = self.hybrid_search_with_limit(
+                            query, 
+                            options.vector_weight, 
+                            options.bm25_weight, 
+                            options.max_results
+                        )?;
+                        
+                        // Add repository and branch information to results
+                        for result in &mut branch_results {
+                            result.repository = Some(repo.name.clone());
+                            result.branch = Some(branch.clone());
+                            
+                            // Add commit hash if available
+                            if let Some(commit) = repo.get_indexed_commit(&branch) {
+                                result.commit = Some(commit.clone());
+                            }
+                        }
+                        
+                        // Filter by file types if specified
+                        if let Some(file_types) = &options.file_types {
+                            branch_results.retain(|result| {
+                                let path = Path::new(&result.file_path);
+                                if let Some(ext) = path.extension() {
+                                    let ext_str = ext.to_string_lossy().to_string();
+                                    file_types.contains(&ext_str)
+                                } else {
+                                    false
+                                }
+                            });
+                        }
+                        
+                        // Add to combined results
+                        all_results.extend(branch_results);
+                    },
+                    Err(e) => {
+                        warn!("Failed to switch to repository {}, branch {}: {}", repo.name, branch, e);
+                    }
+                }
+            }
+        }
+        
+        // Restore original context if needed
+        if let (Some(repo_id), Some(branch)) = (original_repo_id, original_branch) {
+            debug!("Restoring original context: repository {}, branch {}", repo_id, branch);
+            let _ = self.db.switch_repository(&repo_id, Some(&branch));
+        }
+        
+        // Sort all results by similarity
+        all_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Limit to max results
+        if all_results.len() > options.max_results {
+            all_results.truncate(options.max_results);
+        }
+        
+        debug!("Found {} results across all repositories", all_results.len());
+        
+        Ok(all_results)
+    }
 }
 
 // New enum to define code search types
@@ -2130,6 +2270,29 @@ pub enum CodeSearchType {
     Action,     // Search for Rails controller actions
     Model,      // Search for Rails models
     Route,      // Search for Rails routes
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchOptions {
+    pub max_results: usize,
+    pub repositories: Option<Vec<String>>,
+    pub branches: Option<HashMap<String, Vec<String>>>,  // Repository ID -> [Branches]
+    pub file_types: Option<Vec<String>>,
+    pub vector_weight: Option<f32>,
+    pub bm25_weight: Option<f32>,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            max_results: 20,
+            repositories: None,
+            branches: None,
+            file_types: None,
+            vector_weight: None,
+            bm25_weight: None,
+        }
+    }
 }
 
 /// Normalize text by removing extra whitespace, converting to lowercase etc.
@@ -2423,6 +2586,9 @@ fn main() {
                     similarity,
                     snippet,
                     code_context: None,
+                    repository: None,
+                    branch: None,
+                    commit: None,
                 });
             }
         } else {
@@ -2438,6 +2604,9 @@ fn main() {
                     similarity,
                     snippet,
                     code_context: None,
+                    repository: None,
+                    branch: None,
+                    commit: None,
                 });
             }
         }
@@ -2670,18 +2839,27 @@ require_relative 'helper'
                 similarity: 0.9,
                 snippet: "Snippet 1".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file2.rs".to_string(),
                 similarity: 0.85,
                 snippet: "Snippet 2".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file3.rs".to_string(),
                 similarity: 0.8,
                 snippet: "Snippet 3".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         
@@ -2702,18 +2880,27 @@ require_relative 'helper'
                 similarity: 0.9,
                 snippet: "Snippet 1".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file2.rs".to_string(),
                 similarity: 0.7,
                 snippet: "Snippet 2".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file3.rs".to_string(),
                 similarity: 0.5,
                 snippet: "Snippet 3".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         
@@ -2737,18 +2924,27 @@ require_relative 'helper'
                 similarity: 0.9,
                 snippet: "Snippet 1".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file2.rs".to_string(),
                 similarity: 0.6,
                 snippet: "Snippet 2".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file3.rs".to_string(),
                 similarity: 0.3,
                 snippet: "Snippet 3".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         
@@ -2793,18 +2989,27 @@ require_relative 'helper'
                 similarity: 0.8,
                 snippet: function_snippet.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "struct.rs".to_string(),
                 similarity: 0.7, // Make initial score lower to avoid test flakiness
                 snippet: struct_snippet.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "impl.rs".to_string(),
                 similarity: 0.6, // Make initial score lower to avoid test flakiness
                 snippet: impl_snippet.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         
@@ -2847,18 +3052,27 @@ require_relative 'helper'
                 similarity: 0.9,
                 snippet: snippet1.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file2.rs".to_string(),
                 similarity: 0.8,
                 snippet: snippet2.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
                 file_path: "file3.rs".to_string(),
                 similarity: 0.7,
                 snippet: snippet3.to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         

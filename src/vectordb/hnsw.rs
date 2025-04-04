@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::{Duration, Instant};
+use log;
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,6 +515,14 @@ impl HNSWIndex {
                 self.entry_points[layer] = nodes_at_layer[0];
             }
         }
+    }
+
+    /// Mark the index as dirty, indicating it needs rebuilding
+    pub fn mark_dirty(&mut self) {
+        // This is a placeholder in the current implementation
+        // In a more comprehensive implementation, we would track whether
+        // the index needs rebuilding after deletions
+        log::debug!("HNSW index marked as dirty, will be rebuilt on next save");
     }
 }
 

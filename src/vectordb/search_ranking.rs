@@ -217,16 +217,22 @@ mod tests {
     fn test_path_ranking() {
         let mut results = vec![
             SearchResult {
-                file_path: "src/controllers/auth_controller.rb".to_string(),
-                similarity: 0.5,
-                snippet: "class AuthController".to_string(),
+                file_path: "src/utils/helpers.rs".to_string(),
+                similarity: 0.8,
+                snippet: "// Some code snippet".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
             SearchResult {
-                file_path: "src/models/user.rb".to_string(),
-                similarity: 0.5,
-                snippet: "class User".to_string(),
+                file_path: "src/test/test_parser.rs".to_string(),
+                similarity: 0.7,
+                snippet: "// Some code snippet".to_string(),
                 code_context: None,
+                repository: None,
+                branch: None,
+                commit: None,
             },
         ];
         

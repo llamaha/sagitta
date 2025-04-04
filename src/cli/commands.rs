@@ -1,5 +1,5 @@
 use clap::Parser;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use crate::vectordb::VectorDB;
 use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::search::{Search, CodeSearchType};
@@ -78,6 +78,14 @@ pub enum Command {
         /// File types to search (e.g. rs,rb,go)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
+        
+        /// Repository to search (can be specified multiple times)
+        #[arg(short = 'r', long = "repo", value_delimiter = ',')]
+        repositories: Option<Vec<String>>,
+        
+        /// Search across all repositories
+        #[arg(long = "all-repos")]
+        all_repositories: bool,
     },
 
     /// Code-aware search for functions, types, etc.
@@ -142,6 +150,81 @@ pub enum Command {
 
     /// Clear the database
     Clear,
+    
+    /// Repository management commands
+    Repo {
+        #[command(subcommand)]
+        command: RepoCommand,
+    },
+}
+
+#[derive(Parser, Debug)]
+pub enum RepoCommand {
+    /// Add a new repository
+    Add {
+        /// Path to the repository
+        #[arg(required = true)]
+        path: String,
+        
+        /// Repository name (optional, defaults to directory name)
+        #[arg(short = 'n', long = "name")]
+        name: Option<String>,
+        
+        /// File types to index (e.g. rs,rb,go)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',')]
+        file_types: Option<Vec<String>>,
+        
+        /// Embedding model type (fast, onnx)
+        #[arg(long = "model")]
+        model: Option<String>,
+    },
+    
+    /// Remove a repository
+    Remove {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+    },
+    
+    /// List repositories
+    List,
+    
+    /// Set the active repository
+    Use {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+        
+        /// Branch to switch to
+        #[arg(short = 'b', long = "branch")]
+        branch: Option<String>,
+    },
+    
+    /// Sync a repository
+    Sync {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+        
+        /// Branch to sync (defaults to active branch)
+        #[arg(short = 'b', long = "branch")]
+        branch: Option<String>,
+        
+        /// Sync all branches
+        #[arg(long = "all-branches")]
+        all_branches: bool,
+        
+        /// Force full reindexing
+        #[arg(long = "force")]
+        force: bool,
+    },
+    
+    /// Show repository status
+    Status {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+    },
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -276,7 +359,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
         }
-        Command::Query { query, max_results, vector_only, vector_weight, bm25_weight, file_types } => {
+        Command::Query { query, max_results, vector_only, vector_weight, bm25_weight, file_types, repositories, all_repositories } => {
             debug!("Executing Query command: \"{}\"", query);
             
             // Get the max_results value or use the default
@@ -303,87 +386,191 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     debug!("Successfully created embedding model: {:?}", model_type);
                     let mut search = Search::new(db, model);
                     
-                    // Determine search type based on flags
-                    let mut results = if vector_only {
-                        debug!("Performing vector-only search");
-                        println!("Performing vector-only search...");
-                        search.search_with_limit(&query, limit)?
-                    } else {
-                        debug!("Performing hybrid search (vector + BM25)");
-                        println!("Performing hybrid search (combining semantic and lexical matching)...");
-                        
-                        // Show weights being used
-                        let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
-                        let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
-                        debug!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
-                        println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
-                        
-                        search.hybrid_search_with_limit(&query, vector_weight, bm25_weight, limit)?
-                    };
-
-                    // Filter results by file type if specified
-                    if let Some(types) = file_types {
-                        if !types.is_empty() {
-                            debug!("Filtering results by file types: {:?}", types);
-                            println!("Filtering results by file types: {}", types.join(", "));
-                            results.retain(|result| {
-                                let path = Path::new(&result.file_path);
-                                if let Some(ext) = path.extension() {
-                                    let ext_str = ext.to_string_lossy().to_string();
-                                    types.contains(&ext_str)
-                                } else {
-                                    false
-                                }
-                            });
-                        }
-                    }
-
-                    if results.is_empty() {
-                        debug!("No results found for query: \"{}\"", query);
-                        println!("No results found.");
-                        return Ok(());
-                    }
-
-                    // Check if this is a method-related query
-                    let is_method_query = query.to_lowercase().contains("method") || 
-                                          query.to_lowercase().contains("function") ||
-                                          query.to_lowercase().contains("fn ");
-
-                    if is_method_query {
-                        debug!("Presenting method search results, {} results found", results.len());
-                        println!("\nSearch results for methods: {}\n", query);
-                    } else {
-                        debug!("Presenting general search results, {} results found", results.len());
-                        println!("\nSearch results for: {}\n", query);
-                    }
+                    // Check if we should do a multi-repository search
+                    let should_search_multiple = !search.db.repo_manager.list_repositories().is_empty() && 
+                                                (repositories.is_some() || all_repositories);
                     
-                    for (i, result) in results.iter().enumerate() {
-                        println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
+                    if should_search_multiple {
+                        debug!("Performing multi-repository search");
+                        println!("Searching across repositories...");
                         
-                        // Limit the snippet size to avoid displaying entire files
-                        let max_lines = 20; // Reasonable number of lines to display
-                        let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+                        // Create search options
+                        let mut search_options = crate::vectordb::search::SearchOptions {
+                            max_results: limit,
+                            file_types: file_types.clone(),
+                            vector_weight: if vector_only { Some(1.0) } else { vector_weight },
+                            bm25_weight: if vector_only { Some(0.0) } else { bm25_weight },
+                            repositories: None,
+                            branches: None,
+                        };
                         
-                        // If snippet is too large, only show a subset with indication
-                        if snippet_lines.len() > max_lines {
-                            // Show first few lines
-                            for line in &snippet_lines[0..max_lines/2] {
-                                println!("{}", line);
+                        // If specific repositories are specified, resolve them to IDs
+                        if let Some(repo_names) = repositories {
+                            if !repo_names.is_empty() {
+                                println!("Searching in repositories: {}", repo_names.join(", "));
+                                
+                                let repo_ids = repo_names.iter()
+                                    .filter_map(|name| {
+                                        match search.db.repo_manager.resolve_repo_name_to_id(name) {
+                                            Ok(id) => Some(id),
+                                            Err(_) => {
+                                                eprintln!("Warning: Repository '{}' not found", name);
+                                                None
+                                            }
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                
+                                search_options.repositories = Some(repo_ids);
                             }
-                            
-                            // Show ellipsis to indicate truncation
-                            println!("... [truncated {} lines] ...", snippet_lines.len() - max_lines);
-                            
-                            // Show last few lines
-                            for line in &snippet_lines[snippet_lines.len() - max_lines/2..] {
-                                println!("{}", line);
-                            }
-                        } else {
-                            // Show entire snippet if it's reasonably sized
-                            println!("{}", result.snippet);
+                        } else if all_repositories {
+                            println!("Searching across all repositories");
+                            // Just leave repositories as None to search all
                         }
                         
-                        println!();
+                        // Perform multi-repository search
+                        let results = search.multi_repo_search(&query, search_options)?;
+                        
+                        if results.is_empty() {
+                            debug!("No results found for query: \"{}\"", query);
+                            println!("No results found.");
+                            return Ok(());
+                        }
+                        
+                        // Display results
+                        println!("\nSearch results for: {}\n", query);
+                        
+                        for (i, result) in results.iter().enumerate() {
+                            let repo_info = if let Some(repo) = &result.repository {
+                                format!("[{}]", repo)
+                            } else {
+                                "".to_string()
+                            };
+                            
+                            let branch_info = if let Some(branch) = &result.branch {
+                                format!("({})", branch)
+                            } else {
+                                "".to_string()
+                            };
+                            
+                            println!("{}. {} {} {} (similarity: {:.2})", 
+                                   i + 1, 
+                                   result.file_path, 
+                                   repo_info,
+                                   branch_info,
+                                   result.similarity);
+                            
+                            // Limit the snippet size to avoid displaying entire files
+                            let max_lines = 20; // Reasonable number of lines to display
+                            let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+                            
+                            // If snippet is too large, only show a subset with indication
+                            if snippet_lines.len() > max_lines {
+                                // Show first few lines
+                                for line in &snippet_lines[0..max_lines/2] {
+                                    println!("{}", line);
+                                }
+                                
+                                // Show ellipsis to indicate truncation
+                                println!("... [truncated {} lines] ...", snippet_lines.len() - max_lines);
+                                
+                                // Show last few lines
+                                for line in &snippet_lines[snippet_lines.len() - max_lines/2..] {
+                                    println!("{}", line);
+                                }
+                            } else {
+                                // Show entire snippet if it's reasonably sized
+                                println!("{}", result.snippet);
+                            }
+                            
+                            println!();
+                        }
+                    } else {
+                        // Do a regular search
+                        debug!("Performing standard search (not multi-repository)");
+                        
+                        // Determine search type based on flags
+                        let mut results = if vector_only {
+                            debug!("Performing vector-only search");
+                            println!("Performing vector-only search...");
+                            search.search_with_limit(&query, limit)?
+                        } else {
+                            debug!("Performing hybrid search (vector + BM25)");
+                            println!("Performing hybrid search (combining semantic and lexical matching)...");
+                            
+                            // Show weights being used
+                            let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+                            let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+                            debug!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+                            println!("Using weights: vector={:.2}, bm25={:.2}", v_weight, b_weight);
+                            
+                            search.hybrid_search_with_limit(&query, vector_weight, bm25_weight, limit)?
+                        };
+                        
+                        // Filter results by file type if specified
+                        if let Some(types) = file_types {
+                            if !types.is_empty() {
+                                debug!("Filtering results by file types: {:?}", types);
+                                println!("Filtering results by file types: {}", types.join(", "));
+                                results.retain(|result| {
+                                    let path = Path::new(&result.file_path);
+                                    if let Some(ext) = path.extension() {
+                                        let ext_str = ext.to_string_lossy().to_string();
+                                        types.contains(&ext_str)
+                                    } else {
+                                        false
+                                    }
+                                });
+                            }
+                        }
+                        
+                        if results.is_empty() {
+                            debug!("No results found for query: \"{}\"", query);
+                            println!("No results found.");
+                            return Ok(());
+                        }
+                        
+                        // Check if this is a method-related query
+                        let is_method_query = query.to_lowercase().contains("method") || 
+                                            query.to_lowercase().contains("function") ||
+                                            query.to_lowercase().contains("fn ");
+                        
+                        if is_method_query {
+                            debug!("Presenting method search results, {} results found", results.len());
+                            println!("\nSearch results for methods: {}\n", query);
+                        } else {
+                            debug!("Presenting general search results, {} results found", results.len());
+                            println!("\nSearch results for: {}\n", query);
+                        }
+                        
+                        for (i, result) in results.iter().enumerate() {
+                            println!("{}. {} (similarity: {:.2})", i + 1, result.file_path, result.similarity);
+                            
+                            // Limit the snippet size to avoid displaying entire files
+                            let max_lines = 20; // Reasonable number of lines to display
+                            let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+                            
+                            // If snippet is too large, only show a subset with indication
+                            if snippet_lines.len() > max_lines {
+                                // Show first few lines
+                                for line in &snippet_lines[0..max_lines/2] {
+                                    println!("{}", line);
+                                }
+                                
+                                // Show ellipsis to indicate truncation
+                                println!("... [truncated {} lines] ...", snippet_lines.len() - max_lines);
+                                
+                                // Show last few lines
+                                for line in &snippet_lines[snippet_lines.len() - max_lines/2..] {
+                                    println!("{}", line);
+                                }
+                            } else {
+                                // Show entire snippet if it's reasonably sized
+                                println!("{}", result.snippet);
+                            }
+                            
+                            println!();
+                        }
                     }
                 },
                 Err(e) => {
@@ -727,6 +914,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             db.clear()?;
             println!("Database cleared successfully.");
         }
+        Command::Repo { command } => {
+            execute_repo_command(command, db)?
+        }
     }
     Ok(())
 }
@@ -825,6 +1015,319 @@ fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow
             
             Ok(EmbeddingModel::new())
         }
+    }
+}
+
+/// Execute repository management commands
+fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
+    match command {
+        RepoCommand::Add { path, name, file_types, model } => {
+            debug!("Adding repository: {}", path);
+            
+            // Verify path exists and is a git repository
+            let repo_path = PathBuf::from(&path);
+            if !repo_path.exists() {
+                return Err(anyhow!("Repository path does not exist: {}", path));
+            }
+            
+            let git_dir = repo_path.join(".git");
+            if !git_dir.exists() {
+                return Err(anyhow!("Not a git repository: {}", path));
+            }
+            
+            // Add the repository
+            match db.repo_manager.add_repository(repo_path, name.clone()) {
+                Ok(repo_id) => {
+                    println!("Repository added successfully: {}", name.clone().unwrap_or_else(|| path.clone()));
+                    println!("Repository ID: {}", repo_id);
+                    
+                    // Update file types if provided
+                    if let Some(types) = file_types {
+                        if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
+                            repo.file_types = types.clone();
+                            println!("File types set to: {}", types.join(", "));
+                        }
+                    }
+                    
+                    // Update model type if provided
+                    if let Some(model_type) = model {
+                        if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
+                            match model_type.to_lowercase().as_str() {
+                                "fast" => {
+                                    repo.embedding_model = Some(EmbeddingModelType::Fast);
+                                    println!("Using fast embedding model for this repository");
+                                },
+                                "onnx" => {
+                                    repo.embedding_model = Some(EmbeddingModelType::Onnx);
+                                    println!("Using ONNX embedding model for this repository");
+                                },
+                                _ => {
+                                    println!("Unknown model type: {}. Using default.", model_type);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Save changes
+                    db.repo_manager.save()?;
+                    
+                    println!("Use 'vectordb-cli repo sync {}' to index this repository", 
+                             name.unwrap_or_else(|| repo_id));
+                    
+                    Ok(())
+                },
+                Err(e) => Err(e)
+            }
+        },
+        
+        RepoCommand::Remove { repo } => {
+            debug!("Removing repository: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get repository name for display
+            let repo_name = db.repo_manager.get_repository(&repo_id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| repo.clone());
+            
+            // Remove the repository
+            db.repo_manager.remove_repository(&repo_id)?;
+            
+            println!("Repository '{}' removed successfully", repo_name);
+            
+            Ok(())
+        },
+        
+        RepoCommand::List => {
+            debug!("Listing repositories");
+            
+            let repos = db.repo_manager.list_repositories();
+            
+            if repos.is_empty() {
+                println!("No repositories configured");
+                return Ok(());
+            }
+            
+            println!("Configured repositories:");
+            println!("{:<36} {:<20} {:<10} {:<20}", "ID", "NAME", "ACTIVE", "BRANCHES");
+            println!("{}", "-".repeat(86));
+            
+            for repo in repos {
+                let active_marker = if repo.active { "Yes" } else { "No" };
+                let branch_count = repo.indexed_branches.len();
+                println!("{:<36} {:<20} {:<10} {:<20}", 
+                         repo.id, 
+                         repo.name,
+                         active_marker,
+                         if branch_count > 0 { 
+                             format!("{} indexed", branch_count) 
+                         } else { 
+                             "Not indexed".to_string() 
+                         });
+            }
+            
+            // Show active repository
+            if let Some(active_id) = db.repo_manager.get_active_repository_id() {
+                if let Some(active_repo) = db.repo_manager.get_repository(active_id) {
+                    println!("\nActive repository: {} ({})", active_repo.name, active_id);
+                }
+            }
+            
+            Ok(())
+        },
+        
+        RepoCommand::Use { repo, branch } => {
+            debug!("Setting active repository: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get the repository and clone necessary data
+            let repo_name;
+            let active_branch;
+            
+            {
+                let repo_config = db.repo_manager.get_repository(&repo_id)
+                    .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
+                
+                repo_name = repo_config.name.clone();
+                active_branch = repo_config.active_branch.clone();
+            }
+            
+            // Switch to this repository
+            db.switch_repository(&repo_id, branch.as_deref())?;
+            
+            println!("Switched to repository: {}", repo_name);
+            
+            if let Some(branch_name) = branch {
+                println!("Using branch: {}", branch_name);
+            } else {
+                println!("Using branch: {}", active_branch);
+            }
+            
+            Ok(())
+        },
+        
+        RepoCommand::Sync { repo, branch, all_branches, force } => {
+            debug!("Syncing repository: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get repository and clone necessary data
+            let repo_name;
+            let repo_path;
+            let active_branch;
+            
+            {
+                let repo_config = db.repo_manager.get_repository(&repo_id)
+                    .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
+                
+                repo_name = repo_config.name.clone();
+                repo_path = repo_config.path.clone();
+                active_branch = repo_config.active_branch.clone();
+            }
+            
+            if all_branches {
+                println!("Syncing all branches of repository '{}'...", repo_name);
+                
+                // Get git repo
+                let git_repo = crate::utils::git::GitRepo::new(repo_path)
+                    .map_err(|e| anyhow!("Failed to access git repository: {}", e))?;
+                
+                // Get all branches
+                let branches = git_repo.list_branches()
+                    .map_err(|e| anyhow!("Failed to list branches: {}", e))?;
+                
+                if branches.is_empty() {
+                    println!("No branches found in repository");
+                    return Ok(());
+                }
+                
+                println!("Found {} branches to sync", branches.len());
+                
+                // Create progress bar
+                let progress = indicatif::ProgressBar::new(branches.len() as u64);
+                progress.set_style(
+                    indicatif::ProgressStyle::default_bar()
+                        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} branches synced ({eta})")
+                        .unwrap()
+                        .progress_chars("#>-")
+                );
+                
+                // Sync each branch
+                for (i, branch_name) in branches.iter().enumerate() {
+                    progress.set_message(format!("Syncing branch {} ({}/{})", branch_name, i + 1, branches.len()));
+                    
+                    if force {
+                        db.index_repository_full(&repo_id, branch_name)?;
+                    } else {
+                        db.index_repository_changes(&repo_id, branch_name)?;
+                    }
+                    
+                    progress.inc(1);
+                }
+                
+                progress.finish_with_message(format!("Synced {} branches successfully", branches.len()));
+            } else {
+                // Determine which branch to sync
+                let branch_name = branch.as_deref().unwrap_or(&active_branch);
+                
+                println!("Syncing repository '{}' branch '{}'...", repo_name, branch_name);
+                
+                if force {
+                    println!("Performing full reindexing...");
+                    db.index_repository_full(&repo_id, branch_name)?;
+                } else {
+                    println!("Performing incremental indexing...");
+                    db.index_repository_changes(&repo_id, branch_name)?;
+                }
+                
+                println!("Repository synced successfully");
+            }
+            
+            Ok(())
+        },
+        
+        RepoCommand::Status { repo } => {
+            debug!("Showing repository status: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get repository and clone necessary data to prevent borrow checker issues
+            let repo_clone = db.repo_manager.get_repository(&repo_id)
+                .ok_or_else(|| anyhow!("Repository not found: {}", repo))?
+                .clone();
+            
+            println!("Repository: {} ({})", repo_clone.name, repo_id);
+            println!("Path: {}", repo_clone.path.display());
+            println!("Active branch: {}", repo_clone.active_branch);
+            println!("Status: {}", if repo_clone.active { "Active" } else { "Inactive" });
+            
+            if let Some(last_indexed) = repo_clone.last_indexed {
+                println!("Last indexed: {}", last_indexed.format("%Y-%m-%d %H:%M:%S"));
+            } else {
+                println!("Last indexed: Never");
+            }
+            
+            println!("File types: {}", repo_clone.file_types.join(", "));
+            
+            println!("Embedding model: {}", match repo_clone.embedding_model {
+                Some(EmbeddingModelType::Fast) => "Fast",
+                Some(EmbeddingModelType::Onnx) => "ONNX",
+                None => "Default",
+            });
+            
+            println!("\nIndexed branches:");
+            if repo_clone.indexed_branches.is_empty() {
+                println!("  No branches indexed yet");
+            } else {
+                for (branch, commit) in &repo_clone.indexed_branches {
+                    println!("  - {}: {}", branch, commit);
+                }
+            }
+            
+            // Check if there are any updates needed
+            println!("\nStatus check:");
+            
+            // Create git repo
+            match crate::utils::git::GitRepo::new(repo_clone.path.clone()) {
+                Ok(git_repo) => {
+                    // Check current branch
+                    if let Ok(current_branch) = git_repo.get_current_branch() {
+                        println!("Current branch: {}", current_branch);
+                        
+                        // Check if the branch is indexed
+                        if let Some(indexed_commit) = repo_clone.get_indexed_commit(&current_branch) {
+                            // Check if it needs reindexing
+                            match git_repo.needs_reindexing(&current_branch, indexed_commit) {
+                                Ok(needs_reindex) => {
+                                    if needs_reindex {
+                                        println!("⚠️ Branch '{}' needs reindexing", current_branch);
+                                        println!("Run 'vectordb-cli repo sync {}' to update the index", repo);
+                                    } else {
+                                        println!("✓ Branch '{}' index is up to date", current_branch);
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("⚠️ Could not determine if branch needs reindexing: {}", e);
+                                }
+                            }
+                        } else {
+                            println!("⚠️ Branch '{}' has not been indexed yet", current_branch);
+                            println!("Run 'vectordb-cli repo sync {}' to index this branch", repo);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("⚠️ Could not access git repository: {}", e);
+                }
+            }
+            
+            Ok(())
+        },
     }
 }
 

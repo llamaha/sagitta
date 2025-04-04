@@ -16,6 +16,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::AtomicBool;
 use std::io::Write;
 use log::{debug, info, warn, error, trace};
+use crate::vectordb::repo_manager::RepoManager;
 
 /// Relevance feedback data for a query-file pair
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -54,6 +55,9 @@ pub struct VectorDB {
     embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
     onnx_tokenizer_path: Option<PathBuf>,
+    pub repo_manager: RepoManager,
+    current_repo_id: Option<String>,
+    current_branch: Option<String>,
 }
 
 // Implement Clone for VectorDB
@@ -68,6 +72,9 @@ impl Clone for VectorDB {
             embedding_model_type: self.embedding_model_type.clone(),
             onnx_model_path: self.onnx_model_path.clone(),
             onnx_tokenizer_path: self.onnx_tokenizer_path.clone(),
+            repo_manager: self.repo_manager.clone(),
+            current_repo_id: self.current_repo_id.clone(),
+            current_branch: self.current_branch.clone(),
         }
     }
 }
@@ -153,6 +160,37 @@ impl VectorDB {
         debug!("Setting cache model type to: {:?}", embedding_model_type);
         cache.set_model_type(embedding_model_type.clone());
         
+        // Create the repository manager config path
+        let repo_manager_path = Path::new(&db_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("repositories.json");
+        
+        debug!("Creating repository manager at: {}", repo_manager_path.display());
+        
+        // Initialize the repository manager
+        let repo_manager = match RepoManager::new(repo_manager_path) {
+            Ok(manager) => {
+                debug!("Repository manager initialized successfully");
+                manager
+            },
+            Err(e) => {
+                error!("Failed to initialize repository manager: {}", e);
+                eprintln!("Warning: Failed to initialize repository manager: {}", e);
+                eprintln!("Creating a new empty repository manager.");
+                
+                // Create parent directory if needed
+                let parent = Path::new(&db_path).parent().unwrap_or_else(|| Path::new("."));
+                let _ = fs::create_dir_all(parent);
+                
+                // Create new empty manager with default path
+                let repo_config_path = parent.join("repositories.json");
+                RepoManager::new(repo_config_path).unwrap_or_else(|_| {
+                    panic!("Failed to create repository manager")
+                })
+            }
+        };
+        
         // Check for an HNSW index file
         let hnsw_path = Path::new(&db_path)
             .parent()
@@ -214,6 +252,9 @@ impl VectorDB {
             embedding_model_type,
             onnx_model_path,
             onnx_tokenizer_path,
+            repo_manager,
+            current_repo_id: None,
+            current_branch: None,
         })
     }
     
@@ -437,10 +478,7 @@ impl VectorDB {
             })?;
         
         let contents = fs::read_to_string(file_path)
-            .map_err(|e| VectorDBError::FileReadError {
-                path: file_path.to_path_buf(),
-                source: e,
-            })?;
+            .map_err(|e| VectorDBError::IOError(e))?;
             
         // Generate a single embedding for the entire file
         let embedding = model.embed(&contents)
@@ -463,281 +501,200 @@ impl VectorDB {
         Ok(())
     }
 
+    /// Directory indexing function with repository awareness
     pub fn index_directory(&mut self, dir: &str, file_types: &[String]) -> Result<()> {
         let dir_path = Path::new(dir);
-        
-        // Use all supported file types if none are specified
-        let file_types_to_use = if file_types.is_empty() {
-            VectorDB::get_supported_file_types()
-        } else {
-            file_types.to_vec()
-        };
-        
-        // Collect all eligible files first
-        let mut eligible_files = Vec::new();
-        for entry in WalkDir::new(dir_path) {
-            let entry = entry.map_err(|e| VectorDBError::DatabaseError(e.to_string()))?;
-            if entry.file_type().is_file() {
-                let path = entry.path();
-                if let Some(ext) = path.extension() {
-                    let ext = ext.to_string_lossy().to_string();
-                    if file_types_to_use.contains(&ext) {
-                        eligible_files.push(path.to_path_buf());
-                    }
-                }
-            }
+        if !dir_path.exists() || !dir_path.is_dir() {
+            return Err(VectorDBError::DirectoryNotFound(dir.to_string()));
         }
         
-        let file_count = eligible_files.len();
-        println!("Found {} files to index. Processing in parallel...", file_count);
-        
-        // Track if we were interrupted
-        let was_interrupted = Arc::new(AtomicBool::new(false));
-        let was_interrupted_clone = was_interrupted.clone();
-        
-        // Choose single-threaded or parallel indexing based on file count
-        if file_count < 10 {
-            // For small numbers of files, just process sequentially
-            for file_path in eligible_files {
-                self.index_file(&file_path)?;
-                
-                // Check for interruption
-                unsafe {
-                    if crate::cli::commands::INTERRUPT_RECEIVED {
-                        was_interrupted_clone.store(true, Ordering::SeqCst);
-                        println!("Interrupt received, saving progress...");
-                        self.save()?;
-                        break;
-                    }
-                }
-            }
-        } else {
-            // For parallel processing, we need to handle the ONNX model a bit differently
-            // since it might be expensive to create multiple instances
-            
-            // First configure the embedding model type for the thread-local model
-            let embedding_model_type = self.embedding_model_type.clone();
-            let onnx_model_path = self.onnx_model_path.clone();
-            let onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
-            
-            // Use parallel processing for larger file counts with thread-local embedding model
-            thread_local! {
-                static EMBEDDING_MODEL: RefCell<Option<EmbeddingModel>> = RefCell::new(None);
-            }
-            
-            // Shared resources with proper synchronization
-            let embeddings = Arc::new(Mutex::new(HashMap::new()));
-            let cache = Arc::new(Mutex::new(self.cache.clone()));
-            let hnsw_index_option = self.hnsw_index.as_ref().map(|index| {
-                let config = index.get_config();
-                Arc::new(Mutex::new(HNSWIndex::new(config)))
-            });
-            
-            // Track progress
-            let processed_files = Arc::new(AtomicUsize::new(0));
-            let save_triggered = Arc::new(AtomicBool::new(false));
-            
-            // Track ONNX loading errors for reporting
-            let onnx_loading_errors = Arc::new(AtomicBool::new(false));
-            let onnx_errors = Arc::new(Mutex::new(Vec::<String>::new()));
-            
-            // Create a progress bar
-            let progress_bar = ProgressBar::new(file_count as u64);
-            progress_bar.set_style(ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({eta})")
-                .unwrap()
-                .progress_chars("#>-"));
-                
-            // Periodically save progress to handle large indexing operations
-            let save_interval = std::cmp::max(file_count / 10, 100); // Save after every 10% or 100 files, whichever is larger
-            
-            eligible_files.par_iter().for_each(|file_path| {
-                // Skip if we've received an interrupt
-                unsafe {
-                    if crate::cli::commands::INTERRUPT_RECEIVED {
-                        was_interrupted_clone.store(true, Ordering::SeqCst);
-                        return;
-                    }
-                }
-                
-                // Get file path as string
-                let file_path_str = file_path.to_string_lossy().to_string();
-                
-                // Check if file is already in cache
-                let cached_embedding = cache.lock().unwrap().get(&file_path_str).map(|v| v.to_vec());
-                if let Some(embedding) = cached_embedding {
-                    embeddings.lock().unwrap().insert(file_path_str.clone(), embedding.clone());
-                    
-                    // Add to HNSW index if available
-                    if let Some(ref index_lock) = hnsw_index_option {
-                        index_lock.lock().unwrap().insert(embedding).ok();
-                    }
-                } else {
-                    // Not in cache, need to generate an embedding
-                    // Try to get or create the embedding model (thread-local)
-                    EMBEDDING_MODEL.with(|model_ref| {
-                        if model_ref.borrow().is_none() {
-                            // Initialize the model for this thread
-                            *model_ref.borrow_mut() = if embedding_model_type == EmbeddingModelType::Onnx {
-                                // Try to create an ONNX model
-                                match (onnx_model_path.as_ref(), onnx_tokenizer_path.as_ref()) {
-                                    (Some(model_path), Some(tokenizer_path)) => {
-                                        match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
-                                            Ok(model) => Some(model),
-                                            Err(e) => {
-                                                // Log the ONNX error and fall back to fast model
-                                                let error_msg = format!("ONNX model loading failed: {}", e);
-                                                onnx_errors.lock().unwrap().push(error_msg.clone());
-                                                onnx_loading_errors.store(true, Ordering::SeqCst);
-                                                eprintln!("{}", error_msg);
-                                                Some(EmbeddingModel::new())
-                                            }
-                                        }
-                                    },
-                                    _ => {
-                                        // Fallback to fast model if ONNX paths aren't available
-                                        let error_msg = "ONNX paths not fully set, falling back to fast embedding model".to_string();
-                                        onnx_errors.lock().unwrap().push(error_msg.clone());
-                                        onnx_loading_errors.store(true, Ordering::SeqCst);
-                                        eprintln!("{}", error_msg);
-                                        Some(EmbeddingModel::new())
-                                    }
-                                }
-                            } else {
-                                // Use fast model as requested
-                                Some(EmbeddingModel::new())
-                            };
-                        }
-                        
-                        if let Some(model) = &*model_ref.borrow() {
-                            if let Ok(contents) = fs::read_to_string(file_path) {
-                                if let Ok(embedding) = model.embed(&contents) {
-                                    // Get file hash for cache
-                                    if let Ok(file_hash) = EmbeddingCache::get_file_hash(file_path) {
-                                        // Store in both cache and database
-                                        let _ = cache.lock().unwrap().insert(file_path_str.clone(), embedding.clone(), file_hash);
-                                        embeddings.lock().unwrap().insert(file_path_str, embedding.clone());
-                                        
-                                        // Add to HNSW index if available
-                                        if let Some(index_lock) = &hnsw_index_option {
-                                            index_lock.lock().unwrap().insert(embedding).ok();
-                                        }
-                                    }
-                                }
+        // Count files to index
+        let mut file_count = 0;
+        for entry in WalkDir::new(dir_path) {
+            match entry {
+                Ok(entry) => {
+                    if entry.file_type().is_file() {
+                        if let Some(ext) = entry.path().extension() {
+                            let ext_str = ext.to_string_lossy().to_string();
+                            if file_types.contains(&ext_str) {
+                                file_count += 1;
                             }
                         }
-                    });
-                }
-                
-                let current = processed_files.fetch_add(1, Ordering::SeqCst) + 1;
-                progress_bar.set_position(current as u64);
-                
-                // Check for interruption or trigger periodic save
-                unsafe {
-                    if crate::cli::commands::INTERRUPT_RECEIVED || current % save_interval == 0 {
-                        save_triggered.store(true, Ordering::SeqCst);
                     }
-                }
-            });
-            
-            // Update main data structures with results from parallel processing
-            debug!("Updating main data structures with {} entries from parallel processing", embeddings.lock().unwrap().len());
-            self.embeddings.extend(embeddings.lock().unwrap().drain());
-            
-            // Update HNSW index if one was created in parallel
-            if let Some(index_lock) = hnsw_index_option {
-                self.hnsw_index = Some(index_lock.lock().unwrap().clone());
+                },
+                Err(_) => continue,
             }
-            
-            // Check if ONNX model loading failed and we need to update the database settings
-            if onnx_loading_errors.load(Ordering::SeqCst) {
-                if self.embedding_model_type == EmbeddingModelType::Onnx {
-                    // Print all collected errors
-                    println!("\nONNX Model Errors:");
-                    for error in onnx_errors.lock().unwrap().iter() {
-                        println!("  - {}", error);
-                    }
-                    
-                    // Warn that we're falling back to fast model for all embeddings
-                    println!("\nWARNING: Due to ONNX model errors, falling back to fast embedding model for all files.");
-                    println!("         To fix this, set a valid ONNX model using the 'model --onnx' command with correct paths.");
-                    
-                    // Update the model type to Fast since ONNX failed
-                    self.embedding_model_type = EmbeddingModelType::Fast;
-                }
-            }
-            
-            // Check if we need to save
-            if save_triggered.load(Ordering::SeqCst) || was_interrupted.load(Ordering::SeqCst) {
-                println!("Saving progress...");
-                self.save()?;
-            } else {
-                // Ensure we save even if no save was triggered during processing
-                debug!("Saving final database state with {} embeddings", self.embeddings.len());
-                self.save()?;
-            }
-            
-            progress_bar.finish();
         }
         
-        // Print completion message
-        if unsafe { crate::cli::commands::INTERRUPT_RECEIVED } {
-            println!("Indexing was interrupted, but progress has been saved.");
-        } else {
-            println!("Indexing complete!");
+        if file_count == 0 {
+            println!("No matching files found in the directory.");
+            return Ok(());
+        }
+        
+        println!("Found {} files to index.", file_count);
+        
+        // Create progress bar
+        let progress = indicatif::ProgressBar::new(file_count as u64);
+        progress.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files indexed ({eta})")
+                .unwrap()
+                .progress_chars("#>-")
+        );
+        
+        // Process files in parallel using a different approach that avoids borrowing self in the closure
+        let processed = AtomicUsize::new(0);
+        let interrupt = Arc::new(AtomicBool::new(false));
+        
+        let files: Vec<_> = WalkDir::new(dir_path)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.file_type().is_file() && match entry.path().extension() {
+                    Some(ext) => file_types.contains(&ext.to_string_lossy().to_string()),
+                    None => false,
+                }
+            })
+            .collect();
+        
+        // Process files sequentially to avoid borrow checker issues
+        let mut indexed_files = Vec::new();
+        for entry in &files {
+            if unsafe { crate::cli::commands::INTERRUPT_RECEIVED } || interrupt.load(Ordering::SeqCst) {
+                continue;
+            }
+            
+            let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+            
+            match self.index_file(path) {
+                Ok(_) => {
+                    // Update progress
+                    let count = processed.fetch_add(1, Ordering::SeqCst) + 1;
+                    progress.set_position(count as u64);
+                    
+                    // Show progress message
+                    if count % 10 == 0 || count == file_count {
+                        progress.println(format!("Indexed {}: {}", count, path_str));
+                    }
+                    
+                    indexed_files.push(path_str);
+                },
+                Err(e) => {
+                    // Show error but continue with other files
+                    progress.println(format!("Error indexing {}: {}", path_str, e));
+                }
+            }
+        }
+        
+        progress.finish_with_message(format!("Indexed {} files successfully", indexed_files.len()));
+        
+        // Save database after indexing
+        self.save()?;
+        
+        // Check if we're in a repository context and update the commit hash
+        if let (Some(repo_id), Some(branch)) = (&self.current_repo_id, &self.current_branch) {
+            debug!("Updating commit hash for repository {} branch {}", repo_id, branch);
+            
+            // Clone repo_id and branch to avoid borrow checker issues
+            let repo_id_clone = repo_id.clone();
+            let branch_clone = branch.clone();
+            
+            // Only update if we actually have a repository
+            if let Some(repo) = self.repo_manager.get_repository(&repo_id_clone) {
+                // Create a git repository object
+                if let Ok(git_repo) = crate::utils::git::GitRepo::new(repo.path.clone()) {
+                    // Get the current commit hash
+                    if let Ok(commit_hash) = git_repo.get_commit_hash(&branch_clone) {
+                        // Update the indexed commit hash
+                        self.repo_manager.update_indexed_commit(&repo_id_clone, &branch_clone, &commit_hash)?;
+                    }
+                }
+            }
         }
         
         Ok(())
     }
 
-    pub fn save(&self) -> Result<()> {
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = Path::new(&self.db_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| VectorDBError::DirectoryCreationError {
-                    path: parent.to_path_buf(),
-                    source: e,
-                })?;
+    /// Override the save method to handle repository-specific paths
+    pub fn save(&mut self) -> Result<()> {
+        debug!("Saving VectorDB to {}", self.db_path);
+        
+        // Create the parent directory if it doesn't exist
+        let path = Path::new(&self.db_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| VectorDBError::DirectoryCreationError {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
         }
         
-        // Save the HNSW index if it exists
-        if let Some(index) = &self.hnsw_index {
-            let hnsw_path = Path::new(&self.db_path)
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("hnsw_index.json");
-                
-            index.save_to_file(&hnsw_path)?;
-        }
-        
-        // Prepare database file
+        // Prepare the DB file
         let db_file = DBFile {
             embeddings: self.embeddings.clone(),
-            hnsw_config: self.hnsw_index.as_ref().map(|i| i.get_config()),
+            hnsw_config: self.hnsw_index.as_ref().map(|idx| idx.get_config()),
             feedback: Some(self.feedback.clone()),
             embedding_model_type: Some(self.embedding_model_type.clone()),
             onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         };
         
-        // Create temporary file for atomic write
-        let temp_path = format!("{}.tmp", self.db_path);
-        let json = serde_json::to_string_pretty(&db_file)
-            .map_err(VectorDBError::SerializationError)?;
+        // Serialize and save
+        let json = serde_json::to_string_pretty(&db_file)?;
+        fs::write(&self.db_path, &json).map_err(|e| VectorDBError::FileWriteError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        
+        // Save the HNSW index if present
+        if let Some(index) = &self.hnsw_index {
+            let hnsw_path = if self.is_in_repository_context() {
+                // Use repository-specific path
+                let repo_id = self.current_repo_id.as_ref().unwrap();
+                let branch = self.current_branch.as_ref().unwrap();
+                self.get_hnsw_path_for_repo(repo_id, branch)
+            } else {
+                // Use the original path
+                Path::new(&self.db_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("hnsw_index.json")
+            };
             
-        fs::write(&temp_path, json)
-            .map_err(|e| VectorDBError::FileWriteError {
-                path: Path::new(&temp_path).to_path_buf(),
-                source: e,
-            })?;
+            // Make sure the parent directory exists
+            if let Some(parent) = hnsw_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             
-        // Rename temporary file to database file
-        fs::rename(&temp_path, &self.db_path)
-            .map_err(|e| VectorDBError::FileWriteError {
-                path: Path::new(&self.db_path).to_path_buf(),
-                source: e,
-            })?;
+            debug!("Saving HNSW index to {}", hnsw_path.display());
+            if let Err(e) = index.save_to_file(&hnsw_path) {
+                error!("Failed to save HNSW index: {}", e);
+                eprintln!("Warning: Failed to save HNSW index: {}", e);
+            }
+        }
+        
+        // Save the repository manager if we're in a repository context
+        if self.is_in_repository_context() {
+            // Update the last_indexed timestamp for the current repository/branch
+            if let (Some(repo_id), Some(branch)) = (&self.current_repo_id, &self.current_branch) {
+                debug!("Updating last_indexed for repository {}, branch {}", repo_id, branch);
+                
+                // Only update if we actually have a repository manager
+                if let Some(repo) = self.repo_manager.get_repository_mut(repo_id) {
+                    repo.last_indexed = Some(chrono::Utc::now());
+                }
+            }
             
+            debug!("Saving repository manager");
+            if let Err(e) = self.repo_manager.save() {
+                error!("Failed to save repository manager: {}", e);
+                eprintln!("Warning: Failed to save repository manager: {}", e);
+            }
+        }
+        
+        // Save the cache
+        self.cache.save()?;
+        
         Ok(())
     }
 
@@ -1082,6 +1039,443 @@ impl VectorDB {
             "rb".to_string(),  // Ruby
             "go".to_string(),  // Go
         ]
+    }
+
+    /// Get the database path for a specific repository and branch
+    pub fn get_db_path_for_repo(&self, repo_id: &str, branch: &str) -> PathBuf {
+        let repo_name = self.repo_manager.get_repository(repo_id)
+            .map(|repo| repo.name.clone())
+            .unwrap_or_else(|| repo_id.to_string());
+        
+        Path::new(&self.db_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("repositories")
+            .join(repo_name)
+            .join(branch)
+            .join("db.json")
+    }
+    
+    /// Get the HNSW index path for a specific repository and branch
+    pub fn get_hnsw_path_for_repo(&self, repo_id: &str, branch: &str) -> PathBuf {
+        let repo_name = self.repo_manager.get_repository(repo_id)
+            .map(|repo| repo.name.clone())
+            .unwrap_or_else(|| repo_id.to_string());
+        
+        Path::new(&self.db_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("repositories")
+            .join(repo_name)
+            .join(branch)
+            .join("hnsw_index.json")
+    }
+    
+    /// Get the cache path for a specific repository and branch
+    pub fn get_cache_path_for_repo(&self, repo_id: &str, branch: &str) -> PathBuf {
+        let repo_name = self.repo_manager.get_repository(repo_id)
+            .map(|repo| repo.name.clone())
+            .unwrap_or_else(|| repo_id.to_string());
+        
+        Path::new(&self.db_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("repositories")
+            .join(repo_name)
+            .join(branch)
+            .join("cache.json")
+    }
+    
+    /// Switch to a specific repository and branch context
+    pub fn switch_repository(&mut self, repo_id: &str, branch: Option<&str>) -> Result<()> {
+        debug!("Switching to repository: {}", repo_id);
+        
+        // Get the repository
+        let repo = self.repo_manager.get_repository(repo_id)
+            .ok_or_else(|| VectorDBError::RepositoryError(
+                format!("Repository with ID '{}' not found", repo_id)
+            ))?;
+        
+        // Determine which branch to use
+        let branch_name = branch.unwrap_or(&repo.active_branch);
+        
+        debug!("Switching to branch: {}", branch_name);
+        
+        // Clone the necessary data to avoid borrow checker issues
+        let branch_name = branch_name.to_string();
+        let repo_path = repo.path.clone();
+        let repo_active_branch = repo.active_branch.clone();
+        
+        // If we're already in this repository and branch, nothing to do
+        if self.current_repo_id.as_deref() == Some(repo_id) && 
+           self.current_branch.as_deref() == Some(&branch_name) {
+            debug!("Already in repository {} branch {}", repo_id, branch_name);
+            return Ok(());
+        }
+        
+        // Save current state if we're in a repository context
+        if let (Some(current_repo), Some(current_branch)) = (&self.current_repo_id, &self.current_branch) {
+            debug!("Saving current state for repository {} branch {}", current_repo, current_branch);
+            
+            // Clone these values before calling save
+            let current_repo_clone = current_repo.clone();
+            let current_branch_clone = current_branch.clone();
+            
+            // Save the current state
+            let db_path = self.get_db_path_for_repo(&current_repo_clone, &current_branch_clone);
+            
+            // Create parent directory if needed
+            if let Some(parent) = db_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            
+            // Save manually rather than using self.save() to avoid borrowing issues
+            // This is a partial save that just writes the current database state
+            
+            // Prepare the DB file
+            let db_file = DBFile {
+                embeddings: self.embeddings.clone(),
+                hnsw_config: self.hnsw_index.as_ref().map(|idx| idx.get_config()),
+                feedback: Some(self.feedback.clone()),
+                embedding_model_type: Some(self.embedding_model_type.clone()),
+                onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            };
+            
+            // Serialize and save
+            let json = serde_json::to_string_pretty(&db_file)?;
+            fs::write(&db_path, &json).map_err(|e| VectorDBError::FileWriteError {
+                path: db_path.clone(),
+                source: e,
+            })?;
+            
+            // Save the HNSW index if present
+            if let Some(index) = &self.hnsw_index {
+                let hnsw_path = self.get_hnsw_path_for_repo(&current_repo_clone, &current_branch_clone);
+                if let Some(parent) = hnsw_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                
+                debug!("Saving HNSW index to {}", hnsw_path.display());
+                if let Err(e) = index.save_to_file(&hnsw_path) {
+                    error!("Failed to save HNSW index: {}", e);
+                    eprintln!("Warning: Failed to save HNSW index: {}", e);
+                }
+            }
+            
+            // Also save cache
+            self.cache.save()?;
+        }
+        
+        // Get the new DB path
+        let db_path = self.get_db_path_for_repo(repo_id, &branch_name);
+        debug!("New database path: {}", db_path.display());
+        
+        // Try to load the new database
+        if db_path.exists() {
+            debug!("Loading existing repository database");
+            
+            // Read the file
+            let contents = fs::read_to_string(&db_path)
+                .map_err(|e| VectorDBError::IOError(e))?;
+            
+            // Parse the JSON
+            let db_file: DBFile = serde_json::from_str(&contents)
+                .map_err(|e| VectorDBError::DeserializationError(e.to_string()))?;
+            
+            // Extract the data
+            self.embeddings = db_file.embeddings;
+            self.feedback = db_file.feedback.unwrap_or_default();
+            
+            // Handle model type
+            if let Some(model_type) = db_file.embedding_model_type {
+                self.embedding_model_type = model_type;
+            }
+            
+            // Handle ONNX paths
+            self.onnx_model_path = db_file.onnx_model_path.map(PathBuf::from);
+            self.onnx_tokenizer_path = db_file.onnx_tokenizer_path.map(PathBuf::from);
+            
+            // Load HNSW index if it exists
+            let hnsw_path = self.get_hnsw_path_for_repo(repo_id, &branch_name);
+            self.hnsw_index = if hnsw_path.exists() {
+                match HNSWIndex::load_from_file(&hnsw_path) {
+                    Ok(index) => Some(index),
+                    Err(e) => {
+                        warn!("Failed to load HNSW index: {}", e);
+                        // Create a new index with default config
+                        let mut index = HNSWIndex::new(HNSWConfig::default());
+                        // Populate with embeddings
+                        for (_, embedding) in &self.embeddings {
+                            let _ = index.insert(embedding.clone());
+                        }
+                        Some(index)
+                    }
+                }
+            } else if let Some(config) = db_file.hnsw_config {
+                // Create a new index with the config
+                let mut index = HNSWIndex::new(config);
+                // Populate with embeddings
+                for (_, embedding) in &self.embeddings {
+                    let _ = index.insert(embedding.clone());
+                }
+                Some(index)
+            } else {
+                None
+            };
+            
+            // Load cache
+            let cache_path = self.get_cache_path_for_repo(repo_id, &branch_name);
+            
+            // Try to load the cache, but handle potential errors
+            self.cache = if cache_path.exists() {
+                match EmbeddingCache::new(cache_path.to_string_lossy().to_string()) {
+                    Ok(cache) => cache,
+                    Err(e) => {
+                        warn!("Failed to load cache: {}", e);
+                        // Create a new cache
+                        EmbeddingCache::new(cache_path.to_string_lossy().to_string())?
+                    }
+                }
+            } else {
+                // Create a new cache
+                EmbeddingCache::new(cache_path.to_string_lossy().to_string())?
+            };
+            
+            // Configure the cache with the embedding model type
+            self.cache.set_model_type(self.embedding_model_type.clone());
+        } else {
+            debug!("No existing repository database, creating empty one");
+            
+            // Create a new empty database
+            self.embeddings = HashMap::new();
+            self.feedback = FeedbackData::default();
+            
+            // Set model type to the repository-specific one if available
+            if let Some(model_type) = repo.embedding_model.clone() {
+                self.embedding_model_type = model_type;
+            }
+            
+            // Create a new empty HNSW index
+            let config = HNSWConfig::default();
+            self.hnsw_index = Some(HNSWIndex::new(config));
+            
+            // Create a new empty cache
+            let cache_path = self.get_cache_path_for_repo(repo_id, &branch_name);
+            self.cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
+            self.cache.set_model_type(self.embedding_model_type.clone());
+        }
+        
+        // Update the repository and branch context
+        self.current_repo_id = Some(repo_id.to_string());
+        self.current_branch = Some(branch_name);
+        
+        // Update the active repository in the manager
+        self.repo_manager.set_active_repository(repo_id)?;
+        
+        // Update the db_path to point to the repository-specific path
+        self.db_path = db_path.to_string_lossy().to_string();
+        
+        Ok(())
+    }
+    
+    /// Switch to a different branch in the current repository
+    pub fn switch_branch(&mut self, branch: &str) -> Result<()> {
+        // Check if we're in a repository context
+        if let Some(repo_id) = self.current_repo_id.clone() {
+            debug!("Switching to branch {} in repository {}", branch, repo_id);
+            self.switch_repository(&repo_id, Some(branch))
+        } else {
+            Err(VectorDBError::RepositoryError(
+                "Not in a repository context".to_string()
+            ))
+        }
+    }
+    
+    /// Get the current repository ID
+    pub fn current_repo_id(&self) -> Option<&String> {
+        self.current_repo_id.as_ref()
+    }
+    
+    /// Get the current branch
+    pub fn current_branch(&self) -> Option<&String> {
+        self.current_branch.as_ref()
+    }
+    
+    /// Check if we're in a repository context
+    pub fn is_in_repository_context(&self) -> bool {
+        self.current_repo_id.is_some() && self.current_branch.is_some()
+    }
+
+    /// Index a repository on a specific branch
+    pub fn index_repository_full(&mut self, repo_id: &str, branch: &str) -> Result<()> {
+        debug!("Full indexing of repository {} branch {}", repo_id, branch);
+        
+        // Clone all necessary data to avoid borrow checker issues
+        let repo_data = {
+            // Get the repository
+            let repo = self.repo_manager.get_repository(repo_id)
+                .ok_or_else(|| VectorDBError::RepositoryError(
+                    format!("Repository with ID '{}' not found", repo_id)
+                ))?;
+            
+            // Clone what we need
+            (
+                repo.path.clone(),          // repo_path
+                repo.name.clone(),          // repo_name
+                if repo.file_types.is_empty() {
+                    vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()]
+                } else {
+                    repo.file_types.clone()
+                },                          // file_types
+                repo_id.to_string(),        // repo_id
+                branch.to_string()          // branch
+            )
+        };
+        
+        let (repo_path, repo_name, file_types, repo_id, branch) = repo_data;
+        
+        // Switch to this repository context
+        self.switch_repository(&repo_id, Some(&branch))?;
+        
+        // Create a git repository object
+        let git_repo = crate::utils::git::GitRepo::new(repo_path.clone())
+            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+        
+        // Get the current commit hash
+        let commit_hash = git_repo.get_commit_hash(&branch)
+            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+        
+        // Run a full indexing on the repository
+        info!("Indexing repository {} ({}), branch {} at commit {}",
+              repo_name, repo_id, branch, commit_hash);
+        
+        // Index the repository directory
+        self.index_directory(&repo_path.to_string_lossy(), &file_types)?;
+        
+        // Update the indexed commit hash
+        self.repo_manager.update_indexed_commit(&repo_id, &branch, &commit_hash)?;
+        
+        // Save the updates
+        self.save()?;
+        
+        info!("Repository {} branch {} indexed successfully", repo_name, branch);
+        
+        Ok(())
+    }
+
+    /// Index a repository incrementally based on changes
+    pub fn index_repository_changes(&mut self, repo_id: &str, branch: &str) -> Result<()> {
+        debug!("Incremental indexing of repository {} branch {}", repo_id, branch);
+        
+        // Clone all necessary data to avoid borrow checker issues
+        let repo_data = {
+            let repo = self.repo_manager.get_repository(repo_id)
+                .ok_or_else(|| VectorDBError::RepositoryError(
+                    format!("Repository with ID '{}' not found", repo_id)
+                ))?;
+            
+            // Clone what we need
+            (
+                repo.path.clone(),          // repo_path
+                repo.name.clone(),          // repo_name
+                repo.get_indexed_commit(branch).cloned(), // last_commit
+                if repo.file_types.is_empty() {
+                    vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()]
+                } else {
+                    repo.file_types.clone()
+                },                          // file_types
+                repo_id.to_string(),        // repo_id
+                branch.to_string()          // branch
+            )
+        };
+        
+        let (repo_path, repo_name, last_commit, file_types, repo_id, branch) = repo_data;
+        
+        // Create a git repository object
+        let git_repo = crate::utils::git::GitRepo::new(repo_path.clone())
+            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+        
+        // Get the current commit hash
+        let current_commit = git_repo.get_commit_hash(&branch)
+            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+        
+        // If no previous commit, do a full index
+        if last_commit.is_none() {
+            info!("No previous index found for repository {} branch {}, doing full index",
+                 repo_name, branch);
+            return self.index_repository_full(&repo_id, &branch);
+        }
+        
+        let last_commit = last_commit.unwrap();
+        
+        // If commits are the same, nothing to do
+        if last_commit == current_commit {
+            info!("Repository {} branch {} is already up to date at commit {}",
+                 repo_name, branch, current_commit);
+            return Ok(());
+        }
+        
+        // Switch to this repository context
+        self.switch_repository(&repo_id, Some(&branch))?;
+        
+        // Get the change set between commits
+        let changes = git_repo.get_change_set(&last_commit, &current_commit)
+            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+        
+        info!("Incremental indexing of repository {} branch {} from commit {} to {}",
+             repo_name, branch, last_commit, current_commit);
+        
+        info!("Changes detected: {} added, {} modified, {} deleted files",
+             changes.added_files.len(), changes.modified_files.len(), changes.deleted_files.len());
+        
+        // Process added and modified files
+        let files_to_process = [&changes.added_files[..], &changes.modified_files[..]].concat();
+        
+        // Filter for file types we care about
+        let filtered_files: Vec<_> = files_to_process.iter()
+            .filter(|path| {
+                if let Some(ext) = path.extension() {
+                    let ext_str = ext.to_string_lossy().to_string();
+                    file_types.contains(&ext_str)
+                } else {
+                    false
+                }
+            })
+            .collect();
+        
+        // Index each file
+        let total = filtered_files.len();
+        for (i, file_path) in filtered_files.iter().enumerate() {
+            debug!("Indexing file {}/{}: {}", i + 1, total, file_path.display());
+            if let Err(e) = self.index_file(file_path) {
+                warn!("Failed to index file {}: {}", file_path.display(), e);
+            }
+        }
+        
+        // Process deleted files
+        for file_path in &changes.deleted_files {
+            debug!("Removing deleted file from index: {}", file_path.display());
+            let path_str = file_path.to_string_lossy().to_string();
+            self.embeddings.remove(&path_str);
+            
+            // Also remove from HNSW index if present
+            // Note: We'd need to rebuild HNSW index to fully remove it, which is expensive
+            // So just flag that we need to rebuild on next save
+            if let Some(idx) = &mut self.hnsw_index {
+                idx.mark_dirty();
+            }
+        }
+        
+        // Update the indexed commit hash
+        self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
+        
+        // Save the updates
+        self.save()?;
+        
+        info!("Repository {} branch {} indexed successfully", repo_name, branch);
+        
+        Ok(())
     }
 }
 
