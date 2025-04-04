@@ -521,7 +521,7 @@ impl CodeStructureAnalyzer {
     /// Analyze Go files for code structure
     fn analyze_go_file(&self, content: &str, file_path: &str) -> CodeContext {
         let methods = self.extract_methods(content, &CodeLanguage::Go);
-        let types = self.extract_types(content, &CodeLanguage::Go);
+        let mut types = self.extract_types(content, &CodeLanguage::Go);
         let imports = self.extract_imports(content, &CodeLanguage::Go);
         
         // Process import blocks separately with a more specialized regex
@@ -566,9 +566,117 @@ impl CodeStructureAnalyzer {
         let mut all_imports = imports;
         all_imports.extend(additional_imports);
         
+        // Also look for struct methods (methods with receivers)
+        let struct_method_regex = regex::Regex::new(
+            r"(?m)^\s*func\s+\(([a-zA-Z0-9_]+)\s+\*?([a-zA-Z0-9_]+)\)\s+([a-zA-Z0-9_]+)\s*\("
+        ).unwrap_or_else(|_| {
+            warn!("Failed to compile Go struct method regex");
+            regex::Regex::new(r"x^").unwrap()
+        });
+        
+        let mut struct_methods = Vec::new();
+        for cap in struct_method_regex.captures_iter(content) {
+            if let (Some(_receiver_name), Some(receiver_type), Some(method_name)) = (cap.get(1), cap.get(2), cap.get(3)) {
+                struct_methods.push(MethodInfo {
+                    name: method_name.as_str().to_string(),
+                    span: (0, 0), // We'll calculate line numbers later
+                    signature: cap.get(0).map_or("", |m| m.as_str()).to_string(),
+                    containing_type: Some(receiver_type.as_str().to_string()),
+                    is_public: method_name.as_str().chars().next().map_or(false, |c| c.is_uppercase()),
+                });
+            }
+        }
+        
+        // Calculate line numbers for struct methods
+        for method in &mut struct_methods {
+            for (i, line) in lines.iter().enumerate() {
+                if line.contains(&method.signature) {
+                    method.span = (i + 1, i + 1); // Use 1-indexed line numbers
+                    break;
+                }
+            }
+        }
+        
+        // Combine regular functions and struct methods
+        let mut all_methods = methods;
+        all_methods.extend(struct_methods);
+        
+        // Extract interface methods
+        let interface_regex = regex::Regex::new(
+            r"(?m)^\s*type\s+([a-zA-Z0-9_]+)\s+interface\s*\{([^}]*)\}"
+        ).unwrap_or_else(|_| {
+            warn!("Failed to compile Go interface regex");
+            regex::Regex::new(r"x^").unwrap()
+        });
+        
+        let interface_method_regex = regex::Regex::new(
+            r"(?m)^\s*([a-zA-Z0-9_]+)\s*\([^)]*\)"
+        ).unwrap_or_else(|_| {
+            warn!("Failed to compile Go interface method regex");
+            regex::Regex::new(r"x^").unwrap()
+        });
+        
+        let mut interface_methods = Vec::new();
+        for cap in interface_regex.captures_iter(content) {
+            if let (Some(interface_name), Some(interface_body)) = (cap.get(1), cap.get(2)) {
+                let interface_type = interface_name.as_str().to_string();
+                
+                // Extract interface methods
+                for line in interface_body.as_str().lines() {
+                    if let Some(cap) = interface_method_regex.captures(line) {
+                        if let Some(method_name) = cap.get(1) {
+                            interface_methods.push(MethodInfo {
+                                name: method_name.as_str().to_string(),
+                                span: (0, 0), // Calculate later
+                                signature: cap.get(0).map_or("", |m| m.as_str()).to_string(),
+                                containing_type: Some(interface_type.clone()),
+                                is_public: method_name.as_str().chars().next().map_or(false, |c| c.is_uppercase()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Calculate line numbers for interface methods (approximate)
+        for method in &mut interface_methods {
+            if let Some(containing_type) = &method.containing_type {
+                for (i, line) in lines.iter().enumerate() {
+                    if line.contains(&format!("type {} interface", containing_type)) {
+                        // Interface definition found - check next few lines for method
+                        for j in i+1..std::cmp::min(i+20, lines.len()) {
+                            if lines[j].contains(&method.name) {
+                                method.span = (j + 1, j + 1);
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Add interface methods to the results
+        all_methods.extend(interface_methods);
+        
+        // Handle exported identifiers properly - in Go, uppercase first letter means public
+        for method in &mut all_methods {
+            method.is_public = method.name.chars().next().map_or(false, |c| c.is_uppercase());
+        }
+        
+        for type_info in &mut types {
+            type_info.kind = if type_info.name.contains("interface") {
+                TypeKind::Interface
+            } else if type_info.name.contains("struct") {
+                TypeKind::Struct
+            } else {
+                TypeKind::Unknown
+            };
+        }
+        
         CodeContext {
             file_path: file_path.to_string(),
-            methods,
+            methods: all_methods,
             types,
             imports: all_imports,
             language: CodeLanguage::Go,

@@ -349,7 +349,7 @@ impl Search {
         // Language-specific keywords
         let rust_keywords = ["rust", "cargo", "crate", "mod", "impl", "trait", "struct", "enum", "fn"];
         let ruby_keywords = ["ruby", "gem", "class", "module", "def", "end", "attr"];
-        let go_keywords = ["go", "golang", "func", "interface", "struct", "package", "import"];
+        let go_keywords = ["go", "golang", "func", "interface", "struct", "package", "import", "goroutine", "chan", "select", "go fmt", "gofmt", "gomod"];
         
         // Identify code elements in the query
         let code_elements: Vec<String> = code_keywords.iter()
@@ -462,6 +462,28 @@ impl Search {
             },
             QueryType::Generic => {
                 // No special handling for generic queries
+            }
+        }
+        
+        // For Go code, expand terms differently
+        if language_hints.contains(&"go".to_string()) {
+            match query_type {
+                QueryType::Function => {
+                    expanded_terms.push("func".to_string());
+                    expanded_terms.push("method".to_string());
+                    expanded_terms.push("receiver".to_string());
+                },
+                QueryType::Type => {
+                    expanded_terms.push("type".to_string());
+                    expanded_terms.push("struct".to_string());
+                    expanded_terms.push("interface".to_string());
+                },
+                QueryType::Implementation => {
+                    expanded_terms.push("implements".to_string());
+                    expanded_terms.push("interface".to_string());
+                    expanded_terms.push("method".to_string());
+                },
+                _ => {}
             }
         }
         
@@ -2533,3 +2555,4 @@ require_relative 'helper'
         Ok(())
     }
 } // End of mod tests
+
