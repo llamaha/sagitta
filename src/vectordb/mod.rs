@@ -11,5 +11,6 @@ pub mod onnx;
 pub mod search_ranking;
 pub mod code_structure;
 pub mod snippet_extractor;
+pub mod path_relevance;
 
 pub use db::VectorDB;

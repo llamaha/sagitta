@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use log::{debug, info, warn, error};
 use super::search::SearchResult;
+use super::path_relevance::{PathRelevanceScorer, ParsedPath, PathRelevanceConfig};
 
 /// Constants for ranking adjustments
 const FILENAME_EXACT_MATCH_BOOST: f32 = 2.0;
@@ -83,77 +84,24 @@ pub fn analyze_file_path(file_path: &str) -> (String, Vec<String>) {
 
 /// Apply filename and path-based ranking boosts
 pub fn apply_path_ranking(results: &mut Vec<SearchResult>, query: &str, weights: &PathComponentWeights) {
-    let query_terms: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    // Create a path relevance scorer
+    let scorer = PathRelevanceScorer::new();
     
     for result in results.iter_mut() {
         let file_path = &result.file_path;
-        let (filename, path_components) = analyze_file_path(file_path);
-        let mut boost_factor = 1.0;
         
-        // Check for exact filename match with query terms
-        for term in &query_terms {
-            if filename == *term {
-                boost_factor *= FILENAME_EXACT_MATCH_BOOST;
-                debug!("Exact filename match boost for {}: {}", file_path, FILENAME_EXACT_MATCH_BOOST);
-                break;
-            }
-        }
+        // Parse the path
+        let parsed_path = scorer.parse_path(file_path);
         
-        // Check for partial filename matches
-        for term in &query_terms {
-            if filename.contains(term) {
-                boost_factor *= FILENAME_PARTIAL_MATCH_BOOST;
-                debug!("Partial filename match boost for {}: {}", file_path, FILENAME_PARTIAL_MATCH_BOOST);
-                break;
-            }
-        }
+        // Calculate the relevance score
+        let relevance_factor = scorer.calculate_relevance(&parsed_path, query);
         
-        // Check for special terms in the filename
-        for (term, weight) in &weights.filename_terms {
-            if filename.contains(term) {
-                boost_factor *= weight;
-                debug!("Filename keyword '{}' boost for {}: {}", term, file_path, weight);
-            }
-        }
-        
-        // Check path components for special directories
-        for component in &path_components {
-            // Match path components against special directories
-            for (dir, weight) in &weights.special_directories {
-                if component.contains(dir) {
-                    boost_factor *= weight;
-                    debug!("Special directory '{}' boost for {}: {}", dir, file_path, weight);
-                }
-            }
-            
-            // Match path components against weighted terms
-            for (term, weight) in &weights.path_component_terms {
-                if component.contains(term) {
-                    boost_factor *= weight;
-                    debug!("Path component '{}' boost for {}: {}", term, file_path, weight);
-                }
-            }
-            
-            // Check if query terms are in path components
-            for term in &query_terms {
-                if component.contains(term) {
-                    boost_factor *= PATH_KEYWORD_BOOST;
-                    debug!("Query term '{}' in path boost for {}: {}", term, file_path, PATH_KEYWORD_BOOST);
-                    break;
-                }
-            }
-        }
-        
-        // Apply the calculated boost factor to the similarity score
+        // Apply the relevance factor to the similarity score
         let original_similarity = result.similarity;
-        result.similarity = (result.similarity * boost_factor).min(1.0);
+        result.similarity = (result.similarity * relevance_factor).min(1.0);
         
         if (result.similarity - original_similarity).abs() > 0.01 {
-            debug!("Applied path ranking to {}: {} -> {}", 
+            debug!("Applied path relevance to {}: {} -> {}", 
                 file_path, original_similarity, result.similarity);
         }
     }
