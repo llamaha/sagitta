@@ -25,6 +25,7 @@ pub enum CodeLanguage {
     TypeScript,
     Go,
     YAML,
+    Markdown,
     Unknown,
 }
 
@@ -103,6 +104,7 @@ impl CodeStructureAnalyzer {
                 self.analyze_js_ts_file(&content, file_path, language),
             CodeLanguage::Go => self.analyze_go_file(&content, file_path),
             CodeLanguage::YAML => self.analyze_yaml_file(&content, file_path),
+            CodeLanguage::Markdown => self.analyze_markdown_file(&content, file_path),
             CodeLanguage::Unknown => self.analyze_generic_file(&content, file_path),
         };
         
@@ -122,6 +124,7 @@ impl CodeStructureAnalyzer {
             Some("ts") | Some("tsx") => CodeLanguage::TypeScript,
             Some("go") => CodeLanguage::Go,
             Some("yml") | Some("yaml") => CodeLanguage::YAML,
+            Some("md") => CodeLanguage::Markdown,
             _ => CodeLanguage::Unknown,
         }
     }
@@ -152,6 +155,11 @@ impl CodeStructureAnalyzer {
                 // YAML doesn't have methods in the traditional sense,
                 // but we extract keys with function-like values
                 r"(?m)^\s*([a-zA-Z0-9_-]+):\s*\|\s*$"
+            },
+            CodeLanguage::Markdown => {
+                // Markdown doesn't have methods in the traditional sense,
+                // but we extract headings
+                r"(?m)^#+\s+([a-zA-Z0-9_]+)"
             },
             CodeLanguage::Unknown => {
                 // Generic pattern that might work across multiple languages
@@ -247,6 +255,17 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::Markdown => {
+                    if let Some(name) = cap.get(1) {
+                        methods.push(MethodInfo {
+                            name: name.as_str().to_string(),
+                            span: (0, 0),
+                            signature: cap.get(0).map_or("", |m| m.as_str()).to_string(),
+                            containing_type: None,
+                            is_public: true,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         methods.push(MethodInfo {
@@ -300,6 +319,11 @@ impl CodeStructureAnalyzer {
             CodeLanguage::YAML => {
                 // For YAML, treat top-level keys as "types"
                 (r"(?m)^([a-zA-Z0-9_-]+):\s*(?:$|\n|[\{\[])", TypeKind::Struct)
+            },
+            CodeLanguage::Markdown => {
+                // Markdown doesn't have types in the traditional sense,
+                // but we extract headings as "types"
+                (r"(?m)^#+\s+([a-zA-Z0-9_]+)", TypeKind::Unknown)
             },
             CodeLanguage::Unknown => {
                 (r"(?m)(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)", TypeKind::Unknown)
@@ -397,6 +421,16 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::Markdown => {
+                    if let Some(name) = cap.get(1) {
+                        types.push(TypeInfo {
+                            name: name.as_str().to_string(),
+                            kind: TypeKind::Unknown,
+                            span: (0, 0),
+                            containing_module: None,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         types.push(TypeInfo {
@@ -450,6 +484,11 @@ impl CodeStructureAnalyzer {
                 // Extract "import", "include" or "!include" in YAML
                 r#"(?m)^(?:import|include|!include):\s*['"]?([a-zA-Z0-9_./]+)['"]?"#
             },
+            CodeLanguage::Markdown => {
+                // Markdown doesn't have imports in the traditional sense,
+                // but we extract links as "imports"
+                r#"(?m)\[([^\]]+)\]\(([^)]+)\)"#
+            },
             CodeLanguage::Unknown => {
                 r#"(?m)(?:import|require|use|include)\s+['"]?([a-zA-Z0-9_./]+)['"]?"#
             },
@@ -487,6 +526,7 @@ impl CodeStructureAnalyzer {
                             !import.module_name.starts_with(".") && !import.module_name.starts_with("/"),
                         CodeLanguage::Go => !import.module_name.starts_with("."),
                         CodeLanguage::YAML => !import.module_name.starts_with("."),
+                        CodeLanguage::Markdown => !import.module_name.starts_with("."),
                         CodeLanguage::Unknown => false,
                     };
                     
@@ -735,6 +775,21 @@ impl CodeStructureAnalyzer {
             types,
             imports,
             language: CodeLanguage::YAML,
+        }
+    }
+    
+    /// Analyze Markdown files for code structure
+    fn analyze_markdown_file(&self, content: &str, file_path: &str) -> CodeContext {
+        let methods = self.extract_methods(content, &CodeLanguage::Markdown);
+        let types = self.extract_types(content, &CodeLanguage::Markdown);
+        let imports = self.extract_imports(content, &CodeLanguage::Markdown);
+        
+        CodeContext {
+            file_path: file_path.to_string(),
+            methods,
+            types,
+            imports,
+            language: CodeLanguage::Markdown,
         }
     }
     

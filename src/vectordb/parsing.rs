@@ -10,6 +10,8 @@ use tree_sitter_ruby::language as ruby_language;
 use tree_sitter_go::language as go_language;
 use tree_sitter_javascript::language as javascript_language;
 use tree_sitter_typescript::language_typescript as typescript_language;
+// We'll implement markdown parsing with regex instead of tree-sitter due to version incompatibility
+// use tree_sitter_markdown::language as markdown_language;
 // TODO: Fix YAML language support
 // use tree_sitter_yaml::LANGUAGE;
 use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, ItemTrait, UseTree};
@@ -99,6 +101,11 @@ pub struct CodeParser {
     ts_query_class: Query,
     ts_query_interface: Query,
     ts_query_type: Query,
+    // Markdown will use regex-based parsing instead of tree-sitter
+    // md_query_heading: Query,
+    // md_query_list: Query,
+    // md_query_code_block: Query,
+    // md_query_link: Query,
     // TODO: Fix YAML support
     // yaml_query_mapping: Query,
     // yaml_query_sequence: Query,
@@ -506,6 +513,30 @@ impl CodeParser {
             ts_query_class,
             ts_query_interface,
             ts_query_type,
+            // Markdown will use regex-based parsing instead of tree-sitter
+            // md_query_heading: Query::new(markdown_language, r#"
+            // (heading
+            //   level: (number) @level
+            //   content: (inline) @content
+            // ) @heading.def
+            // "#).expect("Invalid markdown heading query"),
+            // md_query_list: Query::new(markdown_language, r#"
+            // (list_item
+            //   bullet: (bullet) @bullet
+            //   content: (inline) @content
+            // ) @list_item.def
+            // "#).expect("Invalid markdown list query"),
+            // md_query_code_block: Query::new(markdown_language, r#"
+            // (code_block
+            //   content: (inline) @content
+            // ) @code_block.def
+            // "#).expect("Invalid markdown code block query"),
+            // md_query_link: Query::new(markdown_language, r#"
+            // (link
+            //   text: (text) @text
+            //   url: (url) @url
+            // ) @link.def
+            // "#).expect("Invalid markdown link query"),
             // yaml_query_mapping,
             // yaml_query_sequence,
         }
@@ -531,6 +562,7 @@ impl CodeParser {
             Some("go") => "go",
             Some("js") | Some("jsx") => "javascript",
             Some("ts") | Some("tsx") => "typescript",
+            Some("md") => "markdown",
             // TODO: Fix YAML support
             // Some("yml") | Some("yaml") => "yaml",
             // For testing purposes, treat any file as rust if no extension is provided
@@ -546,6 +578,7 @@ impl CodeParser {
             "go" => self.parse_go_file(&file_path, &content)?,
             "javascript" => self.parse_javascript_file(&file_path, &content)?,
             "typescript" => self.parse_typescript_file(&file_path, &content)?,
+            "markdown" => self.parse_markdown_file(&file_path, &content)?,
             // TODO: Fix YAML support
             // "yaml" => self.parse_yaml_file(&file_path, &content)?,
             _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
@@ -1641,6 +1674,104 @@ File: {}:{}",
         Ok(())
     }
 
+    /// Parse a Markdown file using regex patterns
+    fn parse_markdown_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+
+        // Extract headings using regex
+        let heading_regex = Regex::new(r"(?m)^(#{1,6})\s+(.+)$").unwrap();
+        for cap in heading_regex.captures_iter(content) {
+            let level = cap[1].len();
+            let heading_text = &cap[2];
+            
+            // Create a span for this heading
+            let span = self.create_span_from_regex_match(&cap[0], content, file_path);
+            
+            // Create a Function element for the heading
+            elements.push(CodeElement::Function {
+                name: format!("Heading level {}: {}", level, heading_text.trim()),
+                params: Vec::new(),
+                return_type: None,
+                body: heading_text.to_string(),
+                span,
+            });
+        }
+        
+        // Extract code blocks using regex
+        let code_block_regex = Regex::new(r"(?ms)```(?:\w+)?\n(.*?)\n```").unwrap();
+        for cap in code_block_regex.captures_iter(content) {
+            let code_content = &cap[1];
+            
+            // Create a span for this code block
+            let span = self.create_span_from_regex_match(&cap[0], content, file_path);
+            
+            // Create a Function element for the code block
+            elements.push(CodeElement::Function {
+                name: format!("Code block"),
+                params: Vec::new(),
+                return_type: None,
+                body: code_content.to_string(),
+                span,
+            });
+        }
+        
+        // Extract links using regex
+        let link_regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+        for cap in link_regex.captures_iter(content) {
+            let link_text = &cap[1];
+            let link_url = &cap[2];
+            
+            // Create a span for this link
+            let span = self.create_span_from_regex_match(&cap[0], content, file_path);
+            
+            // Create an Import element for the link
+            elements.push(CodeElement::Import {
+                path: format!("{} -> {}", link_text.trim(), link_url.trim()),
+                span,
+            });
+            
+            // Add the URL as a dependency
+            dependencies.insert(link_url.trim().to_string());
+        }
+        
+        // Add the parsed file to the map
+        self.parsed_files.insert(file_path.clone(), ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "markdown".to_string(),
+        });
+        
+        Ok(())
+    }
+    
+    /// Create a CodeSpan from a regex match
+    fn create_span_from_regex_match(&self, matched_text: &str, full_content: &str, file_path: &PathBuf) -> CodeSpan {
+        // Find the start of the match in the content
+        let start_pos = full_content.find(matched_text).unwrap_or(0);
+        
+        // Calculate line and column for start position
+        let content_before = &full_content[..start_pos];
+        let start_line = content_before.matches('\n').count();
+        let last_newline = content_before.rfind('\n').unwrap_or(0);
+        let start_column = if last_newline == 0 { start_pos } else { start_pos - last_newline - 1 };
+        
+        // Calculate line and column for end position
+        let end_pos = start_pos + matched_text.len();
+        let content_before_end = &full_content[..end_pos];
+        let end_line = content_before_end.matches('\n').count();
+        let last_newline_end = content_before_end.rfind('\n').unwrap_or(0);
+        let end_column = if last_newline_end == 0 { end_pos } else { end_pos - last_newline_end - 1 };
+        
+        CodeSpan {
+            file_path: file_path.clone(),
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        }
+    }
 }
 
 impl Default for CodeParser {
