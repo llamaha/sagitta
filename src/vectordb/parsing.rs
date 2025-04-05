@@ -10,6 +10,8 @@ use tree_sitter_ruby::language as ruby_language;
 use tree_sitter_go::language as go_language;
 use tree_sitter_javascript::language as javascript_language;
 use tree_sitter_typescript::language_typescript as typescript_language;
+// TODO: Fix YAML language support
+// use tree_sitter_yaml::LANGUAGE;
 use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, ItemTrait, UseTree};
 use syn::parse_file;
 use walkdir;
@@ -97,6 +99,9 @@ pub struct CodeParser {
     ts_query_class: Query,
     ts_query_interface: Query,
     ts_query_type: Query,
+    // TODO: Fix YAML support
+    // yaml_query_mapping: Query,
+    // yaml_query_sequence: Query,
 }
 
 /// Advanced Rust code analyzer using syn crate
@@ -464,6 +469,26 @@ impl CodeParser {
         let ts_query_type = Query::new(ts_lang,
             "(type_alias_declaration name: (type_identifier) @type.name) @type.def").expect("Invalid TypeScript type query");
 
+        // TODO: Fix YAML support
+        // Load YAML grammar
+        // let yaml_lang = LANGUAGE();
+        // 
+        // // Queries for YAML code elements
+        // let yaml_query_mapping = Query::new(yaml_lang,
+        //     r#"
+        //     (mapping_node
+        //       key: (scalar) @key
+        //       value: (scalar) @value
+        //     ) @mapping.def
+        //     "#).expect("Invalid YAML mapping query");
+        // 
+        // let yaml_query_sequence = Query::new(yaml_lang,
+        //     r#"
+        //     (sequence_node
+        //       (scalar) @value
+        //     ) @sequence.def
+        //     "#).expect("Invalid YAML sequence query");
+
         CodeParser {
             parser,
             parsed_files: HashMap::new(),
@@ -481,6 +506,8 @@ impl CodeParser {
             ts_query_class,
             ts_query_interface,
             ts_query_type,
+            // yaml_query_mapping,
+            // yaml_query_sequence,
         }
     }
 
@@ -504,6 +531,8 @@ impl CodeParser {
             Some("go") => "go",
             Some("js") | Some("jsx") => "javascript",
             Some("ts") | Some("tsx") => "typescript",
+            // TODO: Fix YAML support
+            // Some("yml") | Some("yaml") => "yaml",
             // For testing purposes, treat any file as rust if no extension is provided
             None => "rust",
             // Add more languages as needed
@@ -517,6 +546,8 @@ impl CodeParser {
             "go" => self.parse_go_file(&file_path, &content)?,
             "javascript" => self.parse_javascript_file(&file_path, &content)?,
             "typescript" => self.parse_typescript_file(&file_path, &content)?,
+            // TODO: Fix YAML support
+            // "yaml" => self.parse_yaml_file(&file_path, &content)?,
             _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
         }
 
@@ -1609,6 +1640,7 @@ File: {}:{}",
 
         Ok(())
     }
+
 }
 
 impl Default for CodeParser {

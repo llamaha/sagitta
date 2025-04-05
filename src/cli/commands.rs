@@ -32,7 +32,7 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
 
-        /// File types to index (e.g. rs,rb,go)
+        /// File types to index (e.g. rs,rb,go,yml,yaml)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Vec<String>,
         
@@ -128,8 +128,8 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
         
-        /// File types to parse (e.g. rs,rb,go)
-        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs,rb,go")]
+        /// File types to parse (e.g. rs,rb,go,yml,yaml)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs,rb,go,yml,yaml")]
         file_types: Vec<String>,
         
         /// Show functions defined in the code
@@ -170,7 +170,7 @@ pub enum RepoCommand {
         #[arg(short = 'n', long = "name")]
         name: Option<String>,
         
-        /// File types to index (e.g. rs,rb,go)
+        /// File types to index (e.g. rs,rb,go,yml,yaml)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
         

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use log::{debug, info, warn, error};
 use anyhow::Result;
+use serde::{Serialize, Deserialize};
 
 /// Represents code context extracted from a file
 #[derive(Debug, Clone)]
@@ -14,7 +15,8 @@ pub struct CodeContext {
     pub language: CodeLanguage,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Supported programming languages
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CodeLanguage {
     Rust,
     Ruby,
@@ -22,6 +24,7 @@ pub enum CodeLanguage {
     JavaScript,
     TypeScript,
     Go,
+    YAML,
     Unknown,
 }
 
@@ -99,6 +102,7 @@ impl CodeStructureAnalyzer {
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => 
                 self.analyze_js_ts_file(&content, file_path, language),
             CodeLanguage::Go => self.analyze_go_file(&content, file_path),
+            CodeLanguage::YAML => self.analyze_yaml_file(&content, file_path),
             CodeLanguage::Unknown => self.analyze_generic_file(&content, file_path),
         };
         
@@ -117,6 +121,7 @@ impl CodeStructureAnalyzer {
             Some("js") => CodeLanguage::JavaScript,
             Some("ts") | Some("tsx") => CodeLanguage::TypeScript,
             Some("go") => CodeLanguage::Go,
+            Some("yml") | Some("yaml") => CodeLanguage::YAML,
             _ => CodeLanguage::Unknown,
         }
     }
@@ -142,6 +147,11 @@ impl CodeStructureAnalyzer {
             },
             CodeLanguage::Go => {
                 r"(?m)^\s*func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*\("
+            },
+            CodeLanguage::YAML => {
+                // YAML doesn't have methods in the traditional sense,
+                // but we extract keys with function-like values
+                r"(?m)^\s*([a-zA-Z0-9_-]+):\s*\|\s*$"
             },
             CodeLanguage::Unknown => {
                 // Generic pattern that might work across multiple languages
@@ -226,6 +236,17 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::YAML => {
+                    if let Some(name) = cap.get(1) {
+                        methods.push(MethodInfo {
+                            name: name.as_str().to_string(),
+                            span: (0, 0),
+                            signature: cap.get(0).map_or("", |m| m.as_str()).to_string(),
+                            containing_type: None,
+                            is_public: true,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         methods.push(MethodInfo {
@@ -275,6 +296,10 @@ impl CodeStructureAnalyzer {
             },
             CodeLanguage::Go => {
                 (r"(?m)^\s*type\s+([a-zA-Z0-9_]+)\s+(struct|interface|\w+)", TypeKind::Struct)
+            },
+            CodeLanguage::YAML => {
+                // For YAML, treat top-level keys as "types"
+                (r"(?m)^([a-zA-Z0-9_-]+):\s*(?:$|\n|[\{\[])", TypeKind::Struct)
             },
             CodeLanguage::Unknown => {
                 (r"(?m)(?:class|struct|interface|enum)\s+([a-zA-Z0-9_]+)", TypeKind::Unknown)
@@ -362,6 +387,16 @@ impl CodeStructureAnalyzer {
                         });
                     }
                 },
+                CodeLanguage::YAML => {
+                    if let Some(name) = cap.get(1) {
+                        types.push(TypeInfo {
+                            name: name.as_str().to_string(),
+                            kind: TypeKind::Struct,
+                            span: (0, 0),
+                            containing_module: None,
+                        });
+                    }
+                },
                 CodeLanguage::Unknown => {
                     if let Some(name) = cap.get(1) {
                         types.push(TypeInfo {
@@ -411,6 +446,10 @@ impl CodeStructureAnalyzer {
             CodeLanguage::Go => {
                 r#"(?m)^\s*import\s+(?:"([^"]+)"|(\((?:\s*"[^"]+"\s*)+\)))"#
             },
+            CodeLanguage::YAML => {
+                // Extract "import", "include" or "!include" in YAML
+                r#"(?m)^(?:import|include|!include):\s*['"]?([a-zA-Z0-9_./]+)['"]?"#
+            },
             CodeLanguage::Unknown => {
                 r#"(?m)(?:import|require|use|include)\s+['"]?([a-zA-Z0-9_./]+)['"]?"#
             },
@@ -447,6 +486,7 @@ impl CodeStructureAnalyzer {
                         CodeLanguage::JavaScript | CodeLanguage::TypeScript => 
                             !import.module_name.starts_with(".") && !import.module_name.starts_with("/"),
                         CodeLanguage::Go => !import.module_name.starts_with("."),
+                        CodeLanguage::YAML => !import.module_name.starts_with("."),
                         CodeLanguage::Unknown => false,
                     };
                     
@@ -680,6 +720,21 @@ impl CodeStructureAnalyzer {
             types,
             imports: all_imports,
             language: CodeLanguage::Go,
+        }
+    }
+    
+    /// Analyze YAML files for code structure
+    fn analyze_yaml_file(&self, content: &str, file_path: &str) -> CodeContext {
+        let methods = self.extract_methods(content, &CodeLanguage::Unknown);
+        let types = self.extract_types(content, &CodeLanguage::Unknown);
+        let imports = self.extract_imports(content, &CodeLanguage::Unknown);
+        
+        CodeContext {
+            file_path: file_path.to_string(),
+            methods,
+            types,
+            imports,
+            language: CodeLanguage::YAML,
         }
     }
     
