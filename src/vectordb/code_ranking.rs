@@ -60,7 +60,7 @@ impl Default for RankingConfig {
         let mut file_type_weights = HashMap::new();
         // Common implementation file extensions
         file_type_weights.insert("rs".to_string(), 1.2);   // Rust
-        file_type_weights.insert("go".to_string(), 1.2);   // Go
+        file_type_weights.insert("go".to_string(), 1.25);  // Go (increased from 1.2)
         file_type_weights.insert("py".to_string(), 1.2);   // Python
         file_type_weights.insert("rb".to_string(), 1.2);   // Ruby
         file_type_weights.insert("js".to_string(), 1.2);   // JavaScript

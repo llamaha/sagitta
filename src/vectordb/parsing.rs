@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tree_sitter::{Parser, Node, Query, QueryCursor};
+use tree_sitter::{Parser, Node, Query, QueryCursor, Tree};
 use serde::{Serialize, Deserialize};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
@@ -15,6 +15,7 @@ use syn::parse_file;
 use walkdir;
 use syn::spanned::Spanned;
 use regex::Regex;
+use log::{debug, info, warn, error};
 
 /// Representation of a code element in the AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1141,11 +1142,28 @@ File: {}:{}",
             let body = content[func_node.byte_range()].to_string();
             let span = self.node_to_span(func_node, file_path);
             
+            // Extract parameters (in a more Go-specific way)
+            let mut params = Vec::new();
+            if let Some(param_list) = self.find_node(func_node, "parameter_list") {
+                let mut cursor = param_list.walk();
+                for child in param_list.children(&mut cursor) {
+                    if child.kind() == "parameter_declaration" {
+                        params.push(content[child.byte_range()].to_string());
+                    }
+                }
+            }
+            
+            // Determine return type
+            let mut return_type = None;
+            if let Some(result) = self.find_node(func_node, "result") {
+                return_type = Some(content[result.byte_range()].to_string().trim().to_string());
+            }
+            
             // Add function to elements
             elements.push(CodeElement::Function {
                 name: func_name,
-                params: Vec::new(), // We're keeping this simple for now
-                return_type: None,
+                params,
+                return_type,
                 body,
                 span,
             });
@@ -1182,19 +1200,98 @@ File: {}:{}",
                 None => continue,
             };
             
+            // Extract struct fields
+            let mut fields = Vec::new();
+            if let Some(field_list) = self.find_node(struct_node, "field_declaration_list") {
+                let mut cursor = field_list.walk();
+                for child in field_list.children(&mut cursor) {
+                    if child.kind() == "field_declaration" {
+                        // Extract field name and type
+                        let field_name = self.find_node(child, "field_identifier")
+                            .map(|n| content[n.byte_range()].to_string());
+                        
+                        let field_type = self.find_node(child, "type")
+                            .map(|n| content[n.byte_range()].to_string());
+                        
+                        if let (Some(name), Some(typ)) = (field_name, field_type) {
+                            fields.push((name, typ));
+                        }
+                    }
+                }
+            }
+            
             // Create code span
             let span = self.node_to_span(struct_node, file_path);
             
             // Add struct to elements
             elements.push(CodeElement::Struct {
                 name: struct_name,
-                fields: Vec::new(), // We're keeping this simple for now
-                methods: Vec::new(),
+                fields,
+                methods: Vec::new(), // We'll find methods later
                 span,
             });
         }
         
-        // Extract imports
+        // Extract interfaces
+        let mut query_cursor = QueryCursor::new();
+        let matches = query_cursor.matches(&self.go_query_interface, tree.root_node(), content.as_bytes());
+        
+        for query_match in matches {
+            // Get the interface name
+            let interface_name = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_interface.capture_names()[capture.index as usize].as_str();
+                if capture_name == "interface.name" {
+                    Some(content[capture.node.byte_range()].to_string())
+                } else {
+                    None
+                }
+            }) {
+                Some(name) => name,
+                None => continue,
+            };
+            
+            // Get the interface definition node
+            let interface_node = match query_match.captures.iter().find_map(|capture| {
+                let capture_name = self.go_query_interface.capture_names()[capture.index as usize].as_str();
+                if capture_name == "interface.def" {
+                    Some(capture.node)
+                } else {
+                    None
+                }
+            }) {
+                Some(node) => node,
+                None => continue,
+            };
+            
+            // Create a code span
+            let span = self.node_to_span(interface_node, file_path);
+            
+            // Extract methods from the interface (simplistic approach)
+            let interface_text = content[interface_node.byte_range()].to_string();
+            let methods = interface_text.lines()
+                .filter_map(|line| {
+                    let line = line.trim();
+                    // Simple pattern matching for method signatures in interfaces
+                    if line.contains("(") && line.contains(")") && !line.contains("type") && !line.contains("interface") {
+                        line.split('(').next().map(|s| s.trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            
+            // Add interface as a trait-like element
+            elements.push(CodeElement::Trait {
+                name: interface_name,
+                methods,
+                span,
+            });
+        }
+        
+        // Find struct methods (methods with receivers)
+        self.extract_go_struct_methods(&tree.root_node(), content, file_path, &mut elements);
+        
+        // Extract imports using specialized method
         self.extract_go_imports(&tree.root_node(), content, &mut elements, &mut dependencies);
 
         // Create the parsed file representation
@@ -1211,6 +1308,68 @@ File: {}:{}",
         Ok(())
     }
 
+    /// Extract methods associated with structs in Go
+    fn extract_go_struct_methods(&self, node: &Node, content: &str, file_path: &PathBuf, elements: &mut Vec<CodeElement>) {
+        use regex::Regex;
+        
+        // Regex to find methods with receivers
+        let method_regex = Regex::new(
+            r"func\s+\(([a-zA-Z0-9_]+)\s+\*?([a-zA-Z0-9_]+)\)\s+([a-zA-Z0-9_]+)"
+        ).unwrap_or_else(|_| {
+            warn!("Failed to compile Go struct method regex");
+            Regex::new(r"x^").unwrap() // Regex that won't match anything
+        });
+        
+        let content_str = content.to_string();
+        
+        for cap in method_regex.captures_iter(&content_str) {
+            if let (Some(_receiver_var), Some(receiver_type), Some(method_name)) = (cap.get(1), cap.get(2), cap.get(3)) {
+                // Find the struct this method belongs to
+                let receiver = receiver_type.as_str().to_string();
+                
+                // Update the struct with this method
+                for element in elements.iter_mut() {
+                    if let CodeElement::Struct { name, methods, .. } = element {
+                        if name == &receiver {
+                            methods.push(method_name.as_str().to_string());
+                            break;
+                        }
+                    }
+                }
+                
+                // We'll use a simpler approach for finding the span
+                let method_signature = cap.get(0).map_or("", |m| m.as_str()).to_string();
+                let lines: Vec<&str> = content.lines().collect();
+                let mut start_line = 0;
+                
+                for (i, line) in lines.iter().enumerate() {
+                    if line.contains(&method_signature) {
+                        start_line = i + 1; // Convert to 1-indexed
+                        break;
+                    }
+                }
+                
+                // Create a simplified span
+                let span = CodeSpan {
+                    file_path: file_path.clone(),
+                    start_line,
+                    start_column: 0,
+                    end_line: start_line + 1,
+                    end_column: 0,
+                };
+                
+                // Add the method as a function element with containing type
+                elements.push(CodeElement::Function {
+                    name: method_name.as_str().to_string(),
+                    params: Vec::new(), // Simplified for now
+                    return_type: None,  // Simplified for now
+                    body: method_signature,
+                    span,
+                });
+            }
+        }
+    }
+    
     /// Extract imports from Go source code
     fn extract_go_imports(&self, node: &Node, content: &str, elements: &mut Vec<CodeElement>, dependencies: &mut HashSet<String>) {
         let mut cursor = node.walk();

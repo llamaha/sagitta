@@ -364,7 +364,7 @@ impl Search {
         // Language-specific keywords
         let rust_keywords = ["rust", "cargo", "crate", "mod", "impl", "trait", "struct", "enum", "fn"];
         let ruby_keywords = ["ruby", "gem", "class", "module", "def", "end", "attr"];
-        let go_keywords = ["go", "golang", "func", "interface", "struct", "package", "import", "goroutine", "chan", "select", "go fmt", "gofmt", "gomod"];
+        let go_keywords = ["go", "golang", "func", "interface", "struct", "package", "import", "goroutine", "chan", "select", "go fmt", "gofmt", "gomod", "receiver", "slices", "map[", "type ", "defer"];
         
         // Identify code elements in the query
         let code_elements: Vec<String> = code_keywords.iter()
@@ -1052,10 +1052,11 @@ impl Search {
             for lang in &query_analysis.language_hints {
                 match lang.as_str() {
                     "go" | "golang" => {
-                        // For Go queries, slightly increase BM25 weight
-                        vector_weight = (vector_weight * 0.9).max(0.35);
-                        bm25_weight = (bm25_weight * 1.1).min(0.65);
-                        debug!("Detected Go language in query, adjusted weights: vector={:.2}, bm25={:.2}", 
+                        // For Go queries, improve accuracy by using a more balanced approach
+                        // with slightly higher vector weight than before
+                        vector_weight = 0.5;  // Previously was vector_weight * 0.9 (about 0.45)
+                        bm25_weight = 0.5;    // Previously was bm25_weight * 1.1 (about 0.55)
+                        debug!("Detected Go language in query, using balanced weights: vector={:.2}, bm25={:.2}", 
                               vector_weight, bm25_weight);
                     },
                     "rust" => {
@@ -1944,10 +1945,29 @@ impl Search {
                     // Language-specific boosts
                     if is_go_file && ["func", "interface", "struct", "type", "method", "package"].contains(term) {
                         term_frequency += 3; // Boost for Go-specific terms
+                        
+                        // Additional Go-specific pattern boosting
+                        if term == &"interface" && content_lower.contains("interface {") {
+                            term_frequency += 2; // Extra boost for interface definitions
+                        } else if term == &"struct" && content_lower.contains("struct {") {
+                            term_frequency += 2; // Extra boost for struct definitions
+                        } else if term == &"func" && content_lower.contains("func (") {
+                            term_frequency += 2; // Extra boost for methods
+                        }
                     } else if is_rust_file && ["fn", "struct", "trait", "impl", "enum", "mod"].contains(term) {
                         term_frequency += 3; // Boost for Rust-specific terms
                     } else if is_ruby_file && ["def", "class", "module", "attr", "require"].contains(term) {
                         term_frequency += 3; // Boost for Ruby-specific terms
+                    }
+                    
+                    // Go specific export convention (uppercase first letter means exported/public)
+                    if is_go_file && term.len() > 1 && term.chars().next().map_or(false, |c| c.is_uppercase()) {
+                        // In Go, uppercase identifiers are exported symbols
+                        // Boost matches for exported symbols in queries
+                        let exact_term_match = format!(" {} ", term);
+                        if content_lower.contains(&exact_term_match.to_lowercase()) {
+                            term_frequency += 2;
+                        }
                     }
                     
                     // Special handling for tests
