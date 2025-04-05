@@ -1512,6 +1512,9 @@ impl VectorDB {
         info!("Indexing repository {} ({}), branch {} at commit {}",
               repo_name, repo_id, branch, commit_hash);
         
+        // Print file extension types we're indexing
+        info!("Indexing files with extensions: {}", file_types.join(", "));
+        
         // Index the repository directory
         self.index_directory(&repo_path.to_string_lossy(), &file_types)?;
         
@@ -1604,28 +1607,232 @@ impl VectorDB {
                     false
                 }
             })
+            .map(|p| p.clone())  // Clone to own the PathBuf
             .collect();
         
-        // Index each file
         let total = filtered_files.len();
-        for (i, file_path) in filtered_files.iter().enumerate() {
-            debug!("Indexing file {}/{}: {}", i + 1, total, file_path.display());
-            if let Err(e) = self.index_file(file_path) {
-                warn!("Failed to index file {}: {}", file_path.display(), e);
+        
+        if total > 0 {
+            // Create progress bar
+            let progress = indicatif::ProgressBar::new(total as u64);
+            progress.set_style(
+                indicatif::ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files processed ({eta}) {msg}")
+                    .unwrap()
+                    .progress_chars("#>-")
+            );
+            
+            // Determine batch size based on number of files
+            let batch_size = if total < 50 { 10 } else if total < 200 { 20 } else { 50 };
+            
+            // Set up shared state for parallel processing
+            let processed = Arc::new(AtomicUsize::new(0));
+            let interrupt = Arc::new(AtomicBool::new(false));
+            
+            // Create channels for processing results
+            let (tx, rx) = std::sync::mpsc::channel();
+            
+            // Process embeddings in parallel
+            let num_threads = rayon::current_num_threads();
+            progress.set_message(format!("(using {} threads)", num_threads));
+            
+            // Clone references needed for parallel processing
+            let progress_clone = progress.clone();
+            let processed_clone = processed.clone();
+            let interrupt_clone = interrupt.clone();
+            
+            // Prepare a safe clone of all necessary components to enable parallel processing
+            let embedding_model_type = self.embedding_model_type.clone();
+            let onnx_model_path = self.onnx_model_path.clone();
+            let onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
+            let cache = self.cache.clone();
+            
+            // Launch parallel processing
+            let processor_handle = std::thread::spawn(move || {
+                // Process files in parallel
+                filtered_files.par_iter().for_each(|file_path| {
+                    // Check for interruption
+                    if unsafe { crate::cli::commands::INTERRUPT_RECEIVED } || interrupt_clone.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    
+                    let file_path_str = file_path.to_string_lossy().to_string();
+                    
+                    // Try to load from cache first to avoid redundant work
+                    let cached_embedding = cache.get(&file_path_str);
+                    
+                    // If not in cache, generate new embedding
+                    let result = if let Some(embedding) = cached_embedding {
+                        // Found in cache
+                        debug!("Cache hit for file: {}", file_path_str);
+                        Ok((file_path.clone(), embedding.to_vec(), true))
+                    } else {
+                        // Not in cache, generate new embedding
+                        debug!("Generating embedding for file: {}", file_path_str);
+                        
+                        // Create a model based on the configured type
+                        let model = match embedding_model_type {
+                            EmbeddingModelType::Fast => {
+                                Ok(EmbeddingModel::new())
+                            },
+                            EmbeddingModelType::Onnx => {
+                                if let (Some(model_path), Some(tokenizer_path)) = (&onnx_model_path, &onnx_tokenizer_path) {
+                                    EmbeddingModel::new_onnx(model_path, tokenizer_path)
+                                } else {
+                                    // Fallback to fast model if paths aren't set
+                                    Ok(EmbeddingModel::new())
+                                }
+                            }
+                        };
+                        
+                        // If model creation failed, return the error
+                        let model = match model {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return tx.send(Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))).unwrap();
+                            }
+                        };
+                        
+                        // Read the file contents
+                        match fs::read_to_string(file_path) {
+                            Ok(contents) => {
+                                // Generate embedding
+                                match model.embed(&contents) {
+                                    Ok(embedding) => {
+                                        // Calculate file hash for caching
+                                        match EmbeddingCache::get_file_hash(file_path) {
+                                            Ok(file_hash) => {
+                                                // Successfully generated embedding
+                                                Ok((file_path.clone(), embedding, false))
+                                            },
+                                            Err(e) => {
+                                                Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                Err((file_path_str, VectorDBError::IOError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))
+                            }
+                        }
+                    };
+                    
+                    // Send result back to main thread
+                    tx.send(result).unwrap();
+                    
+                    // Update progress
+                    let count = processed_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                    progress_clone.set_position(count as u64);
+                    
+                    // Show progress message occasionally but don't overwhelm the output
+                    if count % 10 == 0 || count == total {
+                        progress_clone.set_message(format!("(using {} threads)", num_threads));
+                    }
+                });
+            });
+            
+            // Track embeddings added so far
+            let mut successful_embeddings = 0;
+            let mut save_counter = 0;
+            let start_time = std::time::Instant::now();
+            let mut last_report_time = start_time;
+            
+            // Process results from worker threads
+            for _ in 0..total {
+                match rx.recv() {
+                    Ok(result) => {
+                        match result {
+                            Ok((file_path, embedding, from_cache)) => {
+                                // Add to our database
+                                let file_path_str = file_path.to_string_lossy().to_string();
+                                
+                                // Store in database (cache was already updated in the worker thread if needed)
+                                self.embeddings.insert(file_path_str.clone(), embedding.clone());
+                                
+                                // Add to HNSW index if available
+                                if let Some(index) = &mut self.hnsw_index {
+                                    if let Err(e) = index.insert(embedding) {
+                                        error!("Failed to insert into HNSW index: {}", e);
+                                        progress.println(format!("Warning: Failed to add {} to HNSW index: {}", file_path_str, e));
+                                    }
+                                }
+                                
+                                successful_embeddings += 1;
+                                
+                                // Print occasional progress for large batches
+                                let now = std::time::Instant::now();
+                                if now.duration_since(last_report_time).as_secs() >= 10 {
+                                    last_report_time = now;
+                                    let elapsed = now.duration_since(start_time).as_secs();
+                                    let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
+                                    progress.println(format!("Processed {}/{} files ({:.1} files/sec)", 
+                                        successful_embeddings, total, rate));
+                                }
+                                
+                                // Save periodically
+                                save_counter += 1;
+                                if save_counter >= batch_size {
+                                    // Save the database and reset counter
+                                    if let Err(e) = self.save() {
+                                        error!("Failed to save database during batch processing: {}", e);
+                                        progress.println(format!("Warning: Failed to save database: {}", e));
+                                    } else {
+                                        debug!("Saved database after processing {} files", save_counter);
+                                    }
+                                    save_counter = 0;
+                                }
+                            },
+                            Err((file_path, error)) => {
+                                // Show error but continue with other files
+                                progress.println(format!("Error indexing {}: {}", file_path, error));
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Channel error: {}", e);
+                        progress.println(format!("Error communicating with worker threads: {}", e));
+                        break;
+                    }
+                }
             }
+            
+            // Wait for the processor thread to finish
+            processor_handle.join().unwrap();
+            
+            // Final save if any unsaved changes
+            if save_counter > 0 {
+                if let Err(e) = self.save() {
+                    error!("Failed to save database at end of incremental indexing: {}", e);
+                    progress.println(format!("Warning: Failed to save database: {}", e));
+                }
+            }
+            
+            // Report final statistics
+            let elapsed = start_time.elapsed().as_secs();
+            let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
+            
+            progress.finish_with_message(format!("Processed {} files successfully in {}s ({:.1} files/sec)", 
+                successful_embeddings, elapsed, rate));
         }
         
         // Process deleted files
-        for file_path in &changes.deleted_files {
-            debug!("Removing deleted file from index: {}", file_path.display());
-            let path_str = file_path.to_string_lossy().to_string();
-            self.embeddings.remove(&path_str);
-            
-            // Also remove from HNSW index if present
-            // Note: We'd need to rebuild HNSW index to fully remove it, which is expensive
-            // So just flag that we need to rebuild on next save
-            if let Some(idx) = &mut self.hnsw_index {
-                idx.mark_dirty();
+        if !changes.deleted_files.is_empty() {
+            println!("Processing {} deleted files...", changes.deleted_files.len());
+            for file_path in &changes.deleted_files {
+                debug!("Removing deleted file from index: {}", file_path.display());
+                let path_str = file_path.to_string_lossy().to_string();
+                self.embeddings.remove(&path_str);
+                
+                // Also remove from HNSW index if present
+                // Note: We'd need to rebuild HNSW index to fully remove it, which is expensive
+                // So just flag that we need to rebuild on next save
+                if let Some(idx) = &mut self.hnsw_index {
+                    idx.mark_dirty();
+                }
             }
         }
         

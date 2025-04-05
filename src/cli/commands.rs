@@ -1179,6 +1179,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             let repo_name;
             let repo_path;
             let active_branch;
+            let file_types;
             
             {
                 let repo_config = db.repo_manager.get_repository(&repo_id)
@@ -1187,6 +1188,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 repo_name = repo_config.name.clone();
                 repo_path = repo_config.path.clone();
                 active_branch = repo_config.active_branch.clone();
+                file_types = repo_config.file_types.clone();
             }
             
             if all_branches {
@@ -1206,35 +1208,79 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 }
                 
                 println!("Found {} branches to sync", branches.len());
+                println!("File types to index: {}", if file_types.is_empty() { 
+                    "rs, go, js, py (default)".to_string() 
+                } else { 
+                    file_types.join(", ") 
+                });
                 
                 // Create progress bar
                 let progress = indicatif::ProgressBar::new(branches.len() as u64);
                 progress.set_style(
                     indicatif::ProgressStyle::default_bar()
-                        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} branches synced ({eta})")
+                        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} branches synced ({eta}) {msg}")
                         .unwrap()
                         .progress_chars("#>-")
                 );
                 
+                // Stats for overall progress
+                let start_time = std::time::Instant::now();
+                let mut successful_branches = 0;
+                
                 // Sync each branch
                 for (i, branch_name) in branches.iter().enumerate() {
-                    progress.set_message(format!("Syncing branch {} ({}/{})", branch_name, i + 1, branches.len()));
+                    progress.set_message(format!("Syncing branch {}", branch_name));
                     
-                    if force {
-                        db.index_repository_full(&repo_id, branch_name)?;
+                    // Sync specific branch
+                    let result = if force {
+                        db.index_repository_full(&repo_id, branch_name)
                     } else {
-                        db.index_repository_changes(&repo_id, branch_name)?;
+                        db.index_repository_changes(&repo_id, branch_name)
+                    };
+                    
+                    // Handle result
+                    match result {
+                        Ok(_) => {
+                            successful_branches += 1;
+                            progress.println(format!("✓ Branch '{}' synced successfully ({}/{})", 
+                                                   branch_name, i + 1, branches.len()));
+                        },
+                        Err(e) => {
+                            progress.println(format!("⚠️ Failed to sync branch '{}': {}", branch_name, e));
+                        }
                     }
                     
                     progress.inc(1);
+                    
+                    // Show overall progress rate
+                    let elapsed = start_time.elapsed().as_secs();
+                    if elapsed > 0 {
+                        let branches_per_min = (successful_branches as f64 / elapsed as f64) * 60.0;
+                        progress.set_message(format!("Syncing branch {} ({:.1} branches/min)", 
+                                                  branch_name, branches_per_min));
+                    }
                 }
                 
-                progress.finish_with_message(format!("Synced {} branches successfully", branches.len()));
+                // Report final stats
+                let elapsed = start_time.elapsed().as_secs();
+                let minutes = elapsed / 60;
+                let seconds = elapsed % 60;
+                
+                progress.finish_with_message(format!("Synced {}/{} branches in {}m{}s", 
+                                                 successful_branches, branches.len(),
+                                                 minutes, seconds));
             } else {
                 // Determine which branch to sync
                 let branch_name = branch.as_deref().unwrap_or(&active_branch);
                 
                 println!("Syncing repository '{}' branch '{}'...", repo_name, branch_name);
+                println!("File types to index: {}", if file_types.is_empty() { 
+                    "rs, go, js, py (default)".to_string() 
+                } else { 
+                    file_types.join(", ") 
+                });
+                
+                let start_time = std::time::Instant::now();
                 
                 if force {
                     println!("Performing full reindexing...");
@@ -1244,7 +1290,13 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                     db.index_repository_changes(&repo_id, branch_name)?;
                 }
                 
-                println!("Repository synced successfully");
+                // Report execution time
+                let elapsed = start_time.elapsed().as_secs();
+                let minutes = elapsed / 60;
+                let seconds = elapsed % 60;
+                
+                println!("Repository '{}' branch '{}' synced successfully in {}m{}s", 
+                         repo_name, branch_name, minutes, seconds);
             }
             
             Ok(())
