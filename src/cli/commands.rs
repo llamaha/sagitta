@@ -8,19 +8,17 @@ use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use colored::Colorize;
 use walkdir::WalkDir;
-use std::time::{Instant, Duration};
+use std::time::Instant;
 use rayon;
 use num_cpus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use ctrlc;
-use log::{debug, info, warn, error, trace};
-use dirs;
+use log::{debug, error};
 use std::io::Write;
-use std::process::Command as ProcessCommand;
-use std::collections::HashMap;
 use crate::vectordb::repo_yaml;
 use crate::vectordb::error::VectorDBError;
+use crate::vectordb::test_utils::create_test_files;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -1858,14 +1856,17 @@ mod tests {
         // Measure performance for HNSW search
         // Skip actual time measurements since they're not deterministic in tests
         let start_hnsw = Instant::now();
-        let hnsw_results = db_hnsw.search(query, None)?;
+        // Create an embedding model for Search::new
+        let model = db_hnsw.create_embedding_model()?;
+        let mut searcher = Search::new(db_hnsw, model); // Pass model, remove ?
+        let hnsw_results = searcher.search(query)?;
         let _hnsw_time = start_hnsw.elapsed();
         
         // Verify we get results
         assert!(!hnsw_results.is_empty());
         
         // Verify the top score is reasonable
-        assert!(hnsw_results[0].score > 0.0);
+        assert!(hnsw_results[0].similarity > 0.0);
         
         Ok(())
     }

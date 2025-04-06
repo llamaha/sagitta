@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use std::process::Command;
 use chrono::{DateTime, Utc, TimeZone};
-use log::{debug, info, warn, error};
 
 /// Represents a git repository with utility functions
 pub struct GitRepo {

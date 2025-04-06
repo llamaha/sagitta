@@ -1,12 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use anyhow::Result;
-use log::{debug, info, warn, error};
+use log::debug;
 
 use super::search::SearchResult;
-use super::path_relevance::{PathRelevanceScorer, ParsedPath};
-use super::code_structure::{CodeContext, CodeStructureAnalyzer, CodeLanguage, TypeKind};
+use super::code_structure::CodeStructureAnalyzer;
 
 /// Factor weights for different ranking components
 pub struct RankingWeights {

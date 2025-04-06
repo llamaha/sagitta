@@ -10,7 +10,6 @@ use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
-use std::time::{Duration, Instant};
 use log;
 
 /// Configuration parameters for HNSW index

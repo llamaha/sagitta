@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tree_sitter::{Parser, Node, Query, QueryCursor, Tree};
+use tree_sitter::{Parser, Node, Query, QueryCursor};
 use serde::{Serialize, Deserialize};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
@@ -19,7 +19,7 @@ use syn::parse_file;
 use walkdir;
 use syn::spanned::Spanned;
 use regex::Regex;
-use log::{debug, info, warn, error};
+use log::warn;
 
 /// Representation of a code element in the AST
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1444,7 +1444,7 @@ File: {}:{}",
             .ok_or_else(|| VectorDBError::ParserError("Failed to parse JavaScript file".to_string()))?;
         
         let mut elements = Vec::new();
-        let mut dependencies = HashSet::new();
+        let dependencies = HashSet::new();
         
         // Extract functions and methods using queries
         let mut query_cursor = QueryCursor::new();
@@ -1560,7 +1560,7 @@ File: {}:{}",
             .ok_or_else(|| VectorDBError::ParserError("Failed to parse TypeScript file".to_string()))?;
         
         let mut elements = Vec::new();
-        let mut dependencies = HashSet::new();
+        let dependencies = HashSet::new();
 
         // Extract functions and methods
         let mut query_cursor = QueryCursor::new();
@@ -2679,7 +2679,7 @@ impl<'a> RubyVisitor<'a> {
         let mut modules = Vec::new();
         
         // Look for include statements within the class
-        let mut cursor = node.walk();
+        let cursor = node.walk();
         fn find_includes<'a>(node: Node<'a>, content: &[u8], modules: &mut Vec<String>) {
             if node.kind() == "call" {
                 if let Some(method_node) = node.child_by_field_name("method") {

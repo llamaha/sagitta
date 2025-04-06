@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::auto_sync::AutoSyncConfig;
 use anyhow::{Result, anyhow};
-use log::{debug, info, warn, error};
 use std::time::SystemTime;
 
 /// Configuration for a git repository tracked by vectordb

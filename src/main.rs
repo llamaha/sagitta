@@ -2,7 +2,7 @@ use clap::Parser;
 use anyhow::Result;
 use std::path::PathBuf;
 use dirs::data_local_dir;
-use log::{debug, info, warn, error};
+use log::{debug, error};
 use env_logger;
 
 mod cli;

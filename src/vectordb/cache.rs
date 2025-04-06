@@ -1,13 +1,10 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use serde::{Serialize, Deserialize};
 use std::time::Instant;
-use std::fs;
 use crate::vectordb::error::{Result, VectorDBError};
-use std::io::{Read, Seek, SeekFrom};
-use std::convert::TryInto;
 use crate::vectordb::embedding::EmbeddingModelType;
 use std::time::Duration;
 

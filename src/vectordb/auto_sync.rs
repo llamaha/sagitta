@@ -1,17 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use log::{debug, info, warn, error};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent, FileIdCache};
 use serde::{Serialize, Deserialize};
 
 use crate::vectordb::VectorDB;
-use crate::vectordb::repo_manager::RepoManager;
 use crate::utils::git::GitRepo;
 
 /// Configuration for auto-sync of a repository

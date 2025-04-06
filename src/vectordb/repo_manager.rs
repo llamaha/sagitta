@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use std::fs;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
-use log::{debug, info, warn, error};
+use log::{debug, warn};
 
-use crate::vectordb::repo::{GitRepoConfig, canonical_repo_id, canonical_repo_id_with_name};
+use crate::vectordb::repo::{GitRepoConfig, canonical_repo_id_with_name};
 
 /// Manager for multiple repository configurations
 #[derive(Serialize, Deserialize, Clone, Debug)]

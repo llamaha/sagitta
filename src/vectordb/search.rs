@@ -2,15 +2,14 @@ use std::fs;
 use anyhow::Result;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::db::VectorDB;
-use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer, CodeElement, TypeKind, RubyMethodInfo, RubyClassInfo};
-use crate::vectordb::hnsw::HNSWIndex;
+use crate::vectordb::parsing::{CodeParser, RustAnalyzer, RubyAnalyzer};
 use crate::vectordb::search_ranking::{PathComponentWeights, apply_path_ranking, apply_code_structure_ranking};
-use crate::vectordb::code_structure::{CodeStructureAnalyzer, CodeContext};
-use crate::vectordb::snippet_extractor::{SnippetExtractor, SnippetContext};
-use crate::vectordb::code_ranking::{CodeRankingEngine, RankingConfig, RankingWeights};
-use std::path::{Path, PathBuf};
+use crate::vectordb::code_structure::CodeStructureAnalyzer;
+use crate::vectordb::snippet_extractor::SnippetExtractor;
+use crate::vectordb::code_ranking::CodeRankingEngine;
+use std::path::Path;
 use std::collections::{HashMap, HashSet};
-use log::{debug, info, warn, error, trace};
+use log::{debug, warn};
 use regex;
 
 const SIMILARITY_THRESHOLD: f32 = 0.5; // Increased from 0.3

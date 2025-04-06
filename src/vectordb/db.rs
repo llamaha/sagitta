@@ -10,13 +10,10 @@ use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats};
 use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::AtomicBool;
-use std::io::Write;
 use std::io::Read;
-use log::{debug, info, warn, error, trace};
+use log::{debug, info, warn, error};
 use crate::vectordb::repo_manager::RepoManager;
 use crate::vectordb::auto_sync::AutoSyncDaemon;
 
@@ -369,7 +366,7 @@ impl VectorDB {
     }
     
     /// Create the appropriate embedding model based on configuration
-    fn create_embedding_model(&self) -> Result<EmbeddingModel> {
+    pub fn create_embedding_model(&self) -> Result<EmbeddingModel> {
         match &self.embedding_model_type {
             EmbeddingModelType::Fast => {
                 Ok(EmbeddingModel::new())
@@ -2035,24 +2032,6 @@ mod tests {
     use tempfile::tempdir;
     use std::io::Write;
 
-    /// Creates a set of test files in the given directory
-    fn create_test_files(dir_path: &str, count: usize) -> Result<()> {
-        for i in 0..count {
-            let test_file = PathBuf::from(dir_path).join(format!("test_{}.txt", i));
-            let mut file = fs::File::create(&test_file)
-                .map_err(|e| VectorDBError::FileWriteError {
-                    path: test_file.clone(),
-                    source: e,
-                })?;
-            writeln!(file, "Test file content {}", i)
-                .map_err(|e| VectorDBError::FileWriteError {
-                    path: test_file,
-                    source: e,
-                })?;
-        }
-        Ok(())
-    }
-
     #[test]
     fn test_vectordb() -> Result<()> {
         // Create a temporary directory
@@ -2071,9 +2050,9 @@ mod tests {
     #[test]
     fn test_optimal_layer_count() {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path();
+        let db_path = temp_dir.path().to_string_lossy().to_string(); // Convert to String
         
-        let _db = VectorDB::new(db_path).unwrap();
+        let _db = VectorDB::new(db_path).unwrap(); // Use the String
         
         let optimal = HNSWConfig::calculate_optimal_layers(1_000);
         assert!(optimal > 0);

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
-use log::{debug, info, warn};
+use log::{debug, warn};
 
 use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::repo_manager::RepoManager;

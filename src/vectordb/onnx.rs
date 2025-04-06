@@ -1,7 +1,6 @@
 use anyhow::{Result, Error};
 use tokenizers::Tokenizer;
 use std::path::Path;
-use ndarray::{s, Array, array, Array2, ArrayD, ArrayView, Axis, Dim, IxDyn};
 use std::sync::Arc;
 
 pub const ONNX_EMBEDDING_DIM: usize = 384;

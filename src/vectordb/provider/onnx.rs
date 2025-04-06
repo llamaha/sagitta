@@ -8,7 +8,7 @@ use ort::{Environment, Session, SessionBuilder, Value, GraphOptimizationLevel};
 use crate::vectordb::provider::session_manager::{SessionManager, SessionConfig};
 use crate::vectordb::provider::tokenizer_cache::{TokenizerCache, TokenizerCacheConfig};
 use crate::vectordb::provider::batch_processor::{BatchProcessor, BatchProcessorConfig};
-use log::{debug, info, warn, error};
+use log::debug;
 
 /// Dimension of the ONNX MiniLM embeddings
 pub const ONNX_EMBEDDING_DIM: usize = 384;

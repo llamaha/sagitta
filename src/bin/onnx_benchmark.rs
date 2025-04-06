@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use anyhow::{Result, Error};
+use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use vectordb_cli::vectordb::provider::session_manager::{SessionManager, SessionConfig};
-use vectordb_cli::vectordb::provider::tokenizer_cache::{TokenizerCache, TokenizerCacheConfig};
-use vectordb_cli::vectordb::provider::batch_processor::{BatchProcessor, BatchProcessorConfig};
+use vectordb_cli::vectordb::provider::session_manager::SessionConfig;
+use vectordb_cli::vectordb::provider::tokenizer_cache::TokenizerCacheConfig;
+use vectordb_cli::vectordb::provider::batch_processor::BatchProcessorConfig;
 use vectordb_cli::vectordb::provider::onnx::{OptimizedOnnxEmbeddingProvider, OnnxEmbeddingProvider, ONNX_EMBEDDING_DIM};
 use vectordb_cli::vectordb::provider::EmbeddingProvider;
 

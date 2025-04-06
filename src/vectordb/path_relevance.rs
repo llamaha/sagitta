@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
-use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::collections::HashSet;
 
 /// Represents a parsed path with extracted components
 #[derive(Debug, Clone)]

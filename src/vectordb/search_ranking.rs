@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::collections::HashMap;
-use log::{debug, info, warn, error};
+use log::debug;
 use super::search::SearchResult;
-use super::path_relevance::{PathRelevanceScorer, ParsedPath, PathRelevanceConfig};
+use super::path_relevance::PathRelevanceScorer;
 
 /// Constants for ranking adjustments
 const FILENAME_EXACT_MATCH_BOOST: f32 = 2.0;
@@ -84,28 +84,26 @@ pub fn analyze_file_path(file_path: &str) -> (String, Vec<String>) {
 
 /// Applies path relevance scoring to search results
 pub fn apply_path_ranking(results: &mut Vec<SearchResult>, query: &str, _weights: &PathComponentWeights) {
-    // Split the query into terms for searching
-    let normalized_query = query.to_lowercase();
-    let query_terms: Vec<&str> = normalized_query
-        .split_whitespace()
-        .filter(|t| t.len() > 2)
-        .collect();
-        
+    // Tokenize the query (used for path component matching)
+    // Removed unused query_terms tokenization
+
     // Create a scorer with default configuration
     let scorer = PathRelevanceScorer::new();
-    
+
     for result in results.iter_mut() {
-        // Skip results that don't have a file path (should never happen)
-        let file_path = match &result.file_path {
-            Some(path) => path,
-            None => continue,
-        };
-        
+        // Use the file_path directly since it's a String, not Option<String>
+        let file_path_str = &result.file_path;
+
+        // Parse the path for relevance calculation
+        let parsed_path = scorer.parse_path(file_path_str);
+
         // Calculate relevance score for this path based on the query
-        let relevance = scorer.score_path_relevance(file_path, &query_terms);
-        
-        // Apply the relevance boost to the result's score
-        result.score *= (1.0 + relevance);
+        let relevance = scorer.calculate_relevance(&parsed_path, query);
+
+        // Apply the relevance boost to the result's similarity score
+        // Remove unnecessary parentheses around (1.0 + relevance)
+        result.similarity *= 1.0 + relevance;
+        result.similarity = result.similarity.min(1.0); // Ensure similarity doesn't exceed 1.0
     }
 }
 
