@@ -1291,25 +1291,17 @@ impl VectorDB {
         // Return a comprehensive list of supported file extensions
         // This list is based on file_type_weights in code_ranking.rs
         vec![
-            // Programming languages
+            // Programming languages with full parsers
             "rs".to_string(),  // Rust
             "rb".to_string(),  // Ruby
             "go".to_string(),  // Go
-            "py".to_string(),  // Python
             "js".to_string(),  // JavaScript
             "ts".to_string(),  // TypeScript
-            // C/C++
-            "c".to_string(),   // C
-            "cpp".to_string(), // C++
-            "h".to_string(),   // C/C++ header
-            "hpp".to_string(), // C++ header
-            // Interface definitions
-            "proto".to_string(), // Protocol Buffers
-            // Documentation
+            // Documentation (regex-based parsing)
             "md".to_string(),   // Markdown
             "txt".to_string(),  // Text
             "rst".to_string(),  // reStructuredText
-            // Configuration
+            // Configuration (basic parsing)
             "json".to_string(), // JSON
             "yaml".to_string(), // YAML
             "yml".to_string(),  // YAML alternative

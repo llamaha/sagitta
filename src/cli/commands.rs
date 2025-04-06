@@ -37,7 +37,7 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
 
-        /// File types to index (e.g. rs,rb,go,yml,yaml,md)
+        /// File types to index (e.g. rs,rb,go,js,ts,yaml,md)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Vec<String>,
         
@@ -80,7 +80,7 @@ pub enum Command {
         #[arg(long = "bm25-weight")]
         bm25_weight: Option<f32>,
         
-        /// File types to search (e.g. rs,rb,go)
+        /// File types to search (e.g. rs,rb,go,js,ts)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
         
@@ -133,8 +133,8 @@ pub enum Command {
         #[arg(required = true)]
         dir: String,
         
-        /// File types to parse (e.g. rs,rb,go,yml,yaml,md)
-        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs,rb,go,yml,yaml,md")]
+        /// File types to parse (e.g. rs,rb,go,js,ts,yaml,md)
+        #[arg(short = 't', long = "file-types", value_delimiter = ',', default_value = "rs,rb,go,js,ts,yaml,md")]
         file_types: Vec<String>,
         
         /// Show functions defined in the code
@@ -187,7 +187,7 @@ pub enum RepoCommand {
         #[arg(short = 'n', long = "name")]
         name: Option<String>,
         
-        /// File types to index (e.g. rs,rb,go,yml,yaml,md)
+        /// File types to index (e.g. rs,rb,go,js,ts,yaml,md)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
         
@@ -487,7 +487,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                             Some(VectorDB::get_supported_file_types())
                         } else {
                             println!("Filtering results by file types: {}", types.join(", "));
-                            file_types.clone()
+                            Some(types.clone())
                         }
                     } else {
                         println!("No file types filter, searching all supported file types");

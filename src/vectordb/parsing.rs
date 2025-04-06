@@ -12,7 +12,7 @@ use tree_sitter_javascript::language as javascript_language;
 use tree_sitter_typescript::language_typescript as typescript_language;
 // We'll implement markdown parsing with regex instead of tree-sitter due to version incompatibility
 // use tree_sitter_markdown::language as markdown_language;
-// TODO: Fix YAML language support
+// Import YAML language support - will be implemented in a future update
 // use tree_sitter_yaml::LANGUAGE;
 use syn::{self, visit::{self, Visit}, ItemFn, ItemStruct, ItemEnum, ItemImpl, ItemTrait, UseTree};
 use syn::parse_file;
@@ -106,9 +106,6 @@ pub struct CodeParser {
     // md_query_list: Query,
     // md_query_code_block: Query,
     // md_query_link: Query,
-    // TODO: Fix YAML support
-    // yaml_query_mapping: Query,
-    // yaml_query_sequence: Query,
 }
 
 /// Advanced Rust code analyzer using syn crate
@@ -476,26 +473,6 @@ impl CodeParser {
         let ts_query_type = Query::new(ts_lang,
             "(type_alias_declaration name: (type_identifier) @type.name) @type.def").expect("Invalid TypeScript type query");
 
-        // TODO: Fix YAML support
-        // Load YAML grammar
-        // let yaml_lang = LANGUAGE();
-        // 
-        // // Queries for YAML code elements
-        // let yaml_query_mapping = Query::new(yaml_lang,
-        //     r#"
-        //     (mapping_node
-        //       key: (scalar) @key
-        //       value: (scalar) @value
-        //     ) @mapping.def
-        //     "#).expect("Invalid YAML mapping query");
-        // 
-        // let yaml_query_sequence = Query::new(yaml_lang,
-        //     r#"
-        //     (sequence_node
-        //       (scalar) @value
-        //     ) @sequence.def
-        //     "#).expect("Invalid YAML sequence query");
-
         CodeParser {
             parser,
             parsed_files: HashMap::new(),
@@ -513,32 +490,6 @@ impl CodeParser {
             ts_query_class,
             ts_query_interface,
             ts_query_type,
-            // Markdown will use regex-based parsing instead of tree-sitter
-            // md_query_heading: Query::new(markdown_language, r#"
-            // (heading
-            //   level: (number) @level
-            //   content: (inline) @content
-            // ) @heading.def
-            // "#).expect("Invalid markdown heading query"),
-            // md_query_list: Query::new(markdown_language, r#"
-            // (list_item
-            //   bullet: (bullet) @bullet
-            //   content: (inline) @content
-            // ) @list_item.def
-            // "#).expect("Invalid markdown list query"),
-            // md_query_code_block: Query::new(markdown_language, r#"
-            // (code_block
-            //   content: (inline) @content
-            // ) @code_block.def
-            // "#).expect("Invalid markdown code block query"),
-            // md_query_link: Query::new(markdown_language, r#"
-            // (link
-            //   text: (text) @text
-            //   url: (url) @url
-            // ) @link.def
-            // "#).expect("Invalid markdown link query"),
-            // yaml_query_mapping,
-            // yaml_query_sequence,
         }
     }
 
@@ -563,8 +514,7 @@ impl CodeParser {
             Some("js") | Some("jsx") => "javascript",
             Some("ts") | Some("tsx") => "typescript",
             Some("md") => "markdown",
-            // TODO: Fix YAML support
-            // Some("yml") | Some("yaml") => "yaml",
+            Some("yml") | Some("yaml") => "yaml",
             // For testing purposes, treat any file as rust if no extension is provided
             None => "rust",
             // Add more languages as needed
@@ -579,12 +529,11 @@ impl CodeParser {
             "javascript" => self.parse_javascript_file(&file_path, &content)?,
             "typescript" => self.parse_typescript_file(&file_path, &content)?,
             "markdown" => self.parse_markdown_file(&file_path, &content)?,
-            // TODO: Fix YAML support
-            // "yaml" => self.parse_yaml_file(&file_path, &content)?,
+            "yaml" => self.parse_simple_yaml_file(&file_path, &content)?,
             _ => return Err(VectorDBError::UnsupportedLanguage(language.to_string())),
         }
-
-        Ok(self.parsed_files.get(&file_path).unwrap())
+        
+        Ok(&self.parsed_files[&file_path])
     }
 
     /// Parse a Rust source file using rust-analyzer
@@ -1771,6 +1720,84 @@ File: {}:{}",
             end_line,
             end_column,
         }
+    }
+
+    /// Parse YAML file using a simple regex-based approach (temp solution)
+    fn parse_simple_yaml_file(&mut self, file_path: &PathBuf, content: &str) -> Result<(), VectorDBError> {
+        // Create a simple regex-based parser for YAML files
+        let mut elements = Vec::new();
+        let mut dependencies = HashSet::new();
+        
+        // Very basic YAML parsing: key-value pairs and sequence items
+        let key_value_re = regex::Regex::new(r"(?m)^([a-zA-Z0-9_-]+):\s*(.*)$").unwrap();
+        let sequence_re = regex::Regex::new(r"(?m)^[\s-]*-\s+(.+)$").unwrap();
+        
+        // Extract key-value pairs
+        for cap in key_value_re.captures_iter(content) {
+            let key = cap.get(1).map_or("", |m| m.as_str()).trim();
+            let value = cap.get(2).map_or("", |m| m.as_str()).trim();
+            
+            if !key.is_empty() {
+                // Create a simple span 
+                let span = CodeSpan {
+                    file_path: file_path.clone(),
+                    start_line: 0,
+                    start_column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                };
+                
+                // Add as a type alias (using key as name, value as aliased type)
+                elements.push(CodeElement::TypeAlias {
+                    name: key.to_string(),
+                    aliased_type: value.to_string(),
+                    span,
+                });
+                
+                // Check if the key might be an import/include
+                if key.contains("import") || key.contains("include") {
+                    dependencies.insert(value.to_string());
+                }
+            }
+        }
+        
+        // Extract sequence items
+        for cap in sequence_re.captures_iter(content) {
+            let value = cap.get(1).map_or("", |m| m.as_str()).trim();
+            
+            if !value.is_empty() {
+                // Create a simple span
+                let span = CodeSpan {
+                    file_path: file_path.clone(),
+                    start_line: 0,
+                    start_column: 0,
+                    end_line: 0,
+                    end_column: 0,
+                };
+                
+                // Add as a simple function (using value as name)
+                elements.push(CodeElement::Function {
+                    name: format!("item_{}", value.replace(' ', "_")),
+                    params: vec![],
+                    return_type: Some(value.to_string()),
+                    body: value.to_string(),
+                    span,
+                });
+            }
+        }
+        
+        // Create the parsed file representation
+        let parsed_file = ParsedFile {
+            file_path: file_path.clone(),
+            elements,
+            dependencies,
+            language: "yaml".to_string(),
+        };
+
+        // Store the parsed file
+        self.parsed_files.insert(file_path.clone(), parsed_file);
+
+        Ok(())
     }
 }
 
