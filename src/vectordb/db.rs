@@ -1092,10 +1092,7 @@ impl VectorDB {
             "ts".to_string(),  // TypeScript
             // Documentation (regex-based parsing)
             "md".to_string(),   // Markdown
-            "txt".to_string(),  // Text
-            "rst".to_string(),  // reStructuredText
             // Configuration (basic parsing)
-            "json".to_string(), // JSON
             "yaml".to_string(), // YAML
             "yml".to_string(),  // YAML alternative
             "toml".to_string(), // TOML
@@ -1708,7 +1705,7 @@ impl VectorDB {
                     let rate = if elapsed > 0.1 { current as f32 / elapsed } else { 0.0 };
                     
                     progress_clone.println(format!(
-                        "Processing: {}/{} files ({} new in last 5s, {:.1} files/sec)",
+                        "Reading and embedding: {}/{} files ({} new in last 5s, {:.1} files/sec)",
                         current, files_to_embed_count, progress_delta, rate
                     ));
                     
@@ -1716,7 +1713,7 @@ impl VectorDB {
                 } else if current > 0 {
                     // No new progress, but processing has started
                     progress_clone.println(format!(
-                        "Still processing: {}/{} files (system may be CPU or I/O bound)",
+                        "Still reading and embedding: {}/{} files (system may be CPU or I/O bound)",
                         current, files_to_embed_count
                     ));
                 } else {
@@ -1855,7 +1852,7 @@ impl VectorDB {
                 let rate = if elapsed_secs > 0.1 { processed_new_files as f32 / elapsed_secs } else { 0.0 };
                 let total_processed = files_from_cache + processed_new_files;
                 progress.println(format!(
-                    "Processed {}/{} files ({:.1} new files/sec)",
+                    "Storing embeddings: {}/{} files ({:.1} new files/sec)",
                     total_processed, file_count, rate
                 ));
             }
