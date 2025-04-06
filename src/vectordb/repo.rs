@@ -125,6 +125,27 @@ pub fn canonical_repo_id(repo_path: &Path) -> Result<String> {
     Ok(format!("{}-{:x}", dir_name, path_hash))
 }
 
+/// Generate a canonical unique ID for a repository based on its path and name
+pub fn canonical_repo_id_with_name(repo_path: &Path, name: &str) -> Result<String> {
+    // Try to get the canonical absolute path
+    let canonical = fs::canonicalize(repo_path)?;
+    
+    // Convert to string and normalize path separators
+    let path_str = canonical.to_string_lossy().to_string().replace('\\', "/");
+    
+    // Create a hash of the combined path and name for a shorter ID
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    let mut hasher = DefaultHasher::new();
+    path_str.hash(&mut hasher);
+    name.hash(&mut hasher);
+    let combined_hash = hasher.finish();
+    
+    // Use given name + hash suffix for readability
+    Ok(format!("{}-{:x}", name, combined_hash))
+}
+
 /// Get the current branch of a git repository
 fn get_current_branch(repo_path: &Path) -> Result<String> {
     let output = std::process::Command::new("git")

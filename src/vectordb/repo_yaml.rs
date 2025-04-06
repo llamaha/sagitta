@@ -131,8 +131,11 @@ fn add_repository_from_yaml(
         return Err(anyhow!("Not a git repository: {}", repo_path.display()));
     }
     
+    // Get the repository name from config
+    let repo_name = repo_config.name.clone();
+    
     // Add repository to manager
-    match repo_manager.add_repository(repo_path, repo_config.name.clone()) {
+    match repo_manager.add_repository(repo_path, repo_name) {
         Ok(id) => Ok(id),
         Err(e) => {
             if e.to_string().contains("already exists") && skip_existing {

@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use log::{debug, info, warn, error};
 
-use crate::vectordb::repo::{GitRepoConfig, canonical_repo_id};
+use crate::vectordb::repo::{GitRepoConfig, canonical_repo_id, canonical_repo_id_with_name};
 
 /// Manager for multiple repository configurations
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -112,13 +112,20 @@ impl RepoManager {
     pub fn add_repository(&mut self, path: PathBuf, name: Option<String>) -> Result<String> {
         debug!("Adding repository: {}", path.display());
         
-        // Generate canonical ID
-        let id = canonical_repo_id(&path)?;
+        // Get default name from directory if not provided
+        let repo_name = name.clone().unwrap_or_else(|| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unnamed-repo".to_string())
+        });
+        
+        // Generate canonical ID that incorporates the name
+        let id = canonical_repo_id_with_name(&path, &repo_name)?;
         debug!("Generated repository ID: {}", id);
         
         // Check if repository already exists with this ID
         if self.repositories.contains_key(&id) {
-            return Err(anyhow!("Repository with this path already exists"));
+            return Err(anyhow!("Repository with this name and path already exists"));
         }
         
         // Create the repository configuration
