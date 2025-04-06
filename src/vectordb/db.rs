@@ -1383,16 +1383,19 @@ impl VectorDB {
         if last_commit.is_none() && branch != prev_active_branch {
             info!("No previous index found for branch {}, checking for cross-branch sync from {}",
                  branch, prev_active_branch);
+            println!("Attempting efficient cross-branch sync from '{}' to '{}'...", prev_active_branch, branch);
             
             // Check if the previous branch was indexed
             let prev_branch_commit = self.repo_manager.get_repository(&repo_id)
                 .and_then(|repo| repo.get_indexed_commit(&prev_active_branch).cloned());
             
             if let Some(prev_commit) = prev_branch_commit {
+                println!("Previous branch '{}' is indexed at commit {}...", prev_active_branch, &prev_commit[..8]);
                 // We have a previous commit in the previous branch, try to find common ancestor
                 match git_repo.find_common_ancestor(&prev_commit, &current_commit) {
                     Ok(common_ancestor) => {
                         info!("Found common ancestor between branches: {}", common_ancestor);
+                        println!("Found common ancestor commit: {}...", &common_ancestor[..8]);
                         
                         // Update branch relationship information
                         if let Err(e) = self.repo_manager.update_branch_relationship(
@@ -1411,34 +1414,75 @@ impl VectorDB {
                         let changes = git_repo.get_cross_branch_changes(&common_ancestor, &current_commit)
                             .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
                         
+                        let total_changes = changes.added_files.len() + changes.modified_files.len() + changes.deleted_files.len();
+                        
+                        if total_changes == 0 {
+                            info!("No changes detected between branches");
+                            println!("No changes detected between branches that need indexing.");
+                            
+                            // Still need to update the indexed commit hash
+                            self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
+                            self.save()?;
+                            
+                            info!("Repository {} branch {} indexed successfully (no changes)", 
+                                repo_name, branch);
+                            return Ok(());
+                        }
+                        
                         info!("Cross-branch changes detected: {} added, {} modified, {} deleted files",
                              changes.added_files.len(), changes.modified_files.len(), changes.deleted_files.len());
+                        
+                        println!("Found {} changes between branches:", total_changes);
+                        println!("  - {} files added", changes.added_files.len());
+                        println!("  - {} files modified", changes.modified_files.len());
+                        println!("  - {} files deleted", changes.deleted_files.len());
                         
                         // Process added and modified files
                         let files_to_process = [&changes.added_files[..], &changes.modified_files[..]].concat();
                         
                         // Filter for file types we care about
-                        let files_to_index: Vec<&PathBuf> = files_to_process.iter()
+                        let filtered_files: Vec<PathBuf> = files_to_process.iter()
                             .filter(|path| {
-                                path.extension()
-                                    .and_then(|ext| ext.to_str())
-                                    .map(|ext| file_types.contains(&ext.to_string()))
-                                    .unwrap_or(false)
+                                if let Some(ext) = path.extension() {
+                                    let ext_str = ext.to_string_lossy().to_string();
+                                    file_types.contains(&ext_str)
+                                } else {
+                                    false
+                                }
                             })
+                            .cloned()
                             .collect();
                         
-                        info!("Indexing {} relevant files", files_to_index.len());
+                        let relevant_file_count = filtered_files.len();
                         
-                        // Process files in batches to avoid memory issues
-                        for file_path in files_to_index {
-                            if let Err(e) = self.index_file(file_path) {
-                                warn!("Failed to index file {}: {}", file_path.display(), e);
-                            }
+                        if relevant_file_count == 0 {
+                            info!("No relevant files found to index after filtering");
+                            println!("No files with relevant extensions found among the changes.");
+                            
+                            // Update commit hash and save even though no files were processed
+                            self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
+                            self.save()?;
+                            
+                            info!("Repository {} branch {} indexed successfully (no relevant files)", 
+                                repo_name, branch);
+                            return Ok(());
                         }
+                        
+                        info!("Indexing {} relevant files", relevant_file_count);
+                        println!("Processing {} changed files with relevant extensions...", relevant_file_count);
+                        
+                        // Use the parallel implementation for efficiency
+                        let model = Arc::new(self.create_embedding_model()?);
+                        let batch_size = std::cmp::min(20, relevant_file_count);
+                        
+                        // Use the parallel implementation
+                        self.index_directory_parallel(filtered_files, model, batch_size)?;
                         
                         // Handle deleted files
                         if !changes.deleted_files.is_empty() {
                             info!("Processing {} deleted files", changes.deleted_files.len());
+                            println!("Removing {} deleted files from index...", changes.deleted_files.len());
+                            
                             for file_path in &changes.deleted_files {
                                 debug!("Removing deleted file from index: {}", file_path.display());
                                 let path_str = file_path.to_string_lossy().to_string();
@@ -1460,18 +1504,27 @@ impl VectorDB {
                         info!("Repository {} branch {} indexed successfully via cross-branch sync", 
                               repo_name, branch);
                         
+                        println!("Branch '{}' successfully synced from '{}' based on {} changes", 
+                                branch, prev_active_branch, total_changes);
+                        
                         return Ok(());
                     },
                     Err(e) => {
                         warn!("Failed to find common ancestor between branches: {}", e);
+                        println!("Could not find common ancestor between branches: {}", e);
+                        println!("Falling back to full indexing...");
                         // Fall back to full index
                     }
                 }
+            } else {
+                println!("Previous branch '{}' is not indexed yet, cannot use for efficient syncing.", 
+                      prev_active_branch);
             }
             
             // If we reach here, we couldn't do an efficient cross-branch sync, so do a full index
             info!("No previous index found for repository {} branch {}, doing full index",
                  repo_name, branch);
+            println!("Performing full indexing of branch '{}'...", branch);
             return self.index_repository_full(&repo_id, &branch);
         } else if last_commit.is_none() {
             // No previous commit and not switching branches, do a full index
