@@ -1687,6 +1687,45 @@ impl VectorDB {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(num_threads).build().unwrap();
         let (tx, rx): (Sender<Vec<(PathBuf, Option<u64>, Result<Vec<f32>>)>>, Receiver<_>) = mpsc::channel();
 
+        // Start a separate thread to report progress periodically, even if processing is slow
+        let progress_clone = progress.clone();
+        let processed = Arc::new(AtomicUsize::new(0));
+        let processed_clone = processed.clone();
+        let should_continue = Arc::new(AtomicBool::new(true));
+        let should_continue_clone = should_continue.clone();
+        
+        std::thread::spawn(move || {
+            let mut last_count = 0;
+            let start = std::time::Instant::now();
+            while should_continue_clone.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let current = processed_clone.load(Ordering::SeqCst);
+                
+                if current > last_count {
+                    // Processing is happening, update the count
+                    let progress_delta = current - last_count;
+                    let elapsed = start.elapsed().as_secs_f32();
+                    let rate = if elapsed > 0.1 { current as f32 / elapsed } else { 0.0 };
+                    
+                    progress_clone.println(format!(
+                        "Processing: {}/{} files ({} new in last 5s, {:.1} files/sec)",
+                        current, files_to_embed_count, progress_delta, rate
+                    ));
+                    
+                    last_count = current;
+                } else if current > 0 {
+                    // No new progress, but processing has started
+                    progress_clone.println(format!(
+                        "Still processing: {}/{} files (system may be CPU or I/O bound)",
+                        current, files_to_embed_count
+                    ));
+                } else {
+                    // No progress at all yet
+                    progress_clone.println("Waiting for processing to begin...");
+                }
+            }
+        });
+
         pool.install(move || {
             file_chunks.into_par_iter().for_each_with(tx, |tx_clone, chunk_data| {
                 let mut texts_to_embed: Vec<String> = Vec::with_capacity(chunk_data.len());
@@ -1727,12 +1766,18 @@ impl VectorDB {
 
                 // Send results
                 if !results_for_chunk.is_empty() {
+                    // Update processed count before sending
+                    processed.fetch_add(results_for_chunk.len(), Ordering::SeqCst);
+                    
                     if tx_clone.send(results_for_chunk).is_err() {
                         warn!("Failed to send chunk results to main thread.");
                     }
                 }
             });
         }); // pool.install blocks until completion
+
+        // Signal the progress thread to stop
+        should_continue.store(false, Ordering::SeqCst);
 
         // Fourth phase: Process results
         let mut successful_embeddings = 0;
@@ -1802,9 +1847,9 @@ impl VectorDB {
                 save_counter = 0;
             }
 
-            // Periodic progress report
+            // Periodic progress report - more frequent (every 5 seconds)
             let now = std::time::Instant::now();
-            if now.duration_since(last_report_time).as_secs() >= 15 {
+            if now.duration_since(last_report_time).as_secs() >= 5 {
                 last_report_time = now;
                 let elapsed_secs = now.duration_since(start_time).as_secs_f32();
                 let rate = if elapsed_secs > 0.1 { processed_new_files as f32 / elapsed_secs } else { 0.0 };
