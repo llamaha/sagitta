@@ -375,9 +375,20 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             let start = Instant::now();
             
+            // Use all supported file types if none were specified
+            let file_types_to_use = if file_types.is_empty() {
+                let supported = VectorDB::get_supported_file_types();
+                println!("No file types specified, using all supported types: {}", 
+                         supported.join(", "));
+                supported
+            } else {
+                println!("Indexing file types: {}", file_types.join(", "));
+                file_types
+            };
+            
             // Check for interrupt periodically during indexing
-            debug!("Starting directory indexing: {}, file types: {:?}", dir, file_types);
-            match db.index_directory(&dir, &file_types) {
+            debug!("Starting directory indexing: {}, file types: {:?}", dir, file_types_to_use);
+            match db.index_directory(&dir, &file_types_to_use) {
                 Ok(_) => {
                     let duration = start.elapsed();
                     if unsafe { INTERRUPT_RECEIVED } {
@@ -430,6 +441,20 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     let should_search_multiple = !search.db.repo_manager.list_repositories().is_empty() && 
                                                 (repositories.is_some() || all_repositories);
                     
+                    // Process file types - use all supported types if none specified
+                    let file_types_to_use = if let Some(types) = &file_types {
+                        if types.is_empty() {
+                            println!("No file types specified, using all supported types");
+                            Some(VectorDB::get_supported_file_types())
+                        } else {
+                            println!("Filtering results by file types: {}", types.join(", "));
+                            file_types.clone()
+                        }
+                    } else {
+                        println!("No file types filter, searching all supported file types");
+                        Some(VectorDB::get_supported_file_types())
+                    };
+                    
                     if should_search_multiple {
                         debug!("Performing multi-repository search");
                         println!("Searching across repositories...");
@@ -437,7 +462,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         // Create search options
                         let mut search_options = crate::vectordb::search::SearchOptions {
                             max_results: limit,
-                            file_types: file_types.clone(),
+                            file_types: file_types_to_use,
                             vector_weight: if vector_only { Some(1.0) } else { vector_weight },
                             bm25_weight: if vector_only { Some(0.0) } else { bm25_weight },
                             repositories: None,
@@ -548,10 +573,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         };
                         
                         // Filter results by file type if specified
-                        if let Some(types) = file_types {
+                        if let Some(types) = file_types_to_use {
                             if !types.is_empty() {
                                 debug!("Filtering results by file types: {:?}", types);
-                                println!("Filtering results by file types: {}", types.join(", "));
                                 results.retain(|result| {
                                     let path = Path::new(&result.file_path);
                                     if let Some(ext) = path.extension() {
@@ -1081,11 +1105,21 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                     println!("Repository added successfully: {}", name.clone().unwrap_or_else(|| path.clone()));
                     println!("Repository ID: {}", repo_id);
                     
-                    // Update file types if provided
-                    if let Some(types) = file_types {
-                        if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
-                            repo.file_types = types.clone();
-                            println!("File types set to: {}", types.join(", "));
+                    // Update file types if provided, otherwise use all supported types
+                    if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
+                        if let Some(types) = file_types {
+                            if !types.is_empty() {
+                                repo.file_types = types.clone();
+                                println!("File types set to: {}", types.join(", "));
+                            } else {
+                                // Empty list provided, use all supported types
+                                repo.file_types = VectorDB::get_supported_file_types();
+                                println!("Using all supported file types: {}", repo.file_types.join(", "));
+                            }
+                        } else {
+                            // No file types specified, use all supported types
+                            repo.file_types = VectorDB::get_supported_file_types();
+                            println!("Using all supported file types: {}", repo.file_types.join(", "));
                         }
                     }
                     
@@ -1249,7 +1283,8 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 println!("Found {} branches to sync", branches.len());
                 println!("File types to index: {}", if file_types.is_empty() { 
-                    "rs, go, js, py (default)".to_string() 
+                    let supported = VectorDB::get_supported_file_types();
+                    format!("{} (all supported types)", supported.join(", "))
                 } else { 
                     file_types.join(", ") 
                 });
@@ -1315,7 +1350,8 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 println!("Syncing repository '{}' branch '{}'...", repo_name, branch_name);
                 println!("File types to index: {}", if file_types.is_empty() { 
-                    "rs, go, js, py (default)".to_string() 
+                    let supported = VectorDB::get_supported_file_types();
+                    format!("{} (all supported types)", supported.join(", "))
                 } else { 
                     file_types.join(", ") 
                 });
@@ -1364,7 +1400,12 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 println!("Last indexed: Never");
             }
             
-            println!("File types: {}", repo_clone.file_types.join(", "));
+            println!("File types: {}", if repo_clone.file_types.is_empty() {
+                let supported = VectorDB::get_supported_file_types();
+                format!("{} (all supported types)", supported.join(", "))
+            } else {
+                repo_clone.file_types.join(", ")
+            });
             
             println!("Embedding model: {}", match repo_clone.embedding_model {
                 Some(EmbeddingModelType::Fast) => "Fast",

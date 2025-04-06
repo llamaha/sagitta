@@ -1200,10 +1200,33 @@ impl VectorDB {
 
     /// Get a list of all supported file types
     pub fn get_supported_file_types() -> Vec<String> {
+        // Return a comprehensive list of supported file extensions
+        // This list is based on file_type_weights in code_ranking.rs
         vec![
+            // Programming languages
             "rs".to_string(),  // Rust
             "rb".to_string(),  // Ruby
             "go".to_string(),  // Go
+            "py".to_string(),  // Python
+            "js".to_string(),  // JavaScript
+            "ts".to_string(),  // TypeScript
+            // C/C++
+            "c".to_string(),   // C
+            "cpp".to_string(), // C++
+            "h".to_string(),   // C/C++ header
+            "hpp".to_string(), // C++ header
+            // Interface definitions
+            "proto".to_string(), // Protocol Buffers
+            // Documentation
+            "md".to_string(),   // Markdown
+            "txt".to_string(),  // Text
+            "rst".to_string(),  // reStructuredText
+            // Configuration
+            "json".to_string(), // JSON
+            "yaml".to_string(), // YAML
+            "yml".to_string(),  // YAML alternative
+            "toml".to_string(), // TOML
+            "xml".to_string(),  // XML
         ]
     }
 
@@ -1490,7 +1513,7 @@ impl VectorDB {
                 repo.path.clone(),          // repo_path
                 repo.name.clone(),          // repo_name
                 if repo.file_types.is_empty() {
-                    vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()]
+                    Self::get_supported_file_types()
                 } else {
                     repo.file_types.clone()
                 },                          // file_types
@@ -1550,7 +1573,7 @@ impl VectorDB {
                 repo.name.clone(),          // repo_name
                 repo.get_indexed_commit(branch).cloned(), // last_commit
                 if repo.file_types.is_empty() {
-                    vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()]
+                    Self::get_supported_file_types()
                 } else {
                     repo.file_types.clone()
                 },                          // file_types
