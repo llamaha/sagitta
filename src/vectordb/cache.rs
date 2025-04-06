@@ -23,6 +23,11 @@ struct CacheFile {
     entries: HashMap<String, CacheEntry>,
 }
 
+pub enum CacheCheckResult {
+    Hit(Vec<f32>),      // Cache hit, contains the embedding
+    Miss(Option<u64>), // Cache miss, contains Option<file_hash>
+}
+
 pub struct EmbeddingCache {
     entries: HashMap<String, CacheEntry>,
     cache_path: String,
@@ -245,6 +250,74 @@ impl EmbeddingCache {
         self.entries.retain(|_, entry| {
             entry.model_type == self.current_model_type
         });
+    }
+
+    /// Checks the cache for a file, considering TTL, model type, and file modification.
+    /// Returns the embedding if hit and valid, or the file hash if missed or invalid.
+    pub fn check_cache_and_get_hash(&self, file_path_str: &str, file_path: &Path) -> Result<CacheCheckResult> {
+        if let Some(entry) = self.entries.get(file_path_str) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| VectorDBError::CacheError(format!("System time error: {}", e)))?
+                .as_secs();
+
+            // 1. Check TTL
+            if now.saturating_sub(entry.timestamp) >= self.ttl {
+                // TTL expired, treat as miss but calculate hash
+                let hash = Self::get_file_hash(file_path)?;
+                return Ok(CacheCheckResult::Miss(Some(hash)));
+            }
+
+            // 2. Check model type
+            if entry.model_type != self.current_model_type {
+                // Model mismatch, treat as miss but calculate hash
+                let hash = Self::get_file_hash(file_path)?;
+                return Ok(CacheCheckResult::Miss(Some(hash)));
+            }
+
+            // 3. Check file hash (modification check)
+            match Self::get_file_hash(file_path) {
+                Ok(current_hash) => {
+                    if entry.file_hash == current_hash {
+                        // Cache hit and valid
+                        Ok(CacheCheckResult::Hit(entry.embedding.clone()))
+                    } else {
+                        // File modified, treat as miss, return new hash
+                        Ok(CacheCheckResult::Miss(Some(current_hash)))
+                    }
+                }
+                Err(e) => {
+                    // Error getting current hash (e.g., file deleted), treat as cache miss
+                    // Log the error for debugging
+                    eprintln!("Warning: Could not get file hash for cache check {}: {}", file_path.display(), e);
+                    Ok(CacheCheckResult::Miss(None)) // Indicate hash couldn't be determined
+                }
+            }
+        } else {
+            // Not in cache map, treat as miss
+            let hash_opt = Self::get_file_hash(file_path).ok();
+            Ok(CacheCheckResult::Miss(hash_opt))
+        }
+    }
+    
+    /// Insert an embedding with a pre-calculated hash. Used after batch processing.
+    /// Does not save immediately.
+    pub fn insert_with_hash(&mut self, file_path: String, embedding: Vec<f32>, file_hash: u64) -> Result<()> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| VectorDBError::CacheError(e.to_string()))?
+            .as_secs();
+
+        let entry = CacheEntry {
+            embedding,
+            timestamp: now,
+            file_hash,
+            model_type: self.current_model_type.clone(),
+        };
+
+        self.entries.insert(file_path, entry);
+        // No save here - intended for batch inserts
+        Ok(())
     }
 }
 
