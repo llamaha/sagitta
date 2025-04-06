@@ -1428,6 +1428,11 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                             successful_branches += 1;
                             progress.println(format!("✓ Branch '{}' synced successfully ({}/{})", 
                                                    branch_name, i + 1, branches.len()));
+                            
+                            // For the last synced branch, indicate it's now active
+                            if i == branches.len() - 1 {
+                                progress.println(format!("ℹ️ Branch '{}' is now the active branch for this repository", branch_name));
+                            }
                         },
                         Err(e) => {
                             progress.println(format!("⚠️ Failed to sync branch '{}': {}", branch_name, e));
@@ -1566,6 +1571,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 println!("Repository '{}' branch '{}' synced successfully in {}m{}s", 
                          repo_name, branch_name, minutes, seconds);
+                println!("✓ Branch '{}' is now the active branch for this repository", branch_name);
             }
             
             Ok(())
@@ -1639,6 +1645,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                         successful += 1;
                         progress.println(format!("✓ Repository '{}' synced successfully ({}/{})", 
                                               repo_name, i + 1, repos.len()));
+                        progress.println(format!("ℹ️ Branch '{}' is now the active branch for this repository", active_branch));
                     },
                     Err(e) => {
                         failed += 1;

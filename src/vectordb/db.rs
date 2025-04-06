@@ -1336,6 +1336,15 @@ impl VectorDB {
         // Save the updates
         self.save()?;
         
+        // Set this branch as the active branch for the repository
+        if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+            if repo.active_branch != branch {
+                info!("Setting branch {} as active branch for repository {}", branch, repo_id);
+                repo.active_branch = branch.clone();
+                self.repo_manager.save()?;
+            }
+        }
+        
         info!("Repository {} branch {} indexed successfully", repo_name, branch);
         
         Ok(())
@@ -1424,6 +1433,15 @@ impl VectorDB {
                             self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
                             self.save()?;
                             
+                            // Set this branch as the active branch for the repository
+                            if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+                                if repo.active_branch != branch {
+                                    info!("Setting branch {} as active branch for repository {}", branch, repo_id);
+                                    repo.active_branch = branch.clone();
+                                    self.repo_manager.save()?;
+                                }
+                            }
+                            
                             info!("Repository {} branch {} indexed successfully (no changes)", 
                                 repo_name, branch);
                             return Ok(());
@@ -1463,6 +1481,15 @@ impl VectorDB {
                             self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
                             self.save()?;
                             
+                            // Set this branch as the active branch for the repository
+                            if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+                                if repo.active_branch != branch {
+                                    info!("Setting branch {} as active branch for repository {}", branch, repo_id);
+                                    repo.active_branch = branch.clone();
+                                    self.repo_manager.save()?;
+                                }
+                            }
+                            
                             info!("Repository {} branch {} indexed successfully (no relevant files)", 
                                 repo_name, branch);
                             return Ok(());
@@ -1500,6 +1527,15 @@ impl VectorDB {
                         
                         // Save the updates
                         self.save()?;
+                        
+                        // Set this branch as the active branch for the repository
+                        if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+                            if repo.active_branch != branch {
+                                info!("Setting branch {} as active branch for repository {}", branch, repo_id);
+                                repo.active_branch = branch.clone();
+                                self.repo_manager.save()?;
+                            }
+                        }
                         
                         info!("Repository {} branch {} indexed successfully via cross-branch sync", 
                               repo_name, branch);
@@ -1621,6 +1657,15 @@ impl VectorDB {
         
         // Save the updates
         self.save()?;
+        
+        // Set this branch as the active branch for the repository
+        if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+            if repo.active_branch != branch {
+                info!("Setting branch {} as active branch for repository {}", branch, repo_id);
+                repo.active_branch = branch.clone();
+                self.repo_manager.save()?;
+            }
+        }
         
         info!("Repository {} branch {} indexed successfully", repo_name, branch);
         
