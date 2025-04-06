@@ -16,6 +16,7 @@ use std::sync::Arc;
 use ctrlc;
 use log::{debug, info, warn, error, trace};
 use dirs;
+use std::io::Write;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -149,7 +150,19 @@ pub enum Command {
     Stats,
 
     /// Clear the database
-    Clear,
+    Clear {
+        /// Clear all repositories (requires confirmation)
+        #[arg(short, long)]
+        all: bool,
+        
+        /// Clear a specific repository
+        #[arg(short, long)]
+        repo: Option<String>,
+        
+        /// Show help information
+        #[arg(short, long)]
+        help: bool,
+    },
     
     /// Repository management commands
     Repo {
@@ -973,10 +986,66 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("  You may want to rebuild the index with the 'index' command.");
             }
         }
-        Command::Clear => {
-            println!("Clearing the database...");
-            db.clear()?;
-            println!("Database cleared successfully.");
+        Command::Clear { all, repo, help } => {
+            if help || (!all && repo.is_none()) {
+                println!("Usage: vectordb-cli clear [OPTIONS]");
+                println!("Clears the database or specific repositories");
+                println!("Options:");
+                println!("  -a, --all          Clear all repositories (requires confirmation)");
+                println!("  -r, --repo <repo>  Clear a specific repository");
+                println!("  -h, --help         Show help information");
+                return Ok(());
+            }
+            
+            if all {
+                // Show warning and ask for confirmation
+                println!("WARNING: You are about to clear ALL repositories from the database.");
+                println!("This action cannot be undone.");
+                print!("Continue? [y/N]: ");
+                std::io::stdout().flush()?;
+                
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                
+                if input.trim().to_lowercase() == "y" {
+                    println!("Clearing all repositories...");
+                    db.clear()?;
+                    println!("All repositories cleared successfully.");
+                } else {
+                    println!("Operation cancelled.");
+                }
+            } else if let Some(repo_name) = repo {
+                // Attempt to resolve repository
+                match db.repo_manager.resolve_repo_name_to_id(&repo_name) {
+                    Ok(repo_id) => {
+                        // Get repository name for display
+                        let repo_display_name = db.repo_manager.get_repository(&repo_id)
+                            .map(|r| r.name.clone())
+                            .unwrap_or_else(|| repo_name.clone());
+                        
+                        // Confirm clearing this repository
+                        println!("About to clear repository: {}", repo_display_name);
+                        print!("Continue? [y/N]: ");
+                        std::io::stdout().flush()?;
+                        
+                        let mut input = String::new();
+                        std::io::stdin().read_line(&mut input)?;
+                        
+                        if input.trim().to_lowercase() == "y" {
+                            println!("Clearing repository {}...", repo_display_name);
+                            match db.clear_repository(&repo_name) {
+                                Ok(_) => println!("Repository '{}' cleared successfully.", repo_display_name),
+                                Err(e) => println!("Error clearing repository: {}", e),
+                            }
+                        } else {
+                            println!("Operation cancelled.");
+                        }
+                    },
+                    Err(_) => {
+                        println!("Repository not found: {}", repo_name);
+                    }
+                }
+            }
         }
         Command::Repo { command } => {
             execute_repo_command(command, db)?

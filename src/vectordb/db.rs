@@ -886,6 +886,59 @@ impl VectorDB {
         Ok(())
     }
     
+    /// Clear data for a specific repository
+    pub fn clear_repository(&mut self, repo_name: &str) -> Result<()> {
+        // Resolve repository name to ID
+        let repo_id = self.repo_manager.resolve_repo_name_to_id(repo_name)?;
+        
+        // Get the repository
+        let repo_config = self.repo_manager.get_repository(&repo_id)
+            .ok_or_else(|| VectorDBError::RepositoryNotFound(repo_name.to_string()))?;
+            
+        let current_branch = repo_config.active_branch.clone();
+            
+        // Check if we're currently in the context of the repository being cleared
+        let is_current_repo = self.current_repo_id.as_ref().map_or(false, |id| id == &repo_id) &&
+                             self.current_branch.as_ref().map_or(false, |b| b == &current_branch);
+                             
+        if is_current_repo {
+            // If we're in the context of this repository, need to clear in-memory data
+            debug!("Clearing in-memory data for current repository: {}", repo_name);
+            
+            // Clear embeddings
+            self.embeddings.clear();
+            
+            // Reset HNSW index if one exists
+            if let Some(index) = &self.hnsw_index {
+                let config = index.get_config();
+                self.hnsw_index = Some(HNSWIndex::new(config));
+            }
+            
+            // Clear the cache
+            self.cache.clear()?;
+            
+            // Clear feedback data (for simplicity, we clear all feedback)
+            self.feedback = FeedbackData::default();
+            
+            // Save the changes
+            self.save()?;
+        } else {
+            // If not the current repository, we can just update the repository config
+            debug!("Repository {} is not the current active repository", repo_name);
+        }
+        
+        // Update the repository configuration to reflect that the branches are no longer indexed
+        if let Some(repo) = self.repo_manager.get_repository_mut(&repo_id) {
+            repo.indexed_branches.clear();
+            
+            // Save the repository manager
+            self.repo_manager.save()?;
+        }
+        
+        debug!("Repository {} cleared successfully", repo_name);
+        Ok(())
+    }
+
     pub fn stats(&self) -> DBStats {
         let embedding_dimension = if !self.embeddings.is_empty() {
             self.embeddings.values().next().unwrap().len()

@@ -85,6 +85,9 @@ pub enum VectorDBError {
     #[error("Repository error: {0}")]
     RepositoryError(String),
     
+    #[error("Repository not found: {0}")]
+    RepositoryNotFound(String),
+    
     #[error("Error deserializing data: {0}")]
     DeserializationError(String),
 }
