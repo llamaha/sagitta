@@ -1324,6 +1324,9 @@ impl VectorDB {
         // Print file extension types we're indexing
         info!("Indexing files with extensions: {}", file_types.join(", "));
         
+        // Display a message about indexing progress
+        println!("Starting indexing... The progress bar will appear shortly");
+        
         // Index the repository directory
         self.index_directory(&repo_path.to_string_lossy(), &file_types)?;
         
@@ -1680,6 +1683,12 @@ impl VectorDB {
         info!("Processing {} files needing embedding in {} chunks (batch size ~{}).", 
               files_to_embed_count, chunk_count, effective_batch_size);
 
+        // Print an initial progress message
+        progress.println(format!(
+            "Scanning and preparing {} files for embedding...",
+            files_to_embed_count
+        ));
+
         // Third phase: Parallel processing with rayon
         let pool = rayon::ThreadPoolBuilder::new().num_threads(num_threads).build().unwrap();
         let (tx, rx): (Sender<Vec<(PathBuf, Option<u64>, Result<Vec<f32>>)>>, Receiver<_>) = mpsc::channel();
@@ -1694,6 +1703,10 @@ impl VectorDB {
         std::thread::spawn(move || {
             let mut last_count = 0;
             let start = std::time::Instant::now();
+            
+            // Print an initial message immediately
+            progress_clone.println("Starting file processing, please wait...");
+            
             while should_continue_clone.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_secs(5));
                 let current = processed_clone.load(Ordering::SeqCst);

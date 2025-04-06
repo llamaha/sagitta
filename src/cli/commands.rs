@@ -1478,9 +1478,11 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 if force {
                     println!("Performing full reindexing...");
+                    println!("Starting indexing... The progress bar will appear shortly.");
                     db.index_repository_full(&repo_id, branch_name)?;
                 } else {
                     println!("Performing incremental indexing...");
+                    println!("Starting indexing... The progress bar will appear shortly.");
                     db.index_repository_changes(&repo_id, branch_name)?;
                 }
                 
