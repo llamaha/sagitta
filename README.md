@@ -328,6 +328,32 @@ IMPORTANT: Design the query for vectordb-cli's hybrid search algorithm which:
 - Dynamically adjusts weights based on query length and structure
 - Performs better with natural language than code syntax in queries
 - Can focus on code structure when using "code-search" command
+
+EXAMPLES:
+
+Example 1 - Conceptual search:
+Goal: "I want to understand how the error handling works in the HTTP client"
+Recommendation:
+- Command: vectordb-cli query "how does error handling work in the HTTP client implementation"
+- This uses the default hybrid search to find conceptual matches across the codebase
+
+Example 2 - Finding specific implementations:
+Goal: "I need to find the code that handles user authentication"
+Recommendation:
+- Command: vectordb-cli code-search "user authentication implementation" --type function
+- This uses code-aware search to focus on function implementations related to authentication
+
+Example 3 - Looking for exact function:
+Goal: "Where is the update_user_profile function defined?"
+Recommendation:
+- Command: vectordb-cli parse-code "function update_user_profile"
+- This uses structure-based search to find the exact function definition
+
+Example 4 - Customized weights for mixed search:
+Goal: "Find code implementing JWT token validation that uses a specific library"
+Recommendation:
+- Command: vectordb-cli query "JWT token validation implementation" --vector-weight 0.5 --bm25-weight 0.5
+- The balanced weights help find semantic matches while giving importance to exact terms
 ```
 
 This template helps you craft queries that take maximum advantage of vectordb-cli's search capabilities, whether you're looking for concept-level understanding or specific code implementations.
