@@ -247,6 +247,13 @@ pub enum RepoCommand {
         force: bool,
     },
     
+    /// Sync all repositories
+    SyncAll {
+        /// Force full reindexing
+        #[arg(long = "force")]
+        force: bool,
+    },
+    
     /// Show repository status
     Status {
         /// Repository ID or name
@@ -1469,6 +1476,85 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 println!("Repository '{}' branch '{}' synced successfully in {}m{}s", 
                          repo_name, branch_name, minutes, seconds);
+            }
+            
+            Ok(())
+        },
+        
+        RepoCommand::SyncAll { force } => {
+            debug!("Syncing all repositories");
+            
+            // Get the list of repositories and clone necessary data to avoid borrowing issues
+            let repos: Vec<_> = db.repo_manager.list_repositories()
+                .into_iter()
+                .map(|repo| (repo.id.clone(), repo.name.clone(), repo.active_branch.clone()))
+                .collect();
+            
+            if repos.is_empty() {
+                println!("No repositories configured");
+                return Ok(());
+            }
+            
+            println!("Syncing all {} repositories...", repos.len());
+            
+            // Create progress bar
+            let progress = indicatif::ProgressBar::new(repos.len() as u64);
+            progress.set_style(
+                indicatif::ProgressStyle::default_bar()
+                    .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} repositories synced ({eta}) {msg}")
+                    .unwrap()
+                    .progress_chars("#>-")
+            );
+            
+            // Stats for overall progress
+            let start_time = std::time::Instant::now();
+            let mut successful = 0;
+            let mut failed = 0;
+            
+            for (i, (repo_id, repo_name, active_branch)) in repos.iter().enumerate() {
+                progress.set_message(format!("Syncing repository {}", repo_name));
+                
+                // Perform the sync
+                let result = if force {
+                    db.index_repository_full(repo_id, active_branch)
+                } else {
+                    db.index_repository_changes(repo_id, active_branch)
+                };
+                
+                // Handle result
+                match result {
+                    Ok(_) => {
+                        successful += 1;
+                        progress.println(format!("✓ Repository '{}' synced successfully ({}/{})", 
+                                              repo_name, i + 1, repos.len()));
+                    },
+                    Err(e) => {
+                        failed += 1;
+                        progress.println(format!("⚠️ Failed to sync repository '{}': {}", repo_name, e));
+                    }
+                }
+                
+                progress.inc(1);
+                
+                // Show overall progress rate
+                let elapsed = start_time.elapsed().as_secs();
+                if elapsed > 0 {
+                    let repos_per_min = (successful as f64 / elapsed as f64) * 60.0;
+                    progress.set_message(format!("Syncing repository {} ({:.1} repos/min)", 
+                                              repo_name, repos_per_min));
+                }
+            }
+            
+            // Report final stats
+            let elapsed = start_time.elapsed().as_secs();
+            let minutes = elapsed / 60;
+            let seconds = elapsed % 60;
+            
+            progress.finish_with_message(format!("Synced {}/{} repositories in {}m{}s", 
+                                             successful, repos.len(), minutes, seconds));
+            
+            if failed > 0 {
+                println!("\n⚠️ {} repositories failed to sync", failed);
             }
             
             Ok(())
