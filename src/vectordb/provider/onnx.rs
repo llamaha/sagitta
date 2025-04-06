@@ -2,7 +2,7 @@ use anyhow::{Result, Error};
 use tokenizers::Tokenizer;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use ndarray::{Array2, CowArray};
+use ndarray::{Array2, CowArray, Array, Ix2};
 use crate::vectordb::provider::EmbeddingProvider;
 use ort::{Environment, Session, SessionBuilder, Value, GraphOptimizationLevel};
 use crate::vectordb::provider::session_manager::{SessionManager, SessionConfig};
@@ -118,6 +118,17 @@ impl OnnxEmbeddingProvider {
         
         Ok(embedding)
     }
+
+    /// Normalize an embedding to unit length
+    fn normalize_embedding(mut embedding: Vec<f32>) -> Vec<f32> {
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for x in &mut embedding {
+                *x /= norm;
+            }
+        }
+        embedding
+    }
 }
 
 impl EmbeddingProvider for OnnxEmbeddingProvider {
@@ -163,10 +174,59 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
             return Ok(Vec::new());
         }
         
-        // Process texts one by one for simplicity and reliability
-        let mut results = Vec::with_capacity(texts.len());
+        let batch_size = texts.len();
+        let mut all_input_ids = Vec::with_capacity(batch_size * self.max_seq_length);
+        let mut all_attention_masks = Vec::with_capacity(batch_size * self.max_seq_length);
+        
+        // Prepare inputs for all texts in the batch
         for text in texts {
-            results.push(self.embed(text)?);
+            let (mut input_ids, mut attention_mask) = self.prepare_inputs(text)?;
+            all_input_ids.append(&mut input_ids);
+            all_attention_masks.append(&mut attention_mask);
+        }
+        
+        // Lock the session for inference
+        let session = self.session.lock().unwrap();
+        
+        // Create input tensors with shape [batch_size, sequence_length]
+        let input_ids_array = Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)?
+            .into_dyn();
+        let attention_mask_array = Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)?
+            .into_dyn();
+        
+        // Create CowArray views
+        let input_ids_cow = CowArray::from(&input_ids_array);
+        let attention_mask_cow = CowArray::from(&attention_mask_array);
+        
+        // Create input values
+        let input_ids_val = Value::from_array(session.allocator(), &input_ids_cow)?;
+        let attention_mask_val = Value::from_array(session.allocator(), &attention_mask_cow)?;
+        
+        let inputs = vec![input_ids_val, attention_mask_val];
+        
+        // Run inference
+        let outputs = session.run(inputs)?;
+        
+        // Extract pooler output (second output tensor)
+        if outputs.len() < 2 {
+            return Err(Error::msg(format!("Model returned unexpected number of outputs: got {}, expected at least 2", outputs.len())));
+        }
+        
+        let pooler_output = outputs[1].try_extract::<f32>()?;
+        let pooler_view = pooler_output.view();
+        
+        // Check output shape: [batch_size, embedding_dim]
+        let output_shape = pooler_view.shape();
+        if output_shape.len() != 2 || output_shape[0] != batch_size || output_shape[1] != ONNX_EMBEDDING_DIM {
+            return Err(Error::msg(format!("Unexpected pooler output shape: got {:?}, expected [{}, {}]", output_shape, batch_size, ONNX_EMBEDDING_DIM)));
+        }
+        
+        // Extract individual embeddings and normalize
+        let mut results = Vec::with_capacity(batch_size);
+        for i in 0..batch_size {
+            let embedding_slice = pooler_view.slice(ndarray::s![i, ..]);
+            let embedding = embedding_slice.to_slice().ok_or_else(|| Error::msg("Failed to slice ONNX output"))?.to_vec();
+            results.push(Self::normalize_embedding(embedding)); // Use static normalize method
         }
         
         Ok(results)

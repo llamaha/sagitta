@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::vectordb::provider::EmbeddingProvider;
+use rayon::prelude::*;
 
 /// Dimension of the fast embeddings (position-weighted token hashes)
 pub const FAST_EMBEDDING_DIM: usize = 384;
@@ -102,6 +103,19 @@ impl EmbeddingProvider for FastEmbeddingProvider {
     
     fn description(&self) -> &'static str {
         "Fast embedding using character trigrams with position weighting (less accurate but quicker than ONNX)"
+    }
+
+    // Override the default embed_batch for parallel processing
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        // Process texts in parallel using rayon
+        texts
+            .par_iter()
+            .map(|text| self.embed(text)) // embed clones self, so it's safe
+            .collect()
     }
 }
 
