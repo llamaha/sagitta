@@ -82,28 +82,30 @@ pub fn analyze_file_path(file_path: &str) -> (String, Vec<String>) {
     (filename, components)
 }
 
-/// Apply filename and path-based ranking boosts
-pub fn apply_path_ranking(results: &mut Vec<SearchResult>, query: &str, weights: &PathComponentWeights) {
-    // Create a path relevance scorer
+/// Applies path relevance scoring to search results
+pub fn apply_path_ranking(results: &mut Vec<SearchResult>, query: &str, _weights: &PathComponentWeights) {
+    // Split the query into terms for searching
+    let normalized_query = query.to_lowercase();
+    let query_terms: Vec<&str> = normalized_query
+        .split_whitespace()
+        .filter(|t| t.len() > 2)
+        .collect();
+        
+    // Create a scorer with default configuration
     let scorer = PathRelevanceScorer::new();
     
     for result in results.iter_mut() {
-        let file_path = &result.file_path;
+        // Skip results that don't have a file path (should never happen)
+        let file_path = match &result.file_path {
+            Some(path) => path,
+            None => continue,
+        };
         
-        // Parse the path
-        let parsed_path = scorer.parse_path(file_path);
+        // Calculate relevance score for this path based on the query
+        let relevance = scorer.score_path_relevance(file_path, &query_terms);
         
-        // Calculate the relevance score
-        let relevance_factor = scorer.calculate_relevance(&parsed_path, query);
-        
-        // Apply the relevance factor to the similarity score
-        let original_similarity = result.similarity;
-        result.similarity = (result.similarity * relevance_factor).min(1.0);
-        
-        if (result.similarity - original_similarity).abs() > 0.01 {
-            debug!("Applied path relevance to {}: {} -> {}", 
-                file_path, original_similarity, result.similarity);
-        }
+        // Apply the relevance boost to the result's score
+        result.score *= (1.0 + relevance);
     }
 }
 

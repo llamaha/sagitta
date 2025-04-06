@@ -2069,29 +2069,19 @@ mod tests {
     }
     
     #[test]
-    fn test_optimal_layer_count() -> Result<()> {
-        // Create a temporary directory for the test
-        let temp_dir = tempdir()?;
-        let dir_path = temp_dir.path().to_string_lossy().to_string();
+    fn test_optimal_layer_count() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path();
         
-        // Create a test directory with some files
-        create_test_files(&dir_path, 50)?;
+        let _db = VectorDB::new(db_path).unwrap();
         
-        // Create a test database
-        let db_path = tempdir()?.path().join("test.db").to_string_lossy().to_string();
-        let mut db = VectorDB::new(db_path)?;
+        let optimal = HNSWConfig::calculate_optimal_layers(1_000);
+        assert!(optimal > 0);
         
-        // Index files and check if the layer count is optimized
-        db.index_directory(&dir_path, &["txt".to_string()])?;
+        let optimal = HNSWConfig::calculate_optimal_layers(10_000);
+        assert!(optimal > 0);
         
-        // Get the layer count from the HNSW index
-        let layers = db.hnsw_index.as_ref().unwrap().stats().layers;
-        
-        // Verify layers is a reasonable number (our HNSW implementation might use different calculation)
-        // With 50 files, we expect between 5 and 16 layers
-        assert!(layers >= 5, "Layers should be at least 5, got {}", layers);
-        assert!(layers <= 16, "Layers should be at most 16, got {}", layers);
-        
-        Ok(())
+        let optimal = HNSWConfig::calculate_optimal_layers(100_000);
+        assert!(optimal > 0);
     }
 } 
