@@ -120,6 +120,12 @@ vectordb-cli query "how does the error handling work"
 # Limit number of results
 vectordb-cli query "implement authentication" --limit 5
 
+# Search in a specific repository
+vectordb-cli query "error handling" --repo my-repo-name
+
+# Search across all configured repositories
+vectordb-cli query "configuration options" --all-repos
+
 # Code-aware search
 vectordb-cli code-search "database connection"
 
@@ -150,7 +156,34 @@ vectordb-cli repo sync my-repo-name
 
 # Remove a repository
 vectordb-cli repo remove my-repo-name
+
+# Set a repository as active
+vectordb-cli repo set-active my-repo-name
 ```
+
+#### Active Repository Concept
+
+When you have multiple repositories configured, one of them is designated as the "active" repository. The active repository is used by default for all commands when you don't explicitly specify a repository using the `--repo` flag. For example:
+
+```bash
+# Uses the active repository
+vectordb-cli query "how does error handling work"
+
+# Explicitly specifies a repository
+vectordb-cli query "how does error handling work" --repo my-other-repo
+```
+
+The active repository is:
+- Automatically set when you add the first repository
+- Changed when you use the `repo set-active` command
+- Updated when you remove the currently active repository (the next available one becomes active)
+
+You can see the current active repository at the bottom of the output from the `repo list` command:
+```
+Active repository: my-repo-name (repo-id-12345)
+```
+
+Having different repositories allows you to organize your searches across separate codebases or have multiple configurations for the same codebase (e.g., one for code files and another for documentation).
 
 #### Example YAML for Repository Import
 
@@ -183,6 +216,37 @@ The YAML file supports the following attributes:
 - `embedding_model`: Optional model type ("onnx" or "fast")
 - `auto_sync`: Optional auto-sync setting (true/false)
 - `auto_sync_interval`: Optional auto-sync interval in seconds
+
+#### Multiple Configurations for the Same Repository
+
+You can create multiple configurations for the same repository by using different names. This is useful for creating specialized search indexes, such as having separate configurations for code and documentation:
+
+```yaml
+repositories:
+  - path: /path/to/repo
+    name: my-repo-code
+    file_types:
+      - rs
+      - go
+      - yaml
+    embedding_model: onnx
+    
+  - path: /path/to/repo
+    name: my-repo-docs
+    file_types:
+      - md
+    embedding_model: onnx
+```
+
+This creates two separate indexes for the same repository, allowing targeted searches:
+
+```bash
+# Search only in code files
+vectordb-cli query "implement feature" --repo my-repo-code
+
+# Search only in documentation
+vectordb-cli query "how to use feature" --repo my-repo-docs
+```
 
 ### Understanding Search Options
 
