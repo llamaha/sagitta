@@ -8,8 +8,28 @@ A CLI tool for semantic code search and analysis.
 - Fast token-based search for larger codebases
 - Hybrid search combining semantic and lexical matching
 - Code-aware search for functions, types, and more
-- Support for multiple languages: Rust, Ruby, Go, and Markdown
+- Support for multiple programming languages and file formats
 - Cross-platform support (Linux, macOS)
+
+## Supported File Types
+
+Currently, the following file types are supported with code parsers:
+- Rust (rs)
+- Ruby (rb)
+- Go (go)
+- Python (py)
+- JavaScript (js)
+- TypeScript (ts)
+- C (c)
+- C++ (cpp, h, hpp)
+- Protocol Buffers (proto)
+- Markdown (md)
+- Text (txt, rst)
+- Configuration files (json, yaml, yml, toml, xml)
+
+When using the `--fast` flag, vectordb-cli will index any non-binary file type at the file level, even if not in the supported list above.
+
+> **Note:** GPU support is planned for a future release to significantly improve embedding generation performance.
 
 ## Installation
 
@@ -80,6 +100,18 @@ vectordb-cli index ./your/code/directory --file-types rs,rb,go,md
 # Use fast model instead of ONNX (for large codebases)
 vectordb-cli index ./your/code/directory --fast
 ```
+
+The indexing process supports different modes:
+
+1. **Default mode**: Uses the ONNX neural network model for high-quality semantic embeddings. Only indexes the supported file types listed above.
+
+2. **Fast mode**: Uses a token-based model that processes files more quickly but with less semantic accuracy.
+   - When using `--fast` without specifying file types, it indexes all non-binary files in the directory
+   - Ideal for large codebases or when quick indexing is more important than semantic accuracy
+
+3. **Targeted mode**: Specify exactly which file types to index using the `--file-types` parameter
+   - Example: `--file-types rs,go,yaml` to only index Rust, Go, and YAML files
+   - Can be combined with `--fast` to use the faster embedding model while restricting file types
 
 ### Searching
 

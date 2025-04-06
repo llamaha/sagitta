@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::atomic::AtomicBool;
 use std::io::Write;
+use std::io::Read;
 use log::{debug, info, warn, error, trace};
 use crate::vectordb::repo_manager::RepoManager;
 use crate::vectordb::auto_sync::AutoSyncDaemon;
@@ -519,17 +520,50 @@ impl VectorDB {
         debug!("Starting directory scan for files to index in {}", dir);
         
         // Scan directory for files to index first
-        let files: Vec<PathBuf> = WalkDir::new(dir_path)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry.file_type().is_file() && match entry.path().extension() {
-                    Some(ext) => file_types.contains(&ext.to_string_lossy().to_string()),
-                    None => false,
-                }
-            })
-            .map(|entry| entry.path().to_path_buf())
-            .collect();
+        let files: Vec<PathBuf> = if file_types.is_empty() && self.embedding_model_type == EmbeddingModelType::Fast {
+            // If file_types is empty and we're using the fast model, index all non-binary files
+            debug!("Using fast model with no file types specified - indexing all non-binary files");
+            WalkDir::new(dir_path)
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    // Only include files (not directories)
+                    if !entry.file_type().is_file() {
+                        return false;
+                    }
+                    
+                    // Check if it's likely a binary file (simple heuristic)
+                    // Try to read the first few bytes to see if it contains NUL bytes
+                    if let Ok(file) = std::fs::File::open(entry.path()) {
+                        let mut buffer = [0u8; 512];
+                        let mut reader = std::io::BufReader::new(file);
+                        if let Ok(bytes_read) = reader.read(&mut buffer) {
+                            if bytes_read > 0 {
+                                // If we find a NUL byte, assume it's binary
+                                return !buffer[..bytes_read].contains(&0);
+                            }
+                        }
+                    }
+                    
+                    // Default to including the file if we couldn't determine binary status
+                    true
+                })
+                .map(|entry| entry.path().to_path_buf())
+                .collect()
+        } else {
+            // Regular mode - only include files with specified extensions
+            WalkDir::new(dir_path)
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry.file_type().is_file() && match entry.path().extension() {
+                        Some(ext) => file_types.contains(&ext.to_string_lossy().to_string()),
+                        None => false,
+                    }
+                })
+                .map(|entry| entry.path().to_path_buf())
+                .collect()
+        };
         
         let file_count = files.len();
         

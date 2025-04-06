@@ -405,13 +405,22 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             
             let start = Instant::now();
             
-            // Use all supported file types if none were specified
+            // Determine file types to use based on input flags and fast mode
             let file_types_to_use = if file_types.is_empty() {
-                let supported = VectorDB::get_supported_file_types();
-                println!("No file types specified, using all supported types: {}", 
-                         supported.join(", "));
-                supported
+                if use_fast {
+                    // In fast mode with no specified file types, use all non-binary file types
+                    // We just pass an empty vector to index_directory which will make it index all non-binary files
+                    println!("No file types specified with --fast mode, indexing all non-binary files at file level");
+                    Vec::new()
+                } else {
+                    // Standard mode with no specified file types, use all supported types with code parsers
+                    let supported = VectorDB::get_supported_file_types();
+                    println!("No file types specified, using all supported types with code parsers: {}", 
+                             supported.join(", "));
+                    supported
+                }
             } else {
+                // User specified file types, use those regardless of mode
                 println!("Indexing file types: {}", file_types.join(", "));
                 file_types
             };
