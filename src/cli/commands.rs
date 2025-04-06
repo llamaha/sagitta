@@ -17,6 +17,9 @@ use ctrlc;
 use log::{debug, info, warn, error, trace};
 use dirs;
 use std::io::Write;
+use std::process::Command as ProcessCommand;
+use std::collections::HashMap;
+use crate::vectordb::repo_yaml;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -190,6 +193,17 @@ pub enum RepoCommand {
         /// Embedding model type (fast, onnx)
         #[arg(long = "model")]
         model: Option<String>,
+    },
+    
+    /// Import repositories from a YAML file
+    ImportYaml {
+        /// Path to the YAML configuration file
+        #[arg(required = true)]
+        path: String,
+        
+        /// Skip existing repositories instead of failing
+        #[arg(short = 's', long = "skip-existing")]
+        skip_existing: bool,
     },
     
     /// Remove a repository
@@ -1019,12 +1033,12 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 match db.repo_manager.resolve_repo_name_to_id(&repo_name) {
                     Ok(repo_id) => {
                         // Get repository name for display
-                        let repo_display_name = db.repo_manager.get_repository(&repo_id)
+                        let repo_name = db.repo_manager.get_repository(&repo_id)
                             .map(|r| r.name.clone())
                             .unwrap_or_else(|| repo_name.clone());
                         
                         // Confirm clearing this repository
-                        println!("About to clear repository: {}", repo_display_name);
+                        println!("About to clear repository: {}", repo_name);
                         print!("Continue? [y/N]: ");
                         std::io::stdout().flush()?;
                         
@@ -1032,9 +1046,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         std::io::stdin().read_line(&mut input)?;
                         
                         if input.trim().to_lowercase() == "y" {
-                            println!("Clearing repository {}...", repo_display_name);
+                            println!("Clearing repository {}...", repo_name);
                             match db.clear_repository(&repo_name) {
-                                Ok(_) => println!("Repository '{}' cleared successfully.", repo_display_name),
+                                Ok(_) => println!("Repository '{}' cleared successfully.", repo_name),
                                 Err(e) => println!("Error clearing repository: {}", e),
                             }
                         } else {
@@ -1223,6 +1237,54 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             }
         },
         
+        RepoCommand::ImportYaml { path, skip_existing } => {
+            debug!("Importing repositories from YAML file: {}", path);
+            
+            // Parse the YAML file and import repositories
+            let yaml_path = Path::new(&path);
+            match repo_yaml::import_repositories_from_yaml(yaml_path, &mut db.repo_manager, skip_existing) {
+                Ok(result) => {
+                    // Show summary of imported repositories
+                    if !result.successful.is_empty() {
+                        println!("\n{} repositories imported successfully:", result.successful.len());
+                        for repo in &result.successful {
+                            println!("  ✓ {}", repo.green());
+                        }
+                    }
+                    
+                    if !result.skipped.is_empty() {
+                        println!("\n{} repositories skipped (already exist):", result.skipped.len());
+                        for repo in &result.skipped {
+                            println!("  ! {}", repo.yellow());
+                        }
+                    }
+                    
+                    if !result.failed.is_empty() {
+                        println!("\n{} repositories failed to import:", result.failed.len());
+                        for (repo, error) in &result.failed {
+                            println!("  ✗ {} - {}", repo.red(), error);
+                        }
+                    }
+                    
+                    println!("\nSummary: {} imported, {} skipped, {} failed", 
+                             result.successful.len(), 
+                             result.skipped.len(), 
+                             result.failed.len());
+                    
+                    // Provide guidance for next steps
+                    if !result.successful.is_empty() {
+                        println!("\nUse 'vectordb-cli repo list' to see all repositories");
+                        println!("Use 'vectordb-cli repo sync <repo>' to index repositories");
+                    }
+                    
+                    Ok(())
+                },
+                Err(e) => {
+                    Err(anyhow!("Failed to import repositories from YAML: {}", e))
+                }
+            }
+        },
+        
         RepoCommand::Remove { repo } => {
             debug!("Removing repository: {}", repo);
             
@@ -1232,7 +1294,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             // Get repository name for display
             let repo_name = db.repo_manager.get_repository(&repo_id)
                 .map(|r| r.name.clone())
-                .unwrap_or_else(|| repo.clone());
+                .unwrap_or_else(|| repo.to_string());
             
             // Remove the repository
             db.repo_manager.remove_repository(&repo_id)?;

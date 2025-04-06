@@ -16,5 +16,6 @@ pub mod repo;
 pub mod repo_manager;
 pub mod auto_sync;
 pub mod code_ranking;
+pub mod repo_yaml;
 
 pub use db::VectorDB;
