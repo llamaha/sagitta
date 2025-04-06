@@ -110,6 +110,60 @@ vectordb-cli code-search "user authentication" --type function
 vectordb-cli parse-code "function update_user"
 ```
 
+### Managing Multiple Repositories
+
+```bash
+# Add a repository
+vectordb-cli repo add /path/to/repository --name my-repo-name
+
+# Import repositories from YAML file
+vectordb-cli repo import-yaml repos.yaml
+
+# Skip existing repositories when importing
+vectordb-cli repo import-yaml repos.yaml --skip-existing
+
+# List configured repositories
+vectordb-cli repo list
+
+# Sync a repository (index the code)
+vectordb-cli repo sync my-repo-name
+
+# Remove a repository
+vectordb-cli repo remove my-repo-name
+```
+
+#### Example YAML for Repository Import
+
+Create a YAML file with multiple repository definitions:
+
+```yaml
+repositories:
+  - path: /path/to/repo1
+    name: my-awesome-project
+    file_types:
+      - rs
+      - go
+    embedding_model: onnx
+    
+  - path: ./relative/path/to/repo2
+    name: another-project
+    file_types:
+      - rs
+      - md
+      - yaml
+    embedding_model: fast
+    auto_sync: true
+    auto_sync_interval: 3600
+```
+
+The YAML file supports the following attributes:
+- `path`: Path to the repository (absolute or relative to the YAML file)
+- `name`: Optional repository name (defaults to directory name)
+- `file_types`: Optional list of file extensions to index
+- `embedding_model`: Optional model type ("onnx" or "fast")
+- `auto_sync`: Optional auto-sync setting (true/false)
+- `auto_sync_interval`: Optional auto-sync interval in seconds
+
 ### Understanding Search Options
 
 vectordb-cli offers different search modes optimized for various use cases:
