@@ -1293,16 +1293,29 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             }
             
             println!("Configured repositories:");
-            println!("{:<36} {:<20} {:<10} {:<20}", "ID", "NAME", "ACTIVE", "BRANCHES");
-            println!("{}", "-".repeat(86));
+            println!("{:<36} {:<20} {:<10} {:<15} {:<20}", "ID", "NAME", "ACTIVE", "CURRENT BRANCH", "BRANCHES");
+            println!("{}", "-".repeat(101));
             
             for repo in repos {
                 let active_marker = if repo.active { "Yes" } else { "No" };
                 let branch_count = repo.indexed_branches.len();
-                println!("{:<36} {:<20} {:<10} {:<20}", 
+                
+                // Get the current git branch of the repository
+                let current_branch = match crate::utils::git::GitRepo::new(repo.path.clone()) {
+                    Ok(git_repo) => {
+                        match git_repo.get_current_branch() {
+                            Ok(branch) => branch,
+                            Err(_) => "Unknown".to_string(),
+                        }
+                    },
+                    Err(_) => "Unknown".to_string(),
+                };
+                
+                println!("{:<36} {:<20} {:<10} {:<15} {:<20}", 
                          repo.id, 
                          repo.name,
                          active_marker,
+                         current_branch,
                          if branch_count > 0 { 
                              format!("{} tracked", branch_count) 
                          } else { 
