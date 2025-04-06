@@ -262,6 +262,66 @@ impl RepoManager {
         Ok(())
     }
     
+    /// Enable auto-sync for a repository
+    pub fn enable_auto_sync(&mut self, repo_id: &str, min_interval: Option<u64>) -> Result<()> {
+        debug!("Enabling auto-sync for repository {}", repo_id);
+        
+        // Get the repository
+        let repo = self.get_repository_mut(repo_id)
+            .ok_or_else(|| anyhow!("Repository with ID '{}' not found", repo_id))?;
+        
+        // Enable auto-sync
+        repo.enable_auto_sync(min_interval);
+        
+        // Save changes
+        self.save()?;
+        
+        Ok(())
+    }
+    
+    /// Disable auto-sync for a repository
+    pub fn disable_auto_sync(&mut self, repo_id: &str) -> Result<()> {
+        debug!("Disabling auto-sync for repository {}", repo_id);
+        
+        // Get the repository
+        let repo = self.get_repository_mut(repo_id)
+            .ok_or_else(|| anyhow!("Repository with ID '{}' not found", repo_id))?;
+        
+        // Disable auto-sync
+        repo.disable_auto_sync();
+        
+        // Save changes
+        self.save()?;
+        
+        Ok(())
+    }
+    
+    /// Get repositories with auto-sync enabled
+    pub fn get_auto_sync_repos(&self) -> Vec<&GitRepoConfig> {
+        self.repositories.values()
+            .filter(|repo| repo.active && repo.auto_sync.enabled)
+            .collect()
+    }
+    
+    /// Check if auto-sync is enabled for a repository
+    pub fn is_auto_sync_enabled(&self, repo_id: &str) -> bool {
+        self.get_repository(repo_id)
+            .map(|repo| repo.auto_sync.enabled)
+            .unwrap_or(false)
+    }
+    
+    /// Start the auto-sync daemon in the VectorDB
+    pub fn start_auto_sync_daemon(&self) -> Result<()> {
+        // Implementation is in VectorDB
+        Ok(())
+    }
+    
+    /// Stop the auto-sync daemon in the VectorDB
+    pub fn stop_auto_sync_daemon(&self) -> Result<()> {
+        // Implementation is in VectorDB
+        Ok(())
+    }
+    
     /// Save the repository manager configuration
     pub fn save(&self) -> Result<()> {
         debug!("Saving repository manager configuration to {}", self.config_path.display());

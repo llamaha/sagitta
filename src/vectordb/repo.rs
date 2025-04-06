@@ -4,6 +4,7 @@ use std::fs;
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use crate::vectordb::embedding::EmbeddingModelType;
+use crate::vectordb::auto_sync::AutoSyncConfig;
 use anyhow::{Result, anyhow};
 use log::{debug, info, warn, error};
 
@@ -28,6 +29,8 @@ pub struct GitRepoConfig {
     pub last_indexed: Option<DateTime<Utc>>,
     /// Whether this repository is active
     pub active: bool,
+    /// Auto-sync configuration for this repository
+    pub auto_sync: AutoSyncConfig,
 }
 
 impl GitRepoConfig {
@@ -64,6 +67,7 @@ impl GitRepoConfig {
             file_types: vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()],
             last_indexed: None,
             active: true,
+            auto_sync: AutoSyncConfig::default(),
         })
     }
     
@@ -81,6 +85,19 @@ impl GitRepoConfig {
     /// Get the indexed commit hash for a branch
     pub fn get_indexed_commit(&self, branch: &str) -> Option<&String> {
         self.indexed_branches.get(branch)
+    }
+    
+    /// Enable auto-sync for this repository
+    pub fn enable_auto_sync(&mut self, min_interval: Option<u64>) {
+        self.auto_sync.enabled = true;
+        if let Some(interval) = min_interval {
+            self.auto_sync.min_interval = interval;
+        }
+    }
+    
+    /// Disable auto-sync for this repository
+    pub fn disable_auto_sync(&mut self) {
+        self.auto_sync.enabled = false;
     }
 }
 

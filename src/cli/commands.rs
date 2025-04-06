@@ -225,6 +225,46 @@ pub enum RepoCommand {
         #[arg(required = true)]
         repo: String,
     },
+    
+    /// Configure auto-sync for repositories
+    AutoSync {
+        #[command(subcommand)]
+        command: AutoSyncCommand,
+    },
+}
+
+#[derive(Parser, Debug)]
+pub enum AutoSyncCommand {
+    /// Enable auto-sync for a repository
+    Enable {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+        
+        /// Minimum interval between syncs in seconds (default: 60)
+        #[arg(short = 'i', long = "interval")]
+        interval: Option<u64>,
+    },
+    
+    /// Disable auto-sync for a repository
+    Disable {
+        /// Repository ID or name
+        #[arg(required = true)]
+        repo: String,
+    },
+    
+    /// Show auto-sync status
+    Status {
+        /// Repository ID or name (optional, shows all if not specified)
+        #[arg(short = 'r', long = "repo")]
+        repo: Option<String>,
+    },
+    
+    /// Start the auto-sync daemon
+    Start,
+    
+    /// Stop the auto-sync daemon
+    Stop,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -1377,6 +1417,147 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                     println!("⚠️ Could not access git repository: {}", e);
                 }
             }
+            
+            Ok(())
+        },
+        
+        RepoCommand::AutoSync { command } => {
+            execute_auto_sync_command(command, db)
+        },
+    }
+}
+
+/// Execute auto-sync commands
+fn execute_auto_sync_command(command: AutoSyncCommand, mut db: VectorDB) -> Result<()> {
+    match command {
+        AutoSyncCommand::Enable { repo, interval } => {
+            debug!("Enabling auto-sync for repository: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get the repository name
+            let repo_name = db.repo_manager.get_repository(&repo_id)
+                .map(|r| r.name.clone())
+                .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
+            
+            // Enable auto-sync
+            db.repo_manager.enable_auto_sync(&repo_id, interval)?;
+            
+            println!("Auto-sync enabled for repository: {} ({})", repo_name, repo_id);
+            println!("Run 'vectordb-cli repo auto-sync start' to start the auto-sync daemon");
+            
+            Ok(())
+        },
+        
+        AutoSyncCommand::Disable { repo } => {
+            debug!("Disabling auto-sync for repository: {}", repo);
+            
+            // Resolve repository name/ID
+            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
+            
+            // Get repository name
+            let repo_name = db.repo_manager.get_repository(&repo_id)
+                .map(|r| r.name.clone())
+                .unwrap_or_else(|| repo_id.clone());
+            
+            // Disable auto-sync
+            db.repo_manager.disable_auto_sync(&repo_id)?;
+            
+            println!("Auto-sync disabled for repository: {} ({})", repo_name, repo_id);
+            
+            Ok(())
+        },
+        
+        AutoSyncCommand::Status { repo } => {
+            debug!("Showing auto-sync status");
+            
+            // Show auto-sync status for a specific repository if specified
+            if let Some(repo_name) = repo {
+                let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo_name)?;
+                let repo = db.repo_manager.get_repository(&repo_id)
+                    .ok_or_else(|| anyhow!("Repository not found: {}", repo_name))?;
+                
+                println!("Auto-sync status for repository: {} ({})", repo.name, repo_id);
+                println!("  Enabled: {}", if repo.auto_sync.enabled { "Yes" } else { "No" });
+                println!("  Minimum sync interval: {} seconds", repo.auto_sync.min_interval);
+                
+                return Ok(());
+            }
+            
+            // Show auto-sync status for all repositories
+            let all_repos = db.repo_manager.list_repositories();
+            
+            if all_repos.is_empty() {
+                println!("No repositories configured");
+                return Ok(());
+            }
+            
+            println!("Auto-sync status for all repositories:");
+            println!("{:<36} {:<20} {:<10} {:<20}", "ID", "NAME", "ENABLED", "INTERVAL");
+            println!("{}", "-".repeat(86));
+            
+            // Count repos with auto-sync enabled
+            let mut auto_sync_count = 0;
+            
+            for repo in all_repos {
+                let enabled = if repo.auto_sync.enabled { 
+                    auto_sync_count += 1;
+                    "Yes" 
+                } else { 
+                    "No" 
+                };
+                let interval = format!("{} seconds", repo.auto_sync.min_interval);
+                
+                println!("{:<36} {:<20} {:<10} {:<20}", 
+                         repo.id, 
+                         repo.name,
+                         enabled,
+                         interval);
+            }
+            
+            if auto_sync_count == 0 {
+                println!("\nNo repositories have auto-sync enabled.");
+            } else {
+                println!("\n{} repositories have auto-sync enabled.", auto_sync_count);
+            }
+            
+            Ok(())
+        },
+        
+        AutoSyncCommand::Start => {
+            debug!("Starting auto-sync daemon");
+            
+            // Clone repos before starting daemon to avoid borrowing conflicts
+            let auto_sync_repos = db.repo_manager.get_auto_sync_repos();
+            let repo_names: Vec<_> = auto_sync_repos.iter()
+                .map(|r| (r.name.clone(), r.id.clone(), r.auto_sync.min_interval))
+                .collect();
+            
+            if repo_names.is_empty() {
+                println!("No repositories have auto-sync enabled. Enable auto-sync first with 'vectordb-cli repo auto-sync enable <repo>'");
+                return Ok(());
+            }
+            
+            // Start auto-sync daemon
+            db.start_auto_sync()?;
+            
+            println!("Auto-sync daemon started for the following repositories:");
+            for (name, id, interval) in repo_names {
+                println!("  - {} ({})", name, id);
+                println!("    Interval: {} seconds", interval);
+            }
+            
+            Ok(())
+        },
+        
+        AutoSyncCommand::Stop => {
+            debug!("Stopping auto-sync daemon");
+            
+            // Stop auto-sync daemon
+            db.stop_auto_sync()?;
+            
+            println!("Auto-sync daemon stopped");
             
             Ok(())
         },

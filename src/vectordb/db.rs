@@ -17,6 +17,7 @@ use std::sync::atomic::AtomicBool;
 use std::io::Write;
 use log::{debug, info, warn, error, trace};
 use crate::vectordb::repo_manager::RepoManager;
+use crate::vectordb::auto_sync::AutoSyncDaemon;
 
 /// Relevance feedback data for a query-file pair
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -58,6 +59,7 @@ pub struct VectorDB {
     pub repo_manager: RepoManager,
     current_repo_id: Option<String>,
     current_branch: Option<String>,
+    auto_sync_daemon: Option<AutoSyncDaemon>,
 }
 
 // Implement Clone for VectorDB
@@ -75,6 +77,7 @@ impl Clone for VectorDB {
             repo_manager: self.repo_manager.clone(),
             current_repo_id: self.current_repo_id.clone(),
             current_branch: self.current_branch.clone(),
+            auto_sync_daemon: self.auto_sync_daemon.clone(),
         }
     }
 }
@@ -255,6 +258,7 @@ impl VectorDB {
             repo_manager,
             current_repo_id: None,
             current_branch: None,
+            auto_sync_daemon: None,
         })
     }
     
@@ -1843,6 +1847,43 @@ impl VectorDB {
         self.save()?;
         
         info!("Repository {} branch {} indexed successfully", repo_name, branch);
+        
+        Ok(())
+    }
+    
+    /// Start the auto-sync daemon
+    pub fn start_auto_sync(&mut self) -> Result<()> {
+        // Check if we have any repositories with auto-sync enabled
+        let has_auto_sync_repos = !self.repo_manager.get_auto_sync_repos().is_empty();
+        
+        if has_auto_sync_repos {
+            debug!("Starting auto-sync daemon");
+            
+            // Clone self to use for auto-sync daemon
+            let db_clone = self.clone();
+            
+            // Create and start auto-sync daemon
+            let mut daemon = AutoSyncDaemon::new(db_clone);
+            daemon.start()?;
+            
+            // Store daemon
+            self.auto_sync_daemon = Some(daemon);
+            
+            info!("Auto-sync daemon started");
+        } else {
+            debug!("No repositories with auto-sync enabled, not starting daemon");
+        }
+        
+        Ok(())
+    }
+    
+    /// Stop the auto-sync daemon
+    pub fn stop_auto_sync(&mut self) -> Result<()> {
+        if let Some(mut daemon) = self.auto_sync_daemon.take() {
+            debug!("Stopping auto-sync daemon");
+            daemon.stop()?;
+            info!("Auto-sync daemon stopped");
+        }
         
         Ok(())
     }
