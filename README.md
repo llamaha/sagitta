@@ -216,16 +216,43 @@ vectordb-cli model --onnx --onnx-model ./your-model.onnx --onnx-tokenizer ./your
 vectordb-cli model --fast
 ```
 
-## Uninstallation
+## Database Backup
 
-Uninstallation is a simple process:
+To backup your vector database:
 
 ```bash
-# Remove the binary
-rm -f ~/.local/bin/vectordb-cli
+# The database is located in the following directory
+~/.local/share/vectordb-cli/
 
-# Remove any vectordb-cli data directories
-rm -rf ~/.local/share/vectordb-cli
+# To create a backup, simply copy or archive this directory
+cp -r ~/.local/share/vectordb-cli/ ~/vectordb-backup/
+
+# Alternatively, create a compressed backup
+tar -czvf vectordb-backup.tar.gz ~/.local/share/vectordb-cli/
+```
+
+You can restore a backup by replacing the database directory with your backup copy or extracting the archive.
+
+## Effective Query Prompts
+
+Use the following prompt with your preferred LLM to generate effective queries for vectordb-cli:
+
+```
+I need to search a codebase using vectordb-cli. Based on my goal described below, help me craft the most effective search query.
+
+My goal: [DESCRIBE YOUR PROBLEM OR WHAT YOU'RE LOOKING FOR]
+
+Please generate:
+1. A concise semantic search query that focuses on concepts and functionality
+2. Suggest whether I should use the regular 'query' command, 'code-search', or 'parse-code' command
+3. Any additional flags or options I should include
+
+Remember that:
+- Regular 'query' works best for conceptual, high-level searches
+- 'code-search' is better for finding specific implementations
+- 'parse-code' is ideal for searching through code structure
+- Be specific but avoid unnecessary details
+- Use natural language rather than code syntax for better semantic matching
 ```
 
 ## License
