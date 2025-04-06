@@ -19,8 +19,10 @@ pub struct GitRepoConfig {
     pub id: String,
     /// Currently active branch
     pub active_branch: String,
-    /// Branch name -> commit hash mapping for indexed branches
+    /// Indexed commit hashes for each branch
     pub indexed_branches: HashMap<String, String>,
+    /// Branch relationship information for faster cross-branch sync
+    pub branch_relationships: HashMap<String, BranchRelationship>,
     /// Repository-specific embedding model if overriding global setting
     pub embedding_model: Option<EmbeddingModelType>,
     /// File types to index for this repository
@@ -31,6 +33,36 @@ pub struct GitRepoConfig {
     pub active: bool,
     /// Auto-sync configuration for this repository
     pub auto_sync: AutoSyncConfig,
+}
+
+/// Relationship between branches for optimizing cross-branch sync
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BranchRelationship {
+    /// The last sync event involving this branch
+    pub last_sync: SystemTime,
+    /// Map of other branch names to their common ancestor commit
+    pub common_ancestors: HashMap<String, String>,
+}
+
+impl BranchRelationship {
+    /// Create a new branch relationship
+    pub fn new() -> Self {
+        Self {
+            last_sync: SystemTime::now(),
+            common_ancestors: HashMap::new(),
+        }
+    }
+    
+    /// Update the common ancestor for a branch
+    pub fn update_common_ancestor(&mut self, branch: String, ancestor: String) {
+        self.common_ancestors.insert(branch, ancestor);
+        self.last_sync = SystemTime::now();
+    }
+    
+    /// Get the common ancestor with another branch
+    pub fn get_common_ancestor(&self, branch: &str) -> Option<&String> {
+        self.common_ancestors.get(branch)
+    }
 }
 
 impl GitRepoConfig {
@@ -64,12 +96,17 @@ impl GitRepoConfig {
         let mut indexed_branches = HashMap::new();
         indexed_branches.insert(branch.clone(), commit_hash);
         
+        // Initialize branch relationships
+        let mut branch_relationships = HashMap::new();
+        branch_relationships.insert(branch.clone(), BranchRelationship::new());
+        
         Ok(Self {
             path,
             name: repo_name,
             id,
             active_branch: branch,
             indexed_branches,
+            branch_relationships,
             embedding_model: None,
             file_types: vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()],
             last_indexed: None,
@@ -82,6 +119,41 @@ impl GitRepoConfig {
     pub fn update_indexed_commit<S: AsRef<str>>(&mut self, branch: &str, commit_hash: S) {
         self.indexed_branches.insert(branch.to_string(), commit_hash.as_ref().to_string());
         self.last_indexed = Some(SystemTime::now().into());
+        
+        // Ensure we have a branch relationship entry
+        if !self.branch_relationships.contains_key(branch) {
+            self.branch_relationships.insert(branch.to_string(), BranchRelationship::new());
+        }
+    }
+    
+    /// Updates the branch relationship information
+    pub fn update_branch_relationship(&mut self, branch1: &str, branch2: &str, common_ancestor: &str) {
+        // Ensure we have branch relationship entries
+        if !self.branch_relationships.contains_key(branch1) {
+            self.branch_relationships.insert(branch1.to_string(), BranchRelationship::new());
+        }
+        if !self.branch_relationships.contains_key(branch2) {
+            self.branch_relationships.insert(branch2.to_string(), BranchRelationship::new());
+        }
+        
+        // Update common ancestor in both directions
+        if let Some(rel1) = self.branch_relationships.get_mut(branch1) {
+            rel1.update_common_ancestor(branch2.to_string(), common_ancestor.to_string());
+        }
+        if let Some(rel2) = self.branch_relationships.get_mut(branch2) {
+            rel2.update_common_ancestor(branch1.to_string(), common_ancestor.to_string());
+        }
+    }
+    
+    /// Get the common ancestor between two branches
+    pub fn get_common_ancestor(&self, branch1: &str, branch2: &str) -> Option<String> {
+        // First check if we have it cached in branch relationships
+        if let Some(rel) = self.branch_relationships.get(branch1) {
+            if let Some(ancestor) = rel.get_common_ancestor(branch2) {
+                return Some(ancestor.clone());
+            }
+        }
+        None
     }
     
     /// Check if a branch has been indexed

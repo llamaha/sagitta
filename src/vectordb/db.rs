@@ -1166,7 +1166,10 @@ impl VectorDB {
         // Clone the necessary data to avoid borrow checker issues
         let branch_name = branch_name.to_string();
         let repo_path = repo.path.clone();
-        let repo_active_branch = repo.active_branch.clone();
+        let _repo_active_branch = repo.active_branch.clone();
+        
+        // Store the previous branch before switching
+        let _previous_branch = self.current_branch.clone();
         
         // If we're already in this repository and branch, nothing to do
         if self.current_repo_id.as_deref() == Some(repo_id) && 
@@ -1177,166 +1180,75 @@ impl VectorDB {
         
         // Save current state if we're in a repository context
         if let (Some(current_repo), Some(current_branch)) = (&self.current_repo_id, &self.current_branch) {
-            debug!("Saving current state for repository {} branch {}", current_repo, current_branch);
+            debug!("Saving state of current repository {}, branch {}", current_repo, current_branch);
             
-            // Clone these values before calling save
-            let current_repo_clone = current_repo.clone();
-            let current_branch_clone = current_branch.clone();
-            
-            // Save the current state
-            let db_path = self.get_db_path_for_repo(&current_repo_clone, &current_branch_clone);
-            
-            // Create parent directory if needed
-            if let Some(parent) = db_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            
-            // Save manually rather than using self.save() to avoid borrowing issues
-            // This is a partial save that just writes the current database state
-            
-            // Prepare the DB file
-            let db_file = DBFile {
-                embeddings: self.embeddings.clone(),
-                hnsw_config: self.hnsw_index.as_ref().map(|idx| idx.get_config()),
-                feedback: Some(self.feedback.clone()),
-                embedding_model_type: Some(self.embedding_model_type.clone()),
-                onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-                onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().to_string()),
-            };
-            
-            // Serialize and save
-            let json = serde_json::to_string_pretty(&db_file)?;
-            fs::write(&db_path, &json).map_err(|e| VectorDBError::FileWriteError {
-                path: db_path.clone(),
-                source: e,
-            })?;
-            
-            // Save the HNSW index if present
-            if let Some(index) = &self.hnsw_index {
-                let hnsw_path = self.get_hnsw_path_for_repo(&current_repo_clone, &current_branch_clone);
-                if let Some(parent) = hnsw_path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
+            // If we're switching branches in the same repository, update branch relationship
+            if current_repo == repo_id && current_branch != &branch_name {
+                debug!("Switching branches within repository: {} -> {}", current_branch, branch_name);
                 
-                debug!("Saving HNSW index to {}", hnsw_path.display());
-                if let Err(e) = index.save_to_file(&hnsw_path) {
-                    error!("Failed to save HNSW index: {}", e);
-                    eprintln!("Warning: Failed to save HNSW index: {}", e);
-                }
-            }
-            
-            // Also save cache
-            self.cache.save()?;
-        }
-        
-        // Get the new DB path
-        let db_path = self.get_db_path_for_repo(repo_id, &branch_name);
-        debug!("New database path: {}", db_path.display());
-        
-        // Try to load the new database
-        if db_path.exists() {
-            debug!("Loading existing repository database");
-            
-            // Read the file
-            let contents = fs::read_to_string(&db_path)
-                .map_err(|e| VectorDBError::IOError(e))?;
-            
-            // Parse the JSON
-            let db_file: DBFile = serde_json::from_str(&contents)
-                .map_err(|e| VectorDBError::DeserializationError(e.to_string()))?;
-            
-            // Extract the data
-            self.embeddings = db_file.embeddings;
-            self.feedback = db_file.feedback.unwrap_or_default();
-            
-            // Handle model type
-            if let Some(model_type) = db_file.embedding_model_type {
-                self.embedding_model_type = model_type;
-            }
-            
-            // Handle ONNX paths
-            self.onnx_model_path = db_file.onnx_model_path.map(PathBuf::from);
-            self.onnx_tokenizer_path = db_file.onnx_tokenizer_path.map(PathBuf::from);
-            
-            // Load HNSW index if it exists
-            let hnsw_path = self.get_hnsw_path_for_repo(repo_id, &branch_name);
-            self.hnsw_index = if hnsw_path.exists() {
-                match HNSWIndex::load_from_file(&hnsw_path) {
-                    Ok(index) => Some(index),
-                    Err(e) => {
-                        warn!("Failed to load HNSW index: {}", e);
-                        // Create a new index with default config
-                        let mut index = HNSWIndex::new(HNSWConfig::default());
-                        // Populate with embeddings
-                        for (_, embedding) in &self.embeddings {
-                            let _ = index.insert(embedding.clone());
+                // Create git repo to find common ancestor
+                if let Ok(git_repo) = crate::utils::git::GitRepo::new(repo_path.clone()) {
+                    // Try to find the common ancestor
+                    if let (Some(prev_commit), Ok(curr_commit)) = (
+                        self.repo_manager.get_repository(repo_id)
+                            .and_then(|r| r.get_indexed_commit(current_branch)),
+                        git_repo.get_commit_hash(&branch_name)
+                    ) {
+                        // Find common ancestor
+                        if let Ok(common_ancestor) = git_repo.find_common_ancestor(prev_commit, &curr_commit) {
+                            debug!("Found common ancestor between branches {} and {}: {}", 
+                                  current_branch, branch_name, common_ancestor);
+                            
+                            // Update branch relationship
+                            if let Err(e) = self.repo_manager.update_branch_relationship(
+                                repo_id, current_branch, &branch_name, &common_ancestor
+                            ) {
+                                warn!("Failed to update branch relationship: {}", e);
+                            }
                         }
-                        Some(index)
                     }
                 }
-            } else if let Some(config) = db_file.hnsw_config {
-                // Create a new index with the config
-                let mut index = HNSWIndex::new(config);
-                // Populate with embeddings
-                for (_, embedding) in &self.embeddings {
-                    let _ = index.insert(embedding.clone());
-                }
-                Some(index)
-            } else {
-                None
-            };
-            
-            // Load cache
-            let cache_path = self.get_cache_path_for_repo(repo_id, &branch_name);
-            
-            // Try to load the cache, but handle potential errors
-            self.cache = if cache_path.exists() {
-                match EmbeddingCache::new(cache_path.to_string_lossy().to_string()) {
-                    Ok(cache) => cache,
-                    Err(e) => {
-                        warn!("Failed to load cache: {}", e);
-                        // Create a new cache
-                        EmbeddingCache::new(cache_path.to_string_lossy().to_string())?
-                    }
-                }
-            } else {
-                // Create a new cache
-                EmbeddingCache::new(cache_path.to_string_lossy().to_string())?
-            };
-            
-            // Configure the cache with the embedding model type
-            self.cache.set_model_type(self.embedding_model_type.clone());
-        } else {
-            debug!("No existing repository database, creating empty one");
-            
-            // Create a new empty database
-            self.embeddings = HashMap::new();
-            self.feedback = FeedbackData::default();
-            
-            // Set model type to the repository-specific one if available
-            if let Some(model_type) = repo.embedding_model.clone() {
-                self.embedding_model_type = model_type;
             }
             
-            // Create a new empty HNSW index
-            let config = HNSWConfig::default();
-            self.hnsw_index = Some(HNSWIndex::new(config));
-            
-            // Create a new empty cache
-            let cache_path = self.get_cache_path_for_repo(repo_id, &branch_name);
-            self.cache = EmbeddingCache::new(cache_path.to_string_lossy().to_string())?;
-            self.cache.set_model_type(self.embedding_model_type.clone());
+            // Save current state (this will also update the active branch)
+            if let Err(e) = self.repo_manager.set_active_repository(repo_id) {
+                warn!("Failed to update active repository: {}", e);
+            }
         }
         
-        // Update the repository and branch context
+        // Set the current repository and branch
         self.current_repo_id = Some(repo_id.to_string());
-        self.current_branch = Some(branch_name);
+        self.current_branch = Some(branch_name.clone());
         
-        // Update the active repository in the manager
-        self.repo_manager.set_active_repository(repo_id)?;
+        // Create the repository cache path if it doesn't exist
+        let cache_path = self.get_cache_path_for_repo(repo_id, &branch_name);
+        if let Some(parent) = cache_path.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    warn!("Failed to create repository cache directory: {}", e);
+                }
+            }
+        }
         
-        // Update the db_path to point to the repository-specific path
-        self.db_path = db_path.to_string_lossy().to_string();
+        // Update the active branch in the repository config
+        let mut repo_updated = false;
+        {
+            if let Some(repo) = self.repo_manager.get_repository_mut(repo_id) {
+                if repo.active_branch != branch_name {
+                    debug!("Updating active branch for repository {}: {} -> {}", 
+                          repo_id, repo.active_branch, branch_name);
+                    repo.active_branch = branch_name.clone();
+                    repo_updated = true;
+                }
+            }
+        }
+        
+        // Save repository config changes
+        if repo_updated {
+            if let Err(e) = self.repo_manager.save() {
+                warn!("Failed to save repository changes: {}", e);
+            }
+        }
         
         Ok(())
     }
@@ -1451,11 +1363,12 @@ impl VectorDB {
                     repo.file_types.clone()
                 },                          // file_types
                 repo_id.to_string(),        // repo_id
-                branch.to_string()          // branch
+                branch.to_string(),         // branch
+                repo.active_branch.clone()  // previous active branch
             )
         };
         
-        let (repo_path, repo_name, last_commit, file_types, repo_id, branch) = repo_data;
+        let (repo_path, repo_name, last_commit, file_types, repo_id, branch, prev_active_branch) = repo_data;
         
         // Create a git repository object
         let git_repo = crate::utils::git::GitRepo::new(repo_path.clone())
@@ -1465,8 +1378,103 @@ impl VectorDB {
         let current_commit = git_repo.get_commit_hash(&branch)
             .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
         
-        // If no previous commit, do a full index
-        if last_commit.is_none() {
+        // If no previous commit for this branch, check if we're switching branches
+        // and can do an efficient cross-branch sync
+        if last_commit.is_none() && branch != prev_active_branch {
+            info!("No previous index found for branch {}, checking for cross-branch sync from {}",
+                 branch, prev_active_branch);
+            
+            // Check if the previous branch was indexed
+            let prev_branch_commit = self.repo_manager.get_repository(&repo_id)
+                .and_then(|repo| repo.get_indexed_commit(&prev_active_branch).cloned());
+            
+            if let Some(prev_commit) = prev_branch_commit {
+                // We have a previous commit in the previous branch, try to find common ancestor
+                match git_repo.find_common_ancestor(&prev_commit, &current_commit) {
+                    Ok(common_ancestor) => {
+                        info!("Found common ancestor between branches: {}", common_ancestor);
+                        
+                        // Update branch relationship information
+                        if let Err(e) = self.repo_manager.update_branch_relationship(
+                            &repo_id, &prev_active_branch, &branch, &common_ancestor
+                        ) {
+                            warn!("Failed to update branch relationship: {}", e);
+                        }
+                        
+                        // Switch to this repository context
+                        self.switch_repository(&repo_id, Some(&branch))?;
+                        
+                        // Get changes since the common ancestor
+                        info!("Performing efficient cross-branch sync from {} to {}", 
+                              prev_active_branch, branch);
+                        
+                        let changes = git_repo.get_cross_branch_changes(&common_ancestor, &current_commit)
+                            .map_err(|e| VectorDBError::RepositoryError(e.to_string()))?;
+                        
+                        info!("Cross-branch changes detected: {} added, {} modified, {} deleted files",
+                             changes.added_files.len(), changes.modified_files.len(), changes.deleted_files.len());
+                        
+                        // Process added and modified files
+                        let files_to_process = [&changes.added_files[..], &changes.modified_files[..]].concat();
+                        
+                        // Filter for file types we care about
+                        let files_to_index: Vec<&PathBuf> = files_to_process.iter()
+                            .filter(|path| {
+                                path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| file_types.contains(&ext.to_string()))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+                        
+                        info!("Indexing {} relevant files", files_to_index.len());
+                        
+                        // Process files in batches to avoid memory issues
+                        for file_path in files_to_index {
+                            if let Err(e) = self.index_file(file_path) {
+                                warn!("Failed to index file {}: {}", file_path.display(), e);
+                            }
+                        }
+                        
+                        // Handle deleted files
+                        if !changes.deleted_files.is_empty() {
+                            info!("Processing {} deleted files", changes.deleted_files.len());
+                            for file_path in &changes.deleted_files {
+                                debug!("Removing deleted file from index: {}", file_path.display());
+                                let path_str = file_path.to_string_lossy().to_string();
+                                self.embeddings.remove(&path_str);
+                                
+                                // Also remove from HNSW index if present
+                                if let Some(idx) = &mut self.hnsw_index {
+                                    idx.mark_dirty();
+                                }
+                            }
+                        }
+                        
+                        // Update the indexed commit hash
+                        self.repo_manager.update_indexed_commit(&repo_id, &branch, &current_commit)?;
+                        
+                        // Save the updates
+                        self.save()?;
+                        
+                        info!("Repository {} branch {} indexed successfully via cross-branch sync", 
+                              repo_name, branch);
+                        
+                        return Ok(());
+                    },
+                    Err(e) => {
+                        warn!("Failed to find common ancestor between branches: {}", e);
+                        // Fall back to full index
+                    }
+                }
+            }
+            
+            // If we reach here, we couldn't do an efficient cross-branch sync, so do a full index
+            info!("No previous index found for repository {} branch {}, doing full index",
+                 repo_name, branch);
+            return self.index_repository_full(&repo_id, &branch);
+        } else if last_commit.is_none() {
+            // No previous commit and not switching branches, do a full index
             info!("No previous index found for repository {} branch {}, doing full index",
                  repo_name, branch);
             return self.index_repository_full(&repo_id, &branch);

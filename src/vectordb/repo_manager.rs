@@ -269,6 +269,35 @@ impl RepoManager {
         Ok(())
     }
     
+    /// Update branch relationship information
+    pub fn update_branch_relationship(&mut self, repo_id: &str, branch1: &str, branch2: &str, common_ancestor: &str) -> Result<()> {
+        debug!("Updating branch relationship for repository {}, branches {} and {}: common ancestor {}",
+              repo_id, branch1, branch2, common_ancestor);
+        
+        // Get the repository
+        let repo = self.get_repository_mut(repo_id)
+            .ok_or_else(|| anyhow!("Repository with ID '{}' not found", repo_id))?;
+        
+        // Update branch relationship
+        repo.update_branch_relationship(branch1, branch2, common_ancestor);
+        
+        // Save changes
+        self.save()?;
+        
+        Ok(())
+    }
+    
+    /// Get the common ancestor between two branches for a repository
+    pub fn get_common_ancestor(&self, repo_id: &str, branch1: &str, branch2: &str) -> Option<String> {
+        // Get the repository
+        if let Some(repo) = self.get_repository(repo_id) {
+            // Get common ancestor
+            repo.get_common_ancestor(branch1, branch2)
+        } else {
+            None
+        }
+    }
+    
     /// Enable auto-sync for a repository
     pub fn enable_auto_sync(&mut self, repo_id: &str, min_interval: Option<u64>) -> Result<()> {
         debug!("Enabling auto-sync for repository {}", repo_id);

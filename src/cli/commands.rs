@@ -1459,6 +1459,23 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 
                 let start_time = std::time::Instant::now();
                 
+                // Check if we're switching branches and this is different from the active branch in the DB
+                let is_branch_switch = {
+                    if let Some(db_active_repo) = db.current_repo_id() {
+                        if let Some(db_active_branch) = db.current_branch() {
+                            &repo_id == db_active_repo && branch_name != db_active_branch
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                
+                if is_branch_switch {
+                    println!("Detected branch switch, attempting efficient cross-branch sync...");
+                }
+                
                 if force {
                     println!("Performing full reindexing...");
                     db.index_repository_full(&repo_id, branch_name)?;
