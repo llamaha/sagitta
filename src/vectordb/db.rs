@@ -1671,7 +1671,7 @@ impl VectorDB {
         
         info!("Starting parallel indexing for {} files using {} threads.", file_count, num_threads);
 
-        // Create progress bar
+        // Create progress bar for embedded files
         let progress = ProgressBar::new(file_count as u64);
         progress.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files indexed ({eta}) {msg}")
@@ -1760,39 +1760,41 @@ impl VectorDB {
         let processed_clone = processed.clone();
         let should_continue = Arc::new(AtomicBool::new(true));
         let should_continue_clone = should_continue.clone();
+        let files_to_embed_count_clone = files_to_embed_count;
         
         std::thread::spawn(move || {
             let mut last_count = 0;
             let start = std::time::Instant::now();
             
-            // Print an initial message immediately
-            progress_clone.println("Starting file processing, please wait...");
+            // Set initial progress bar message
+            progress_clone.set_message("Starting file processing...");
             
             while should_continue_clone.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_secs(5));
                 let current = processed_clone.load(Ordering::SeqCst);
                 
                 if current > last_count {
-                    // Processing is happening, update the count
+                    // Processing is happening, update the progress bar
                     let progress_delta = current - last_count;
                     let elapsed = start.elapsed().as_secs_f32();
                     let rate = if elapsed > 0.1 { current as f32 / elapsed } else { 0.0 };
                     
-                    progress_clone.println(format!(
-                        "Reading and embedding: {}/{} files ({} new in last 5s, {:.1} files/sec)",
-                        current, files_to_embed_count, progress_delta, rate
+                    // Update the progress bar with rate information
+                    progress_clone.set_message(format!(
+                        "Processing files ({:.1} files/sec)",
+                        rate
                     ));
+                    
+                    // Also update the position
+                    progress_clone.set_position(current as u64);
                     
                     last_count = current;
                 } else if current > 0 {
                     // No new progress, but processing has started
-                    progress_clone.println(format!(
-                        "Still reading and embedding: {}/{} files (system may be CPU or I/O bound)",
-                        current, files_to_embed_count
-                    ));
+                    progress_clone.set_message("Processing (waiting for results)...");
                 } else {
                     // No progress at all yet
-                    progress_clone.println("Waiting for processing to begin...");
+                    progress_clone.set_message("Preparing for embedding...");
                 }
             }
         });
@@ -1925,9 +1927,11 @@ impl VectorDB {
                 let elapsed_secs = now.duration_since(start_time).as_secs_f32();
                 let rate = if elapsed_secs > 0.1 { processed_new_files as f32 / elapsed_secs } else { 0.0 };
                 let total_processed = files_from_cache + processed_new_files;
-                progress.println(format!(
-                    "Storing embeddings: {}/{} files ({:.1} new files/sec)",
-                    total_processed, file_count, rate
+                
+                // Update progress bar message instead of printing
+                progress.set_message(format!(
+                    "Storing embeddings ({:.1} files/sec)",
+                    rate
                 ));
             }
         }

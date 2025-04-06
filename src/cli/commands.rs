@@ -1616,10 +1616,20 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             for (i, (repo_id, repo_name, active_branch)) in repos.iter().enumerate() {
                 progress.set_message(format!("Syncing repository {}", repo_name));
                 
+                // Check if this repository has been indexed before
+                let repo_config = db.repo_manager.get_repository(repo_id);
+                let needs_full_index = force || repo_config.map_or(true, |repo| {
+                    // If the repo exists, check if this branch has been indexed
+                    repo.get_indexed_commit(active_branch).is_none()
+                });
+                
                 // Perform the sync
-                let result = if force {
+                let result = if needs_full_index {
+                    // If force is true or the branch has never been indexed, do a full index
+                    progress.println(format!("Performing full index of repository '{}'...", repo_name));
                     db.index_repository_full(repo_id, active_branch)
                 } else {
+                    // Otherwise do an incremental index
                     db.index_repository_changes(repo_id, active_branch)
                 };
                 
