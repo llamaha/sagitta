@@ -21,7 +21,7 @@ Currently, the following file types are supported with code parsers:
 - TypeScript (ts)
 - Markdown (md) - with regex-based parsing
 - Text (txt, rst) - with basic text analysis
-- Configuration files (json, yaml, yml, toml, xml) - YAML support is being improved
+- Configuration files (json, yaml, yml, toml, xml)
 
 When using the `--fast` flag, vectordb-cli will index any non-binary file type at the file level, even if not in the supported list above.
 
