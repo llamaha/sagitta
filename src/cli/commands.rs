@@ -1293,8 +1293,8 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             }
             
             println!("Configured repositories:");
-            println!("{:<36} {:<20} {:<10} {:<15} {:<20}", "ID", "NAME", "ACTIVE", "CURRENT BRANCH", "BRANCHES");
-            println!("{}", "-".repeat(101));
+            println!("{:<36} {:<20} {:<10} {:<15} {:<20} {:<25}", "ID", "NAME", "ACTIVE", "CURRENT BRANCH", "BRANCHES", "LANGUAGES");
+            println!("{}", "-".repeat(126));
             
             for repo in repos {
                 let active_marker = if repo.active { "Yes" } else { "No" };
@@ -1311,7 +1311,19 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                     Err(_) => "Unknown".to_string(),
                 };
                 
-                println!("{:<36} {:<20} {:<10} {:<15} {:<20}", 
+                // Format the languages (file types) being indexed
+                let languages = if repo.file_types.is_empty() {
+                    "All supported".to_string()
+                } else {
+                    // Limit to first few languages if there are many
+                    if repo.file_types.len() > 3 {
+                        format!("{} +{} more", repo.file_types[0..3].join(", "), repo.file_types.len() - 3)
+                    } else {
+                        repo.file_types.join(", ")
+                    }
+                };
+                
+                println!("{:<36} {:<20} {:<10} {:<15} {:<20} {:<25}", 
                          repo.id, 
                          repo.name,
                          active_marker,
@@ -1320,7 +1332,8 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                              format!("{} tracked", branch_count) 
                          } else { 
                              "None tracked".to_string() 
-                         });
+                         },
+                         languages);
             }
             
             // Show active repository
