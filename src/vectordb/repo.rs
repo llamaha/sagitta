@@ -7,6 +7,7 @@ use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::auto_sync::AutoSyncConfig;
 use anyhow::{Result, anyhow};
 use log::{debug, info, warn, error};
+use std::time::SystemTime;
 
 /// Configuration for a git repository tracked by vectordb
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -57,12 +58,19 @@ impl GitRepoConfig {
         // Get current branch
         let branch = get_current_branch(&path).unwrap_or_else(|_| "main".to_string());
         
+        // Get current commit hash
+        let commit_hash = get_current_commit_hash(&path)?;
+        
+        // Initialize indexed branches with the current branch
+        let mut indexed_branches = HashMap::new();
+        indexed_branches.insert(branch.clone(), commit_hash);
+        
         Ok(Self {
             path,
             name: repo_name,
             id,
             active_branch: branch,
-            indexed_branches: HashMap::new(),
+            indexed_branches,
             embedding_model: None,
             file_types: vec!["rs".to_string(), "go".to_string(), "js".to_string(), "py".to_string()],
             last_indexed: None,
@@ -71,10 +79,10 @@ impl GitRepoConfig {
         })
     }
     
-    /// Update the indexed commit hash for a branch
-    pub fn update_indexed_commit(&mut self, branch: &str, commit_hash: &str) {
-        self.indexed_branches.insert(branch.to_string(), commit_hash.to_string());
-        self.last_indexed = Some(Utc::now());
+    /// Updates the indexed commit for a branch
+    pub fn update_indexed_commit<S: AsRef<str>>(&mut self, branch: &str, commit_hash: S) {
+        self.indexed_branches.insert(branch.to_string(), commit_hash.as_ref().to_string());
+        self.last_indexed = Some(SystemTime::now().into());
     }
     
     /// Check if a branch has been indexed
@@ -183,5 +191,180 @@ fn get_current_branch(repo_path: &Path) -> Result<String> {
     } else {
         Err(anyhow!("Failed to get current branch: {}", 
             String::from_utf8_lossy(&output.stderr)))
+    }
+}
+
+/// Get the current commit hash of a git repository
+fn get_current_commit_hash(repo_path: &Path) -> Result<String> {
+    let output = std::process::Command::new("git")
+        .current_dir(repo_path)
+        .args(["rev-parse", "HEAD"])
+        .output()?;
+    
+    if output.status.success() {
+        let commit_hash = String::from_utf8(output.stdout)?
+            .trim()
+            .to_string();
+        
+        Ok(commit_hash)
+    } else {
+        Err(anyhow!("Failed to get current commit hash: {}", 
+            String::from_utf8_lossy(&output.stderr)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::process::Command;
+    use std::fs;
+
+    // Helper function to create a git repo for testing
+    fn setup_git_repo() -> Result<(tempfile::TempDir, PathBuf)> {
+        // Create a temporary directory that will be automatically deleted when it goes out of scope
+        let temp_dir = tempdir()?;
+        let repo_path = temp_dir.path().to_path_buf();
+        
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .output()?;
+            
+        // Configure git identity for commits
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(&repo_path)
+            .output()?;
+            
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(&repo_path)
+            .output()?;
+            
+        // Create a test file
+        let test_file = repo_path.join("test.txt");
+        fs::write(&test_file, "Test content")?;
+        
+        // Add and commit the file
+        Command::new("git")
+            .args(["add", "test.txt"])
+            .current_dir(&repo_path)
+            .output()?;
+            
+        Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(&repo_path)
+            .output()?;
+        
+        // Find out what branch we're on for debugging
+        let branch_output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(&repo_path)
+            .output()?;
+        
+        let branch_name = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+        println!("Current branch name in test repo: '{}'", branch_name);
+        
+        Ok((temp_dir, repo_path))
+    }
+    
+    #[test]
+    fn test_repo_config_new() -> Result<()> {
+        // Keep the temp_dir alive for the duration of the test
+        let (temp_dir, repo_path) = setup_git_repo()?;
+        let repo_id = "test-repo";
+        
+        let config = GitRepoConfig::new(repo_path.clone(), None, repo_id.to_string())?;
+        assert!(config.path.exists());
+        assert!(!config.indexed_branches.is_empty());
+        
+        // temp_dir will be automatically cleaned up when it goes out of scope
+        drop(temp_dir);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_branch_indexed_status() -> Result<()> {
+        let (temp_dir, repo_path) = setup_git_repo()?;
+        let repo_id = "test-repo";
+        
+        let config = GitRepoConfig::new(repo_path.clone(), None, repo_id.to_string())?;
+        println!("Active branch: {}", config.active_branch);
+        println!("Indexed branches: {:?}", config.indexed_branches);
+        
+        // Use the actual active branch instead of hardcoding "master"
+        let current_branch = config.active_branch.clone(); 
+        assert!(config.is_branch_indexed(&current_branch));
+        
+        // Non-existent branch should not be indexed
+        assert!(!config.is_branch_indexed("nonexistent-branch"));
+        
+        drop(temp_dir);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_auto_sync_config() -> Result<()> {
+        let (temp_dir, repo_path) = setup_git_repo()?;
+        let repo_id = "test-repo";
+        
+        // Create with auto-sync disabled
+        let config = GitRepoConfig::new(repo_path.clone(), None, repo_id.to_string())?;
+        assert!(!config.auto_sync.enabled);
+        
+        // Create with auto-sync enabled
+        let mut config = GitRepoConfig::new(repo_path.clone(), None, repo_id.to_string())?;
+        config.auto_sync.enabled = true;
+        assert!(config.auto_sync.enabled);
+        
+        drop(temp_dir);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_canonical_repo_id_with_name() -> Result<()> {
+        let (temp_dir, repo_path) = setup_git_repo()?;
+        
+        // Test with a custom name
+        let name = "test-repo";
+        let config = GitRepoConfig::new(repo_path.clone(), Some(name.to_string()), name.to_string())?;
+        assert_eq!(config.id, name);
+        
+        // Test without a name (should use id directly)
+        let id = "test-repo-id";
+        let config = GitRepoConfig::new(repo_path.clone(), None, id.to_string())?;
+        assert_eq!(config.id, id);
+        
+        drop(temp_dir);
+        Ok(())
+    }
+    
+    #[test]
+    fn test_update_indexed_commit() -> Result<()> {
+        let (temp_dir, repo_path) = setup_git_repo()?;
+        let repo_id = "test-repo";
+        
+        let mut config = GitRepoConfig::new(repo_path.clone(), None, repo_id.to_string())?;
+        println!("Active branch: {}", config.active_branch);
+        println!("Indexed branches: {:?}", config.indexed_branches);
+        
+        // Use the actual active branch instead of hardcoding "master"
+        let current_branch = config.active_branch.clone();
+        assert!(config.indexed_branches.contains_key(&current_branch));
+        
+        // Update the commit ID
+        let new_commit = "abc123def456";
+        config.update_indexed_commit(&current_branch, new_commit);
+        
+        // Check that it was updated
+        assert_eq!(
+            config.indexed_branches.get(&current_branch).unwrap(),
+            &new_commit.to_string()
+        );
+        
+        drop(temp_dir);
+        Ok(())
     }
 } 
