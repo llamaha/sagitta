@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use walkdir::WalkDir;
 use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType, EMBEDDING_DIM};
 use crate::vectordb::onnx::ONNX_EMBEDDING_DIM;
-use crate::vectordb::cache::EmbeddingCache;
+use crate::vectordb::cache::{EmbeddingCache, CacheCheckResult};
 use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::hnsw::{HNSWIndex, HNSWConfig, HNSWStats};
 use std::sync::{Arc, Mutex};
@@ -16,6 +16,10 @@ use std::io::Read;
 use log::{debug, info, warn, error};
 use crate::vectordb::repo_manager::RepoManager;
 use crate::vectordb::auto_sync::AutoSyncDaemon;
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::iter::ParallelIterator; // Ensure ParallelIterator is imported
+use std::sync::mpsc::{self, Receiver, Sender}; // Ensure mpsc is imported
+use num_cpus;
 
 /// Relevance feedback data for a query-file pair
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -571,6 +575,9 @@ impl VectorDB {
         
         println!("Found {} files to index.", file_count);
         
+        // Create the embedding model
+        let model = Arc::new(self.create_embedding_model()?);
+        
         // The batch size determines how many files to process before saving
         // For small repos (< 1000 files), save after every 100 files
         // For larger repos, save less frequently to reduce overhead
@@ -584,228 +591,17 @@ impl VectorDB {
         
         debug!("Using batch size of {} for {} files", batch_size, file_count);
         
-        // Create progress bar
-        let progress = indicatif::ProgressBar::new(file_count as u64);
-        progress.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files indexed ({eta}) {msg}")
-                .unwrap()
-                .progress_chars("#>-")
-        );
+        // Use the parallel implementation
+        self.index_directory_parallel(files, model, batch_size)?;
         
-        // Set up shared state for parallel processing
-        let processed = Arc::new(AtomicUsize::new(0));
-        let interrupt = Arc::new(AtomicBool::new(false));
-        let indexed_files_mutex = Arc::new(Mutex::new(Vec::<String>::with_capacity(file_count)));
-        
-        // Create channels for processing results
-        let (tx, rx) = std::sync::mpsc::channel();
-        
-        // Process embeddings in parallel
-        let num_threads = rayon::current_num_threads();
-        progress.set_message(format!("(using {} threads)", num_threads));
-        
-        // Clone references needed for parallel processing
-        let progress_clone = progress.clone();
-        let processed_clone = processed.clone();
-        let interrupt_clone = interrupt.clone();
-        
-        // Prepare a safe clone of all necessary components to enable parallel processing
-        let embedding_model_type = self.embedding_model_type.clone();
-        let onnx_model_path = self.onnx_model_path.clone();
-        let onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
-        let cache = self.cache.clone();
-        
-        // Launch parallel processing
-        let processor_handle = std::thread::spawn(move || {
-            // Process files in parallel
-            files.par_iter().for_each(|file_path| {
-                // Check for interruption
-                if unsafe { crate::cli::commands::INTERRUPT_RECEIVED } || interrupt_clone.load(Ordering::SeqCst) {
-                    return;
-                }
-                
-                let file_path_str = file_path.to_string_lossy().to_string();
-                
-                // Try to load from cache first to avoid redundant work
-                let cached_embedding = cache.get(&file_path_str);
-                
-                // If not in cache, generate new embedding
-                let result = if let Some(embedding) = cached_embedding {
-                    // Found in cache
-                    debug!("Cache hit for file: {}", file_path_str);
-                    Ok((file_path.clone(), embedding.to_vec(), true))
-                } else {
-                    // Not in cache, generate new embedding
-                    debug!("Generating embedding for file: {}", file_path_str);
-                    
-                    // Create a model based on the configured type
-                    let model = match embedding_model_type {
-                        EmbeddingModelType::Fast => {
-                            Ok(EmbeddingModel::new())
-                        },
-                        EmbeddingModelType::Onnx => {
-                            if let (Some(model_path), Some(tokenizer_path)) = (&onnx_model_path, &onnx_tokenizer_path) {
-                                EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                            } else {
-                                // Fallback to fast model if paths aren't set
-                                Ok(EmbeddingModel::new())
-                            }
-                        }
-                    };
-                    
-                    // If model creation failed, return the error
-                    let model = match model {
-                        Ok(m) => m,
-                        Err(e) => {
-                            return tx.send(Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))).unwrap();
-                        }
-                    };
-                    
-                    // Read the file contents
-                    match fs::read_to_string(file_path) {
-                        Ok(contents) => {
-                            // Generate embedding
-                            match model.embed(&contents) {
-                                Ok(embedding) => {
-                                    // Calculate file hash for caching
-                                    match EmbeddingCache::get_file_hash(file_path) {
-                                        Ok(file_hash) => {
-                                            // Successfully generated embedding
-                                            Ok((file_path.clone(), embedding, false))
-                                        },
-                                        Err(e) => {
-                                            Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
-                                        }
-                                    }
-                                },
-                                Err(e) => {
-                                    Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            Err((file_path_str, VectorDBError::IOError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))
-                        }
-                    }
-                };
-                
-                // Send result back to main thread
-                tx.send(result).unwrap();
-                
-                // Update progress
-                let count = processed_clone.fetch_add(1, Ordering::SeqCst) + 1;
-                progress_clone.set_position(count as u64);
-                
-                // Show progress message occasionally but don't overwhelm the output
-                if count % 10 == 0 || count == file_count {
-                    progress_clone.set_message(format!("(using {} threads)", num_threads));
-                }
-            });
-        });
-        
-        // Track embeddings added so far
-        let mut successful_embeddings = 0;
-        let mut save_counter = 0;
-        let start_time = std::time::Instant::now();
-        let mut last_report_time = start_time;
-        
-        // Process results from worker threads
-        for _ in 0..file_count {
-            match rx.recv() {
-                Ok(result) => {
-                    match result {
-                        Ok((file_path, embedding, from_cache)) => {
-                            // Add to our database
-                            let file_path_str = file_path.to_string_lossy().to_string();
-                            
-                            // Store in database (cache was already updated in the worker thread if needed)
-                            self.embeddings.insert(file_path_str.clone(), embedding.clone());
-                            
-                            // Add to HNSW index if available
-                            if let Some(index) = &mut self.hnsw_index {
-                                if let Err(e) = index.insert(embedding) {
-                                    error!("Failed to insert into HNSW index: {}", e);
-                                    progress.println(format!("Warning: Failed to add {} to HNSW index: {}", file_path_str, e));
-                                }
-                            }
-                            
-                            // Track for reporting
-                            indexed_files_mutex.lock().unwrap().push(file_path_str.clone());
-                            successful_embeddings += 1;
-                            
-                            // Print occasional progress for large batches
-                            let now = std::time::Instant::now();
-                            if now.duration_since(last_report_time).as_secs() >= 10 {
-                                last_report_time = now;
-                                let elapsed = now.duration_since(start_time).as_secs();
-                                let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
-                                progress.println(format!("Processed {}/{} files ({:.1} files/sec)", 
-                                    successful_embeddings, file_count, rate));
-                            }
-                            
-                            // Save periodically
-                            save_counter += 1;
-                            if save_counter >= batch_size {
-                                // Save the database and reset counter
-                                if let Err(e) = self.save() {
-                                    error!("Failed to save database during batch processing: {}", e);
-                                    progress.println(format!("Warning: Failed to save database: {}", e));
-                                } else {
-                                    debug!("Saved database after processing {} files", save_counter);
-                                }
-                                save_counter = 0;
-                            }
-                        },
-                        Err((file_path, error)) => {
-                            // Show error but continue with other files
-                            progress.println(format!("Error indexing {}: {}", file_path, error));
-                        }
-                    }
-                },
-                Err(e) => {
-                    error!("Channel error: {}", e);
-                    progress.println(format!("Error communicating with worker threads: {}", e));
-                    break;
-                }
-            }
-        }
-        
-        // Wait for the processor thread to finish
-        processor_handle.join().unwrap();
-        
-        // Final save if any unsaved changes
-        if save_counter > 0 {
-            if let Err(e) = self.save() {
-                error!("Failed to save database at end of indexing: {}", e);
-                progress.println(format!("Warning: Failed to save database: {}", e));
-            }
-        }
-        
-        // Report final statistics
-        let elapsed = start_time.elapsed().as_secs();
-        let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
-        let indexed_files = indexed_files_mutex.lock().unwrap();
-        
-        progress.finish_with_message(format!("Indexed {} files successfully in {}s ({:.1} files/sec)", 
-            successful_embeddings, elapsed, rate));
-        
-        // Check if we're in a repository context and update the commit hash
+        // Update repository information if needed
         if let (Some(repo_id), Some(branch)) = (&self.current_repo_id, &self.current_branch) {
-            debug!("Updating commit hash for repository {} branch {}", repo_id, branch);
-            
-            // Clone repo_id and branch to avoid borrow checker issues
-            let repo_id_clone = repo_id.clone();
-            let branch_clone = branch.clone();
-            
-            // Only update if we actually have a repository
-            if let Some(repo) = self.repo_manager.get_repository(&repo_id_clone) {
-                // Create a git repository object
+            if let Some(repo) = self.repo_manager.get_repository(repo_id) {
                 if let Ok(git_repo) = crate::utils::git::GitRepo::new(repo.path.clone()) {
-                    // Get the current commit hash
-                    if let Ok(commit_hash) = git_repo.get_commit_hash(&branch_clone) {
-                        // Update the indexed commit hash
-                        self.repo_manager.update_indexed_commit(&repo_id_clone, &branch_clone, &commit_hash)?;
+                    if let Ok(commit_hash) = git_repo.get_commit_hash(branch) {
+                        if let Err(e) = self.repo_manager.update_indexed_commit(repo_id, branch, &commit_hash) {
+                            error!("Failed to update indexed commit: {}", e);
+                        }
                     }
                 }
             }
@@ -1718,209 +1514,20 @@ impl VectorDB {
         
         if total > 0 {
             // Create progress bar
-            let progress = indicatif::ProgressBar::new(total as u64);
-            progress.set_style(
-                indicatif::ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files processed ({eta}) {msg}")
-                    .unwrap()
-                    .progress_chars("#>-")
-            );
+            let progress = ProgressBar::new(total as u64);
+            progress.set_style(ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files processed ({eta}) {msg}")
+                .unwrap()
+                .progress_chars("#>-"));
             
             // Determine batch size based on number of files
             let batch_size = if total < 50 { 10 } else if total < 200 { 20 } else { 50 };
             
-            // Set up shared state for parallel processing
-            let processed = Arc::new(AtomicUsize::new(0));
-            let interrupt = Arc::new(AtomicBool::new(false));
+            // Create the embedding model
+            let model = Arc::new(self.create_embedding_model()?);
             
-            // Create channels for processing results
-            let (tx, rx) = std::sync::mpsc::channel();
-            
-            // Process embeddings in parallel
-            let num_threads = rayon::current_num_threads();
-            progress.set_message(format!("(using {} threads)", num_threads));
-            
-            // Clone references needed for parallel processing
-            let progress_clone = progress.clone();
-            let processed_clone = processed.clone();
-            let interrupt_clone = interrupt.clone();
-            
-            // Prepare a safe clone of all necessary components to enable parallel processing
-            let embedding_model_type = self.embedding_model_type.clone();
-            let onnx_model_path = self.onnx_model_path.clone();
-            let onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
-            let cache = self.cache.clone();
-            
-            // Launch parallel processing
-            let processor_handle = std::thread::spawn(move || {
-                // Process files in parallel
-                filtered_files.par_iter().for_each(|file_path| {
-                    // Check for interruption
-                    if unsafe { crate::cli::commands::INTERRUPT_RECEIVED } || interrupt_clone.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    
-                    let file_path_str = file_path.to_string_lossy().to_string();
-                    
-                    // Try to load from cache first to avoid redundant work
-                    let cached_embedding = cache.get(&file_path_str);
-                    
-                    // If not in cache, generate new embedding
-                    let result = if let Some(embedding) = cached_embedding {
-                        // Found in cache
-                        debug!("Cache hit for file: {}", file_path_str);
-                        Ok((file_path.clone(), embedding.to_vec(), true))
-                    } else {
-                        // Not in cache, generate new embedding
-                        debug!("Generating embedding for file: {}", file_path_str);
-                        
-                        // Create a model based on the configured type
-                        let model = match embedding_model_type {
-                            EmbeddingModelType::Fast => {
-                                Ok(EmbeddingModel::new())
-                            },
-                            EmbeddingModelType::Onnx => {
-                                if let (Some(model_path), Some(tokenizer_path)) = (&onnx_model_path, &onnx_tokenizer_path) {
-                                    EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                                } else {
-                                    // Fallback to fast model if paths aren't set
-                                    Ok(EmbeddingModel::new())
-                                }
-                            }
-                        };
-                        
-                        // If model creation failed, return the error
-                        let model = match model {
-                            Ok(m) => m,
-                            Err(e) => {
-                                return tx.send(Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))).unwrap();
-                            }
-                        };
-                        
-                        // Read the file contents
-                        match fs::read_to_string(file_path) {
-                            Ok(contents) => {
-                                // Generate embedding
-                                match model.embed(&contents) {
-                                    Ok(embedding) => {
-                                        // Calculate file hash for caching
-                                        match EmbeddingCache::get_file_hash(file_path) {
-                                            Ok(file_hash) => {
-                                                // Successfully generated embedding
-                                                Ok((file_path.clone(), embedding, false))
-                                            },
-                                            Err(e) => {
-                                                Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        Err((file_path_str, VectorDBError::EmbeddingError(e.to_string())))
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                Err((file_path_str, VectorDBError::IOError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))
-                            }
-                        }
-                    };
-                    
-                    // Send result back to main thread
-                    tx.send(result).unwrap();
-                    
-                    // Update progress
-                    let count = processed_clone.fetch_add(1, Ordering::SeqCst) + 1;
-                    progress_clone.set_position(count as u64);
-                    
-                    // Show progress message occasionally but don't overwhelm the output
-                    if count % 10 == 0 || count == total {
-                        progress_clone.set_message(format!("(using {} threads)", num_threads));
-                    }
-                });
-            });
-            
-            // Track embeddings added so far
-            let mut successful_embeddings = 0;
-            let mut save_counter = 0;
-            let start_time = std::time::Instant::now();
-            let mut last_report_time = start_time;
-            
-            // Process results from worker threads
-            for _ in 0..total {
-                match rx.recv() {
-                    Ok(result) => {
-                        match result {
-                            Ok((file_path, embedding, from_cache)) => {
-                                // Add to our database
-                                let file_path_str = file_path.to_string_lossy().to_string();
-                                
-                                // Store in database (cache was already updated in the worker thread if needed)
-                                self.embeddings.insert(file_path_str.clone(), embedding.clone());
-                                
-                                // Add to HNSW index if available
-                                if let Some(index) = &mut self.hnsw_index {
-                                    if let Err(e) = index.insert(embedding) {
-                                        error!("Failed to insert into HNSW index: {}", e);
-                                        progress.println(format!("Warning: Failed to add {} to HNSW index: {}", file_path_str, e));
-                                    }
-                                }
-                                
-                                successful_embeddings += 1;
-                                
-                                // Print occasional progress for large batches
-                                let now = std::time::Instant::now();
-                                if now.duration_since(last_report_time).as_secs() >= 10 {
-                                    last_report_time = now;
-                                    let elapsed = now.duration_since(start_time).as_secs();
-                                    let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
-                                    progress.println(format!("Processed {}/{} files ({:.1} files/sec)", 
-                                        successful_embeddings, total, rate));
-                                }
-                                
-                                // Save periodically
-                                save_counter += 1;
-                                if save_counter >= batch_size {
-                                    // Save the database and reset counter
-                                    if let Err(e) = self.save() {
-                                        error!("Failed to save database during batch processing: {}", e);
-                                        progress.println(format!("Warning: Failed to save database: {}", e));
-                                    } else {
-                                        debug!("Saved database after processing {} files", save_counter);
-                                    }
-                                    save_counter = 0;
-                                }
-                            },
-                            Err((file_path, error)) => {
-                                // Show error but continue with other files
-                                progress.println(format!("Error indexing {}: {}", file_path, error));
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Channel error: {}", e);
-                        progress.println(format!("Error communicating with worker threads: {}", e));
-                        break;
-                    }
-                }
-            }
-            
-            // Wait for the processor thread to finish
-            processor_handle.join().unwrap();
-            
-            // Final save if any unsaved changes
-            if save_counter > 0 {
-                if let Err(e) = self.save() {
-                    error!("Failed to save database at end of incremental indexing: {}", e);
-                    progress.println(format!("Warning: Failed to save database: {}", e));
-                }
-            }
-            
-            // Report final statistics
-            let elapsed = start_time.elapsed().as_secs();
-            let rate = if elapsed > 0 { successful_embeddings as f64 / elapsed as f64 } else { 0.0 };
-            
-            progress.finish_with_message(format!("Processed {} files successfully in {}s ({:.1} files/sec)", 
-                successful_embeddings, elapsed, rate));
+            // Use the parallel implementation
+            self.index_directory_parallel(filtered_files, model, batch_size)?;
         }
         
         // Process deleted files
@@ -1985,6 +1592,263 @@ impl VectorDB {
             info!("Auto-sync daemon stopped");
         }
         
+        Ok(())
+    }
+
+    /// Parallel directory indexing function
+    fn index_directory_parallel(&mut self, files: Vec<PathBuf>, model: Arc<EmbeddingModel>, batch_size: usize) -> Result<()> {
+        let num_threads = num_cpus::get();
+        let file_count = files.len();
+        
+        info!("Starting parallel indexing for {} files using {} threads.", file_count, num_threads);
+
+        // Create progress bar
+        let progress = ProgressBar::new(file_count as u64);
+        progress.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files indexed ({eta}) {msg}")
+            .unwrap()
+            .progress_chars("#>-"));
+
+        // Create thread-safe cache reference
+        let cache_arc = Arc::new(Mutex::new(self.cache.clone()));
+        
+        // First phase: Check cache for all files and collect those needing embedding
+        let mut files_to_embed: Vec<(PathBuf, Option<u64>)> = Vec::with_capacity(file_count);
+        let mut files_from_cache = 0;
+        let mut cache_errors = 0;
+        
+        debug!("Checking cache for {} files...", file_count);
+        { // Scope for cache_guard lock
+            let mut cache_guard = cache_arc.lock().unwrap();
+            for file_path in &files {
+                let path_str = file_path.to_string_lossy().to_string();
+                match cache_guard.check_cache_and_get_hash(&path_str, file_path) {
+                    Ok(CacheCheckResult::Hit(embedding)) => {
+                        // Release cache lock before potentially locking HNSW index
+                        drop(cache_guard);
+                        self.embeddings.insert(path_str, embedding.clone());
+                        if let Some(index) = &mut self.hnsw_index {
+                            if let Err(e) = index.insert(embedding) {
+                                error!("Failed to insert cached embedding into HNSW index for {}: {}", file_path.display(), e);
+                            }
+                        }
+                        files_from_cache += 1;
+                        progress.inc(1); // Increment progress for cached file
+                        cache_guard = cache_arc.lock().unwrap(); // Re-acquire lock
+                    }
+                    Ok(CacheCheckResult::Miss(hash_opt)) => {
+                        files_to_embed.push((file_path.clone(), hash_opt));
+                    }
+                    Err(e) => {
+                        error!("Cache check/hash error for {}: {}. Queuing for embedding.", file_path.display(), e);
+                        cache_errors += 1;
+                        files_to_embed.push((file_path.clone(), None));
+                    }
+                }
+            }
+        } // cache_guard lock released here
+
+        if cache_errors > 0 {
+            progress.println(format!("Warning: Encountered {} cache read/hash errors.", cache_errors));
+        }
+        
+        let files_to_embed_count = files_to_embed.len();
+        debug!("Found {} files in cache. {} files need embedding.", files_from_cache, files_to_embed_count);
+
+        if files_to_embed_count == 0 {
+            progress.finish_with_message(format!("Processed {} files (all from cache).", files_from_cache));
+            if let Err(e) = self.save() {
+                error!("Failed to save database after cache check: {}", e);
+            }
+            return Ok(());
+        }
+
+        // Second phase: Prepare for batched parallel processing
+        let model_clone = Arc::clone(&model);
+        let effective_batch_size = std::cmp::min(batch_size, 128); // Cap batch size
+        let file_chunks: Vec<Vec<(PathBuf, Option<u64>)>> = files_to_embed
+            .chunks(effective_batch_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+        
+        let chunk_count = file_chunks.len();
+        info!("Processing {} files needing embedding in {} chunks (batch size ~{}).", 
+              files_to_embed_count, chunk_count, effective_batch_size);
+
+        // Third phase: Parallel processing with rayon
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(num_threads).build().unwrap();
+        let (tx, rx): (Sender<Vec<(PathBuf, Option<u64>, Result<Vec<f32>>)>>, Receiver<_>) = mpsc::channel();
+
+        pool.install(move || {
+            file_chunks.into_par_iter().for_each_with(tx, |tx_clone, chunk_data| {
+                let mut texts_to_embed: Vec<String> = Vec::with_capacity(chunk_data.len());
+                let mut paths_and_hashes: Vec<(PathBuf, Option<u64>)> = Vec::with_capacity(chunk_data.len());
+                let mut results_for_chunk: Vec<(PathBuf, Option<u64>, Result<Vec<f32>>)> = Vec::with_capacity(chunk_data.len());
+
+                // Read file contents
+                for (path, hash_opt) in chunk_data {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            texts_to_embed.push(content);
+                            paths_and_hashes.push((path, hash_opt));
+                        }
+                        Err(e) => {
+                            results_for_chunk.push((path, hash_opt, Err(VectorDBError::IOError(e))));
+                        }
+                    }
+                }
+
+                // Embed batch
+                if !texts_to_embed.is_empty() {
+                    let text_refs: Vec<&str> = texts_to_embed.iter().map(String::as_str).collect();
+                    match model_clone.embed_batch(&text_refs) {
+                        Ok(embeddings) => {
+                            assert_eq!(embeddings.len(), paths_and_hashes.len());
+                            for ((path, hash_opt), embedding) in paths_and_hashes.into_iter().zip(embeddings) {
+                                results_for_chunk.push((path, hash_opt, Ok(embedding)));
+                            }
+                        }
+                        Err(e) => {
+                            let error_message = format!("Batch embedding failed: {}", e);
+                            for (path, hash_opt) in paths_and_hashes {
+                                results_for_chunk.push((path, hash_opt, Err(VectorDBError::EmbeddingError(error_message.clone()))));
+                            }
+                        }
+                    }
+                }
+
+                // Send results
+                if !results_for_chunk.is_empty() {
+                    if tx_clone.send(results_for_chunk).is_err() {
+                        warn!("Failed to send chunk results to main thread.");
+                    }
+                }
+            });
+        }); // pool.install blocks until completion
+
+        // Fourth phase: Process results
+        let mut successful_embeddings = 0;
+        let mut save_counter = 0;
+        let start_time = std::time::Instant::now();
+        let mut last_report_time = start_time;
+        let mut processed_new_files = 0;
+
+        while let Ok(chunk_results) = rx.recv() {
+            let mut cache_guard = cache_arc.lock().unwrap();
+            for (file_path, hash_opt, result) in chunk_results {
+                processed_new_files += 1;
+                match result {
+                    Ok(embedding) => {
+                        let file_path_str = file_path.to_string_lossy().to_string();
+                        // Cache insert logic
+                        if let Some(hash) = hash_opt {
+                            if let Err(e) = cache_guard.insert_with_hash(file_path_str.clone(), embedding.clone(), hash) {
+                                error!("Failed to insert into cache for {}: {}", file_path.display(), e);
+                            }
+                        } else {
+                            // Try getting hash again if it wasn't available initially
+                            match EmbeddingCache::get_file_hash(&file_path) {
+                                Ok(new_hash) => {
+                                    if let Err(e) = cache_guard.insert_with_hash(file_path_str.clone(), embedding.clone(), new_hash) {
+                                        error!("Failed to insert into cache (retry hash) for {}: {}", file_path.display(), e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed again to get hash for cache insertion for {}: {}", file_path.display(), e);
+                                }
+                            }
+                        }
+                        
+                        // DB insert
+                        self.embeddings.insert(file_path_str.clone(), embedding.clone());
+                        
+                        // HNSW insert (outside lock to avoid deadlock)
+                        drop(cache_guard);
+                        if let Some(index) = &mut self.hnsw_index {
+                            if let Err(e) = index.insert(embedding) {
+                                error!("Failed to insert into HNSW index for {}: {}", file_path.display(), e);
+                                progress.println(format!("Warning: Failed to add {} to HNSW index: {}", file_path_str, e));
+                            }
+                        }
+                        cache_guard = cache_arc.lock().unwrap(); // Re-acquire lock
+
+                        successful_embeddings += 1;
+                        save_counter += 1;
+                    }
+                    Err(error) => {
+                        progress.println(format!("Error indexing {}: {}", file_path.display(), error));
+                    }
+                }
+                progress.inc(1); // Increment progress bar for each processed file
+            }
+            drop(cache_guard); // Release lock after processing the chunk
+
+            // Periodic save
+            if save_counter >= effective_batch_size {
+                if let Err(e) = self.save() {
+                    error!("Failed to save database during batch processing: {}", e);
+                    progress.println(format!("Warning: Failed to save database: {}", e));
+                } else {
+                    debug!("Saved database after processing {} new files", save_counter);
+                }
+                save_counter = 0;
+            }
+
+            // Periodic progress report
+            let now = std::time::Instant::now();
+            if now.duration_since(last_report_time).as_secs() >= 15 {
+                last_report_time = now;
+                let elapsed_secs = now.duration_since(start_time).as_secs_f32();
+                let rate = if elapsed_secs > 0.1 { processed_new_files as f32 / elapsed_secs } else { 0.0 };
+                let total_processed = files_from_cache + processed_new_files;
+                progress.println(format!(
+                    "Processed {}/{} files ({:.1} new files/sec)",
+                    total_processed, file_count, rate
+                ));
+            }
+        }
+
+        // Fifth phase: Finalization
+        if save_counter > 0 {
+            if let Err(e) = self.save() {
+                error!("Failed to save database at end of indexing: {}", e);
+                progress.println(format!("Warning: Failed to save database: {}", e));
+            } else {
+                debug!("Final save completed.");
+            }
+        }
+
+        let elapsed_total = start_time.elapsed().as_secs_f32();
+        let rate_final = if elapsed_total > 0.1 { successful_embeddings as f32 / elapsed_total } else { 0.0 };
+        let total_files_in_db = files_from_cache + successful_embeddings;
+        
+        progress.finish_with_message(format!(
+            "Indexed {} files ({} new embeddings) in {:.1}s ({:.1} new/sec)",
+            total_files_in_db, successful_embeddings, elapsed_total, rate_final
+        ));
+
+        // Update commit hash if in repo context
+        if let (Some(repo_id), Some(branch)) = (&self.current_repo_id, &self.current_branch) {
+            debug!("Updating commit hash for repository {} branch {}", repo_id, branch);
+            let repo_id_clone = repo_id.clone();
+            let branch_clone = branch.clone();
+            if let Some(repo) = self.repo_manager.get_repository(&repo_id_clone) {
+                if let Ok(git_repo) = crate::utils::git::GitRepo::new(repo.path.clone()) {
+                    if let Ok(commit_hash) = git_repo.get_commit_hash(&branch_clone) {
+                        if let Err(e) = self.repo_manager.update_indexed_commit(&repo_id_clone, &branch_clone, &commit_hash) {
+                            error!("Failed to update indexed commit for {}/{}: {}", repo_id_clone, branch_clone, e);
+                        }
+                    } else {
+                        warn!("Could not get current commit hash for {}/{}", repo_id_clone, branch_clone);
+                    }
+                } else {
+                    warn!("Could not open git repo at {}", repo.path.display());
+                }
+            } else {
+                warn!("Repository config not found for {}", repo_id_clone);
+            }
+        }
+
         Ok(())
     }
 }

@@ -106,6 +106,52 @@ impl From<anyhow::Error> for VectorDBError {
     }
 }
 
+// Add Clone implementation for VectorDBError to support parallel processing
+impl Clone for VectorDBError {
+    fn clone(&self) -> Self {
+        match self {
+            Self::FileNotFound(s) => Self::FileNotFound(s.clone()),
+            Self::FileReadError { path, source } => Self::FileReadError {
+                path: path.clone(),
+                source: io::Error::new(source.kind(), source.to_string()),
+            },
+            Self::FileWriteError { path, source } => Self::FileWriteError {
+                path: path.clone(),
+                source: io::Error::new(source.kind(), source.to_string()),
+            },
+            Self::DirectoryCreationError { path, source } => Self::DirectoryCreationError {
+                path: path.clone(),
+                source: io::Error::new(source.kind(), source.to_string()),
+            },
+            Self::MetadataError { path, source } => Self::MetadataError {
+                path: path.clone(),
+                source: io::Error::new(source.kind(), source.to_string()),
+            },
+            // Create new serialization error with the string representation
+            Self::SerializationError(e) => Self::SerializationError(
+                serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", e)).unwrap_err()
+            ),
+            Self::EmbeddingError(s) => Self::EmbeddingError(s.clone()),
+            Self::DatabaseError(s) => Self::DatabaseError(s.clone()),
+            Self::ASTTraversalError(s) => Self::ASTTraversalError(s.clone()),
+            Self::InvalidParameter(s) => Self::InvalidParameter(s.clone()),
+            Self::InvalidPath(s) => Self::InvalidPath(s.clone()),
+            Self::CacheError(s) => Self::CacheError(s.clone()),
+            Self::ParserError(s) => Self::ParserError(s.clone()),
+            Self::UnsupportedLanguage(s) => Self::UnsupportedLanguage(s.clone()),
+            Self::HNSWError(s) => Self::HNSWError(s.clone()),
+            Self::IOError(e) => Self::IOError(io::Error::new(e.kind(), e.to_string())),
+            Self::SyntaxParsingError(s) => Self::SyntaxParsingError(s.clone()),
+            Self::CodeAnalysisError(s) => Self::CodeAnalysisError(s.clone()),
+            Self::GeneralError(s) => Self::GeneralError(s.clone()),
+            Self::DirectoryNotFound(s) => Self::DirectoryNotFound(s.clone()),
+            Self::RepositoryError(s) => Self::RepositoryError(s.clone()),
+            Self::RepositoryNotFound(s) => Self::RepositoryNotFound(s.clone()),
+            Self::DeserializationError(s) => Self::DeserializationError(s.clone()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
