@@ -1483,6 +1483,46 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 } else {
                     println!("Performing incremental indexing...");
                     println!("Starting indexing... The progress bar will appear shortly.");
+                    
+                    // Get the repository to check commit information
+                    let repo_config = db.repo_manager.get_repository(&repo_id)
+                        .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
+                        
+                    // Check if the branch is already indexed
+                    let indexed_commit = repo_config.get_indexed_commit(branch_name);
+                    
+                    // Create a git repository object
+                    let git_repo = crate::utils::git::GitRepo::new(repo_path.clone())
+                        .map_err(|e| anyhow!("Failed to access git repository: {}", e))?;
+                    
+                    // Get the current commit hash
+                    let current_commit = git_repo.get_commit_hash(branch_name)
+                        .map_err(|e| anyhow!("Failed to get commit hash: {}", e))?;
+                    
+                    // Check if commits are the same (no changes)
+                    if let Some(last_commit) = indexed_commit {
+                        if last_commit == &current_commit {
+                            println!("Branch is already at latest commit ({}) - no changes to index.", current_commit);
+                            return Ok(());
+                        } else {
+                            // Get changes between commits
+                            match git_repo.get_change_set(last_commit, &current_commit) {
+                                Ok(changes) => {
+                                    let total_changes = changes.added_files.len() + changes.modified_files.len() + changes.deleted_files.len();
+                                    println!("Found {} changes between commits:", total_changes);
+                                    println!("  - {} files added", changes.added_files.len());
+                                    println!("  - {} files modified", changes.modified_files.len());
+                                    println!("  - {} files deleted", changes.deleted_files.len());
+                                },
+                                Err(e) => {
+                                    println!("Failed to get changes between commits: {}", e);
+                                }
+                            }
+                        }
+                    } else {
+                        println!("Branch '{}' has not been indexed before - performing full index.", branch_name);
+                    }
+                    
                     db.index_repository_changes(&repo_id, branch_name)?;
                 }
                 

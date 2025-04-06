@@ -1486,6 +1486,7 @@ impl VectorDB {
         if last_commit == current_commit {
             info!("Repository {} branch {} is already up to date at commit {}",
                  repo_name, branch, current_commit);
+            println!("Branch is already at latest commit ({}) - no changes to index.", &current_commit[..8]);
             return Ok(());
         }
         
@@ -1498,6 +1499,13 @@ impl VectorDB {
         
         info!("Incremental indexing of repository {} branch {} from commit {} to {}",
              repo_name, branch, last_commit, current_commit);
+        
+        let total_changes = changes.added_files.len() + changes.modified_files.len() + changes.deleted_files.len();
+        println!("Found {} changes between commits {}.. and {}..:", 
+                total_changes, &last_commit[..8], &current_commit[..8]);
+        println!("  - {} files added", changes.added_files.len());
+        println!("  - {} files modified", changes.modified_files.len());
+        println!("  - {} files deleted", changes.deleted_files.len());
         
         info!("Changes detected: {} added, {} modified, {} deleted files",
              changes.added_files.len(), changes.modified_files.len(), changes.deleted_files.len());
@@ -1885,10 +1893,18 @@ impl VectorDB {
         let rate_final = if elapsed_total > 0.1 { successful_embeddings as f32 / elapsed_total } else { 0.0 };
         let total_files_in_db = files_from_cache + successful_embeddings;
         
-        progress.finish_with_message(format!(
-            "Indexed {} files ({} new embeddings) in {:.1}s ({:.1} new/sec)",
-            total_files_in_db, successful_embeddings, elapsed_total, rate_final
-        ));
+        // Show breakdown of files processed
+        if files_from_cache > 0 {
+            progress.finish_with_message(format!(
+                "Indexed {} files ({} new embeddings, {} from cache) in {:.1}s ({:.1} new/sec)",
+                total_files_in_db, successful_embeddings, files_from_cache, elapsed_total, rate_final
+            ));
+        } else {
+            progress.finish_with_message(format!(
+                "Indexed {} files ({} new embeddings) in {:.1}s ({:.1} new/sec)",
+                total_files_in_db, successful_embeddings, elapsed_total, rate_final
+            ));
+        }
 
         // Update commit hash if in repo context
         if let (Some(repo_id), Some(branch)) = (&self.current_repo_id, &self.current_branch) {
