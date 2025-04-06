@@ -1244,7 +1244,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                     // Provide guidance for next steps
                     if !result.successful.is_empty() {
                         println!("\nUse 'vectordb-cli repo list' to see all repositories");
-                        println!("Use 'vectordb-cli repo sync <repo>' to index repositories");
+                        println!("Use 'vectordb-cli repo sync <repo>' to index repositories (branches are only tracked until synced)");
                     }
                     
                     Ok(())
@@ -1296,9 +1296,9 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                          repo.name,
                          active_marker,
                          if branch_count > 0 { 
-                             format!("{} indexed", branch_count) 
+                             format!("{} tracked", branch_count) 
                          } else { 
-                             "Not indexed".to_string() 
+                             "None tracked".to_string() 
                          });
             }
             
@@ -1652,9 +1652,9 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 None => "Default",
             });
             
-            println!("\nIndexed branches:");
+            println!("\nTracked branches:");
             if repo_clone.indexed_branches.is_empty() {
-                println!("  No branches indexed yet");
+                println!("  No branches tracked yet");
             } else {
                 for (branch, commit) in &repo_clone.indexed_branches {
                     println!("  - {}: {}", branch, commit);
