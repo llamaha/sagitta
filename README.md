@@ -31,20 +31,7 @@ A CLI tool for semantic code search and analysis.
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
 
-### Option 1: Easy Installation Script (Recommended)
-
-```bash
-# Download and run the installation script
-curl -L https://gitlab.com/amulvany/vectordb-cli/-/raw/main/scripts/install.sh | bash
-
-# Add to your shell configuration (~/.bashrc, ~/.zshrc, etc.)
-echo 'source $HOME/.vectordb-cli/env.sh' >> ~/.bashrc
-
-# Reload your shell configuration
-source ~/.bashrc
-```
-
-### Option 2: Manual Installation
+### Manual Installation
 
 ```bash
 # Clone the repository with Git LFS support
@@ -62,19 +49,22 @@ cp target/release/vectordb-cli ~/.local/bin/
 
 #### ONNX Model Files
 
-The ONNX model files are stored in Git LFS and are required for the application to work properly. The installation script ensures these files are properly downloaded and copied to the right location.
+The ONNX model files are stored in Git LFS and are required for the application to work properly.
 
 **Important**: Git LFS is a required dependency for this project. Without it, the ONNX models won't be downloaded correctly and the semantic search functionality won't work.
 
-The model files will be placed in one of these locations:
-- `./onnx/` (in the cloned repository)
-- `$HOME/.vectordb-cli/models/` (when installed via script)
+The model files will be placed in the `./onnx/` directory in the cloned repository.
 
-You can also specify custom model paths using environment variables:
+### Environment Variables (Required)
+
+**You must specify the model paths using environment variables:**
+
 ```bash
 export VECTORDB_ONNX_MODEL=/path/to/your/model.onnx
 export VECTORDB_ONNX_TOKENIZER=/path/to/your/tokenizer_directory
 ```
+
+These environment variables should be added to your shell profile (~/.bashrc, ~/.zshrc, etc.) to ensure they're always available when using vectordb-cli.
 
 ## Usage
 
@@ -198,15 +188,13 @@ vectordb-cli model --fast
 
 ## Uninstallation
 
-```bash
-# Run the uninstallation script
-bash $HOME/.vectordb-cli/scripts/uninstall.sh
-```
+Uninstallation is a simple process:
 
-Or manually:
 ```bash
+# Remove the binary
 rm -f ~/.local/bin/vectordb-cli
-rm -rf ~/.vectordb-cli
+
+# Remove any vectordb-cli data directories
 rm -rf ~/.local/share/vectordb-cli
 ```
 

@@ -378,9 +378,10 @@ impl VectorDB {
                     EmbeddingModel::new_onnx(model_path, tokenizer_path)
                         .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
                 } else {
-                    // Fallback to fast model if paths aren't set
-                    eprintln!("Warning: ONNX model paths not set, falling back to fast embedding model");
-                    Ok(EmbeddingModel::new())
+                    // Error instead of fallback since environment variables are now mandatory
+                    Err(VectorDBError::EmbeddingError(
+                        "ONNX model paths not set. Environment variables VECTORDB_ONNX_MODEL and VECTORDB_ONNX_TOKENIZER are required".to_string()
+                    ))
                 }
             }
         }

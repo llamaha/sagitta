@@ -20,6 +20,7 @@ use std::io::Write;
 use std::process::Command as ProcessCommand;
 use std::collections::HashMap;
 use crate::vectordb::repo_yaml;
+use crate::vectordb::error::VectorDBError;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -303,25 +304,27 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             // Default to using ONNX model unless fast model is explicitly requested
             if !use_fast {
                 debug!("Using ONNX model for indexing (default)");
-                // Get or use default paths
-                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL").ok();
-                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER").ok();
+                // Get environment variable paths (required)
+                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL")
+                    .map_err(|_| VectorDBError::EmbeddingError(
+                        "VECTORDB_ONNX_MODEL environment variable is required but not set".to_string()
+                    ))?;
                 
-                let model_path = onnx_model.as_deref().or_else(|| 
-                    env_model_path.as_deref()
-                ).unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER")
+                    .map_err(|_| VectorDBError::EmbeddingError(
+                        "VECTORDB_ONNX_TOKENIZER environment variable is required but not set".to_string()
+                    ))?;
                 
-                let tokenizer_path = onnx_tokenizer.as_deref().or_else(|| 
-                    env_tokenizer_path.as_deref()
-                ).unwrap_or("onnx");
+                let model_path = onnx_model.unwrap_or(env_model_path);
+                let tokenizer_path = onnx_tokenizer.unwrap_or(env_tokenizer_path);
                 
                 debug!("Using ONNX model path: {}", model_path);
                 debug!("Using ONNX tokenizer path: {}", tokenizer_path);
                 
                 // Set ONNX paths
                 match db.set_onnx_paths(
-                    Some(PathBuf::from(model_path)),
-                    Some(PathBuf::from(tokenizer_path))
+                    Some(PathBuf::from(model_path.clone())),
+                    Some(PathBuf::from(tokenizer_path.clone()))
                 ) {
                     Ok(_) => {
                         // Now set the model type to ONNX
@@ -337,7 +340,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                                 eprintln!("Failed to use ONNX model: {}", e);
                                 eprintln!("Model error: {}. Checking if model files exist...", e);
                                 
-                                let model_file_exists = Path::new(model_path).exists();
+                                let model_file_exists = Path::new(&model_path).exists();
                                 let tokenizer_file_exists = Path::new(&format!("{}/tokenizer.json", tokenizer_path)).exists();
                                 
                                 if !model_file_exists || !tokenizer_file_exists {
@@ -792,22 +795,24 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let use_onnx = use_onnx || !use_fast;
             
             if use_onnx {
-                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL").ok();
-                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER").ok();
+                let env_model_path = std::env::var("VECTORDB_ONNX_MODEL")
+                    .map_err(|_| VectorDBError::EmbeddingError(
+                        "VECTORDB_ONNX_MODEL environment variable is required but not set".to_string()
+                    ))?;
                 
-                let model_path = onnx_model.as_deref().or_else(|| 
-                    env_model_path.as_deref()
-                ).unwrap_or("onnx/all-minilm-l6-v2.onnx");
+                let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER")
+                    .map_err(|_| VectorDBError::EmbeddingError(
+                        "VECTORDB_ONNX_TOKENIZER environment variable is required but not set".to_string()
+                    ))?;
                 
-                let tokenizer_path = onnx_tokenizer.as_deref().or_else(|| 
-                    env_tokenizer_path.as_deref()
-                ).unwrap_or("onnx");
+                let model_path = onnx_model.unwrap_or(env_model_path);
+                let tokenizer_path = onnx_tokenizer.unwrap_or(env_tokenizer_path);
                 
                 debug!("Setting model type to ONNX with paths: {} and {}", model_path, tokenizer_path);
                 
                 match db.set_onnx_paths(
-                    Some(PathBuf::from(model_path)),
-                    Some(PathBuf::from(tokenizer_path))
+                    Some(PathBuf::from(model_path.clone())),
+                    Some(PathBuf::from(tokenizer_path.clone()))
                 ) {
                     Ok(_) => {
                         match db.set_embedding_model_type(EmbeddingModelType::Onnx) {
@@ -817,7 +822,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                                 println!("  - Tokenizer path: {}", tokenizer_path);
                                 
                                 // Verify the files exist
-                                let model_file_exists = Path::new(model_path).exists();
+                                let model_file_exists = Path::new(&model_path).exists();
                                 let tokenizer_file_exists = Path::new(&format!("{}/tokenizer.json", tokenizer_path)).exists();
                                 
                                 if !model_file_exists || !tokenizer_file_exists {
@@ -1079,88 +1084,39 @@ fn get_embedding_model(model_type: &EmbeddingModelType, db: &VectorDB) -> anyhow
         EmbeddingModelType::Onnx => {
             debug!("Creating ONNX embedding model");
             
-            let home_dir = dirs::home_dir();
+            // Environment variables are now required for ONNX models
+            let env_model_path = std::env::var("VECTORDB_ONNX_MODEL")
+                .map_err(|_| VectorDBError::EmbeddingError(
+                    "VECTORDB_ONNX_MODEL environment variable is required but not set".to_string()
+                ))?;
             
-            // Try different locations for the model files
-            let possible_model_locations = vec![
-                // First check the paths set in the database
-                db.onnx_model_path().map(|p| p.to_owned()),
-                
-                // Then check in the current directory
-                Some(PathBuf::from("onnx/all-minilm-l6-v2.onnx")),
-                
-                // Then check in the user's home directory
-                home_dir.as_ref().map(|h| h.join(".vectordb-cli").join("models").join("all-minilm-l6-v2.onnx")),
-                
-                // Check environment variable if set
-                std::env::var("VECTORDB_ONNX_MODEL").ok().map(PathBuf::from),
-            ];
+            let env_tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER")
+                .map_err(|_| VectorDBError::EmbeddingError(
+                    "VECTORDB_ONNX_TOKENIZER environment variable is required but not set".to_string()
+                ))?;
             
-            // Try different locations for the tokenizer
-            let possible_tokenizer_locations = vec![
-                // First check the paths set in the database
-                db.onnx_tokenizer_path().map(|p| p.to_owned()),
-                
-                // Then check in the current directory
-                Some(PathBuf::from("onnx")),
-                
-                // Then check in the user's home directory
-                home_dir.as_ref().map(|h| h.join(".vectordb-cli").join("models")),
-                
-                // Check environment variable if set
-                std::env::var("VECTORDB_ONNX_TOKENIZER").ok().map(PathBuf::from),
-            ];
+            // Create paths from the environment variables
+            let model_path = PathBuf::from(&env_model_path);
+            let tokenizer_path = PathBuf::from(&env_tokenizer_path);
             
-            let mut errors = Vec::new();
-            
-            // Try each model/tokenizer path combination
-            for model_path in possible_model_locations.iter().flatten() {
-                for tokenizer_path in possible_tokenizer_locations.iter().flatten() {
-                    debug!("Trying ONNX model: {}, tokenizer: {}", 
-                           model_path.display(), tokenizer_path.display());
-                    
-                    // Check if files exist before attempting to load
-                    if !model_path.exists() {
-                        trace!("Model file does not exist: {}", model_path.display());
-                        continue;
-                    }
-                    
-                    let tokenizer_json = tokenizer_path.join("tokenizer.json");
-                    if !tokenizer_json.exists() {
-                        trace!("Tokenizer file does not exist: {}", tokenizer_json.display());
-                        continue;
-                    }
-                    
-                    // Try to create the model with this path combination
-                    match EmbeddingModel::new_onnx(model_path, tokenizer_path) {
-                        Ok(model) => {
-                            info!("Successfully loaded ONNX model from: {}, tokenizer: {}", 
-                                  model_path.display(), tokenizer_path.display());
-                            return Ok(model);
-                        },
-                        Err(e) => {
-                            debug!("Failed to load ONNX model from: {}, tokenizer: {}, error: {}", 
-                                   model_path.display(), tokenizer_path.display(), e);
-                            errors.push(format!("Path: {}, tokenizer: {} - Error: {}", 
-                                       model_path.display(), tokenizer_path.display(), e));
-                        }
-                    }
-                }
+            // Verify paths exist
+            if !model_path.exists() {
+                return Err(anyhow::Error::msg(format!(
+                    "ONNX model file not found at path specified in VECTORDB_ONNX_MODEL: {}", 
+                    model_path.display()
+                )));
             }
             
-            // If we reach here, all attempts failed
-            let error_details = if errors.is_empty() {
-                "No valid ONNX model files found".to_string()
-            } else {
-                format!("All attempts to load ONNX model failed, last error: {}", 
-                         errors.last().unwrap_or(&"Unknown error".to_string()))
-            };
+            if !tokenizer_path.exists() {
+                return Err(anyhow::Error::msg(format!(
+                    "ONNX tokenizer directory not found at path specified in VECTORDB_ONNX_TOKENIZER: {}", 
+                    tokenizer_path.display()
+                )));
+            }
             
-            warn!("Falling back to fast model due to ONNX model loading failure");
-            warn!("{}", error_details);
-            println!("Warning: ONNX model could not be loaded, falling back to fast model (less accurate but quicker)");
-            
-            Ok(EmbeddingModel::new())
+            // Create the model with verified paths
+            EmbeddingModel::new_onnx(&model_path, &tokenizer_path)
+                .map_err(|e| anyhow::Error::msg(format!("Failed to create ONNX model: {}", e)))
         }
     }
 }
