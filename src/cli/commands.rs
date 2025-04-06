@@ -243,6 +243,10 @@ pub enum RepoCommand {
         /// Force full reindexing
         #[arg(long = "force")]
         force: bool,
+        
+        /// Number of threads to use for indexing (defaults to available CPUs)
+        #[arg(short = 'j', long = "threads")]
+        threads: Option<usize>,
     },
     
     /// Sync all repositories
@@ -250,6 +254,10 @@ pub enum RepoCommand {
         /// Force full reindexing
         #[arg(long = "force")]
         force: bool,
+        
+        /// Number of threads to use for indexing (defaults to available CPUs)
+        #[arg(short = 'j', long = "threads")]
+        threads: Option<usize>,
     },
     
     /// Show repository status
@@ -397,12 +405,12 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             let num_cpus = num_cpus::get();
             if let Some(thread_count) = threads {
                 debug!("Setting thread count to {} (of {} available CPUs)", thread_count, num_cpus);
-                println!("Using {} threads for indexing ({} CPUs available)...", 
-                         thread_count, num_cpus);
-                rayon::ThreadPoolBuilder::new()
+                println!("Using {} threads for indexing ({} CPUs available)...",
+                    thread_count, num_cpus);
+                let _ = rayon::ThreadPoolBuilder::new()
                     .num_threads(thread_count)
                     .build_global()
-                    .unwrap_or_else(|e| println!("Failed to set thread count: {}", e));
+                    .map_err(|e| println!("Failed to set thread count: {}", e));
             } else {
                 debug!("Using all {} available CPUs for indexing", num_cpus);
                 println!("Using all {} available CPUs for indexing...", num_cpus);
@@ -1344,7 +1352,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             Ok(())
         },
         
-        RepoCommand::Sync { repo, branch, all_branches, force } => {
+        RepoCommand::Sync { repo, branch, all_branches, force, threads } => {
             debug!("Syncing repository: {}", repo);
             
             // Resolve repository name/ID
@@ -1479,10 +1487,35 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
                 if force {
                     println!("Performing full reindexing...");
                     println!("Starting indexing... The progress bar will appear shortly.");
+                    
+                    // Set thread count if specified
+                    let num_cpus = num_cpus::get();
+                    if let Some(thread_count) = threads {
+                        debug!("Setting thread count to {} (of {} available CPUs)", thread_count, num_cpus);
+                        println!("Using {} threads for indexing ({} CPUs available)...", 
+                            thread_count, num_cpus);
+                        let _ = rayon::ThreadPoolBuilder::new()
+                            .num_threads(thread_count)
+                            .build_global()
+                            .map_err(|e| println!("Failed to set thread count: {}", e));
+                    }
+                    
                     db.index_repository_full(&repo_id, branch_name)?;
                 } else {
                     println!("Performing incremental indexing...");
                     println!("Starting indexing... The progress bar will appear shortly.");
+                    
+                    // Set thread count if specified
+                    let num_cpus = num_cpus::get();
+                    if let Some(thread_count) = threads {
+                        debug!("Setting thread count to {} (of {} available CPUs)", thread_count, num_cpus);
+                        println!("Using {} threads for indexing ({} CPUs available)...", 
+                            thread_count, num_cpus);
+                        let _ = rayon::ThreadPoolBuilder::new()
+                            .num_threads(thread_count)
+                            .build_global()
+                            .map_err(|e| println!("Failed to set thread count: {}", e));
+                    }
                     
                     // Get the repository to check commit information
                     let repo_config = db.repo_manager.get_repository(&repo_id)
@@ -1538,7 +1571,7 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             Ok(())
         },
         
-        RepoCommand::SyncAll { force } => {
+        RepoCommand::SyncAll { force, threads } => {
             debug!("Syncing all repositories");
             
             // Get the list of repositories and clone necessary data to avoid borrowing issues
@@ -1567,6 +1600,18 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
             let start_time = std::time::Instant::now();
             let mut successful = 0;
             let mut failed = 0;
+            
+            // Set thread count if specified
+            let num_cpus = num_cpus::get();
+            if let Some(thread_count) = threads {
+                debug!("Setting thread count to {} (of {} available CPUs)", thread_count, num_cpus);
+                println!("Using {} threads for indexing ({} CPUs available)...", 
+                    thread_count, num_cpus);
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(thread_count)
+                    .build_global()
+                    .map_err(|e| println!("Failed to set thread count: {}", e));
+            }
             
             for (i, (repo_id, repo_name, active_branch)) in repos.iter().enumerate() {
                 progress.set_message(format!("Syncing repository {}", repo_name));
