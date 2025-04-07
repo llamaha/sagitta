@@ -7,7 +7,7 @@ use crate::vectordb::search_ranking::{PathComponentWeights, apply_path_ranking, 
 use crate::vectordb::code_structure::CodeStructureAnalyzer;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use crate::vectordb::code_ranking::CodeRankingEngine;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use log::{debug, warn};
 use regex;
@@ -2289,8 +2289,32 @@ impl Search {
                             let repo_relative_path = if let Ok(rel_path) = absolute_path.strip_prefix(&repo_path) {
                                 rel_path.to_string_lossy().to_string()
                             } else {
-                                // Keep original path if we can't make it relative (shouldn't happen)
-                                result.file_path.clone()
+                                // Try to handle the case where paths may have different prefixes
+                                // Look for the repo name in the path as a fallback heuristic
+                                let repo_name = repo_path.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("");
+                                
+                                if !repo_name.is_empty() && absolute_path.to_string_lossy().contains(repo_name) {
+                                    // Try to extract the part after the repo name
+                                    if let Some(index) = absolute_path.to_string_lossy().rfind(repo_name) {
+                                        let start_index = index + repo_name.len();
+                                        if start_index < absolute_path.to_string_lossy().len() {
+                                            let remaining = &absolute_path.to_string_lossy()[start_index..];
+                                            // Remove any leading path separators
+                                            remaining.trim_start_matches('/').trim_start_matches('\\').to_string()
+                                        } else {
+                                            result.file_path.clone()
+                                        }
+                                    } else {
+                                        result.file_path.clone()
+                                    }
+                                } else {
+                                    // Last resort, just use the file name
+                                    absolute_path.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| result.file_path.clone())
+                                }
                             };
                             
                             // Update the file path to be repository-relative
