@@ -489,14 +489,13 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     debug!("Successfully created embedding model: {:?}", model_type);
                     let mut search = Search::new(db, model);
                     
-                    // Check if we should do a multi-repository search
-                    let should_search_multiple = !search.db.repo_manager.list_repositories().is_empty() && 
-                                                (repositories.is_some() || all_repositories);
+                    // Determine if we should search multiple repositories
+                    let should_search_multiple = repositories.is_some() || all_repositories;
                     
-                    // Process file types - use all supported types if none specified
-                    let file_types_to_use = if let Some(types) = &file_types {
+                    // Prepare file type filter
+                    let file_types_to_use = if let Some(types) = file_types {
                         if types.is_empty() {
-                            println!("No file types specified, using all supported types");
+                            println!("No specific file types specified, searching all supported file types");
                             Some(VectorDB::get_supported_file_types())
                         } else {
                             println!("Filtering results by file types: {}", types.join(", "));

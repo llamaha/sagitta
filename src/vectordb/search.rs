@@ -2088,12 +2088,19 @@ impl Search {
         if repos_to_search.is_empty() {
             debug!("No repositories to search. Will search in standard mode.");
             // If no repositories, just do a regular search
-            let results = self.hybrid_search_with_limit(
-                query, 
-                options.vector_weight, 
-                options.bm25_weight, 
-                options.max_results
-            )?;
+            let results = if options.vector_weight == Some(1.0) && options.bm25_weight == Some(0.0) {
+                // Use vector-only search if specified
+                debug!("Using vector-only search because weights are set to vector=1.0, bm25=0.0");
+                self.search_with_limit(query, options.max_results)?
+            } else {
+                // Otherwise use hybrid search with specified or default weights
+                self.hybrid_search_with_limit(
+                    query, 
+                    options.vector_weight, 
+                    options.bm25_weight, 
+                    options.max_results
+                )?
+            };
             return Ok(results);
         }
         
@@ -2103,9 +2110,15 @@ impl Search {
         let original_repo_id = self.db.current_repo_id().cloned();
         let original_branch = self.db.current_branch().cloned();
         
+        // Track which files have already been processed to avoid duplicates
+        let mut processed_files = HashSet::new();
+        
         // Search each repository
         for repo in repos_to_search {
             debug!("Searching repository: {} ({})", repo.name, repo.id);
+            
+            // Store the absolute repository path for path resolution
+            let repo_path = repo.path.clone();
             
             // Determine which branches to search
             let branches_to_search = if let Some(branches_map) = &options.branches {
@@ -2129,16 +2142,53 @@ impl Search {
                 // Switch to this repo/branch context
                 match self.db.switch_repository(&repo.id, Some(&branch)) {
                     Ok(_) => {
-                        // Perform search in this context
-                        let mut branch_results = self.hybrid_search_with_limit(
-                            query, 
-                            options.vector_weight, 
-                            options.bm25_weight, 
-                            options.max_results
-                        )?;
+                        // Perform search in this context - check if we should do vector-only search
+                        let branch_results = if options.vector_weight == Some(1.0) && options.bm25_weight == Some(0.0) {
+                            // Use vector-only search if specified
+                            debug!("Using vector-only search because weights are set to vector=1.0, bm25=0.0");
+                            self.search_with_limit(query, options.max_results)?
+                        } else {
+                            // Otherwise use hybrid search with specified or default weights
+                            self.hybrid_search_with_limit(
+                                query, 
+                                options.vector_weight, 
+                                options.bm25_weight, 
+                                options.max_results
+                            )?
+                        };
+                        
+                        let mut filtered_branch_results = Vec::new();
                         
                         // Add repository and branch information to results
-                        for result in &mut branch_results {
+                        for mut result in branch_results {
+                            // Create a unique identifier for this file to avoid duplicates
+                            let file_path = Path::new(&result.file_path);
+                            let absolute_path = if file_path.is_absolute() {
+                                file_path.to_path_buf()
+                            } else {
+                                // Convert to absolute path for deduplication
+                                repo_path.join(file_path)
+                            };
+                            
+                            let abs_path_str = absolute_path.to_string_lossy().to_string();
+                            
+                            // Skip this file if we've already processed it from another repo/branch
+                            if !processed_files.insert(abs_path_str.clone()) {
+                                continue;
+                            }
+                            
+                            // Convert absolute path to repository-relative path
+                            let repo_relative_path = if let Ok(rel_path) = absolute_path.strip_prefix(&repo_path) {
+                                rel_path.to_string_lossy().to_string()
+                            } else {
+                                // Keep original path if we can't make it relative (shouldn't happen)
+                                result.file_path.clone()
+                            };
+                            
+                            // Update the file path to be repository-relative
+                            result.file_path = repo_relative_path;
+                            
+                            // Add repository and branch information
                             result.repository = Some(repo.name.clone());
                             result.branch = Some(branch.clone());
                             
@@ -2146,11 +2196,14 @@ impl Search {
                             if let Some(commit) = repo.get_indexed_commit(&branch) {
                                 result.commit = Some(commit.clone());
                             }
+                            
+                            // Add this result to our filtered list
+                            filtered_branch_results.push(result);
                         }
                         
                         // Filter by file types if specified
                         if let Some(file_types) = &options.file_types {
-                            branch_results.retain(|result| {
+                            filtered_branch_results.retain(|result| {
                                 let path = Path::new(&result.file_path);
                                 if let Some(ext) = path.extension() {
                                     let ext_str = ext.to_string_lossy().to_string();
@@ -2162,7 +2215,7 @@ impl Search {
                         }
                         
                         // Add to combined results
-                        all_results.extend(branch_results);
+                        all_results.extend(filtered_branch_results);
                     },
                     Err(e) => {
                         warn!("Failed to switch to repository {}, branch {}: {}", repo.name, branch, e);
