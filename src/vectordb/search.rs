@@ -973,50 +973,147 @@ impl Search {
     }
     
     /// Normalize the score distribution to spread out the scores more evenly
+    /// Improved to better handle multi-repository normalization
     fn normalize_score_distribution(&self, results: &mut Vec<SearchResult>) {
         if results.len() <= 1 {
             return;
         }
         
-        // Find min and max scores
-        let mut min_score = f32::INFINITY;
-        let mut max_score = f32::NEG_INFINITY;
+        // First, group results by repository if repository information is available
+        let mut repo_groups: HashMap<String, Vec<usize>> = HashMap::new();
         
-        for result in results.iter() {
-            min_score = min_score.min(result.similarity);
-            max_score = max_score.max(result.similarity);
-        }
+        // Check if we have repository information
+        let has_repo_info = results.iter().any(|r| r.repository.is_some());
         
-        let score_range = max_score - min_score;
-        
-        // If there's minimal variation, add artificial distribution
-        if score_range < 0.05 {
-            // Apply rank-based scoring to create more distribution
-            let mut sorted_results = results.clone();
-            sorted_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
-            
-            let result_count = sorted_results.len() as f32;
-            
-            // Map each result to its index and corresponding score
-            let mut rank_scores = HashMap::new();
-            for (i, result) in sorted_results.iter().enumerate() {
-                // Convert rank to score in 0.3-1.0 range (more separation)
-                let rank_score = 1.0 - (i as f32 / result_count) * 0.7;
-                rank_scores.insert(result.file_path.clone(), rank_score);
+        if has_repo_info {
+            // Group by repository
+            for (i, result) in results.iter().enumerate() {
+                let repo_name = result.repository.as_ref()
+                    .map(|r| r.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                repo_groups.entry(repo_name).or_default().push(i);
             }
             
-            // Apply the rank scores to the original results
-            for result in results.iter_mut() {
-                if let Some(score) = rank_scores.get(&result.file_path) {
-                    result.similarity = *score;
+            // Normalize scores within each repository group first
+            for indices in repo_groups.values() {
+                if indices.len() <= 1 {
+                    continue; // Skip groups with only one result
+                }
+                
+                // Find min and max scores within this repository
+                let mut min_score = f32::INFINITY;
+                let mut max_score = f32::NEG_INFINITY;
+                
+                for &idx in indices {
+                    min_score = min_score.min(results[idx].similarity);
+                    max_score = max_score.max(results[idx].similarity);
+                }
+                
+                let score_range = max_score - min_score;
+                
+                // If all scores are nearly identical within this repo, create artificial separation
+                if score_range < 0.05 {
+                    // Apply rank-based scoring to create more distribution
+                    let mut repo_results: Vec<(usize, f32)> = indices.iter()
+                        .map(|&idx| (idx, results[idx].similarity))
+                        .collect();
+                    
+                    // Sort by similarity
+                    repo_results.sort_by(|(_, a), (_, b)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                    
+                    let result_count = repo_results.len() as f32;
+                    
+                    // Apply rank-based normalization within the group
+                    for (i, (idx, _)) in repo_results.iter().enumerate() {
+                        // Normalize to 0.3-1.0 range for better separation
+                        let rank_score = 1.0 - (i as f32 / result_count) * 0.7;
+                        results[*idx].similarity = rank_score;
+                    }
+                } else if score_range > 0.0 {
+                    // Apply standard min-max normalization within group
+                    for &idx in indices {
+                        let normalized = (results[idx].similarity - min_score) / score_range;
+                        results[idx].similarity = 0.3 + (normalized * 0.7); // Normalize to 0.3-1.0 range
+                    }
                 }
             }
-        } else if score_range < 0.3 {
-            // Use min-max normalization with a wider range
+            
+            // Now apply a second normalization across all repositories to ensure comparable scores
+            // This addresses the issue where one repository might have overall higher scores
+            
+            // Find min and max scores globally after per-repository normalization
+            let mut global_min = f32::INFINITY;
+            let mut global_max = f32::NEG_INFINITY;
+            
+            for result in results.iter() {
+                global_min = global_min.min(result.similarity);
+                global_max = global_max.max(result.similarity);
+            }
+            
+            let global_range = global_max - global_min;
+            
+            // Only apply global normalization if there's a reasonable range
+            if global_range > 0.001 {
+                // For repositories with overall higher scores, this will bring them in line with others
+                for result in results.iter_mut() {
+                    let normalized = (result.similarity - global_min) / global_range;
+                    // Use a slightly narrower range (0.25-0.95) to preserve some distinction
+                    result.similarity = 0.25 + (normalized * 0.7); 
+                }
+            }
+            
+            // Final step: boost scores for exact repository matches if query contains repository name
             for result in results.iter_mut() {
-                // Normalize to 0.3-1.0 range for better separation
-                let normalized = (result.similarity - min_score) / score_range;
-                result.similarity = 0.3 + (normalized * 0.7);
+                if let Some(repo) = &result.repository {
+                    // If file path or snippet contains the repository name, give a small boost
+                    if result.file_path.contains(repo) || result.snippet.contains(repo) {
+                        // Cap at 1.0 maximum
+                        result.similarity = (result.similarity + 0.05).min(1.0);
+                    }
+                }
+            }
+        } else {
+            // Original normalization for non-repository searches
+            let mut min_score = f32::INFINITY;
+            let mut max_score = f32::NEG_INFINITY;
+            
+            for result in results.iter() {
+                min_score = min_score.min(result.similarity);
+                max_score = max_score.max(result.similarity);
+            }
+            
+            let score_range = max_score - min_score;
+            
+            // If there's minimal variation, add artificial distribution
+            if score_range < 0.05 {
+                // Apply rank-based scoring to create more distribution
+                let mut sorted_results = results.clone();
+                sorted_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+                
+                let result_count = sorted_results.len() as f32;
+                
+                // Map each result to its index and corresponding score
+                let mut rank_scores = HashMap::new();
+                for (i, result) in sorted_results.iter().enumerate() {
+                    // Convert rank to score in 0.3-1.0 range (more separation)
+                    let rank_score = 1.0 - (i as f32 / result_count) * 0.7;
+                    rank_scores.insert(result.file_path.clone(), rank_score);
+                }
+                
+                // Apply the rank scores to the original results
+                for result in results.iter_mut() {
+                    if let Some(score) = rank_scores.get(&result.file_path) {
+                        result.similarity = *score;
+                    }
+                }
+            } else if score_range < 0.3 {
+                // Use min-max normalization with a wider range
+                for result in results.iter_mut() {
+                    // Normalize to 0.3-1.0 range for better separation
+                    let normalized = (result.similarity - min_score) / score_range;
+                    result.similarity = 0.3 + (normalized * 0.7);
+                }
             }
         }
     }
@@ -1207,9 +1304,10 @@ impl Search {
         let lambda = lambda.clamp(0.0, 1.0); // Ensure lambda is between 0 and 1
         let k = k.min(results.len()); // Ensure k doesn't exceed the available results
         
-        // Track unique file paths to promote path diversity
+        // Track unique file paths and repositories to promote diversity
         let mut seen_paths = HashSet::new();
         let mut seen_path_prefixes = HashSet::new();
+        let mut seen_repositories = HashSet::new();
         
         // Create document embeddings for all results
         let mut result_embeddings: Vec<(SearchResult, Vec<f32>)> = Vec::with_capacity(results.len());
@@ -1240,6 +1338,15 @@ impl Search {
             b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal)
         );
         
+        // Keep track of top results for potential boosting later
+        let top_similarity = if !unranked.is_empty() {
+            unranked[0].0.similarity
+        } else {
+            0.0
+        };
+        
+        let top_similarity_threshold = top_similarity * 0.95; // Consider top 95% as very relevant
+        
         // Add the first element (highest relevance)
         if !unranked.is_empty() {
             let (first, first_emb) = unranked.remove(0);
@@ -1248,6 +1355,11 @@ impl Search {
             seen_paths.insert(first.file_path.clone());
             if let Some(prefix) = Self::extract_path_prefix(&first.file_path) {
                 seen_path_prefixes.insert(prefix);
+            }
+            
+            // Track repository if available
+            if let Some(repo) = &first.repository {
+                seen_repositories.insert(repo.clone());
             }
             
             ranked.push(first);
@@ -1259,6 +1371,7 @@ impl Search {
             let mut max_score = f32::NEG_INFINITY;
             let mut max_idx = 0;
             let mut max_path_diversity_boost = 0.0;
+            let mut max_repo_diversity_boost = 0.0;
             
             for (i, (candidate, candidate_emb)) in unranked.iter().enumerate() {
                 // Calculate path diversity boost
@@ -1268,8 +1381,26 @@ impl Search {
                     &seen_path_prefixes
                 );
                 
+                // Calculate repository diversity boost
+                let repo_diversity_boost = if let Some(repo) = &candidate.repository {
+                    if !seen_repositories.contains(repo) {
+                        0.12 // Significant boost for new repositories
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+                
+                // Relevance boost for highly similar results
+                let relevance_boost = if candidate.similarity >= top_similarity_threshold {
+                    0.05 // Small boost to keep very relevant results higher
+                } else {
+                    0.0
+                };
+                
                 // MMR score = λ * sim(candidate, query) - (1-λ) * max(sim(candidate, ranked_docs))
-                let relevance = candidate.similarity + path_diversity_boost;
+                let relevance = candidate.similarity + path_diversity_boost + repo_diversity_boost + relevance_boost;
                 
                 // Find maximum similarity to any ranked document
                 let mut max_diversity_penalty: f32 = 0.0;
@@ -1299,6 +1430,7 @@ impl Search {
                     max_score = final_score;
                     max_idx = i;
                     max_path_diversity_boost = path_diversity_boost;
+                    max_repo_diversity_boost = repo_diversity_boost;
                 }
             }
             
@@ -1311,12 +1443,37 @@ impl Search {
                 seen_path_prefixes.insert(prefix);
             }
             
+            // Update repository tracking
+            if let Some(repo) = &next.repository {
+                seen_repositories.insert(repo.clone());
+            }
+            
             // Log the selection with diversity information
-            debug!("MMR selected file: {} (sim: {:.2}, diversity boost: {:.2})", 
-                  next.file_path, next.similarity, max_path_diversity_boost);
+            debug!("MMR selected file: {} (sim: {:.2}, path diversity: {:.2}, repo diversity: {:.2})", 
+                  next.file_path, next.similarity, max_path_diversity_boost, max_repo_diversity_boost);
             
             ranked.push(next);
             ranked_embeddings.push(next_emb);
+        }
+        
+        // Post-processing: ensure at least one highly relevant result is in the top 3
+        // This addresses the issue where the most relevant document can get pushed down
+        if ranked.len() > 3 {
+            // Check if we have any highly relevant result in top 3
+            let has_relevant_in_top3 = ranked.iter().take(3).any(|r| r.similarity >= top_similarity_threshold);
+            
+            if !has_relevant_in_top3 {
+                // Find the first highly relevant result after position 3
+                for i in 3..ranked.len() {
+                    if ranked[i].similarity >= top_similarity_threshold {
+                        // Move this result to position 2 (third place)
+                        let relevant = ranked.remove(i);
+                        ranked.insert(2, relevant);
+                        debug!("Boosted a highly relevant result to position 3 to improve visibility");
+                        break;
+                    }
+                }
+            }
         }
         
         debug!("MMR algorithm completed, returning {} diverse results", ranked.len());
@@ -1433,55 +1590,6 @@ impl Search {
         Ok(())
     }
 
-    /// Apply min-max normalization to a set of similarity scores
-    fn normalize_scores(&self, results: &mut Vec<SearchResult>) {
-        if results.len() <= 1 {
-            return;
-        }
-        
-        // Find min and max similarity scores
-        let mut min_score = f32::INFINITY;
-        let mut max_score = f32::NEG_INFINITY;
-        
-        for result in results.iter() {
-            min_score = min_score.min(result.similarity);
-            max_score = max_score.max(result.similarity);
-        }
-        
-        // Check if all scores are the same (common issue with some queries)
-        let score_range = max_score - min_score;
-        
-        if score_range < 0.001 {
-            // If all scores are the same but high (above 0.9), introduce some artificial differentiation
-            // based on other factors like file path relevance or snippet quality
-            if min_score > 0.9 {
-                // Create artificial differentiation for high-scoring but identical results
-                for (i, result) in results.iter_mut().enumerate() {
-                    // Gradually lower scores based on position, but keep them high
-                    // First result keeps its high score, others get slightly lower scores
-                    let position_penalty = (i as f32 * 0.02).min(0.12); // Reduced penalty for more gradual scaling
-                    result.similarity = (result.similarity - position_penalty).max(0.80); // Higher minimum to preserve high scores
-                }
-            } else {
-                // For low scores that are identical, we still want some differentiation
-                for (i, result) in results.iter_mut().enumerate() {
-                    // Lower scores more gradually for low-scoring identical results
-                    let position_penalty = (i as f32 * 0.03).min(0.15); // Reduced penalty for more gradual scaling
-                    result.similarity = (result.similarity - position_penalty).max(0.35); // Higher minimum
-                }
-            }
-            return;
-        }
-        
-        // Apply modified min-max normalization to spread out the scores while preserving some of the original distribution
-        // New method: score = 0.2 + 0.8 * (score - min) / (max - min)
-        // This keeps scores within 0.2-1.0 range, preserving more nuance than full 0-1 normalization
-        for result in results.iter_mut() {
-            let normalized = (result.similarity - min_score) / score_range;
-            result.similarity = 0.2 + (0.8 * normalized);
-        }
-    }
-    
     /// Apply sigmoid normalization to similarity scores
     fn sigmoid_normalize_scores(&self, results: &mut Vec<SearchResult>, steepness: f32) {
         if results.is_empty() {
@@ -2849,14 +2957,14 @@ require_relative 'helper'
         ];
         
         // Test min-max normalization
-        search.normalize_scores(&mut results);
+        search.normalize_score_distribution(&mut results);
         
-        // The highest score should now be 1.0 (0.2 + 0.8 * 1.0)
+        // The highest score should now be 1.0
         assert_eq!(results[0].similarity, 1.0);
-        // The lowest score should now be 0.2 (0.2 + 0.8 * 0.0)
-        assert_eq!(results[2].similarity, 0.2);
+        // The lowest score should now be 0.3 in our new implementation
+        assert_eq!(results[2].similarity, 0.3);
         // The middle score should be normalized within this range
-        assert!(results[1].similarity > 0.2 && results[1].similarity < 1.0);
+        assert!(results[1].similarity > 0.3 && results[1].similarity < 1.0);
         
         // Test sigmoid normalization
         let mut sigmoid_results = vec![
