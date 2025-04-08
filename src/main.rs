@@ -1,13 +1,13 @@
-use clap::Parser;
 use anyhow::Result;
-use std::path::PathBuf;
+use clap::Parser;
 use dirs::data_local_dir;
-use log::{debug, error};
 use env_logger;
+use log::{debug, error};
+use std::path::PathBuf;
 
 mod cli;
-mod vectordb;
 mod utils;
+mod vectordb;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,11 +19,11 @@ struct Cli {
 fn main() -> Result<()> {
     // Initialize the logger
     env_logger::init();
-    
+
     let cli = Cli::parse();
-    
+
     debug!("Initializing vectordb-cli with command: {:?}", cli.command);
-    
+
     // Get the database path
     let db_path = data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -31,19 +31,33 @@ fn main() -> Result<()> {
         .join("db.json")
         .to_string_lossy()
         .to_string();
-    
+
     debug!("Using database path: {}", db_path);
-    
+
     // Create or load the database
     let mut db = vectordb::VectorDB::new(db_path)?;
-    
+
     #[cfg(feature = "experimental_repo")]
     {
         // Start auto-sync daemon if any repositories have auto-sync enabled
-        if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Start } }) {
+        if matches!(
+            cli.command,
+            cli::commands::Command::Repo {
+                command: cli::commands::RepoCommand::AutoSync {
+                    command: cli::commands::AutoSyncCommand::Start
+                }
+            }
+        ) {
             // Don't start daemon if the command is already to start the daemon
             // to avoid conflicts
-        } else if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Stop } }) {
+        } else if matches!(
+            cli.command,
+            cli::commands::Command::Repo {
+                command: cli::commands::RepoCommand::AutoSync {
+                    command: cli::commands::AutoSyncCommand::Stop
+                }
+            }
+        ) {
             // Don't start daemon if the command is to stop the daemon
         } else {
             // Start auto-sync daemon if there are repositories with auto-sync enabled
@@ -55,10 +69,10 @@ fn main() -> Result<()> {
             }
         }
     }
-    
+
     // Execute the command
     let result = cli::commands::execute_command(cli.command, db.clone());
-    
+
     // Clean up
     if !matches!(result, Ok(())) {
         // If there was an error, ensure we stop the auto-sync daemon
@@ -66,6 +80,6 @@ fn main() -> Result<()> {
             error!("Failed to stop auto-sync daemon during cleanup: {}", e);
         }
     }
-    
+
     result
 }

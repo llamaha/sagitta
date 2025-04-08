@@ -1,17 +1,17 @@
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, mpsc};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::{Duration, Instant};
 use anyhow::Result;
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent, FileIdCache};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use crate::vectordb::VectorDB;
 use crate::utils::git::GitRepo;
+use crate::vectordb::VectorDB;
 
 /// Configuration for auto-sync of a repository
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -65,26 +65,26 @@ impl AutoSyncDaemon {
         }
 
         debug!("Starting auto-sync daemon");
-        
+
         // Mark as running
         self.running.store(true, Ordering::SeqCst);
-        
+
         // Create channel for stopping the daemon
         let (stop_tx, stop_rx) = mpsc::channel();
         self.stop_tx = Some(stop_tx);
-        
+
         // Clone shared state for thread
         let running = self.running.clone();
         let last_sync = self.last_sync.clone();
         let db = self.db.clone();
-        
+
         // Start daemon thread
         let handle = thread::spawn(move || {
             Self::daemon_loop(running, last_sync, db, stop_rx);
         });
-        
+
         self.thread_handle = Some(handle);
-        
+
         info!("Auto-sync daemon started");
         Ok(())
     }
@@ -94,22 +94,22 @@ impl AutoSyncDaemon {
         if !self.running.load(Ordering::SeqCst) {
             return Ok(()); // Not running
         }
-        
+
         debug!("Stopping auto-sync daemon");
-        
+
         // Signal thread to stop
         self.running.store(false, Ordering::SeqCst);
-        
+
         // Send stop signal
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }
-        
+
         // Wait for thread to finish
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }
-        
+
         info!("Auto-sync daemon stopped");
         Ok(())
     }
@@ -119,18 +119,18 @@ impl AutoSyncDaemon {
         running: Arc<AtomicBool>,
         last_sync: Arc<Mutex<HashMap<String, Instant>>>,
         db: Arc<Mutex<VectorDB>>,
-        stop_rx: mpsc::Receiver<()>
+        stop_rx: mpsc::Receiver<()>,
     ) {
         info!("Auto-sync daemon running");
-        
+
         // Create channel for watcher events
         let (tx, rx) = mpsc::channel();
-        
+
         // Create debouncer for file events
         let mut debouncer = match new_debouncer(
             Duration::from_secs(2), // Debounce file events for 2 seconds
             None,
-            tx
+            tx,
         ) {
             Ok(debouncer) => debouncer,
             Err(e) => {
@@ -138,13 +138,13 @@ impl AutoSyncDaemon {
                 return;
             }
         };
-        
+
         // Track currently watched repositories
         let mut watched_repos: HashMap<String, PathBuf> = HashMap::new();
-        
+
         // Update watchers periodically
         let mut next_watcher_update = Instant::now();
-        
+
         // Main event loop
         while running.load(Ordering::SeqCst) {
             // Update watchers every 30 seconds
@@ -154,53 +154,56 @@ impl AutoSyncDaemon {
                 }
                 next_watcher_update = Instant::now() + Duration::from_secs(30);
             }
-            
+
             // Handle file events with a timeout
             match rx.recv_timeout(Duration::from_secs(1)) {
                 Ok(Ok(events)) => {
                     Self::handle_file_events(events, &watched_repos, &last_sync, &db);
-                },
+                }
                 Ok(Err(e)) => {
                     error!("File watcher error: {:?}", e);
-                },
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     // Timeout is normal, continue with the next iteration
-                },
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     error!("File watcher disconnected");
                     break;
-                },
+                }
             }
-            
+
             // Check for stop signal
             if stop_rx.try_recv().is_ok() {
                 debug!("Stop signal received by auto-sync daemon");
                 break;
             }
         }
-        
+
         // Clean up watchers
         for (_, path) in watched_repos {
             let _ = debouncer.watcher().unwatch(&path);
         }
         info!("Auto-sync daemon shutdown complete");
     }
-    
+
     /// Update watchers for repositories with auto-sync enabled
     fn update_watchers<T: FileIdCache>(
         debouncer: &mut notify_debouncer_full::Debouncer<RecommendedWatcher, T>,
         watched_repos: &mut HashMap<String, PathBuf>,
-        db: &Arc<Mutex<VectorDB>>
+        db: &Arc<Mutex<VectorDB>>,
     ) -> Result<()> {
         // Lock database
         let db_locked = db.lock().unwrap();
-        
+
         // Get repos with auto-sync enabled
-        let auto_sync_repos: Vec<_> = db_locked.repo_manager.list_repositories().iter()
+        let auto_sync_repos: Vec<_> = db_locked
+            .repo_manager
+            .list_repositories()
+            .iter()
             .filter(|repo| repo.active && repo.auto_sync.enabled)
             .map(|repo| (repo.id.clone(), repo.path.clone()))
             .collect();
-        
+
         // Remove watchers for repositories that no longer need watching
         let mut to_remove = Vec::new();
         for (id, _) in watched_repos.iter() {
@@ -208,7 +211,7 @@ impl AutoSyncDaemon {
                 to_remove.push(id.clone());
             }
         }
-        
+
         for id in to_remove {
             if let Some(path) = watched_repos.remove(&id) {
                 debug!("Removing watcher for repository: {}", path.display());
@@ -217,7 +220,7 @@ impl AutoSyncDaemon {
                 }
             }
         }
-        
+
         // Add watchers for new repositories
         for (id, path) in auto_sync_repos {
             if !watched_repos.contains_key(&id) && path.exists() {
@@ -225,35 +228,36 @@ impl AutoSyncDaemon {
                 match debouncer.watcher().watch(&path, RecursiveMode::Recursive) {
                     Ok(_) => {
                         watched_repos.insert(id.clone(), path.clone());
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to watch repository {}: {}", path.display(), e);
                     }
                 }
             }
         }
-        
+
         debug!("Now watching {} repositories", watched_repos.len());
         Ok(())
     }
-    
+
     /// Handle file events from the watcher
     fn handle_file_events(
         events: Vec<DebouncedEvent>,
         watched_repos: &HashMap<String, PathBuf>,
         last_sync: &Arc<Mutex<HashMap<String, Instant>>>,
-        db: &Arc<Mutex<VectorDB>>
+        db: &Arc<Mutex<VectorDB>>,
     ) {
         // Group events by repository
         let mut repo_events: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        
+
         for event in events {
             // Each event might have multiple paths affected
             for event_path in &event.event.paths {
                 // Find which repository this event belongs to
                 for (id, repo_path) in watched_repos {
                     if event_path.starts_with(repo_path) {
-                        repo_events.entry(id.clone())
+                        repo_events
+                            .entry(id.clone())
                             .or_insert_with(Vec::new)
                             .push(event_path.clone());
                         break;
@@ -261,14 +265,14 @@ impl AutoSyncDaemon {
                 }
             }
         }
-        
+
         // Process events for each repository
         for (repo_id, _) in repo_events {
             // Check if we need to sync based on time interval
             let should_sync = {
                 let mut last_sync_map = last_sync.lock().unwrap();
                 let now = Instant::now();
-                
+
                 let db_locked = match db.lock() {
                     Ok(db) => db,
                     Err(e) => {
@@ -276,14 +280,14 @@ impl AutoSyncDaemon {
                         continue;
                     }
                 };
-                
+
                 let repo = match db_locked.repo_manager.get_repository(&repo_id) {
                     Some(repo) => repo,
                     None => continue,
                 };
-                
+
                 let min_interval = repo.auto_sync.min_interval;
-                
+
                 if let Some(last_time) = last_sync_map.get(&repo_id) {
                     if now.duration_since(*last_time) < Duration::from_secs(min_interval) {
                         debug!("Skipping sync for {} due to interval limit", repo_id);
@@ -297,18 +301,18 @@ impl AutoSyncDaemon {
                     true
                 }
             };
-            
+
             if !should_sync {
                 continue;
             }
-            
+
             // Perform sync in a separate thread to avoid blocking the watcher
             let db_clone = db.clone();
             let repo_id_clone = repo_id.clone();
-            
+
             thread::spawn(move || {
                 debug!("Auto-syncing repository: {}", repo_id_clone);
-                
+
                 let mut db_locked = match db_clone.lock() {
                     Ok(db) => db,
                     Err(e) => {
@@ -316,7 +320,7 @@ impl AutoSyncDaemon {
                         return;
                     }
                 };
-                
+
                 // Get repository information
                 let (repo_path, repo_name, branch) = {
                     let repo = match db_locked.repo_manager.get_repository(&repo_id_clone) {
@@ -326,10 +330,14 @@ impl AutoSyncDaemon {
                             return;
                         }
                     };
-                    
-                    (repo.path.clone(), repo.name.clone(), repo.active_branch.clone())
+
+                    (
+                        repo.path.clone(),
+                        repo.name.clone(),
+                        repo.active_branch.clone(),
+                    )
                 };
-                
+
                 // Check if Git HEAD has actually changed
                 match GitRepo::new(repo_path.clone()) {
                     Ok(git_repo) => {
@@ -341,30 +349,38 @@ impl AutoSyncDaemon {
                                 return;
                             }
                         };
-                        
+
                         let repo = match db_locked.repo_manager.get_repository(&repo_id_clone) {
                             Some(repo) => repo,
                             None => return,
                         };
-                        
+
                         let needs_sync = match repo.get_indexed_commit(&branch) {
                             Some(indexed_commit) => indexed_commit != &current_commit,
                             None => true, // Never indexed before
                         };
-                        
+
                         if needs_sync {
-                            info!("Auto-syncing repository {} ({}), branch {}", repo_name, repo_id_clone, branch);
-                            
+                            info!(
+                                "Auto-syncing repository {} ({}), branch {}",
+                                repo_name, repo_id_clone, branch
+                            );
+
                             // Perform incremental sync
-                            if let Err(e) = db_locked.index_repository_changes(&repo_id_clone, &branch) {
+                            if let Err(e) =
+                                db_locked.index_repository_changes(&repo_id_clone, &branch)
+                            {
                                 error!("Failed to auto-sync repository {}: {}", repo_id_clone, e);
                             } else {
                                 info!("Auto-sync completed for repository {}", repo_id_clone);
                             }
                         } else {
-                            debug!("No Git changes detected, skipping auto-sync for {}", repo_id_clone);
+                            debug!(
+                                "No Git changes detected, skipping auto-sync for {}",
+                                repo_id_clone
+                            );
                         }
-                    },
+                    }
                     Err(e) => {
                         error!("Failed to access Git repository {}: {}", repo_id_clone, e);
                     }
@@ -386,4 +402,4 @@ impl Clone for AutoSyncDaemon {
             stop_tx: None,
         }
     }
-} 
+}

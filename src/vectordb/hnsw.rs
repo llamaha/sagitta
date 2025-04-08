@@ -1,16 +1,16 @@
+use crate::vectordb::embedding::EMBEDDING_DIM;
+use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
+use log;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
-use crate::vectordb::embedding::EMBEDDING_DIM;
-use rand::{Rng, SeedableRng};
-use rand::rngs::StdRng;
-use serde::{Serialize, Deserialize};
-use rayon::prelude::*;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use indicatif::{ProgressBar, ProgressStyle};
-use log;
+use std::sync::{Arc, Mutex};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,22 +27,22 @@ pub struct HNSWConfig {
 
 impl HNSWConfig {
     /// Calculate the optimal number of layers based on dataset size
-    /// 
+    ///
     /// The formula used is log2(n) as recommended in the HNSW paper,
     /// where n is the number of vectors in the dataset.
-    /// 
+    ///
     /// Returns a value between MIN_LAYERS and MAX_LAYERS (2-16).
     pub fn calculate_optimal_layers(dataset_size: usize) -> usize {
         const MIN_LAYERS: usize = 2;
         const MAX_LAYERS: usize = 16;
-        
+
         if dataset_size == 0 {
             return MIN_LAYERS;
         }
-        
+
         // Use log2(n) as recommended in the HNSW paper
         let optimal_layers = (dataset_size as f64).log2().ceil() as usize;
-        
+
         // Constrain between MIN_LAYERS and MAX_LAYERS
         optimal_layers.clamp(MIN_LAYERS, MAX_LAYERS)
     }
@@ -114,7 +114,7 @@ impl HNSWIndex {
         let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        
+
         if norm_a > 0.0 && norm_b > 0.0 {
             // Calculate normalized cosine distance with proper bounds
             let similarity = dot_product / (norm_a * norm_b);
@@ -142,26 +142,35 @@ impl HNSWIndex {
     }
 
     /// Find the nearest neighbors in a given layer
-    fn search_layer(&self, query: &[f32], entry_point: usize, ef: usize, layer: usize) -> Vec<(usize, f32)> {
+    fn search_layer(
+        &self,
+        query: &[f32],
+        entry_point: usize,
+        ef: usize,
+        layer: usize,
+    ) -> Vec<(usize, f32)> {
         let mut candidates = HashSet::new();
         let mut results = Vec::new();
         let mut distances = HashMap::new();
-        
+
         // Initialize with entry point
         let entry_dist = Self::cosine_distance(query, &self.nodes[entry_point].vector);
         candidates.insert(entry_point);
         distances.insert(entry_point, entry_dist);
         results.push((entry_point, entry_dist));
-        
+
         while !candidates.is_empty() {
             // Find the closest candidate
-            let current = match candidates.iter()
-                .min_by(|&&a, &&b| distances[&a].partial_cmp(&distances[&b]).unwrap_or(std::cmp::Ordering::Equal)) {
+            let current = match candidates.iter().min_by(|&&a, &&b| {
+                distances[&a]
+                    .partial_cmp(&distances[&b])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) {
                 Some(&c) => c,
                 None => break,
             };
             candidates.remove(&current);
-            
+
             // Add to results if it's better than our current worst result
             let worst_dist = results.last().map_or(f32::INFINITY, |&(_, dist)| dist);
             if results.len() < ef || distances[&current] < worst_dist {
@@ -171,13 +180,13 @@ impl HNSWIndex {
                     results.pop();
                 }
             }
-            
+
             // Explore neighbors
             for &neighbor in &self.nodes[current].connections[layer] {
                 if !distances.contains_key(&neighbor) {
                     let dist = Self::cosine_distance(query, &self.nodes[neighbor].vector);
                     distances.insert(neighbor, dist);
-                    
+
                     let worst_dist = results.last().map_or(f32::INFINITY, |&(_, d)| d);
                     if results.len() < ef || dist < worst_dist {
                         candidates.insert(neighbor);
@@ -185,7 +194,7 @@ impl HNSWIndex {
                 }
             }
         }
-        
+
         results
     }
 
@@ -214,11 +223,12 @@ impl HNSWIndex {
                 &self.nodes[node_idx].vector,
                 current_entry,
                 self.config.ef_construction,
-                layer
+                layer,
             );
 
             // Select neighbors to connect to
-            let selected = neighbors.into_iter()
+            let selected = neighbors
+                .into_iter()
                 .take(self.config.m)
                 .map(|(idx, _)| idx)
                 .collect::<Vec<_>>();
@@ -233,11 +243,11 @@ impl HNSWIndex {
             if !selected.is_empty() {
                 let current_dist = Self::cosine_distance(
                     &self.nodes[current_entry].vector,
-                    &self.nodes[node_idx].vector
+                    &self.nodes[node_idx].vector,
                 );
                 let best_dist = Self::cosine_distance(
                     &self.nodes[selected[0]].vector,
-                    &self.nodes[node_idx].vector
+                    &self.nodes[node_idx].vector,
                 );
                 if best_dist < current_dist {
                     self.entry_points[layer] = selected[0];
@@ -282,26 +292,27 @@ impl HNSWIndex {
 
         // Search the bottom layer (level 0) in parallel for better performance
         // First, get all the neighbors of the entry point to use as starting points
-        let initial_candidates = self.search_layer(query, current_entry, ef.max(self.config.m * 2), 0);
-        
+        let initial_candidates =
+            self.search_layer(query, current_entry, ef.max(self.config.m * 2), 0);
+
         // If we have very few candidates, just return them
         if initial_candidates.len() <= k {
             return Ok(initial_candidates);
         }
-        
+
         // Take only the top candidates as starting points
-        let starting_points: Vec<usize> = initial_candidates.iter()
+        let starting_points: Vec<usize> = initial_candidates
+            .iter()
             .take(self.config.m.min(4))
             .map(|(idx, _)| *idx)
             .collect();
-            
+
         // Search from each starting point in parallel
-        let results: Vec<Vec<(usize, f32)>> = starting_points.par_iter()
-            .map(|&start_idx| {
-                self.search_layer(query, start_idx, ef / starting_points.len(), 0)
-            })
+        let results: Vec<Vec<(usize, f32)>> = starting_points
+            .par_iter()
+            .map(|&start_idx| self.search_layer(query, start_idx, ef / starting_points.len(), 0))
             .collect();
-            
+
         // Merge results
         let mut merged = Vec::new();
         for result_set in results {
@@ -309,20 +320,20 @@ impl HNSWIndex {
                 merged.push(result);
             }
         }
-        
+
         // De-duplicate by node index
         let mut seen = HashSet::new();
         let mut unique_results = Vec::new();
-        
+
         for (idx, dist) in merged {
             if seen.insert(idx) {
                 unique_results.push((idx, dist));
             }
         }
-        
+
         // Sort by distance
         unique_results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // Take top k
         Ok(unique_results.into_iter().take(k).collect())
     }
@@ -374,37 +385,37 @@ impl HNSWIndex {
             nodes: self.nodes.clone(),
             entry_points: self.entry_points.clone(),
         };
-        
+
         // First serialize to a string
         let data = serde_json::to_string_pretty(&serialized)?;
-        
+
         // Create parent directories if they don't exist
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // Write to the file
         fs::write(path, data)?;
-        
+
         Ok(())
     }
-    
+
     /// Load an index from a file
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let data = fs::read_to_string(path)?;
         let serialized: SerializedHNSWIndex = serde_json::from_str(&data)?;
-        
+
         Ok(Self {
             config: serialized.config,
             nodes: serialized.nodes,
             entry_points: serialized.entry_points,
         })
     }
-    
+
     /// Rebuild the index with a new configuration in parallel
     pub fn rebuild_with_config_parallel(&self, new_config: HNSWConfig) -> Result<Self> {
         let mut new_index = HNSWIndex::new(new_config.clone());
-        
+
         // Set up progress bar for large datasets
         let node_count = self.nodes.len();
         let progress_bar = if node_count > 10000 {
@@ -419,61 +430,62 @@ impl HNSWIndex {
         } else {
             None
         };
-        
+
         // Create a vector of all embeddings
-        let embeddings: Vec<Vec<f32>> = self.nodes.iter()
-            .map(|node| node.vector.clone())
-            .collect();
-        
+        let embeddings: Vec<Vec<f32>> = self.nodes.iter().map(|node| node.vector.clone()).collect();
+
         // Process insertion in parallel
         let counter = Arc::new(AtomicUsize::new(0));
         let new_nodes = Arc::new(Mutex::new(Vec::with_capacity(node_count)));
         let layer_count = new_config.num_layers;
         let _entry_points = Arc::new(Mutex::new(vec![0; layer_count]));
-        
-        embeddings.par_iter().enumerate().for_each(|(_i, embedding)| {
-            let mut local_new_index = HNSWIndex::new(new_config.clone());
-            
-            // Insert the embedding into the local index
-            let _ = local_new_index.insert(embedding.clone());
-            
-            // Transfer the newly inserted node to the shared data structure
-            if let Some(node) = local_new_index.nodes.pop() {
-                new_nodes.lock().unwrap().push(node);
-            }
-            
-            // Update progress
-            if let Some(pb) = &progress_bar {
-                let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                pb.set_position(current as u64);
-            }
-        });
-        
+
+        embeddings
+            .par_iter()
+            .enumerate()
+            .for_each(|(_i, embedding)| {
+                let mut local_new_index = HNSWIndex::new(new_config.clone());
+
+                // Insert the embedding into the local index
+                let _ = local_new_index.insert(embedding.clone());
+
+                // Transfer the newly inserted node to the shared data structure
+                if let Some(node) = local_new_index.nodes.pop() {
+                    new_nodes.lock().unwrap().push(node);
+                }
+
+                // Update progress
+                if let Some(pb) = &progress_bar {
+                    let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    pb.set_position(current as u64);
+                }
+            });
+
         if let Some(pb) = progress_bar {
             pb.finish_with_message("HNSW index rebuilding complete!");
         }
-        
+
         // Assign the collected nodes and entry points
         new_index.nodes = new_nodes.lock().unwrap().clone();
-        
+
         // Rebuild the connections between nodes
         new_index.optimize();
-        
+
         Ok(new_index)
     }
-    
+
     /// Optimize the index by ensuring connections are bidirectional and consistent
     fn optimize(&mut self) {
         if self.nodes.is_empty() {
             return;
         }
-        
+
         // Find the highest layer
         let mut max_layer = 0;
         for node in &self.nodes {
             max_layer = max_layer.max(node.max_layer);
         }
-        
+
         // For each layer, rebuild connections
         for layer in 0..=max_layer.min(self.config.num_layers - 1) {
             // For each node at this layer or higher
@@ -483,33 +495,38 @@ impl HNSWIndex {
                     let mut neighbors = Vec::new();
                     for j in 0..self.nodes.len() {
                         if i != j && layer <= self.nodes[j].max_layer {
-                            let dist = Self::cosine_distance(&self.nodes[i].vector, &self.nodes[j].vector);
+                            let dist =
+                                Self::cosine_distance(&self.nodes[i].vector, &self.nodes[j].vector);
                             neighbors.push((j, dist));
                         }
                     }
-                    
+
                     // Sort by distance and take the closest m neighbors
-                    neighbors.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                    let selected = neighbors.iter()
+                    neighbors
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    let selected = neighbors
+                        .iter()
                         .take(self.config.m)
                         .map(|(idx, _)| *idx)
                         .collect::<Vec<_>>();
-                    
+
                     // Update connections for this node
                     self.nodes[i].connections[layer] = selected;
                 }
             }
         }
-        
+
         // Set entry points for each layer
         for layer in 0..self.config.num_layers {
             // Find a node at this layer
-            let nodes_at_layer: Vec<usize> = self.nodes.iter()
+            let nodes_at_layer: Vec<usize> = self
+                .nodes
+                .iter()
                 .enumerate()
                 .filter(|(_, node)| layer <= node.max_layer)
                 .map(|(i, _)| i)
                 .collect();
-                
+
             if !nodes_at_layer.is_empty() {
                 self.entry_points[layer] = nodes_at_layer[0];
             }
@@ -550,30 +567,38 @@ mod tests {
     use super::*;
     use std::f32::consts::PI;
     use std::time::{Duration, Instant};
-    
+
     #[test]
     fn test_cosine_distance() {
         // Vectors pointing in opposite directions should have maximum distance
         let v1 = vec![1.0, 0.0];
         let v2 = vec![-1.0, 0.0];
         let dist = HNSWIndex::cosine_distance(&v1, &v2);
-        // With our scaling, the maximum distance is now 1.0 
+        // With our scaling, the maximum distance is now 1.0
         // but transformed with (1.0 - similarity) * 1.2 and then power scaling of 0.8
         // so the maximum value is (1.0 - (-1.0)) * 1.2 = 2.4, transformed with 2.4^0.8 ≈ 1.89
-        // We just check that it's close to 2.0 
-        assert!(dist > 1.5, "Distance between opposite vectors should be high, got {}", dist);
-        
+        // We just check that it's close to 2.0
+        assert!(
+            dist > 1.5,
+            "Distance between opposite vectors should be high, got {}",
+            dist
+        );
+
         // Identical vectors should have zero distance
         let v3 = vec![1.0, 0.0];
         let dist = HNSWIndex::cosine_distance(&v1, &v3);
         assert_eq!(dist, 0.0);
-        
+
         // Orthogonal vectors should have a mid-range distance
         let v4 = vec![0.0, 1.0];
         let dist = HNSWIndex::cosine_distance(&v1, &v4);
         // With our scaling, the 90° distance is transformed with (1.0 - 0.0) * 1.2 = 1.2, then 1.2^0.8 ≈ 1.15
         // We verify it's in the expected range
-        assert!(dist > 0.9 && dist < 1.3, "Distance between orthogonal vectors should be moderate, got {}", dist);
+        assert!(
+            dist > 0.9 && dist < 1.3,
+            "Distance between orthogonal vectors should be moderate, got {}",
+            dist
+        );
     }
 
     #[test]
@@ -583,14 +608,14 @@ mod tests {
         assert_eq!(HNSWConfig::calculate_optimal_layers(1), 2);
         assert_eq!(HNSWConfig::calculate_optimal_layers(2), 2);
         assert_eq!(HNSWConfig::calculate_optimal_layers(3), 2);
-        
+
         // Medium datasets - should follow log2(n) pattern
         assert_eq!(HNSWConfig::calculate_optimal_layers(4), 2);
         assert_eq!(HNSWConfig::calculate_optimal_layers(8), 3);
         assert_eq!(HNSWConfig::calculate_optimal_layers(16), 4);
         assert_eq!(HNSWConfig::calculate_optimal_layers(32), 5);
         assert_eq!(HNSWConfig::calculate_optimal_layers(64), 6);
-        
+
         // Large datasets - should not exceed max of 16 layers
         assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 15), 15);
         assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 16), 16);
@@ -609,20 +634,20 @@ mod tests {
     fn test_insertion() {
         let config = HNSWConfig::default();
         let mut index = HNSWIndex::new(config);
-        
+
         // Insert a few test vectors
         let v1 = vec![1.0; EMBEDDING_DIM];
         let v2 = vec![0.0; EMBEDDING_DIM];
         let v3 = vec![0.5; EMBEDDING_DIM];
-        
+
         let idx1 = index.insert(v1).unwrap();
         let idx2 = index.insert(v2).unwrap();
         let idx3 = index.insert(v3).unwrap();
-        
+
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
         assert_eq!(idx3, 2);
-        
+
         // Check that nodes were created with correct dimensions
         assert_eq!(index.nodes.len(), 3);
         assert_eq!(index.nodes[0].vector.len(), EMBEDDING_DIM);
@@ -632,25 +657,25 @@ mod tests {
     fn test_search() {
         let config = HNSWConfig::default();
         let mut index = HNSWIndex::new(config);
-        
+
         // Insert test vectors
         let v1 = vec![1.0; EMBEDDING_DIM];
         let v2 = vec![0.0; EMBEDDING_DIM];
         let v3 = vec![0.5; EMBEDDING_DIM];
-        
+
         index.insert(v1).unwrap();
         index.insert(v2).unwrap();
         index.insert(v3).unwrap();
-        
+
         // Search for nearest neighbors
         let query = vec![0.8; EMBEDDING_DIM];
         let results = index.search_parallel(&query, 2, 10).unwrap();
-        
+
         assert_eq!(results.len(), 2);
-        
+
         // Print results for debugging
         println!("Search results: {:?}", results);
-        
+
         // Just verify we got 2 results, don't check order since it might vary
         // due to tie-breaking in different floating point operations
     }
@@ -659,13 +684,13 @@ mod tests {
     fn test_stats() {
         let config = HNSWConfig::default();
         let mut index = HNSWIndex::new(config.clone());
-        
+
         // Insert some test vectors
         for i in 0..5 {
             let v = vec![i as f32; EMBEDDING_DIM];
             index.insert(v).unwrap();
         }
-        
+
         let stats = index.stats();
         assert_eq!(stats.total_nodes, 5);
         assert_eq!(stats.layers, config.num_layers);
@@ -682,14 +707,14 @@ mod tests {
             random_seed: 42,
         };
         let mut index = HNSWIndex::new(initial_config);
-        
+
         // Add some vectors
         for i in 0..10 {
             let mut vector = vec![0.0; EMBEDDING_DIM];
             vector[i % EMBEDDING_DIM] = 1.0;
             index.insert(vector).unwrap();
         }
-        
+
         // Create a new config with fewer layers
         let new_config = HNSWConfig {
             m: 16,
@@ -697,16 +722,16 @@ mod tests {
             num_layers: 4,
             random_seed: 42,
         };
-        
+
         // Rebuild the index
         let rebuilt_index = index.rebuild_with_config_parallel(new_config).unwrap();
-        
+
         // Verify that the rebuilt index has the new config
         assert_eq!(rebuilt_index.config.num_layers, 4);
-        
+
         // Verify that all vectors were transferred
         assert_eq!(rebuilt_index.nodes.len(), index.nodes.len());
-        
+
         // Check that search still works
         let query = vec![1.0; EMBEDDING_DIM];
         let results = rebuilt_index.search_parallel(&query, 5, 100).unwrap();
@@ -722,19 +747,24 @@ mod tests {
         for _ in 0..5 {
             f();
         }
-        
+
         let start = Instant::now();
         for _ in 0..iterations {
             f();
         }
         let elapsed = start.elapsed();
-        
-        println!("{} took {:?} for {} iterations ({:?} per iteration)",
-                name, elapsed, iterations, elapsed / iterations);
-        
+
+        println!(
+            "{} took {:?} for {} iterations ({:?} per iteration)",
+            name,
+            elapsed,
+            iterations,
+            elapsed / iterations
+        );
+
         elapsed
     }
-    
+
     #[test]
     #[ignore] // This test is a performance benchmark that can take a long time to run
     fn benchmark_linear_vs_hnsw() {
@@ -742,7 +772,7 @@ mod tests {
         let num_vectors = 1000;
         let num_queries = 10;
         let k = 10;
-        
+
         // Create random vectors
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
@@ -757,7 +787,7 @@ mod tests {
             }
             vectors.push(v);
         }
-        
+
         // Create random queries
         let mut queries = Vec::with_capacity(num_queries);
         for _ in 0..num_queries {
@@ -772,7 +802,7 @@ mod tests {
             }
             queries.push(q);
         }
-        
+
         // Build HNSW index
         let config = HNSWConfig {
             m: 16,
@@ -781,27 +811,27 @@ mod tests {
             random_seed: 42,
         };
         let mut hnsw_index = HNSWIndex::new(config);
-        
+
         for v in &vectors {
             hnsw_index.insert(v.clone()).unwrap();
         }
-        
+
         // Linear search function
         let linear_search = |query: &[f32], k: usize| -> Vec<(usize, f32)> {
             let mut distances = Vec::with_capacity(vectors.len());
-            
+
             for (i, vector) in vectors.iter().enumerate() {
                 let dist = HNSWIndex::cosine_distance(query, vector);
                 distances.push((i, dist));
             }
-            
+
             // Sort by distance
             distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            
+
             // Take top k
             distances.into_iter().take(k).collect()
         };
-        
+
         // Benchmark linear search
         let mut query_idx = 0;
         let linear_time = benchmark("Linear search", num_queries as u32, || {
@@ -809,7 +839,7 @@ mod tests {
             let _ = linear_search(query, k);
             query_idx = (query_idx + 1) % num_queries;
         });
-        
+
         // Benchmark HNSW search
         query_idx = 0;
         let hnsw_time = benchmark("HNSW search", num_queries as u32, || {
@@ -817,30 +847,36 @@ mod tests {
             let _ = hnsw_index.search_parallel(query, k, 100).unwrap();
             query_idx = (query_idx + 1) % num_queries;
         });
-        
-        println!("HNSW is {:.2}x faster than linear search", 
-                 linear_time.as_nanos() as f64 / hnsw_time.as_nanos() as f64);
-                 
+
+        println!(
+            "HNSW is {:.2}x faster than linear search",
+            linear_time.as_nanos() as f64 / hnsw_time.as_nanos() as f64
+        );
+
         // Check search quality
         for query in &queries {
             let linear_results = linear_search(query, k);
             let hnsw_results = hnsw_index.search_parallel(query, k, 100).unwrap();
-            
+
             // Calculate recall@k (how many of the exact top-k results were found by HNSW)
             let mut found = 0;
             let linear_ids: HashSet<usize> = linear_results.iter().map(|(idx, _)| *idx).collect();
-            
+
             for (idx, _) in hnsw_results {
                 if linear_ids.contains(&idx) {
                     found += 1;
                 }
             }
-            
+
             let recall = found as f32 / k as f32;
             println!("Recall@{}: {:.2}", k, recall);
-            
+
             // We generally want recall to be at least 0.9
-            assert!(recall >= 0.7, "HNSW search quality is too low: {:.2}", recall);
+            assert!(
+                recall >= 0.7,
+                "HNSW search quality is too low: {:.2}",
+                recall
+            );
         }
     }
-} 
+}

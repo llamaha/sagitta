@@ -33,19 +33,19 @@ log = "0.4"
 env_logger = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 # Code parsing dependencies
-tree-sitter = "0.20"
-tree-sitter-rust = "0.20"
-tree-sitter-ruby = "0.20"
-tree-sitter-go = "0.20"
-tree-sitter-javascript = "0.20"
-tree-sitter-typescript = "0.20"
-tree-sitter-yaml = "0.7.0"
+# tree-sitter = "0.20"
+# tree-sitter-rust = "0.20"
+# tree-sitter-ruby = "0.20"
+# tree-sitter-go = "0.20"
+# tree-sitter-javascript = "0.20"
+# tree-sitter-typescript = "0.20"
+# tree-sitter-yaml = "0.7.0"
 lsp-types = "0.94"
 crossbeam-channel = "0.5"
 # Syntax parsing dependencies
-syn = { version = "2.0", features = ["full", "parsing", "extra-traits", "visit"] }
-proc-macro2 = "1.0"
-quote = "1.0"
+# syn = { version = "2.0", features = ["full", "parsing", "extra-traits", "visit"] }
+# proc-macro2 = "1.0"
+# quote = "1.0"
 ctrlc = "3.4"
 # ONNX Runtime dependencies
 ort = "1.16.0"

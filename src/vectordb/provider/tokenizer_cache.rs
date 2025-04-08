@@ -1,10 +1,10 @@
-use anyhow::{Result, Error};
-use tokenizers::Tokenizer;
-use std::sync::{Arc, Mutex};
-use std::path::Path;
-use std::time::{Duration, Instant};
-use std::num::NonZeroUsize;
+use anyhow::{Error, Result};
 use lru::LruCache;
+use std::num::NonZeroUsize;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokenizers::Tokenizer;
 
 /// Tokenization result including input IDs and attention mask
 #[derive(Clone, Debug)]
@@ -36,7 +36,7 @@ impl Default for TokenizerCacheConfig {
             max_cache_size: 1000,
             max_text_length: 200,
             cache_ttl: Duration::from_secs(300), // 5 minutes
-            max_seq_length: 128, // Default for MiniLM
+            max_seq_length: 128,                 // Default for MiniLM
         }
     }
 }
@@ -60,22 +60,22 @@ impl TokenizerCache {
         } else {
             tokenizer_path.to_path_buf()
         };
-        
+
         // Load the tokenizer from the file
         let tokenizer = Tokenizer::from_file(&tokenizer_json_path)
             .map_err(|e| Error::msg(format!("Failed to load tokenizer: {}", e)))?;
-        
+
         // Create the LRU cache with NonZeroUsize capacity
-        let capacity = NonZeroUsize::new(config.max_cache_size)
-            .unwrap_or(NonZeroUsize::new(1).unwrap());
-        
+        let capacity =
+            NonZeroUsize::new(config.max_cache_size).unwrap_or(NonZeroUsize::new(1).unwrap());
+
         Ok(Arc::new(Self {
             tokenizer,
             cache: Mutex::new(LruCache::new(capacity)),
             config,
         }))
     }
-    
+
     /// Tokenize text, using the cache if available
     pub fn tokenize(&self, text: &str) -> Result<TokenizerOutput> {
         // Check if the text is too long to cache
@@ -83,13 +83,13 @@ impl TokenizerCache {
             // Skip the cache and tokenize directly
             return self.tokenize_uncached(text);
         }
-        
+
         // Try to get the result from the cache
         let cache_key = text.to_string();
-        
+
         // Lock the cache for reading and potential writing
         let mut cache = self.cache.lock().unwrap();
-        
+
         // Check if we have a cached result
         if let Some(cached) = cache.get(&cache_key) {
             // Check if the cache entry has expired
@@ -100,27 +100,32 @@ impl TokenizerCache {
             // Entry has expired, remove it and continue
             cache.pop(&cache_key);
         }
-        
+
         // No valid cached result, tokenize and cache the result
         let output = self.tokenize_uncached(text)?;
-        
+
         // Cache the result
         cache.put(cache_key, output.clone());
-        
+
         Ok(output)
     }
-    
+
     /// Tokenize text without using the cache
     fn tokenize_uncached(&self, text: &str) -> Result<TokenizerOutput> {
         // Encode the text with the tokenizer
-        let encoding = self.tokenizer
+        let encoding = self
+            .tokenizer
             .encode(text, true)
             .map_err(|e| Error::msg(format!("Failed to encode text with tokenizer: {}", e)))?;
-        
+
         // Get input IDs and attention mask
         let mut input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let mut attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&mask| mask as i64).collect();
-        
+        let mut attention_mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&mask| mask as i64)
+            .collect();
+
         // Truncate or pad to the maximum sequence length
         let max_seq_length = self.config.max_seq_length;
         if input_ids.len() > max_seq_length {
@@ -133,20 +138,20 @@ impl TokenizerCache {
             input_ids.extend(vec![0; pad_length]);
             attention_mask.extend(vec![0; pad_length]);
         }
-        
+
         Ok(TokenizerOutput {
             input_ids,
             attention_mask,
             created_at: Instant::now(),
         })
     }
-    
+
     /// Clear the cache
     pub fn clear_cache(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
     }
-    
+
     /// Get the current cache hit rate (for monitoring)
     pub fn cache_stats(&self) -> (usize, usize) {
         let cache = self.cache.lock().unwrap();
@@ -159,7 +164,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::thread;
-    
+
     #[test]
     fn test_tokenizer_creation() {
         // Use correct path to tokenizer directory
@@ -168,13 +173,13 @@ mod tests {
             println!("Skipping test_tokenizer_creation because tokenizer file isn't available");
             return;
         }
-        
+
         // Create a tokenizer cache with default config
         let config = TokenizerCacheConfig::default();
         let cache = TokenizerCache::new(&tokenizer_path, config);
         assert!(cache.is_ok());
     }
-    
+
     #[test]
     fn test_tokenization() {
         // Use correct path to tokenizer directory
@@ -183,23 +188,23 @@ mod tests {
             println!("Skipping test_tokenization because tokenizer file isn't available");
             return;
         }
-        
+
         // Create a tokenizer cache with default config
         let config = TokenizerCacheConfig::default();
         let expected_seq_length = config.max_seq_length; // Store the value before moving config
-        
+
         let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
-        
+
         // Tokenize some text
         let text = "Hello, world!";
         let output = cache.tokenize(text);
         assert!(output.is_ok());
-        
+
         let output = output.unwrap();
         assert_eq!(output.input_ids.len(), expected_seq_length);
         assert_eq!(output.attention_mask.len(), expected_seq_length);
     }
-    
+
     #[test]
     fn test_cache_hit() {
         // Use correct path to tokenizer directory
@@ -208,25 +213,25 @@ mod tests {
             println!("Skipping test_cache_hit because tokenizer file isn't available");
             return;
         }
-        
+
         // Create a tokenizer cache with default config
         let config = TokenizerCacheConfig::default();
         let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
-        
+
         // Tokenize the same text twice
         let text = "Hello, world!";
         let output1 = cache.tokenize(text).unwrap();
         let output2 = cache.tokenize(text).unwrap();
-        
+
         // The cache should have been hit for the second call
         assert_eq!(output1.input_ids, output2.input_ids);
         assert_eq!(output1.attention_mask, output2.attention_mask);
-        
+
         // Check cache stats
         let (len, _) = cache.cache_stats();
         assert_eq!(len, 1);
     }
-    
+
     #[test]
     fn test_cache_expiry() {
         // Use correct path to tokenizer directory
@@ -235,24 +240,24 @@ mod tests {
             println!("Skipping test_cache_expiry because tokenizer file isn't available");
             return;
         }
-        
+
         // Create a tokenizer cache with a very short TTL
         let mut config = TokenizerCacheConfig::default();
         config.cache_ttl = Duration::from_millis(10);
         let cache = TokenizerCache::new(&tokenizer_path, config).unwrap();
-        
+
         // Tokenize some text
         let text = "Hello, world!";
         let _ = cache.tokenize(text).unwrap();
-        
+
         // Wait for the cache entry to expire
         thread::sleep(Duration::from_millis(20));
-        
+
         // Tokenize again - this should not be a hit
         let _ = cache.tokenize(text).unwrap();
-        
+
         // Check cache stats - should still be 1 entry (the second one)
         let (len, _) = cache.cache_stats();
         assert_eq!(len, 1);
     }
-} 
+}

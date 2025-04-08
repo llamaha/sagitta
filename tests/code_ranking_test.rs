@@ -1,49 +1,85 @@
 use anyhow::Result;
-use vectordb_cli::vectordb::search::SearchResult;
-use vectordb_cli::vectordb::code_ranking::{CodeRankingEngine, FileCategory};
 use std::fs;
 use std::io::Write;
 use tempfile::tempdir;
+use vectordb_cli::vectordb::code_ranking::{CodeRankingEngine, FileCategory};
+use vectordb_cli::vectordb::search::SearchResult;
 
 #[test]
 fn test_code_ranking_categorization() {
     let engine = CodeRankingEngine::new();
-    
+
     // Test files
-    assert_eq!(engine.categorize_file("src/test/test_parser.rs"), FileCategory::Test);
-    assert_eq!(engine.categorize_file("tests/integration_tests/parser_test.go"), FileCategory::Test);
-    assert_eq!(engine.categorize_file("spec/models/user_spec.rb"), FileCategory::Test);
-    
+    assert_eq!(
+        engine.categorize_file("src/test/test_parser.rs"),
+        FileCategory::Test
+    );
+    assert_eq!(
+        engine.categorize_file("tests/integration_tests/parser_test.go"),
+        FileCategory::Test
+    );
+    assert_eq!(
+        engine.categorize_file("spec/models/user_spec.rb"),
+        FileCategory::Test
+    );
+
     // Mock files
-    assert_eq!(engine.categorize_file("src/mocks/mock_database.rs"), FileCategory::Mock);
-    assert_eq!(engine.categorize_file("test/stubs/stub_client.rb"), FileCategory::Test);
-    
+    assert_eq!(
+        engine.categorize_file("src/mocks/mock_database.rs"),
+        FileCategory::Mock
+    );
+    assert_eq!(
+        engine.categorize_file("test/stubs/stub_client.rb"),
+        FileCategory::Test
+    );
+
     // Documentation
-    assert_eq!(engine.categorize_file("docs/API.md"), FileCategory::Documentation);
-    assert_eq!(engine.categorize_file("README.md"), FileCategory::Documentation);
-    
+    assert_eq!(
+        engine.categorize_file("docs/API.md"),
+        FileCategory::Documentation
+    );
+    assert_eq!(
+        engine.categorize_file("README.md"),
+        FileCategory::Documentation
+    );
+
     // Configuration
-    assert_eq!(engine.categorize_file("config/app.yaml"), FileCategory::Configuration);
-    assert_eq!(engine.categorize_file(".gitignore"), FileCategory::Configuration);
-    assert_eq!(engine.categorize_file("Dockerfile"), FileCategory::Configuration);
-    
+    assert_eq!(
+        engine.categorize_file("config/app.yaml"),
+        FileCategory::Configuration
+    );
+    assert_eq!(
+        engine.categorize_file(".gitignore"),
+        FileCategory::Configuration
+    );
+    assert_eq!(
+        engine.categorize_file("Dockerfile"),
+        FileCategory::Configuration
+    );
+
     // Implementation
-    assert_eq!(engine.categorize_file("src/models/user.rb"), FileCategory::MainImplementation);
-    assert_eq!(engine.categorize_file("lib/parser.rs"), FileCategory::MainImplementation);
+    assert_eq!(
+        engine.categorize_file("src/models/user.rb"),
+        FileCategory::MainImplementation
+    );
+    assert_eq!(
+        engine.categorize_file("lib/parser.rs"),
+        FileCategory::MainImplementation
+    );
 }
 
 #[test]
 fn test_code_ranking() -> Result<()> {
     // Create a temporary directory for test files
     let dir = tempdir()?;
-    
+
     // Create some test files
     let main_impl_path = dir.path().join("main_impl.rs");
     let test_file_path = dir.path().join("test_main.rs");
     let mock_file_path = dir.path().join("mock_service.rs");
     let interface_path = dir.path().join("interface.rs");
     let doc_file_path = dir.path().join("README.md");
-    
+
     // Write content to the files
     let main_impl_content = r#"
 fn main() {
@@ -65,7 +101,7 @@ impl User {
     }
 }
     "#;
-    
+
     let test_file_content = r#"
 #[cfg(test)]
 mod tests {
@@ -79,7 +115,7 @@ mod tests {
     }
 }
     "#;
-    
+
     let mock_file_content = r#"
 pub struct MockUser {
     name: String,
@@ -105,7 +141,7 @@ impl MockUser {
     }
 }
     "#;
-    
+
     let interface_content = r#"
 pub trait UserTrait {
     fn new(name: String, age: u32) -> Self;
@@ -114,15 +150,15 @@ pub trait UserTrait {
     fn get_age(&self) -> u32;
 }
     "#;
-    
+
     let doc_content = "# User Module\n\nThis is documentation for the User module.";
-    
+
     fs::write(&main_impl_path, main_impl_content)?;
     fs::write(&test_file_path, test_file_content)?;
     fs::write(&mock_file_path, mock_file_content)?;
     fs::write(&interface_path, interface_content)?;
     fs::write(&doc_file_path, doc_content)?;
-    
+
     // Create search results with equal initial scores
     let mut results = vec![
         SearchResult {
@@ -171,37 +207,59 @@ pub trait UserTrait {
             commit: None,
         },
     ];
-    
+
     // Rank the results
     let mut engine = CodeRankingEngine::new();
     engine.rank_results(&mut results, "user")?;
-    
+
     // Check if the results are now ranked correctly
     // Main implementation should be ranked higher than tests and mocks
-    let main_impl_idx = results.iter().position(|r| r.file_path.contains("main_impl.rs")).unwrap();
-    let test_file_idx = results.iter().position(|r| r.file_path.contains("test_main.rs")).unwrap();
-    let mock_file_idx = results.iter().position(|r| r.file_path.contains("mock_service.rs")).unwrap();
-    let doc_file_idx = results.iter().position(|r| r.file_path.contains("README.md")).unwrap();
-    
+    let main_impl_idx = results
+        .iter()
+        .position(|r| r.file_path.contains("main_impl.rs"))
+        .unwrap();
+    let test_file_idx = results
+        .iter()
+        .position(|r| r.file_path.contains("test_main.rs"))
+        .unwrap();
+    let mock_file_idx = results
+        .iter()
+        .position(|r| r.file_path.contains("mock_service.rs"))
+        .unwrap();
+    let doc_file_idx = results
+        .iter()
+        .position(|r| r.file_path.contains("README.md"))
+        .unwrap();
+
     // Verify main implementation is ranked higher than test file
-    assert!(main_impl_idx < test_file_idx, 
-            "Main implementation should be ranked higher than test file");
-    
+    assert!(
+        main_impl_idx < test_file_idx,
+        "Main implementation should be ranked higher than test file"
+    );
+
     // Verify main implementation is ranked higher than mock file
-    assert!(main_impl_idx < mock_file_idx,
-            "Main implementation should be ranked higher than mock file");
-    
+    assert!(
+        main_impl_idx < mock_file_idx,
+        "Main implementation should be ranked higher than mock file"
+    );
+
     // Verify documentation is ranked lowest
-    assert!(doc_file_idx > main_impl_idx && doc_file_idx > test_file_idx && doc_file_idx > mock_file_idx,
-            "Documentation should be ranked lowest");
-    
+    assert!(
+        doc_file_idx > main_impl_idx
+            && doc_file_idx > test_file_idx
+            && doc_file_idx > mock_file_idx,
+        "Documentation should be ranked lowest"
+    );
+
     // Verify the explanation factors were added
     engine.add_explanation_factors(&mut results);
     for result in &results {
-        assert!(result.code_context.is_some(), 
-                "Explanation factors should have been added to each result");
+        assert!(
+            result.code_context.is_some(),
+            "Explanation factors should have been added to each result"
+        );
     }
-    
+
     Ok(())
 }
 
@@ -209,19 +267,19 @@ pub trait UserTrait {
 fn test_complexity_calculation() -> Result<()> {
     // Create a temporary directory
     let dir = tempdir()?;
-    
+
     // Create files with different complexity levels
     let simple_file_path = dir.path().join("simple.rs");
     let medium_file_path = dir.path().join("medium.rs");
     let complex_file_path = dir.path().join("complex.rs");
-    
+
     // Simple file with few lines and one function
     let simple_content = r#"
 fn main() {
     println!("This is a simple file");
 }
     "#;
-    
+
     // Medium complexity file with multiple functions and types
     let medium_content = r#"
 struct User {
@@ -249,7 +307,7 @@ fn main() {
     process_user(&user);
 }
     "#;
-    
+
     // Complex file with many functions, types, and imports
     let complex_content = r#"
 use std::collections::{HashMap, HashSet};
@@ -387,27 +445,34 @@ fn main() {
     }
 }
     "#;
-    
+
     fs::write(&simple_file_path, simple_content)?;
     fs::write(&medium_file_path, medium_content)?;
     fs::write(&complex_file_path, complex_content)?;
-    
+
     // Calculate complexity
     let mut engine = CodeRankingEngine::new();
     let simple_complexity = engine.calculate_complexity(&simple_file_path.to_string_lossy());
     let medium_complexity = engine.calculate_complexity(&medium_file_path.to_string_lossy());
     let complex_complexity = engine.calculate_complexity(&complex_file_path.to_string_lossy());
-    
+
     // Verify simple file has lower complexity
-    assert!(simple_complexity < medium_complexity, 
-            "Simple file should have lower complexity than medium file");
-    
+    assert!(
+        simple_complexity < medium_complexity,
+        "Simple file should have lower complexity than medium file"
+    );
+
     // Verify complex file has higher complexity
-    assert!(complex_complexity > medium_complexity, 
-            "Complex file should have higher complexity than medium file");
-    
+    assert!(
+        complex_complexity > medium_complexity,
+        "Complex file should have higher complexity than medium file"
+    );
+
     // Check if values are in expected ranges
-    assert!(simple_complexity < 0.3, "Simple file should have low complexity score");
-    
+    assert!(
+        simple_complexity < 0.3,
+        "Simple file should have low complexity score"
+    );
+
     Ok(())
-} 
+}

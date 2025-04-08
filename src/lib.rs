@@ -1,4 +1,4 @@
 // Module exports
-pub mod vectordb;
 pub mod cli;
-pub mod utils; 
+pub mod utils;
+pub mod vectordb;

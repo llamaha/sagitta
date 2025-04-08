@@ -1,12 +1,12 @@
-use anyhow::{Result, Error};
-use ort::{Environment, Session, SessionBuilder, GraphOptimizationLevel, ExecutionProvider};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use anyhow::{Error, Result};
 use lazy_static::lazy_static;
 use ndarray::{Array2, CowArray};
 use ort::Value;
+use ort::{Environment, ExecutionProvider, GraphOptimizationLevel, Session, SessionBuilder};
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 // Global ONNX environment to ensure it's only created once
 lazy_static! {
@@ -47,7 +47,7 @@ impl Default for SessionConfig {
             max_pool_size: num_cpus::get(),
             num_threads: num_cpus::get() as i16,
             use_cuda: true,
-            optimization_level: 1, // Level1
+            optimization_level: 1,                     // Level1
             session_timeout: Duration::from_secs(300), // 5 minutes
             warmup_iterations: 3,
             warmup_batch_size: 4,
@@ -121,12 +121,12 @@ impl SessionManager {
 
         // Create a session for the pool
         let mut session = manager.create_session()?;
-        
+
         // Warm up the session if enabled
         if manager.config.warmup_iterations > 0 {
             manager.warm_up_session(&mut session)?;
         }
-        
+
         // Add the session to the pool by cloning the Arc
         let manager_clone = Arc::clone(&manager);
         let mut pool = manager_clone.pool.lock().unwrap();
@@ -144,36 +144,42 @@ impl SessionManager {
         // Create dummy input tensors with the configured batch size and sequence length
         let batch_size = self.config.warmup_batch_size;
         let seq_length = self.config.warmup_seq_length;
-        
+
         for i in 0..self.config.warmup_iterations {
             // Create dummy input_ids and attention_mask
-            let input_ids = vec![1i64; batch_size * seq_length];  // Use 1 (typically token ID for a common word)
-            let attention_mask = vec![1i64; batch_size * seq_length];  // All tokens are attended to
-            
-            let input_ids_array = Array2::from_shape_vec((batch_size, seq_length), input_ids.clone())?;
-            let attention_mask_array = Array2::from_shape_vec((batch_size, seq_length), attention_mask.clone())?;
-            
+            let input_ids = vec![1i64; batch_size * seq_length]; // Use 1 (typically token ID for a common word)
+            let attention_mask = vec![1i64; batch_size * seq_length]; // All tokens are attended to
+
+            let input_ids_array =
+                Array2::from_shape_vec((batch_size, seq_length), input_ids.clone())?;
+            let attention_mask_array =
+                Array2::from_shape_vec((batch_size, seq_length), attention_mask.clone())?;
+
             // Convert to dynamic arrays
             let input_ids_dyn = input_ids_array.into_dyn();
             let attention_mask_dyn = attention_mask_array.into_dyn();
-            
+
             // Create CowArray (needed for ONNX runtime)
             let input_ids_cow = CowArray::from(&input_ids_dyn);
             let attention_mask_cow = CowArray::from(&attention_mask_dyn);
-            
+
             // Create input values
             let input_ids_val = Value::from_array(session.allocator(), &input_ids_cow)?;
             let attention_mask_val = Value::from_array(session.allocator(), &attention_mask_cow)?;
-            
+
             // Run inference
             let _ = session.run(vec![input_ids_val, attention_mask_val])?;
-            
+
             // Log progress for the first session only
             if i == 0 {
-                eprintln!("Session warmup: {} of {} iterations completed", i+1, self.config.warmup_iterations);
+                eprintln!(
+                    "Session warmup: {} of {} iterations completed",
+                    i + 1,
+                    self.config.warmup_iterations
+                );
             }
         }
-        
+
         eprintln!("Session warmup complete - session is ready for inference");
         Ok(())
     }
@@ -199,7 +205,8 @@ impl SessionManager {
                 .and_then(|b| b.with_optimization_level(opt_level))
                 .and_then(|b| b.with_intra_threads(self.config.num_threads))
                 .and_then(|b| b.with_execution_providers(providers))
-                .and_then(|b| b.with_model_from_file(&self.model_path)) {
+                .and_then(|b| b.with_model_from_file(&self.model_path))
+            {
                 Ok(session) => return Ok(session),
                 Err(e) => eprintln!("Failed to create CUDA session, falling back to CPU: {}", e),
             }
@@ -219,7 +226,7 @@ impl SessionManager {
     pub fn get_session(&self) -> Result<Session> {
         // Try to get a session from the pool
         let mut pool = self.pool.lock().unwrap();
-        
+
         // Check if we have any sessions in the pool
         if let Some(pooled) = pool.pop_front() {
             // Check if the session has timed out
@@ -228,22 +235,22 @@ impl SessionManager {
             }
             // Session timed out, let it drop and create a new one
         }
-        
+
         // No session available, create a new one
         let mut session = self.create_session()?;
-        
+
         // Warm up the new session if configured
         if self.config.warmup_iterations > 0 {
             self.warm_up_session(&mut session)?;
         }
-        
+
         Ok(session)
     }
 
     /// Return a session to the pool
     pub fn return_session(&self, session: Session) {
         let mut pool = self.pool.lock().unwrap();
-        
+
         // Only add to the pool if we haven't reached the maximum size
         if pool.len() < self.config.max_pool_size {
             pool.push_back(PooledSession {
@@ -263,28 +270,27 @@ impl SessionManager {
             manager: self,
         })
     }
-    
+
     /// Pre-warm a pool of sessions in parallel
     pub fn warm_up_pool(&self) -> Result<()> {
         // Create the configured number of warmed-up sessions in parallel
         let target_pool_size = self.config.max_pool_size;
         let mut handles = Vec::with_capacity(target_pool_size);
-        
+
         // Create sessions in parallel
         for i in 0..target_pool_size {
             let manager_clone = Arc::clone(&Arc::new(self.clone()));
             let handle = std::thread::spawn(move || {
-                eprintln!("Pre-warming session {} of {}", i+1, target_pool_size);
-                let result = manager_clone.create_session()
-                    .and_then(|mut session| {
-                        manager_clone.warm_up_session(&mut session)?;
-                        Ok(session)
-                    });
+                eprintln!("Pre-warming session {} of {}", i + 1, target_pool_size);
+                let result = manager_clone.create_session().and_then(|mut session| {
+                    manager_clone.warm_up_session(&mut session)?;
+                    Ok(session)
+                });
                 result
             });
             handles.push(handle);
         }
-        
+
         // Collect all sessions and add them to the pool
         let mut pool = self.pool.lock().unwrap();
         for handle in handles {
@@ -307,7 +313,7 @@ impl SessionManager {
                 }
             }
         }
-        
+
         eprintln!("Pool warmup complete - {} sessions ready", pool.len());
         Ok(())
     }
@@ -341,7 +347,7 @@ impl<'a> Drop for SessionGuard<'a> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    
+
     #[test]
     fn test_session_creation() {
         // Skip if ONNX model isn't available
@@ -350,18 +356,18 @@ mod tests {
             println!("Skipping test_session_creation because model file isn't available");
             return;
         }
-        
+
         // Create a session manager with default config
         let config = SessionConfig::default();
         let manager = SessionManager::new(&model_path, config);
         assert!(manager.is_ok());
-        
+
         // Get a session from the manager
         let manager = manager.unwrap();
         let session = manager.get_session();
         assert!(session.is_ok());
     }
-    
+
     #[test]
     fn test_session_pooling() {
         // Skip if ONNX model isn't available
@@ -370,28 +376,28 @@ mod tests {
             println!("Skipping test_session_pooling because model file isn't available");
             return;
         }
-        
+
         // Create a session manager with a pool size of 2
         let mut config = SessionConfig::default();
         config.max_pool_size = 2;
         config.warmup_iterations = 0; // Disable warmup for faster test
         let manager = SessionManager::new(&model_path, config).unwrap();
-        
+
         // Get 3 sessions
         let session1 = manager.get_session().unwrap();
         let session2 = manager.get_session().unwrap();
         let session3 = manager.get_session().unwrap();
-        
+
         // Return them to the pool
         manager.return_session(session3);
         manager.return_session(session2);
         manager.return_session(session1);
-        
+
         // The pool should now have 2 sessions (session2 and session1)
         // session3 should have been dropped
         assert_eq!(manager.pool.lock().unwrap().len(), 2);
     }
-    
+
     #[test]
     fn test_session_guard() {
         // Skip if ONNX model isn't available
@@ -400,27 +406,27 @@ mod tests {
             println!("Skipping test_session_guard because model file isn't available");
             return;
         }
-        
+
         // Create a session manager with default config
         let mut config = SessionConfig::default();
         config.warmup_iterations = 0; // Disable warmup for faster test
         let manager = SessionManager::new(&model_path, config).unwrap();
-        
+
         // Get a session guard
         let guard = manager.get_session_guard();
         assert!(guard.is_ok());
-        
+
         // Use the session through the guard
         {
             let guard = guard.unwrap();
             let _session = guard.session();
             // guard is dropped here and session is returned to the pool
         }
-        
+
         // The pool should now have 1 session
         assert_eq!(manager.pool.lock().unwrap().len(), 1);
     }
-    
+
     #[test]
     fn test_warmup() {
         // Skip if ONNX model isn't available
@@ -429,22 +435,22 @@ mod tests {
             println!("Skipping test_warmup because model file isn't available");
             return;
         }
-        
+
         // Create a session manager with warmup enabled
         let mut config = SessionConfig::default();
         config.warmup_iterations = 1; // Just one iteration for the test
         config.warmup_batch_size = 1;
         config.warmup_seq_length = 64;
-        
+
         let manager = SessionManager::new(&model_path, config);
         assert!(manager.is_ok());
-        
+
         // Check that the session was created successfully
         let manager = manager.unwrap();
         let session = manager.get_session();
         assert!(session.is_ok());
     }
-    
+
     #[test]
     fn test_pool_warmup() {
         // Skip if ONNX model isn't available
@@ -453,22 +459,22 @@ mod tests {
             println!("Skipping test_pool_warmup because model file isn't available");
             return;
         }
-        
+
         // Create a session manager with a small pool and minimal warmup
         let mut config = SessionConfig::default();
         config.max_pool_size = 2;
         config.warmup_iterations = 1;
         config.warmup_batch_size = 1;
         config.warmup_seq_length = 64;
-        
+
         let manager = SessionManager::new(&model_path, config).unwrap();
-        
+
         // Warm up the pool
         let result = manager.warm_up_pool();
         assert!(result.is_ok());
-        
+
         // The pool should now have sessions
         let pool_size = manager.pool.lock().unwrap().len();
         assert!(pool_size > 0 && pool_size <= 2);
     }
-} 
+}

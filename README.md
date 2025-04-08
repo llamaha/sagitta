@@ -7,28 +7,16 @@ A CLI tool for semantic code search and analysis.
 - Semantic code search with ONNX neural network models (default)
 - Fast token-based search for larger codebases
 - Hybrid search combining semantic and lexical matching
-- Code-aware search for functions, types, and more
-- Support for multiple programming languages and file formats
+- Support for multiple file formats
 - Cross-platform support (Linux, macOS)
 
 > **Note:** Repository management features are currently experimental and must be enabled with the `VECTORDB_EXPERIMENTAL_REPO=true` environment variable or by compiling with the `--features experimental_repo` flag.
 
 ## Supported File Types
 
-Currently, the following file types are supported with code parsers:
-- Rust (rs)
-- Ruby (rb)
-- Go (go)
-- JavaScript (js)
-- TypeScript (ts)
-- Markdown (md) - with regex-based parsing
-- Text (txt) - with basic text analysis
-- Configuration files (json, yaml, yml, toml, xml)
+When using the `--fast` flag, vectordb-cli will index any non-binary file type at the file level.
+In the default (ONNX) mode, it currently indexes common text-based source files and documentation (e.g., .rs, .go, .py, .js, .ts, .md, .txt, .yaml, .json, etc.) based on whole-file content.
 
-When using the `--fast` flag, vectordb-cli will index any non-binary file type at the file level, even if not in the supported list above.
-
-> **Note:** Support for Python, C, and C++ is planned for a future release.
->
 > **Note:** GPU support is planned for a future release to significantly improve embedding generation performance.
 
 ## Installation
@@ -91,27 +79,28 @@ These environment variables should be added to your shell profile (~/.bashrc, ~/
 ### Indexing Your Code
 
 ```bash
-# Index a directory
+# Index a directory (using ONNX model)
 vectordb-cli index ./your/code/directory
 
-# Index with specific file types
-vectordb-cli index ./your/code/directory --file-types rs,rb,go,md
+# Index with specific file types (using ONNX model)
+vectordb-cli index ./your/code/directory --file-types rs,md
 
-# Use fast model instead of ONNX (for large codebases)
+# Use fast model instead of ONNX (for large codebases, indexes all non-binary)
 vectordb-cli index ./your/code/directory --fast
+
+# Use fast model with specific file types
+vectordb-cli index ./your/code/directory --fast --file-types rs,go,yaml
 ```
 
 The indexing process supports different modes:
 
-1. **Default mode**: Uses the ONNX neural network model for high-quality semantic embeddings. Only indexes the supported file types listed above.
+1. **Default mode**: Uses the ONNX neural network model for high-quality semantic embeddings based on whole-file content. Indexes common source/doc file types.
 
 2. **Fast mode**: Uses a token-based model that processes files more quickly but with less semantic accuracy.
    - When using `--fast` without specifying file types, it indexes all non-binary files in the directory
    - Ideal for large codebases or when quick indexing is more important than semantic accuracy
 
-3. **Targeted mode**: Specify exactly which file types to index using the `--file-types` parameter
-   - Example: `--file-types rs,go,yaml` to only index Rust, Go, and YAML files
-   - Can be combined with `--fast` to use the faster embedding model while restricting file types
+3. **Targeted mode**: Specify exactly which file types to index using the `--file-types` parameter. This restricts indexing to only those extensions, regardless of whether the default or fast model is used.
 
 ### Searching
 
@@ -127,15 +116,6 @@ vectordb-cli query "error handling" --repo my-repo-name
 
 # Search across all configured repositories
 vectordb-cli query "configuration options" --all-repos
-
-# Code-aware search
-vectordb-cli code-search "database connection"
-
-# Search by code type
-vectordb-cli code-search "user authentication" --type function
-
-# Parse and search through code structure
-vectordb-cli parse-code "function update_user"
 ```
 
 ### Managing Multiple Repositories
@@ -252,84 +232,54 @@ vectordb-cli query "how to use feature" --repo my-repo-docs
 
 ### Understanding Search Types
 
-vectordb-cli offers three specialized search modes:
+vectordb-cli now primarily relies on the **`query`** command:
 
-1. **Regular Query** (`query` command)
-   - Best for conceptual, high-level searches and semantic understanding
-   - Combines vector similarity with BM25 lexical matching (hybrid search by default)
-   - Optimal for questions like "How does error handling work?" or "Where is configuration loaded?"
-   - Provides context-rich results with surrounding code and comments
-   - Automatically adjusts vector/BM25 weights based on query characteristics
-   - Examples:
-     ```bash
-     vectordb-cli query "how are errors handled in the API layer"
-     vectordb-cli query "authentication implementation" --vector-weight 0.8 --bm25-weight 0.2
-     ```
-
-2. **Code Search** (`code-search` command)
-   - Optimized for finding specific code implementations and patterns
-   - Code-aware searching that understands functions, types, classes, and modules
-   - Ideal for queries like "parse JSON function" or "database connection implementation"
-   - Supports specialized searches with `--type` parameter:
-     - `function`: Find function/method implementations
-     - `type`: Find class/struct/type definitions
-     - `dependency`: Find external dependencies and imports
-     - `usage`: Find where certain elements are used
-   - Examples:
-     ```bash
-     vectordb-cli code-search "JWT token validation" --type function
-     vectordb-cli code-search "user authentication" --type type
-     ```
-
-3. **Parse Code** (`parse-code` command)
-   - Analyzes code structure to find specific elements
-   - Performs exact matching on function/type names
-   - Perfect for finding specific functions, classes, or types by name
-   - Examples:
-     ```bash
-     vectordb-cli parse-code "function update_user"
-     vectordb-cli parse-code "class AuthController"
-     ```
+- Best for conceptual, high-level searches and semantic understanding.
+- Combines vector similarity with BM25 lexical matching (hybrid search by default).
+- Optimal for questions like "How does error handling work?" or "Where is configuration loaded?"
+- Provides context-rich snippets from relevant files.
+- Automatically adjusts vector/BM25 weights based on query characteristics, or you can override them.
+- Examples:
+  ```bash
+  vectordb-cli query "how are errors handled in the API layer"
+  vectordb-cli query "authentication implementation" --vector-weight 0.8 --bm25-weight 0.2
+  ```
 
 ### Query Optimization Tips
 
-- **Be specific but conversational**: Describe what you're looking for in natural language
-- **Include context**: Adding context improves semantic search (e.g., "how does error handling work in the API layer" vs just "error handling")
-- **Mention languages or frameworks**: Including specific languages helps target relevant files
+- **Be specific but conversational**: Describe what you're looking for in natural language.
+- **Include context**: Adding context improves semantic search (e.g., "how does error handling work in the API layer" vs just "error handling").
+- **Mention languages or frameworks**: Including specific languages helps target relevant files.
 - **Adjust weights for different needs**:
-  - Increase `--vector-weight` for more conceptual/semantic matches
-  - Increase `--bm25-weight` for more exact keyword matches
+  - Increase `--vector-weight` for more conceptual/semantic matches.
+  - Increase `--bm25-weight` for more exact keyword matches.
 - **Use hybrid search effectively**:
-  - Hybrid search (default) combines semantic understanding with lexical matches
-  - `--vector-only` is useful for concept-based searches when exact terms might differ
-  - Weights automatically adjust based on query characteristics, but you can override them
+  - Hybrid search (default) combines semantic understanding with lexical matches.
+  - `--vector-only` is useful for concept-based searches when exact terms might differ.
+  - Weights automatically adjust based on query characteristics, but you can override them.
 
 ### Prompt Template
 
 Use the following prompt with your preferred LLM to generate effective queries for vectordb-cli:
 
 ```
-I need to search a codebase using vectordb-cli. Based on my goal described below, help me craft the most effective search query.
+I need to search a codebase using vectordb-cli. Based on my goal described below, help me craft the most effective search query using the 'query' command.
 
 My goal: [DESCRIBE YOUR PROBLEM OR WHAT YOU'RE LOOKING FOR]
 
 Please generate:
-1. A primary search query that best captures my intent
-2. The recommended search command to use (query, code-search, or parse-code)
-3. Any additional flags or options that would improve results
+1. A primary search query that best captures my intent.
+2. Any additional flags or options (like --limit, --vector-weight, --bm25-weight) that would improve results.
 
 Consider these guidelines:
-- For concept-based searches about "how" something works, use the regular 'query' command (best for semantics)
-- For finding specific implementations, use 'code-search' (understands code structure)
-- For finding exact function/class/type definitions, use 'parse-code' (structure-based)
-- For mixed keyword/semantic importance, suggest appropriate vector/BM25 weights
-- For narrow file type searches, include the --file-types parameter
+- Use the 'query' command for concept-based searches about "how" something works (best for semantics).
+- For mixed keyword/semantic importance, suggest appropriate vector/BM25 weights.
+- For narrow file type searches, include the --file-types parameter.
 
 IMPORTANT: Design the query for vectordb-cli's hybrid search algorithm which:
-- Uses both semantic embeddings and BM25 lexical search
-- Dynamically adjusts weights based on query length and structure
-- Performs better with natural language than code syntax in queries
-- Can focus on code structure when using "code-search" command
+- Uses both semantic embeddings and BM25 lexical search based on whole file content.
+- Dynamically adjusts weights based on query length and structure.
+- Performs better with natural language than code syntax in queries.
 
 EXAMPLES:
 
@@ -337,28 +287,16 @@ Example 1 - Conceptual search:
 Goal: "I want to understand how the error handling works in the HTTP client"
 Recommendation:
 - Command: vectordb-cli query "how does error handling work in the HTTP client implementation"
-- This uses the default hybrid search to find conceptual matches across the codebase
+- This uses the default hybrid search to find conceptual matches across the codebase.
 
-Example 2 - Finding specific implementations:
-Goal: "I need to find the code that handles user authentication"
-Recommendation:
-- Command: vectordb-cli code-search "user authentication implementation" --type function
-- This uses code-aware search to focus on function implementations related to authentication
-
-Example 3 - Looking for exact function:
-Goal: "Where is the update_user_profile function defined?"
-Recommendation:
-- Command: vectordb-cli parse-code "function update_user_profile"
-- This uses structure-based search to find the exact function definition
-
-Example 4 - Customized weights for mixed search:
+Example 2 - Customized weights for mixed search:
 Goal: "Find code implementing JWT token validation that uses a specific library"
 Recommendation:
 - Command: vectordb-cli query "JWT token validation implementation" --vector-weight 0.5 --bm25-weight 0.5
-- The balanced weights help find semantic matches while giving importance to exact terms
+- The balanced weights help find semantic matches while giving importance to exact terms.
 ```
 
-This template helps you craft queries that take maximum advantage of vectordb-cli's search capabilities, whether you're looking for concept-level understanding or specific code implementations.
+This template helps you craft queries that take maximum advantage of vectordb-cli's `query` command.
 
 ## Database Backup
 
