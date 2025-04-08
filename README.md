@@ -11,6 +11,8 @@ A CLI tool for semantic code search and analysis.
 - Support for multiple programming languages and file formats
 - Cross-platform support (Linux, macOS)
 
+> **Note:** Repository management features are currently experimental and must be enabled with the `VECTORDB_EXPERIMENTAL_REPO=true` environment variable or by compiling with the `--features experimental_repo` flag.
+
 ## Supported File Types
 
 Currently, the following file types are supported with code parsers:

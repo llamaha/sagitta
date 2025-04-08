@@ -7,6 +7,7 @@ authors = ["Your Name <your.email@example.com>"]
 
 [features]
 default = ["onnx"]
+experimental_repo = []
 onnx = []
 
 [dependencies]

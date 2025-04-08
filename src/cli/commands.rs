@@ -19,6 +19,7 @@ use std::io::Write;
 use crate::vectordb::repo_yaml;
 use crate::vectordb::error::VectorDBError;
 use crate::vectordb::test_utils::create_test_files;
+use crate::utils;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -153,20 +154,13 @@ pub enum Command {
 
     /// Clear the database
     Clear {
-        /// Clear all repositories (requires confirmation)
-        #[arg(short, long)]
-        all: bool,
-        
-        /// Clear a specific repository
-        #[arg(short, long)]
-        repo: Option<String>,
-        
         /// Show help information
         #[arg(short, long)]
         help: bool,
     },
     
-    /// Repository management commands
+    /// Repository management commands (experimental)
+    #[cfg(feature = "experimental_repo")]
     Repo {
         #[command(subcommand)]
         command: RepoCommand,
@@ -268,6 +262,7 @@ pub enum RepoCommand {
     },
     
     /// Configure auto-sync for repositories
+    #[cfg(feature = "experimental_repo")]
     AutoSync {
         #[command(subcommand)]
         command: AutoSyncCommand,
@@ -275,37 +270,33 @@ pub enum RepoCommand {
 }
 
 #[derive(Parser, Debug)]
+#[cfg(feature = "experimental_repo")]
 pub enum AutoSyncCommand {
+    /// Start auto-sync daemon for repositories with auto-sync enabled
+    Start,
+    
+    /// Stop auto-sync daemon
+    Stop,
+    
     /// Enable auto-sync for a repository
     Enable {
-        /// Repository ID or name
+        /// Repository name or ID
         #[arg(required = true)]
         repo: String,
-        
-        /// Minimum interval between syncs in seconds (default: 60)
-        #[arg(short = 'i', long = "interval")]
-        interval: Option<u64>,
     },
     
     /// Disable auto-sync for a repository
     Disable {
-        /// Repository ID or name
+        /// Repository name or ID
         #[arg(required = true)]
         repo: String,
     },
     
-    /// Show auto-sync status
-    Status {
-        /// Repository ID or name (optional, shows all if not specified)
-        #[arg(short = 'r', long = "repo")]
-        repo: Option<String>,
-    },
+    /// List repositories with auto-sync enabled
+    List,
     
-    /// Start the auto-sync daemon
-    Start,
-    
-    /// Stop the auto-sync daemon
-    Stop,
+    /// Show status of auto-sync daemon
+    Status,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -1026,67 +1017,33 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("  You may want to rebuild the index with the 'index' command.");
             }
         }
-        Command::Clear { all, repo, help } => {
-            if help || (!all && repo.is_none()) {
+        Command::Clear { help } => {
+            if help {
                 println!("Usage: vectordb-cli clear [OPTIONS]");
-                println!("Clears the database or specific repositories");
+                println!("Clears the database");
                 println!("Options:");
-                println!("  -a, --all          Clear all repositories (requires confirmation)");
-                println!("  -r, --repo <repo>  Clear a specific repository");
                 println!("  -h, --help         Show help information");
                 return Ok(());
             }
             
-            if all {
-                // Show warning and ask for confirmation
-                println!("WARNING: You are about to clear ALL repositories from the database.");
-                println!("This action cannot be undone.");
-                print!("Continue? [y/N]: ");
-                std::io::stdout().flush()?;
-                
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                
-                if input.trim().to_lowercase() == "y" {
-                    println!("Clearing all repositories...");
-                    db.clear()?;
-                    println!("All repositories cleared successfully.");
-                } else {
-                    println!("Operation cancelled.");
-                }
-            } else if let Some(repo_name) = repo {
-                // Attempt to resolve repository
-                match db.repo_manager.resolve_repo_name_to_id(&repo_name) {
-                    Ok(repo_id) => {
-                        // Get repository name for display
-                        let repo_name = db.repo_manager.get_repository(&repo_id)
-                            .map(|r| r.name.clone())
-                            .unwrap_or_else(|| repo_name.clone());
-                        
-                        // Confirm clearing this repository
-                        println!("About to clear repository: {}", repo_name);
-                        print!("Continue? [y/N]: ");
-                        std::io::stdout().flush()?;
-                        
-                        let mut input = String::new();
-                        std::io::stdin().read_line(&mut input)?;
-                        
-                        if input.trim().to_lowercase() == "y" {
-                            println!("Clearing repository {}...", repo_name);
-                            match db.clear_repository(&repo_name) {
-                                Ok(_) => println!("Repository '{}' cleared successfully.", repo_name),
-                                Err(e) => println!("Error clearing repository: {}", e),
-                            }
-                        } else {
-                            println!("Operation cancelled.");
-                        }
-                    },
-                    Err(_) => {
-                        println!("Repository not found: {}", repo_name);
-                    }
-                }
+            // Show warning and ask for confirmation
+            println!("WARNING: You are about to clear the database.");
+            println!("This action cannot be undone.");
+            print!("Continue? [y/N]: ");
+            std::io::stdout().flush()?;
+            
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            
+            if input.trim().to_lowercase() == "y" {
+                println!("Clearing database...");
+                db.clear()?;
+                println!("Database cleared successfully.");
+            } else {
+                println!("Operation cancelled.");
             }
         }
+        #[cfg(feature = "experimental_repo")]
         Command::Repo { command } => {
             execute_repo_command(command, db)?
         }
@@ -1143,6 +1100,7 @@ fn get_embedding_model(model_type: &EmbeddingModelType, _db: &VectorDB) -> anyho
 }
 
 /// Execute repository management commands
+#[cfg(feature = "experimental_repo")]
 fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
     match command {
         RepoCommand::Add { path, name, file_types, model } => {
@@ -1794,7 +1752,8 @@ fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
     }
 }
 
-/// Execute auto-sync commands
+/// Execute auto-sync daemon commands
+#[cfg(feature = "experimental_repo")]
 fn execute_auto_sync_command(command: AutoSyncCommand, mut db: VectorDB) -> Result<()> {
     match command {
         AutoSyncCommand::Enable { repo, interval } => {
