@@ -37,18 +37,21 @@ fn main() -> Result<()> {
     // Create or load the database
     let mut db = vectordb::VectorDB::new(db_path)?;
     
-    // Start auto-sync daemon if any repositories have auto-sync enabled
-    if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Start } }) {
-        // Don't start daemon if the command is already to start the daemon
-        // to avoid conflicts
-    } else if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Stop } }) {
-        // Don't start daemon if the command is to stop the daemon
-    } else {
-        // Start auto-sync daemon if there are repositories with auto-sync enabled
-        if !db.repo_manager.get_auto_sync_repos().is_empty() {
-            debug!("Starting auto-sync daemon");
-            if let Err(e) = db.start_auto_sync() {
-                error!("Failed to start auto-sync daemon: {}", e);
+    #[cfg(feature = "experimental_repo")]
+    {
+        // Start auto-sync daemon if any repositories have auto-sync enabled
+        if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Start } }) {
+            // Don't start daemon if the command is already to start the daemon
+            // to avoid conflicts
+        } else if matches!(cli.command, cli::commands::Command::Repo { command: cli::commands::RepoCommand::AutoSync { command: cli::commands::AutoSyncCommand::Stop } }) {
+            // Don't start daemon if the command is to stop the daemon
+        } else {
+            // Start auto-sync daemon if there are repositories with auto-sync enabled
+            if !db.repo_manager.get_auto_sync_repos().is_empty() {
+                debug!("Starting auto-sync daemon");
+                if let Err(e) = db.start_auto_sync() {
+                    error!("Failed to start auto-sync daemon: {}", e);
+                }
             }
         }
     }
