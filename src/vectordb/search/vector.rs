@@ -69,7 +69,6 @@ pub(crate) fn search_with_limit(
                 file_path,
                 similarity,
                 snippet: String::new(), // Snippet generated later
-                repository: None, // Repository info added later if applicable
             })
             .collect()
     } else {
@@ -105,7 +104,6 @@ pub(crate) fn search_with_limit(
                 file_path,
                 similarity,
                 snippet: String::new(), // Snippet generated later
-                repository: None, // Repository info added later if applicable
             })
             .collect()
     };
