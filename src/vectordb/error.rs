@@ -75,6 +75,12 @@ pub enum VectorDBError {
 
     #[error("Error deserializing data: {0}")]
     DeserializationError(String),
+
+    #[error("Search error: {0}")]
+    SearchError(String),
+
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 /// Conversion from anyhow::Error
@@ -125,6 +131,8 @@ impl Clone for VectorDBError {
             Self::RepositoryError(s) => Self::RepositoryError(s.clone()),
             Self::RepositoryNotFound(s) => Self::RepositoryNotFound(s.clone()),
             Self::DeserializationError(s) => Self::DeserializationError(s.clone()),
+            Self::SearchError(s) => Self::SearchError(s.clone()),
+            Self::Other(s) => Self::Other(s.clone()),
         }
     }
 }
