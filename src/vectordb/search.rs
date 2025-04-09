@@ -1193,19 +1193,19 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
 
-        // Create a new DB. It won't have ONNX paths initially.
+        // Create a new DB.
         let mut db = VectorDB::new(db_path_str.clone()).unwrap();
 
-        // Attempt to set default ONNX paths if available, otherwise tests needing model will fail later
+        // Attempt to set default ONNX paths
         let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
         let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
         if default_model_path.exists() && default_tokenizer_path.exists() {
              if let Err(e) = db.set_onnx_paths(Some(default_model_path.to_path_buf()), Some(default_tokenizer_path.to_path_buf())) {
                 warn!("Setup_test_env: Failed to set default ONNX paths: {}", e);
              }
-        }
+        } // No else needed, create_embedding_model will handle missing paths if test runs
 
-        // Create and index test files with more distinct content
+        // Create test files
         let files_data = vec![
             ("file1_alpha.txt", "Detailed Rust code snippet regarding alpha topic, contains specific implementation details."),
             ("file2_bravo.txt", "Python script focusing on the bravo subject matter, includes data processing functions."),
@@ -1215,12 +1215,17 @@ mod tests {
         for (filename, content) in files_data {
             let file_path = temp_dir.path().join(filename);
             fs::write(&file_path, content).unwrap();
-            // Index the file using the correct method
-            // Ignore result for simplicity in test setup, proper error handling would be better
-            let _ = db.index_single_file(&file_path);
+            // Don't index individually anymore
+            // let _ = db.index_single_file(&file_path);
         }
 
-        // No explicit build_hnsw_index needed, it's built incrementally
+        // Index the directory containing the test files
+        let file_patterns = vec!["txt".to_string()];
+        db.index_directory(temp_dir.path().to_str().unwrap(), &file_patterns)
+            .expect("Failed to index test directory in setup_test_env");
+
+        // Remove BM25 index build, Search::new should handle it
+        // db.build_bm25_index();
 
         (temp_dir, db)
     }
