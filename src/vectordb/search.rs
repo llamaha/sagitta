@@ -1,9 +1,8 @@
-use crate::vectordb::cache::EmbeddingCache;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -79,34 +78,6 @@ impl Search {
     /// Preprocess and analyze the query to improve search results
     fn preprocess_query(&self, query: &str) -> QueryAnalysis {
         let query_lower = query.to_lowercase();
-
-        // Code-specific keywords that indicate a code search
-        let code_keywords = [
-            "method",
-            "function",
-            "fn",
-            "struct",
-            "trait",
-            "enum",
-            "impl",
-            "type",
-            "class",
-            "module",
-            "implementation",
-            "definition",
-            "interface",
-            "signature",
-            "parameter",
-            "return",
-            "static",
-            "pub",
-            "self",
-            "mut",
-            "const",
-            "where",
-            "use",
-            "crate",
-        ];
 
         // Language-specific keywords
         let rust_keywords = [
