@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use dirs::data_local_dir;
 use env_logger;
-use log::{debug, error};
+use log::debug;
 use std::path::PathBuf;
 
 mod cli;
@@ -35,50 +35,15 @@ fn main() -> Result<()> {
     debug!("Using database path: {}", db_path);
 
     // Create or load the database
-    let mut db = vectordb::VectorDB::new(db_path)?;
-
-    #[cfg(feature = "experimental_repo")]
-    {
-        // Start auto-sync daemon if any repositories have auto-sync enabled
-        if matches!(
-            cli.command,
-            cli::commands::Command::Repo {
-                command: cli::commands::RepoCommand::AutoSync {
-                    command: cli::commands::AutoSyncCommand::Start
-                }
-            }
-        ) {
-            // Don't start daemon if the command is already to start the daemon
-            // to avoid conflicts
-        } else if matches!(
-            cli.command,
-            cli::commands::Command::Repo {
-                command: cli::commands::RepoCommand::AutoSync {
-                    command: cli::commands::AutoSyncCommand::Stop
-                }
-            }
-        ) {
-            // Don't start daemon if the command is to stop the daemon
-        } else {
-            // Start auto-sync daemon if there are repositories with auto-sync enabled
-            if !db.repo_manager.get_auto_sync_repos().is_empty() {
-                debug!("Starting auto-sync daemon");
-                if let Err(e) = db.start_auto_sync() {
-                    error!("Failed to start auto-sync daemon: {}", e);
-                }
-            }
-        }
-    }
+    let db = vectordb::VectorDB::new(db_path)?;
 
     // Execute the command
     let result = cli::commands::execute_command(cli.command, db.clone());
 
     // Clean up
     if !matches!(result, Ok(())) {
-        // If there was an error, ensure we stop the auto-sync daemon
-        if let Err(e) = db.stop_auto_sync() {
-            error!("Failed to stop auto-sync daemon during cleanup: {}", e);
-        }
+        // Handle cleanup on error if needed in the future
+        debug!("Command execution resulted in an error: {:?}", result.as_ref().err());
     }
 
     result

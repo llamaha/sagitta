@@ -4,9 +4,8 @@ use std::fs;
 use std::path::Path;
 // use super::code_structure::{CodeStructureAnalyzer, CodeContext, MethodInfo, TypeInfo};
 
+const EXTENSION_WEIGHT: f32 = 0.9;
 const DEFAULT_CONTEXT_LINES: usize = 5;
-const MAX_CONTEXT_LINES: usize = 15;
-const MIN_CONTEXT_LINES: usize = 2;
 
 /// Structure to hold context information for a code snippet
 #[derive(Debug, Clone)]

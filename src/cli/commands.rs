@@ -75,14 +75,6 @@ pub enum Command {
         /// File types to search (e.g. rs,rb,go,js,ts)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
-
-        /// Repository to search (can be specified multiple times)
-        #[arg(short = 'r', long = "repo", value_delimiter = ',')]
-        repositories: Option<Vec<String>>,
-
-        /// Search across all repositories
-        #[arg(long = "all-repos")]
-        all_repositories: bool,
     },
 
     /// Configure the embedding model
@@ -113,145 +105,6 @@ pub enum Command {
         #[arg(short, long)]
         help: bool,
     },
-
-    /// Repository management commands (experimental)
-    #[cfg(feature = "experimental_repo")]
-    Repo {
-        #[command(subcommand)]
-        command: RepoCommand,
-    },
-}
-
-#[derive(Parser, Debug)]
-pub enum RepoCommand {
-    /// Add a new repository
-    Add {
-        /// Path to the repository
-        #[arg(required = true)]
-        path: String,
-
-        /// Repository name (optional, defaults to directory name)
-        #[arg(short = 'n', long = "name")]
-        name: Option<String>,
-
-        /// File types to index (e.g. rs,rb,go,js,ts,yaml,md)
-        #[arg(short = 't', long = "file-types", value_delimiter = ',')]
-        file_types: Option<Vec<String>>,
-
-        /// Embedding model type (fast, onnx)
-        #[arg(long = "model")]
-        model: Option<String>,
-    },
-
-    /// Import repositories from a YAML file
-    ImportYaml {
-        /// Path to the YAML configuration file
-        #[arg(required = true)]
-        path: String,
-
-        /// Skip existing repositories instead of failing
-        #[arg(short = 's', long = "skip-existing")]
-        skip_existing: bool,
-    },
-
-    /// Remove a repository
-    Remove {
-        /// Repository ID or name
-        #[arg(required = true)]
-        repo: String,
-    },
-
-    /// List repositories
-    List,
-
-    /// Set the active repository
-    Use {
-        /// Repository ID or name
-        #[arg(required = true)]
-        repo: String,
-
-        /// Branch to switch to
-        #[arg(short = 'b', long = "branch")]
-        branch: Option<String>,
-    },
-
-    /// Sync a repository
-    Sync {
-        /// Repository ID or name
-        #[arg(required = true)]
-        repo: String,
-
-        /// Branch to sync (defaults to active branch)
-        #[arg(short = 'b', long = "branch")]
-        branch: Option<String>,
-
-        /// Sync all branches
-        #[arg(long = "all-branches")]
-        all_branches: bool,
-
-        /// Force full reindexing
-        #[arg(long = "force")]
-        force: bool,
-
-        /// Number of threads to use for indexing (defaults to available CPUs)
-        #[arg(short = 'j', long = "threads")]
-        threads: Option<usize>,
-    },
-
-    /// Sync all repositories
-    SyncAll {
-        /// Force full reindexing
-        #[arg(long = "force")]
-        force: bool,
-
-        /// Number of threads to use for indexing (defaults to available CPUs)
-        #[arg(short = 'j', long = "threads")]
-        threads: Option<usize>,
-    },
-
-    /// Show repository status
-    Status {
-        /// Repository ID or name
-        #[arg(required = true)]
-        repo: String,
-    },
-
-    /// Configure auto-sync for repositories
-    #[cfg(feature = "experimental_repo")]
-    AutoSync {
-        #[command(subcommand)]
-        command: AutoSyncCommand,
-    },
-}
-
-#[derive(Parser, Debug)]
-#[cfg(feature = "experimental_repo")]
-pub enum AutoSyncCommand {
-    /// Start auto-sync daemon for repositories with auto-sync enabled
-    Start,
-
-    /// Stop auto-sync daemon
-    Stop,
-
-    /// Enable auto-sync for a repository
-    Enable {
-        /// Repository name or ID
-        #[arg(required = true)]
-        repo: String,
-    },
-
-    /// Disable auto-sync for a repository
-    Disable {
-        /// Repository name or ID
-        #[arg(required = true)]
-        repo: String,
-    },
-
-    /// List repositories with auto-sync enabled
-    List,
-
-    /// Show status of auto-sync daemon
-    Status,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -451,8 +304,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             vector_weight,
             bm25_weight,
             file_types,
-            repositories,
-            all_repositories,
         } => {
             debug!("Executing Query command: \"{}\"", query);
 
@@ -482,9 +333,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                     debug!("Successfully created embedding model: {:?}", model_type);
                     let mut search = Search::new(db, model);
 
-                    // Determine if we should search multiple repositories
-                    let should_search_multiple = repositories.is_some() || all_repositories;
-
                     // Prepare file type filter
                     let file_types_to_use = if let Some(types) = file_types {
                         if types.is_empty() {
@@ -499,224 +347,114 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                         Some(VectorDB::get_supported_file_types())
                     };
 
-                    if should_search_multiple {
-                        debug!("Performing multi-repository search");
-                        println!("Searching across repositories...");
+                    // Do a regular search
+                    debug!("Performing standard search (not multi-repository)");
 
-                        // Create search options
-                        let mut search_options = crate::vectordb::search::SearchOptions {
-                            max_results: limit,
-                            file_types: file_types_to_use,
-                            vector_weight: if vector_only {
-                                Some(1.0)
-                            } else {
-                                vector_weight
-                            },
-                            bm25_weight: if vector_only { Some(0.0) } else { bm25_weight },
-                            repositories: None,
-                            branches: None,
-                        };
-
-                        // If specific repositories are specified, resolve them to IDs
-                        if let Some(repo_names) = repositories {
-                            if !repo_names.is_empty() {
-                                println!("Searching in repositories: {}", repo_names.join(", "));
-
-                                let repo_ids = repo_names
-                                    .iter()
-                                    .filter_map(|name| {
-                                        match search.db.repo_manager.resolve_repo_name_to_id(name) {
-                                            Ok(id) => Some(id),
-                                            Err(_) => {
-                                                eprintln!(
-                                                    "Warning: Repository '{}' not found",
-                                                    name
-                                                );
-                                                None
-                                            }
-                                        }
-                                    })
-                                    .collect::<Vec<_>>();
-
-                                search_options.repositories = Some(repo_ids);
-                            }
-                        } else if all_repositories {
-                            println!("Searching across all repositories");
-                            // Just leave repositories as None to search all
-                        }
-
-                        // Perform multi-repository search
-                        let results = search.multi_repo_search(&query, search_options)?;
-
-                        if results.is_empty() {
-                            debug!("No results found for query: \"{}\"", query);
-                            println!("No results found.");
-                            return Ok(());
-                        }
-
-                        // Display results
-                        println!("\nSearch results for: {}\n", query);
-
-                        for (i, result) in results.iter().enumerate() {
-                            let repo_info = if let Some(repo) = &result.repository {
-                                format!("[{}]", repo)
-                            } else {
-                                "".to_string()
-                            };
-
-                            let branch_info = if let Some(branch) = &result.branch {
-                                format!("({})", branch)
-                            } else {
-                                "".to_string()
-                            };
-
-                            println!(
-                                "{}. {} {} {} (similarity: {:.2})",
-                                i + 1,
-                                result.file_path,
-                                repo_info,
-                                branch_info,
-                                result.similarity
-                            );
-
-                            // Limit the snippet size to avoid displaying entire files
-                            let max_lines = 20; // Reasonable number of lines to display
-                            let snippet_lines: Vec<&str> = result.snippet.lines().collect();
-
-                            // If snippet is too large, only show a subset with indication
-                            if snippet_lines.len() > max_lines {
-                                // Show first few lines
-                                for line in &snippet_lines[0..max_lines / 2] {
-                                    println!("{}", line);
-                                }
-
-                                // Show ellipsis to indicate truncation
-                                println!(
-                                    "... [truncated {} lines] ...",
-                                    snippet_lines.len() - max_lines
-                                );
-
-                                // Show last few lines
-                                for line in &snippet_lines[snippet_lines.len() - max_lines / 2..] {
-                                    println!("{}", line);
-                                }
-                            } else {
-                                // Show entire snippet if it's reasonably sized
-                                println!("{}", result.snippet);
-                            }
-
-                            println!();
-                        }
+                    // Determine search type based on flags
+                    let mut results = if vector_only {
+                        debug!("Performing vector-only search");
+                        println!("Performing vector-only search...");
+                        search.search_with_limit(&query, limit)?
                     } else {
-                        // Do a regular search
-                        debug!("Performing standard search (not multi-repository)");
+                        debug!("Performing hybrid search (vector + BM25)");
+                        println!("Performing hybrid search (combining semantic and lexical matching)...");
 
-                        // Determine search type based on flags
-                        let mut results = if vector_only {
-                            debug!("Performing vector-only search");
-                            println!("Performing vector-only search...");
-                            search.search_with_limit(&query, limit)?
-                        } else {
-                            debug!("Performing hybrid search (vector + BM25)");
-                            println!("Performing hybrid search (combining semantic and lexical matching)...");
+                        // Show weights being used
+                        let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
+                        let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
+                        debug!(
+                            "Using weights: vector={:.2}, bm25={:.2}",
+                            v_weight, b_weight
+                        );
+                        println!(
+                            "Using weights: vector={:.2}, bm25={:.2}",
+                            v_weight, b_weight
+                        );
 
-                            // Show weights being used
-                            let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
-                            let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
-                            debug!(
-                                "Using weights: vector={:.2}, bm25={:.2}",
-                                v_weight, b_weight
-                            );
-                            println!(
-                                "Using weights: vector={:.2}, bm25={:.2}",
-                                v_weight, b_weight
-                            );
+                        search.hybrid_search_with_limit(
+                            &query,
+                            vector_weight,
+                            bm25_weight,
+                            limit,
+                        )?
+                    };
 
-                            search.hybrid_search_with_limit(
-                                &query,
-                                vector_weight,
-                                bm25_weight,
-                                limit,
-                            )?
-                        };
-
-                        // Filter results by file type if specified
-                        if let Some(types) = file_types_to_use {
-                            if !types.is_empty() {
-                                debug!("Filtering results by file types: {:?}", types);
-                                results.retain(|result| {
-                                    let path = Path::new(&result.file_path);
-                                    if let Some(ext) = path.extension() {
-                                        let ext_str = ext.to_string_lossy().to_string();
-                                        types.contains(&ext_str)
-                                    } else {
-                                        false
-                                    }
-                                });
-                            }
-                        }
-
-                        if results.is_empty() {
-                            debug!("No results found for query: \"{}\"", query);
-                            println!("No results found.");
-                            return Ok(());
-                        }
-
-                        // Check if this is a method-related query
-                        let is_method_query = query.to_lowercase().contains("method")
-                            || query.to_lowercase().contains("function")
-                            || query.to_lowercase().contains("fn ");
-
-                        if is_method_query {
-                            debug!(
-                                "Presenting method search results, {} results found",
-                                results.len()
-                            );
-                            println!("\nSearch results for methods: {}\n", query);
-                        } else {
-                            debug!(
-                                "Presenting general search results, {} results found",
-                                results.len()
-                            );
-                            println!("\nSearch results for: {}\n", query);
-                        }
-
-                        for (i, result) in results.iter().enumerate() {
-                            println!(
-                                "{}. {} (similarity: {:.2})",
-                                i + 1,
-                                result.file_path,
-                                result.similarity
-                            );
-
-                            // Limit the snippet size to avoid displaying entire files
-                            let max_lines = 20; // Reasonable number of lines to display
-                            let snippet_lines: Vec<&str> = result.snippet.lines().collect();
-
-                            // If snippet is too large, only show a subset with indication
-                            if snippet_lines.len() > max_lines {
-                                // Show first few lines
-                                for line in &snippet_lines[0..max_lines / 2] {
-                                    println!("{}", line);
+                    // Filter results by file type if specified
+                    if let Some(types) = file_types_to_use {
+                        if !types.is_empty() {
+                            debug!("Filtering results by file types: {:?}", types);
+                            results.retain(|result| {
+                                let path = Path::new(&result.file_path);
+                                if let Some(ext) = path.extension() {
+                                    let ext_str = ext.to_string_lossy().to_string();
+                                    types.contains(&ext_str)
+                                } else {
+                                    false
                                 }
+                            });
+                        }
+                    }
 
-                                // Show ellipsis to indicate truncation
-                                println!(
-                                    "... [truncated {} lines] ...",
-                                    snippet_lines.len() - max_lines
-                                );
+                    if results.is_empty() {
+                        debug!("No results found for query: \"{}\"", query);
+                        println!("No results found.");
+                        return Ok(());
+                    }
 
-                                // Show last few lines
-                                for line in &snippet_lines[snippet_lines.len() - max_lines / 2..] {
-                                    println!("{}", line);
-                                }
-                            } else {
-                                // Show entire snippet if it's reasonably sized
-                                println!("{}", result.snippet);
+                    // Check if this is a method-related query
+                    let is_method_query = query.to_lowercase().contains("method")
+                        || query.to_lowercase().contains("function")
+                        || query.to_lowercase().contains("fn ");
+
+                    if is_method_query {
+                        debug!(
+                            "Presenting method search results, {} results found",
+                            results.len()
+                        );
+                        println!("\nSearch results for methods: {}\n", query);
+                    } else {
+                        debug!(
+                            "Presenting general search results, {} results found",
+                            results.len()
+                        );
+                        println!("\nSearch results for: {}\n", query);
+                    }
+
+                    for (i, result) in results.iter().enumerate() {
+                        println!(
+                            "{}. {} (similarity: {:.2})",
+                            i + 1,
+                            result.file_path,
+                            result.similarity
+                        );
+
+                        // Limit the snippet size to avoid displaying entire files
+                        let max_lines = 20; // Reasonable number of lines to display
+                        let snippet_lines: Vec<&str> = result.snippet.lines().collect();
+
+                        // If snippet is too large, only show a subset with indication
+                        if snippet_lines.len() > max_lines {
+                            // Show first few lines
+                            for line in &snippet_lines[0..max_lines / 2] {
+                                println!("{}", line);
                             }
 
-                            println!();
+                            // Show ellipsis to indicate truncation
+                            println!(
+                                "... [truncated {} lines] ...",
+                                snippet_lines.len() - max_lines
+                            );
+
+                            // Show last few lines
+                            for line in &snippet_lines[snippet_lines.len() - max_lines / 2..] {
+                                println!("{}", line);
+                            }
+                        } else {
+                            // Show entire snippet if it's reasonably sized
+                            println!("{}", result.snippet);
                         }
+
+                        println!();
                     }
                 }
                 Err(e) => {
@@ -943,8 +681,6 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("Operation cancelled.");
             }
         }
-        #[cfg(feature = "experimental_repo")]
-        Command::Repo { command } => execute_repo_command(command, db)?,
     }
     Ok(())
 }
@@ -1003,984 +739,31 @@ fn get_embedding_model(
     }
 }
 
-/// Execute repository management commands
-#[cfg(feature = "experimental_repo")]
-fn execute_repo_command(command: RepoCommand, mut db: VectorDB) -> Result<()> {
-    match command {
-        RepoCommand::Add {
-            path,
-            name,
-            file_types,
-            model,
-        } => {
-            debug!("Adding repository: {}", path);
-
-            // Verify path exists and is a git repository
-            let repo_path = PathBuf::from(&path);
-            if !repo_path.exists() {
-                return Err(anyhow!("Repository path does not exist: {}", path));
-            }
-
-            let git_dir = repo_path.join(".git");
-            if !git_dir.exists() {
-                return Err(anyhow!("Not a git repository: {}", path));
-            }
-
-            // Add the repository
-            match db.repo_manager.add_repository(repo_path, name.clone()) {
-                Ok(repo_id) => {
-                    println!(
-                        "Repository added successfully: {}",
-                        name.clone().unwrap_or_else(|| path.clone())
-                    );
-                    println!("Repository ID: {}", repo_id);
-
-                    // Update file types if provided, otherwise use all supported types
-                    if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
-                        if let Some(types) = file_types {
-                            if !types.is_empty() {
-                                repo.file_types = types.clone();
-                                println!("File types set to: {}", types.join(", "));
-                            } else {
-                                // Empty list provided, use all supported types
-                                repo.file_types = VectorDB::get_supported_file_types();
-                                println!(
-                                    "Using all supported file types: {}",
-                                    repo.file_types.join(", ")
-                                );
-                            }
-                        } else {
-                            // No file types specified, use all supported types
-                            repo.file_types = VectorDB::get_supported_file_types();
-                            println!(
-                                "Using all supported file types: {}",
-                                repo.file_types.join(", ")
-                            );
-                        }
-                    }
-
-                    // Update model type if provided
-                    if let Some(model_type) = model {
-                        if let Some(repo) = db.repo_manager.get_repository_mut(&repo_id) {
-                            match model_type.to_lowercase().as_str() {
-                                "fast" => {
-                                    repo.embedding_model = Some(EmbeddingModelType::Fast);
-                                    println!("Using fast embedding model for this repository");
-                                }
-                                "onnx" => {
-                                    repo.embedding_model = Some(EmbeddingModelType::Onnx);
-                                    println!("Using ONNX embedding model for this repository");
-                                }
-                                _ => {
-                                    println!("Unknown model type: {}. Using default.", model_type);
-                                }
-                            }
-                        }
-                    }
-
-                    // Save changes
-                    db.repo_manager.save()?;
-
-                    println!(
-                        "Use 'vectordb-cli repo sync {}' to index this repository",
-                        name.unwrap_or_else(|| repo_id)
-                    );
-
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
-        }
-
-        RepoCommand::ImportYaml {
-            path,
-            skip_existing,
-        } => {
-            debug!("Importing repositories from YAML file: {}", path);
-
-            // Parse the YAML file and import repositories
-            let yaml_path = Path::new(&path);
-            match repo_yaml::import_repositories_from_yaml(
-                yaml_path,
-                &mut db.repo_manager,
-                skip_existing,
-            ) {
-                Ok(result) => {
-                    // Show summary of imported repositories
-                    if !result.successful.is_empty() {
-                        println!(
-                            "\n{} repositories imported successfully:",
-                            result.successful.len()
-                        );
-                        for repo in &result.successful {
-                            println!("  ✓ {}", repo.green());
-                        }
-                    }
-
-                    if !result.skipped.is_empty() {
-                        println!(
-                            "\n{} repositories skipped (already exist):",
-                            result.skipped.len()
-                        );
-                        for repo in &result.skipped {
-                            println!("  ! {}", repo.yellow());
-                        }
-                    }
-
-                    if !result.failed.is_empty() {
-                        println!("\n{} repositories failed to import:", result.failed.len());
-                        for (repo, error) in &result.failed {
-                            println!("  ✗ {} - {}", repo.red(), error);
-                        }
-                    }
-
-                    println!(
-                        "\nSummary: {} imported, {} skipped, {} failed",
-                        result.successful.len(),
-                        result.skipped.len(),
-                        result.failed.len()
-                    );
-
-                    // Provide guidance for next steps
-                    if !result.successful.is_empty() {
-                        println!("\nUse 'vectordb-cli repo list' to see all repositories");
-                        println!("Use 'vectordb-cli repo sync <repo>' to index repositories (branches are only tracked until synced)");
-                    }
-
-                    Ok(())
-                }
-                Err(e) => Err(anyhow!("Failed to import repositories from YAML: {}", e)),
-            }
-        }
-
-        RepoCommand::Remove { repo } => {
-            debug!("Removing repository: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get repository name for display
-            let repo_name = db
-                .repo_manager
-                .get_repository(&repo_id)
-                .map(|r| r.name.clone())
-                .unwrap_or_else(|| repo.to_string());
-
-            // Remove the repository
-            db.repo_manager.remove_repository(&repo_id)?;
-
-            println!("Repository '{}' removed successfully", repo_name);
-
-            Ok(())
-        }
-
-        RepoCommand::List => {
-            debug!("Listing repositories");
-
-            let repos = db.repo_manager.list_repositories();
-
-            if repos.is_empty() {
-                println!("No repositories configured");
-                return Ok(());
-            }
-
-            println!("Configured repositories:");
-            println!(
-                "{:<36} {:<20} {:<10} {:<15} {:<20} {:<25}",
-                "ID", "NAME", "ACTIVE", "CURRENT BRANCH", "BRANCHES", "LANGUAGES"
-            );
-            println!("{}", "-".repeat(126));
-
-            for repo in repos {
-                let active_marker = if repo.active { "Yes" } else { "No" };
-                let branch_count = repo.indexed_branches.len();
-
-                // Get the current git branch of the repository
-                let current_branch = match crate::utils::git::GitRepo::new(repo.path.clone()) {
-                    Ok(git_repo) => match git_repo.get_current_branch() {
-                        Ok(branch) => branch,
-                        Err(_) => "Unknown".to_string(),
-                    },
-                    Err(_) => "Unknown".to_string(),
-                };
-
-                // Format the languages (file types) being indexed
-                let languages = if repo.file_types.is_empty() {
-                    "All supported".to_string()
-                } else {
-                    // Limit to first few languages if there are many
-                    if repo.file_types.len() > 3 {
-                        format!(
-                            "{} +{} more",
-                            repo.file_types[0..3].join(", "),
-                            repo.file_types.len() - 3
-                        )
-                    } else {
-                        repo.file_types.join(", ")
-                    }
-                };
-
-                println!(
-                    "{:<36} {:<20} {:<10} {:<15} {:<20} {:<25}",
-                    repo.id,
-                    repo.name,
-                    active_marker,
-                    current_branch,
-                    if branch_count > 0 {
-                        format!("{} tracked", branch_count)
-                    } else {
-                        "None tracked".to_string()
-                    },
-                    languages
-                );
-            }
-
-            // Show active repository
-            if let Some(active_id) = db.repo_manager.get_active_repository_id() {
-                if let Some(active_repo) = db.repo_manager.get_repository(active_id) {
-                    println!("\nActive repository: {} ({})", active_repo.name, active_id);
-                }
-            }
-
-            Ok(())
-        }
-
-        RepoCommand::Use { repo, branch } => {
-            debug!("Setting active repository: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get the repository and clone necessary data
-            let repo_name;
-            let active_branch;
-
-            {
-                let repo_config = db
-                    .repo_manager
-                    .get_repository(&repo_id)
-                    .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
-
-                repo_name = repo_config.name.clone();
-                active_branch = repo_config.active_branch.clone();
-            }
-
-            // Switch to this repository
-            db.switch_repository(&repo_id, branch.as_deref())?;
-
-            println!("Switched to repository: {}", repo_name);
-
-            if let Some(branch_name) = branch {
-                println!("Using branch: {}", branch_name);
-            } else {
-                println!("Using branch: {}", active_branch);
-            }
-
-            Ok(())
-        }
-
-        RepoCommand::Sync {
-            repo,
-            branch,
-            all_branches,
-            force,
-            threads,
-        } => {
-            debug!("Syncing repository: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get repository and clone necessary data
-            let repo_name;
-            let repo_path;
-            let active_branch;
-            let file_types;
-
-            {
-                let repo_config = db
-                    .repo_manager
-                    .get_repository(&repo_id)
-                    .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
-
-                repo_name = repo_config.name.clone();
-                repo_path = repo_config.path.clone();
-                active_branch = repo_config.active_branch.clone();
-                file_types = repo_config.file_types.clone();
-            }
-
-            if all_branches {
-                println!("Syncing all branches of repository '{}'...", repo_name);
-
-                // Get git repo
-                let git_repo = crate::utils::git::GitRepo::new(repo_path)
-                    .map_err(|e| anyhow!("Failed to access git repository: {}", e))?;
-
-                // Get all branches
-                let branches = git_repo
-                    .list_branches()
-                    .map_err(|e| anyhow!("Failed to list branches: {}", e))?;
-
-                if branches.is_empty() {
-                    println!("No branches found in repository");
-                    return Ok(());
-                }
-
-                println!("Found {} branches to sync", branches.len());
-                println!(
-                    "File types to index: {}",
-                    if file_types.is_empty() {
-                        let supported = VectorDB::get_supported_file_types();
-                        format!("{} (all supported types)", supported.join(", "))
-                    } else {
-                        file_types.join(", ")
-                    }
-                );
-
-                // Create progress bar
-                let progress = indicatif::ProgressBar::new(branches.len() as u64);
-                progress.set_style(
-                    indicatif::ProgressStyle::default_bar()
-                        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} branches synced ({eta}) {msg}")
-                        .unwrap()
-                        .progress_chars("#>-")
-                );
-
-                // Stats for overall progress
-                let start_time = std::time::Instant::now();
-                let mut successful_branches = 0;
-
-                // Sync each branch
-                for (i, branch_name) in branches.iter().enumerate() {
-                    progress.set_message(format!("Syncing branch {}", branch_name));
-
-                    // Sync specific branch
-                    let result = if force {
-                        db.index_repository_full(&repo_id, branch_name)
-                    } else {
-                        db.index_repository_changes(&repo_id, branch_name)
-                    };
-
-                    // Handle result
-                    match result {
-                        Ok(_) => {
-                            successful_branches += 1;
-                            progress.println(format!(
-                                "✓ Branch '{}' synced successfully ({}/{})",
-                                branch_name,
-                                i + 1,
-                                branches.len()
-                            ));
-
-                            // For the last synced branch, indicate it's now active
-                            if i == branches.len() - 1 {
-                                progress.println(format!(
-                                    "ℹ️ Branch '{}' is now the active branch for this repository",
-                                    branch_name
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            progress.println(format!(
-                                "⚠️ Failed to sync branch '{}': {}",
-                                branch_name, e
-                            ));
-                        }
-                    }
-
-                    progress.inc(1);
-
-                    // Show overall progress rate
-                    let elapsed = start_time.elapsed().as_secs();
-                    if elapsed > 0 {
-                        let branches_per_min = (successful_branches as f64 / elapsed as f64) * 60.0;
-                        progress.set_message(format!(
-                            "Syncing branch {} ({:.1} branches/min)",
-                            branch_name, branches_per_min
-                        ));
-                    }
-                }
-
-                // Report final stats
-                let elapsed = start_time.elapsed().as_secs();
-                let minutes = elapsed / 60;
-                let seconds = elapsed % 60;
-
-                progress.finish_with_message(format!(
-                    "Synced {}/{} branches in {}m{}s",
-                    successful_branches,
-                    branches.len(),
-                    minutes,
-                    seconds
-                ));
-            } else {
-                // Determine which branch to sync
-                let branch_name = branch.as_deref().unwrap_or(&active_branch);
-
-                println!(
-                    "Syncing repository '{}' branch '{}'...",
-                    repo_name, branch_name
-                );
-                println!(
-                    "File types to index: {}",
-                    if file_types.is_empty() {
-                        let supported = VectorDB::get_supported_file_types();
-                        format!("{} (all supported types)", supported.join(", "))
-                    } else {
-                        file_types.join(", ")
-                    }
-                );
-
-                let start_time = std::time::Instant::now();
-
-                // Check if we're switching branches and this is different from the active branch in the DB
-                let is_branch_switch = {
-                    if let Some(db_active_repo) = db.current_repo_id() {
-                        if let Some(db_active_branch) = db.current_branch() {
-                            &repo_id == db_active_repo && branch_name != db_active_branch
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                };
-
-                if is_branch_switch {
-                    println!("Detected branch switch, attempting efficient cross-branch sync...");
-                }
-
-                if force {
-                    println!("Performing full reindexing...");
-                    println!("Starting indexing... The progress bar will appear shortly.");
-
-                    // Set thread count if specified
-                    let num_cpus = num_cpus::get();
-                    if let Some(thread_count) = threads {
-                        debug!(
-                            "Setting thread count to {} (of {} available CPUs)",
-                            thread_count, num_cpus
-                        );
-                        println!(
-                            "Using {} threads for indexing ({} CPUs available)...",
-                            thread_count, num_cpus
-                        );
-                        let _ = rayon::ThreadPoolBuilder::new()
-                            .num_threads(thread_count)
-                            .build_global()
-                            .map_err(|e| println!("Failed to set thread count: {}", e));
-                    }
-
-                    db.index_repository_full(&repo_id, branch_name)?;
-                } else {
-                    println!("Performing incremental indexing...");
-                    println!("Starting indexing... The progress bar will appear shortly.");
-
-                    // Set thread count if specified
-                    let num_cpus = num_cpus::get();
-                    if let Some(thread_count) = threads {
-                        debug!(
-                            "Setting thread count to {} (of {} available CPUs)",
-                            thread_count, num_cpus
-                        );
-                        println!(
-                            "Using {} threads for indexing ({} CPUs available)...",
-                            thread_count, num_cpus
-                        );
-                        let _ = rayon::ThreadPoolBuilder::new()
-                            .num_threads(thread_count)
-                            .build_global()
-                            .map_err(|e| println!("Failed to set thread count: {}", e));
-                    }
-
-                    // Get the repository to check commit information
-                    let repo_config = db
-                        .repo_manager
-                        .get_repository(&repo_id)
-                        .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
-
-                    // Check if the branch is already indexed
-                    let indexed_commit = repo_config.get_indexed_commit(branch_name);
-
-                    // Create a git repository object
-                    let git_repo = crate::utils::git::GitRepo::new(repo_path.clone())
-                        .map_err(|e| anyhow!("Failed to access git repository: {}", e))?;
-
-                    // Get the current commit hash
-                    let current_commit = git_repo
-                        .get_commit_hash(branch_name)
-                        .map_err(|e| anyhow!("Failed to get commit hash: {}", e))?;
-
-                    // Check if commits are the same (no changes)
-                    if let Some(last_commit) = indexed_commit {
-                        if last_commit == &current_commit {
-                            println!(
-                                "Branch is already at latest commit ({}) - no changes to index.",
-                                current_commit
-                            );
-                            return Ok(());
-                        } else {
-                            // Get changes between commits
-                            match git_repo.get_change_set(last_commit, &current_commit) {
-                                Ok(changes) => {
-                                    let total_changes = changes.added_files.len()
-                                        + changes.modified_files.len()
-                                        + changes.deleted_files.len();
-                                    println!("Found {} changes between commits:", total_changes);
-                                    println!("  - {} files added", changes.added_files.len());
-                                    println!("  - {} files modified", changes.modified_files.len());
-                                    println!("  - {} files deleted", changes.deleted_files.len());
-                                }
-                                Err(e) => {
-                                    println!("Failed to get changes between commits: {}", e);
-                                }
-                            }
-                        }
-                    } else {
-                        println!(
-                            "Branch '{}' has not been indexed before - performing full index.",
-                            branch_name
-                        );
-                    }
-
-                    db.index_repository_changes(&repo_id, branch_name)?;
-                }
-
-                // Report execution time
-                let elapsed = start_time.elapsed().as_secs();
-                let minutes = elapsed / 60;
-                let seconds = elapsed % 60;
-
-                println!(
-                    "Repository '{}' branch '{}' synced successfully in {}m{}s",
-                    repo_name, branch_name, minutes, seconds
-                );
-                println!(
-                    "✓ Branch '{}' is now the active branch for this repository",
-                    branch_name
-                );
-            }
-
-            Ok(())
-        }
-
-        RepoCommand::SyncAll { force, threads } => {
-            debug!("Syncing all repositories");
-
-            // Get the list of repositories and clone necessary data to avoid borrowing issues
-            let repos: Vec<_> = db
-                .repo_manager
-                .list_repositories()
-                .into_iter()
-                .map(|repo| {
-                    (
-                        repo.id.clone(),
-                        repo.name.clone(),
-                        repo.active_branch.clone(),
-                    )
-                })
-                .collect();
-
-            if repos.is_empty() {
-                println!("No repositories configured");
-                return Ok(());
-            }
-
-            println!("Syncing all {} repositories...", repos.len());
-
-            // Create progress bar
-            let progress = indicatif::ProgressBar::new(repos.len() as u64);
-            progress.set_style(
-                indicatif::ProgressStyle::default_bar()
-                    .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} repositories synced ({eta}) {msg}")
-                    .unwrap()
-                    .progress_chars("#>-")
-            );
-
-            // Stats for overall progress
-            let start_time = std::time::Instant::now();
-            let mut successful = 0;
-            let mut failed = 0;
-
-            // Set thread count if specified
-            let num_cpus = num_cpus::get();
-            if let Some(thread_count) = threads {
-                debug!(
-                    "Setting thread count to {} (of {} available CPUs)",
-                    thread_count, num_cpus
-                );
-                println!(
-                    "Using {} threads for indexing ({} CPUs available)...",
-                    thread_count, num_cpus
-                );
-                let _ = rayon::ThreadPoolBuilder::new()
-                    .num_threads(thread_count)
-                    .build_global()
-                    .map_err(|e| println!("Failed to set thread count: {}", e));
-            }
-
-            for (i, (repo_id, repo_name, active_branch)) in repos.iter().enumerate() {
-                progress.set_message(format!("Syncing repository {}", repo_name));
-
-                // Check if this repository has been indexed before
-                let repo_config = db.repo_manager.get_repository(repo_id);
-                let needs_full_index = force
-                    || repo_config.map_or(true, |repo| {
-                        // If the repo exists, check if this branch has been indexed
-                        repo.get_indexed_commit(active_branch).is_none()
-                    });
-
-                // Perform the sync
-                let result = if needs_full_index {
-                    // If force is true or the branch has never been indexed, do a full index
-                    progress.println(format!(
-                        "Performing full index of repository '{}'...",
-                        repo_name
-                    ));
-                    db.index_repository_full(repo_id, active_branch)
-                } else {
-                    // Otherwise do an incremental index
-                    db.index_repository_changes(repo_id, active_branch)
-                };
-
-                // Handle result
-                match result {
-                    Ok(_) => {
-                        successful += 1;
-                        progress.println(format!(
-                            "✓ Repository '{}' synced successfully ({}/{})",
-                            repo_name,
-                            i + 1,
-                            repos.len()
-                        ));
-                        progress.println(format!(
-                            "ℹ️ Branch '{}' is now the active branch for this repository",
-                            active_branch
-                        ));
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        progress.println(format!(
-                            "⚠️ Failed to sync repository '{}': {}",
-                            repo_name, e
-                        ));
-                    }
-                }
-
-                progress.inc(1);
-
-                // Show overall progress rate
-                let elapsed = start_time.elapsed().as_secs();
-                if elapsed > 0 {
-                    let repos_per_min = (successful as f64 / elapsed as f64) * 60.0;
-                    progress.set_message(format!(
-                        "Syncing repository {} ({:.1} repos/min)",
-                        repo_name, repos_per_min
-                    ));
-                }
-            }
-
-            // Report final stats
-            let elapsed = start_time.elapsed().as_secs();
-            let minutes = elapsed / 60;
-            let seconds = elapsed % 60;
-
-            progress.finish_with_message(format!(
-                "Synced {}/{} repositories in {}m{}s",
-                successful,
-                repos.len(),
-                minutes,
-                seconds
-            ));
-
-            if failed > 0 {
-                println!("\n⚠️ {} repositories failed to sync", failed);
-            }
-
-            Ok(())
-        }
-
-        RepoCommand::Status { repo } => {
-            debug!("Showing repository status: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get repository and clone necessary data to prevent borrow checker issues
-            let repo_clone = db
-                .repo_manager
-                .get_repository(&repo_id)
-                .ok_or_else(|| anyhow!("Repository not found: {}", repo))?
-                .clone();
-
-            println!("Repository: {} ({})", repo_clone.name, repo_id);
-            println!("Path: {}", repo_clone.path.display());
-            println!("Active branch: {}", repo_clone.active_branch);
-            println!(
-                "Status: {}",
-                if repo_clone.active {
-                    "Active"
-                } else {
-                    "Inactive"
-                }
-            );
-
-            if let Some(last_indexed) = repo_clone.last_indexed {
-                println!("Last indexed: {}", last_indexed.format("%Y-%m-%d %H:%M:%S"));
-            } else {
-                println!("Last indexed: Never");
-            }
-
-            println!(
-                "File types: {}",
-                if repo_clone.file_types.is_empty() {
-                    let supported = VectorDB::get_supported_file_types();
-                    format!("{} (all supported types)", supported.join(", "))
-                } else {
-                    repo_clone.file_types.join(", ")
-                }
-            );
-
-            println!(
-                "Embedding model: {}",
-                match repo_clone.embedding_model {
-                    Some(EmbeddingModelType::Fast) => "Fast",
-                    Some(EmbeddingModelType::Onnx) => "ONNX",
-                    None => "Default",
-                }
-            );
-
-            println!("\nTracked branches:");
-            if repo_clone.indexed_branches.is_empty() {
-                println!("  No branches tracked yet");
-            } else {
-                for (branch, commit) in &repo_clone.indexed_branches {
-                    println!("  - {}: {}", branch, commit);
-                }
-            }
-
-            // Check if there are any updates needed
-            println!("\nStatus check:");
-
-            // Create git repo
-            match crate::utils::git::GitRepo::new(repo_clone.path.clone()) {
-                Ok(git_repo) => {
-                    // Check current branch
-                    if let Ok(current_branch) = git_repo.get_current_branch() {
-                        println!("Current branch: {}", current_branch);
-
-                        // Check if the branch is indexed
-                        if let Some(indexed_commit) = repo_clone.get_indexed_commit(&current_branch)
-                        {
-                            // Check if it needs reindexing
-                            match git_repo.needs_reindexing(&current_branch, indexed_commit) {
-                                Ok(needs_reindex) => {
-                                    if needs_reindex {
-                                        println!("⚠️ Branch '{}' needs reindexing", current_branch);
-                                        println!(
-                                            "Run 'vectordb-cli repo sync {}' to update the index",
-                                            repo
-                                        );
-                                    } else {
-                                        println!(
-                                            "✓ Branch '{}' index is up to date",
-                                            current_branch
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    println!(
-                                        "⚠️ Could not determine if branch needs reindexing: {}",
-                                        e
-                                    );
-                                }
-                            }
-                        } else {
-                            println!("⚠️ Branch '{}' has not been indexed yet", current_branch);
-                            println!("Run 'vectordb-cli repo sync {}' to index this branch", repo);
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!("⚠️ Could not access git repository: {}", e);
-                }
-            }
-
-            Ok(())
-        }
-
-        RepoCommand::AutoSync { command } => execute_auto_sync_command(command, db),
-    }
-}
-
-/// Execute auto-sync daemon commands
-#[cfg(feature = "experimental_repo")]
-fn execute_auto_sync_command(command: AutoSyncCommand, mut db: VectorDB) -> Result<()> {
-    match command {
-        AutoSyncCommand::Enable { repo, interval } => {
-            debug!("Enabling auto-sync for repository: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get the repository name
-            let repo_name = db
-                .repo_manager
-                .get_repository(&repo_id)
-                .map(|r| r.name.clone())
-                .ok_or_else(|| anyhow!("Repository not found: {}", repo))?;
-
-            // Enable auto-sync
-            db.repo_manager.enable_auto_sync(&repo_id, interval)?;
-
-            println!(
-                "Auto-sync enabled for repository: {} ({})",
-                repo_name, repo_id
-            );
-            println!("Run 'vectordb-cli repo auto-sync start' to start the auto-sync daemon");
-
-            Ok(())
-        }
-
-        AutoSyncCommand::Disable { repo } => {
-            debug!("Disabling auto-sync for repository: {}", repo);
-
-            // Resolve repository name/ID
-            let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo)?;
-
-            // Get repository name
-            let repo_name = db
-                .repo_manager
-                .get_repository(&repo_id)
-                .map(|r| r.name.clone())
-                .unwrap_or_else(|| repo_id.clone());
-
-            // Disable auto-sync
-            db.repo_manager.disable_auto_sync(&repo_id)?;
-
-            println!(
-                "Auto-sync disabled for repository: {} ({})",
-                repo_name, repo_id
-            );
-
-            Ok(())
-        }
-
-        AutoSyncCommand::Status { repo } => {
-            debug!("Showing auto-sync status");
-
-            // Show auto-sync status for a specific repository if specified
-            if let Some(repo_name) = repo {
-                let repo_id = db.repo_manager.resolve_repo_name_to_id(&repo_name)?;
-                let repo = db
-                    .repo_manager
-                    .get_repository(&repo_id)
-                    .ok_or_else(|| anyhow!("Repository not found: {}", repo_name))?;
-
-                println!(
-                    "Auto-sync status for repository: {} ({})",
-                    repo.name, repo_id
-                );
-                println!(
-                    "  Enabled: {}",
-                    if repo.auto_sync.enabled { "Yes" } else { "No" }
-                );
-                println!(
-                    "  Minimum sync interval: {} seconds",
-                    repo.auto_sync.min_interval
-                );
-
-                return Ok(());
-            }
-
-            // Show auto-sync status for all repositories
-            let all_repos = db.repo_manager.list_repositories();
-
-            if all_repos.is_empty() {
-                println!("No repositories configured");
-                return Ok(());
-            }
-
-            println!("Auto-sync status for all repositories:");
-            println!(
-                "{:<36} {:<20} {:<10} {:<20}",
-                "ID", "NAME", "ENABLED", "INTERVAL"
-            );
-            println!("{}", "-".repeat(86));
-
-            // Count repos with auto-sync enabled
-            let mut auto_sync_count = 0;
-
-            for repo in all_repos {
-                let enabled = if repo.auto_sync.enabled {
-                    auto_sync_count += 1;
-                    "Yes"
-                } else {
-                    "No"
-                };
-                let interval = format!("{} seconds", repo.auto_sync.min_interval);
-
-                println!(
-                    "{:<36} {:<20} {:<10} {:<20}",
-                    repo.id, repo.name, enabled, interval
-                );
-            }
-
-            if auto_sync_count == 0 {
-                println!("\nNo repositories have auto-sync enabled.");
-            } else {
-                println!("\n{} repositories have auto-sync enabled.", auto_sync_count);
-            }
-
-            Ok(())
-        }
-
-        AutoSyncCommand::Start => {
-            debug!("Starting auto-sync daemon");
-
-            // Clone repos before starting daemon to avoid borrowing conflicts
-            let auto_sync_repos = db.repo_manager.get_auto_sync_repos();
-            let repo_names: Vec<_> = auto_sync_repos
-                .iter()
-                .map(|r| (r.name.clone(), r.id.clone(), r.auto_sync.min_interval))
-                .collect();
-
-            if repo_names.is_empty() {
-                println!("No repositories have auto-sync enabled. Enable auto-sync first with 'vectordb-cli repo auto-sync enable <repo>'");
-                return Ok(());
-            }
-
-            // Start auto-sync daemon
-            db.start_auto_sync()?;
-
-            println!("Auto-sync daemon started for the following repositories:");
-            for (name, id, interval) in repo_names {
-                println!("  - {} ({})", name, id);
-                println!("    Interval: {} seconds", interval);
-            }
-
-            Ok(())
-        }
-
-        AutoSyncCommand::Stop => {
-            debug!("Stopping auto-sync daemon");
-
-            // Stop auto-sync daemon
-            db.stop_auto_sync()?;
-
-            println!("Auto-sync daemon stopped");
-
-            Ok(())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use crate::vectordb::hnsw::HNSWConfig;
+    use crate::vectordb::test_utils::create_test_files; // Import needed function
+    use std::collections::HashMap;
+    use std::fs::{self, File};
     use std::io::Write;
     use tempfile::tempdir;
+
+    // Helper function to create a VectorDB instance for testing
+    fn create_test_db(db_path: &str) -> Result<VectorDB> {
+        let db = VectorDB::new(db_path.to_string())?;
+        let dir_path = tempdir()?;
+        let dir_path_str = dir_path.path().to_string_lossy().to_string();
+
+        // Create a test directory with files
+        create_test_files(&dir_path_str, 50)?;
+
+        // Index files
+        db.index_directory(&dir_path_str, &["txt".to_string()])?;
+        db.save()?;
+
+        Ok(db)
+    }
 
     #[test]
     fn test_hnsw_index_creation() -> Result<()> {
@@ -2022,52 +805,79 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Ignore potentially slow test
     fn test_hnsw_search_performance() -> anyhow::Result<()> {
         let temp_dir = tempdir()?;
-        let dir_path = temp_dir.path().to_string_lossy().to_string();
+        let db_path = temp_dir.path().join("perf_test.db").to_string_lossy().to_string();
+        let dir_path = temp_dir.path().join("perf_data");
+        fs::create_dir(&dir_path)?;
+        let dir_path_str = dir_path.to_string_lossy().to_string();
 
-        // Create a test directory with files
-        create_test_files(&dir_path, 50)?;
+        // Create a larger number of files
+        let num_files = 1000;
+        let file_types = vec!["txt".to_string()];
+        create_test_files(&dir_path, num_files, "perf test content")?;
 
-        // Create a test database
-        let db_path = tempdir()?
-            .path()
-            .join("test.db")
-            .to_string_lossy()
-            .to_string();
-        let db_path_slow = tempdir()?
-            .path()
-            .join("test_slow.db")
-            .to_string_lossy()
-            .to_string();
 
-        // Create two VectorDBs - one with HNSW and one without
-        let mut db_hnsw = VectorDB::new(db_path.clone())?;
-        let mut db_slow = VectorDB::new(db_path_slow.clone())?;
+        let mut db = create_test_db(&db_path)?;
+         // Enable HNSW
+        let config = HNSWConfig {
+             space_type: crate::vectordb::hnsw::SpaceType::Cosine,
+             m: 32, // Higher M for potentially better accuracy
+             ef_construction: 400, // Higher ef_construction
+             num_layers: HNSWConfig::calculate_optimal_layers(num_files),
+        };
+        db.set_hnsw_config(Some(config));
 
-        db_hnsw.index_directory(&dir_path, &["txt".to_string()])?;
-        db_slow.index_directory(&dir_path, &["txt".to_string()])?;
 
-        // For the slow DB, disable HNSW
-        let db_clone = db_slow.clone();
+        // Index files
+        println!("Indexing {} files for performance test...", num_files);
+        db.index_directory(&dir_path_str, &file_types)?;
+        db.save()?;
+        println!("Indexing complete.");
 
-        // Use a simple query
-        let query = "function search implementation";
+        assert!(db.hnsw_index.is_some());
+        assert_eq!(db.embeddings.len(), num_files);
+        assert!(db.hnsw_index.as_ref().unwrap().stats().total_nodes >= num_files); // Should be at least num_files
 
-        // Measure performance for HNSW search
-        // Skip actual time measurements since they're not deterministic in tests
+        // Perform a search using HNSW
+        let model = db.create_embedding_model()?;
+        let query = "performance test";
+        let query_embedding = model.embed(query)?;
+        let search = Search::new(&db, query_embedding.clone());
+
         let start_hnsw = Instant::now();
-        // Create an embedding model for Search::new
-        let model = db_hnsw.create_embedding_model()?;
-        let mut searcher = Search::new(db_hnsw, model); // Pass model, remove ?
-        let hnsw_results = searcher.search(query)?;
-        let _hnsw_time = start_hnsw.elapsed();
+        let results_hnsw = search.search_with_limit(query, 10, None, None)?; // Use hybrid default
+        let duration_hnsw = start_hnsw.elapsed();
+        println!("HNSW search took: {:?}", duration_hnsw);
+        assert!(!results_hnsw.is_empty());
 
-        // Verify we get results
-        assert!(!hnsw_results.is_empty());
 
-        // Verify the top score is reasonable
-        assert!(hnsw_results[0].similarity > 0.0);
+        // Disable HNSW for comparison
+         println!("Disabling HNSW index for comparison...");
+        db.set_hnsw_config(None); // This removes the index
+        assert!(db.hnsw_index.is_none());
+
+
+        // Perform search without HNSW (brute force)
+         let search_brute = Search::new(&db, query_embedding);
+        let start_brute = Instant::now();
+        let results_brute = search_brute.search_with_limit(query, 10, None, None)?; // Use hybrid default
+        let duration_brute = start_brute.elapsed();
+        println!("Brute force search took: {:?}", duration_brute);
+        assert!(!results_brute.is_empty());
+
+
+        // Basic assertion: HNSW should generally be faster for larger datasets
+         // This might fail for very small datasets where overhead dominates
+         if num_files > 100 {
+             // Add some tolerance, e.g. brute force shouldn't be 10x faster
+             assert!(duration_hnsw < duration_brute * 10, "HNSW search was significantly slower than brute force");
+             println!("HNSW speedup factor: {:.2}x", duration_brute.as_secs_f64() / duration_hnsw.as_secs_f64());
+         } else {
+             println!("Skipping performance comparison assertion for small dataset ({} files)", num_files);
+         }
+
 
         Ok(())
     }
