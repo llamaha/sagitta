@@ -256,6 +256,10 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
 
         Ok(results)
     }
+
+    fn dim(&self) -> usize {
+        ONNX_EMBEDDING_DIM
+    }
 }
 
 #[cfg(test)]

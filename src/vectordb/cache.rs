@@ -216,6 +216,16 @@ impl EmbeddingCache {
         // No save here - intended for batch inserts
         Ok(())
     }
+
+    /// Removes an entry from the cache if it exists.
+    pub fn remove(&mut self, key: &str) -> Result<Option<CacheEntry>> {
+        let removed = self.entries.remove(key);
+        if removed.is_some() {
+            // Save the cache if an entry was actually removed
+            self.save()?;
+        }
+        Ok(removed)
+    }
 }
 
 #[cfg(test)]
