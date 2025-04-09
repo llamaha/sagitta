@@ -2,12 +2,10 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use vectordb_cli::vectordb::provider::batch_processor::BatchProcessorConfig;
 use vectordb_cli::vectordb::provider::onnx::{
-    OnnxEmbeddingProvider, OptimizedOnnxEmbeddingProvider, ONNX_EMBEDDING_DIM,
+    OnnxEmbeddingProvider,
+    ONNX_EMBEDDING_DIM,
 };
-use vectordb_cli::vectordb::provider::session_manager::SessionConfig;
-use vectordb_cli::vectordb::provider::tokenizer_cache::TokenizerCacheConfig;
 use vectordb_cli::vectordb::provider::EmbeddingProvider;
 
 /// Command line arguments
@@ -35,7 +33,7 @@ struct Args {
     batch_sizes: String,
 
     /// Provider to benchmark
-    #[clap(long, value_enum, default_value = "optimized")]
+    #[clap(long, value_enum, default_value = "basic")]
     provider: ProviderType,
 
     /// Text file with sample inputs (one per line)
@@ -47,7 +45,7 @@ struct Args {
     pre_warm: bool,
 
     /// Whether to use dynamic batching
-    #[clap(long, default_value = "true")]
+    #[clap(long, default_value = "false")]
     dynamic_batching: bool,
 
     /// Output results in CSV format
@@ -59,8 +57,6 @@ struct Args {
 enum ProviderType {
     /// Basic ONNX provider
     Basic,
-    /// Optimized ONNX provider
-    Optimized,
 }
 
 /// Create sample texts with varying lengths
@@ -167,72 +163,6 @@ fn benchmark_basic(
     Ok(results)
 }
 
-/// Run benchmark with the optimized ONNX provider
-fn benchmark_optimized(
-    model_path: &str,
-    tokenizer_path: &str,
-    samples: &[String],
-    batch_size: usize,
-    iterations: usize,
-    pre_warm: bool,
-    dynamic_batching: bool,
-) -> Result<Vec<Duration>> {
-    // Create session configuration
-    let mut session_config = SessionConfig::default();
-    session_config.warmup_iterations = if pre_warm { 3 } else { 0 };
-
-    // Create tokenizer configuration
-    let tokenizer_config = TokenizerCacheConfig::default();
-
-    // Create batch processor configuration
-    let mut batch_config = BatchProcessorConfig::default();
-    batch_config.max_batch_size = batch_size;
-    batch_config.dynamic_batching = dynamic_batching;
-
-    // Create the provider
-    let model_path = PathBuf::from(model_path);
-    let tokenizer_path = PathBuf::from(tokenizer_path);
-    let provider = OptimizedOnnxEmbeddingProvider::new(
-        &model_path,
-        &tokenizer_path,
-        Some(session_config),
-        Some(tokenizer_config),
-        Some(batch_config),
-    )?;
-
-    // Pre-warm the session pool if enabled
-    if pre_warm {
-        println!("Pre-warming session pool...");
-        // This is done automatically when creating the provider
-    }
-
-    // Prepare batches
-    let mut results = Vec::with_capacity(iterations);
-    for _ in 0..iterations {
-        // Select a random subset of samples for this iteration
-        let batch_start = fastrand::usize(0..samples.len().saturating_sub(batch_size));
-        let batch_texts: Vec<&str> = samples[batch_start..batch_start + batch_size]
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-
-        // Time the embedding generation
-        let start = Instant::now();
-        let embeddings = provider.embed_batch(&batch_texts)?;
-        let duration = start.elapsed();
-
-        // Verify the embeddings
-        assert_eq!(embeddings.len(), batch_size);
-        for embedding in &embeddings {
-            assert_eq!(embedding.len(), ONNX_EMBEDDING_DIM);
-        }
-
-        results.push(duration);
-    }
-
-    Ok(results)
-}
-
 /// Format a duration as milliseconds with 2 decimal places
 fn format_ms(duration: Duration) -> String {
     let ms = duration.as_secs_f64() * 1000.0;
@@ -280,7 +210,6 @@ fn main() -> Result<()> {
         "Provider:         {}",
         match args.provider {
             ProviderType::Basic => "Basic ONNX",
-            ProviderType::Optimized => "Optimized ONNX",
         }
     );
     println!("Model:            {}", args.model_path);
@@ -323,15 +252,6 @@ fn main() -> Result<()> {
                 batch_size,
                 args.warmup_iterations,
             ),
-            ProviderType::Optimized => benchmark_optimized(
-                &args.model_path,
-                &args.tokenizer_path,
-                &samples,
-                batch_size,
-                args.warmup_iterations,
-                args.pre_warm,
-                args.dynamic_batching,
-            ),
         };
 
         if warmup_result.is_err() {
@@ -352,15 +272,6 @@ fn main() -> Result<()> {
                 batch_size,
                 args.bench_iterations,
             ),
-            ProviderType::Optimized => benchmark_optimized(
-                &args.model_path,
-                &args.tokenizer_path,
-                &samples,
-                batch_size,
-                args.bench_iterations,
-                args.pre_warm,
-                args.dynamic_batching,
-            ),
         };
 
         match bench_result {
@@ -374,7 +285,6 @@ fn main() -> Result<()> {
                 if args.csv {
                     let provider_name = match args.provider {
                         ProviderType::Basic => "basic",
-                        ProviderType::Optimized => "optimized",
                     };
                     println!(
                         "{},{},{},{},{},{:.2}",

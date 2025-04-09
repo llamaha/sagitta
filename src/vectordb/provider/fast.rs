@@ -93,18 +93,6 @@ impl EmbeddingProvider for FastEmbeddingProvider {
         Ok(embedding)
     }
 
-    fn embedding_dimension(&self) -> usize {
-        FAST_EMBEDDING_DIM
-    }
-
-    fn name(&self) -> &'static str {
-        "Fast-Trigram"
-    }
-
-    fn description(&self) -> &'static str {
-        "Fast embedding using character trigrams with position weighting (less accurate but quicker than ONNX)"
-    }
-
     // Override the default embed_batch for parallel processing
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {

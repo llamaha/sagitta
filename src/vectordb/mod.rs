@@ -11,7 +11,6 @@ pub mod provider;
 pub mod search;
 // pub mod search_ranking;
 pub mod snippet_extractor;
-pub mod tokenizer;
 
 pub mod test_utils;
 

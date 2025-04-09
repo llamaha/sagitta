@@ -1044,7 +1044,7 @@ impl Default for SearchOptions {
 mod tests {
     use super::*;
     use crate::vectordb::embedding::EmbeddingModel;
-    use crate::vectordb::test_utils::tests::create_test_files;
+    
     use tempfile::tempdir;
 
     #[test]

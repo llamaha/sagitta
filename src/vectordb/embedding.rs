@@ -69,16 +69,6 @@ impl EmbeddingModel {
         })
     }
 
-    /// Get the model type
-    pub fn model_type(&self) -> &EmbeddingModelType {
-        &self.model_type
-    }
-
-    /// Get the embedding dimension
-    pub fn embedding_dimension(&self) -> usize {
-        self.provider.embedding_dimension()
-    }
-
     /// Convert text to an embedding vector
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
         self.provider.embed(text)
@@ -140,7 +130,6 @@ mod tests {
         assert!(onnx_model.is_ok());
 
         let model = onnx_model.unwrap();
-        assert_eq!(*model.model_type(), EmbeddingModelType::Onnx);
 
         // Test embedding
         let text = "fn main() { let x = 42; }";

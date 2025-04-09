@@ -1,6 +1,3 @@
-use crate::vectordb::provider::batch_processor::{BatchProcessor, BatchProcessorConfig};
-use crate::vectordb::provider::session_manager::{SessionConfig, SessionManager};
-use crate::vectordb::provider::tokenizer_cache::{TokenizerCache, TokenizerCacheConfig};
 use crate::vectordb::provider::EmbeddingProvider;
 use anyhow::{Error, Result};
 use log::debug;
@@ -259,79 +256,6 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
 
         Ok(results)
     }
-
-    fn embedding_dimension(&self) -> usize {
-        ONNX_EMBEDDING_DIM
-    }
-
-    fn name(&self) -> &'static str {
-        "ONNX-MiniLM"
-    }
-
-    fn description(&self) -> &'static str {
-        "ONNX-based embedding using MiniLM model for high-quality semantic representations"
-    }
-}
-
-/// Optimized ONNX embedding provider with pooling, caching, and batching
-pub struct OptimizedOnnxEmbeddingProvider {
-    /// Batch processor for efficient embedding
-    batch_processor: Arc<BatchProcessor>,
-}
-
-impl OptimizedOnnxEmbeddingProvider {
-    /// Creates a new OptimizedOnnxEmbeddingProvider from the given model and tokenizer paths
-    pub fn new(
-        model_path: &Path,
-        tokenizer_path: &Path,
-        session_config: Option<SessionConfig>,
-        tokenizer_config: Option<TokenizerCacheConfig>,
-        batch_config: Option<BatchProcessorConfig>,
-    ) -> Result<Self> {
-        // Create the session manager
-        let session_manager = SessionManager::new(model_path, session_config.unwrap_or_default())?;
-
-        // Create the tokenizer cache
-        let tokenizer_cache =
-            TokenizerCache::new(tokenizer_path, tokenizer_config.unwrap_or_default())?;
-
-        // Create the batch processor
-        let batch_processor = BatchProcessor::new(
-            session_manager,
-            tokenizer_cache,
-            batch_config.unwrap_or_default(),
-            ONNX_EMBEDDING_DIM,
-        );
-
-        Ok(Self { batch_processor })
-    }
-
-    /// Creates a new OptimizedOnnxEmbeddingProvider with default configurations
-    pub fn new_with_defaults(model_path: &Path, tokenizer_path: &Path) -> Result<Self> {
-        Self::new(model_path, tokenizer_path, None, None, None)
-    }
-}
-
-impl EmbeddingProvider for OptimizedOnnxEmbeddingProvider {
-    fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        self.batch_processor.embed(text)
-    }
-
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        self.batch_processor.embed_batch(texts)
-    }
-
-    fn embedding_dimension(&self) -> usize {
-        ONNX_EMBEDDING_DIM
-    }
-
-    fn name(&self) -> &'static str {
-        "Optimized-ONNX-MiniLM"
-    }
-
-    fn description(&self) -> &'static str {
-        "Optimized ONNX-based embedding with session pooling, tokenizer caching, and batch processing"
-    }
 }
 
 #[cfg(test)]
@@ -342,86 +266,48 @@ mod tests {
 
     #[test]
     fn test_onnx_provider() {
-        // Skip if the model files aren't available
+        // Skip if model/tokenizer aren't available
         let model_path = PathBuf::from("onnx/all-minilm-l12-v2.onnx");
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
 
         if !model_path.exists() || !tokenizer_path.exists() {
-            println!("Skipping ONNX provider test because model files aren't available");
+            println!("Skipping test_onnx_provider because model/tokenizer files aren't available");
             return;
         }
 
         let provider = OnnxEmbeddingProvider::new(&model_path, &tokenizer_path);
-        if provider.is_err() {
-            println!("Failed to create ONNX provider: {:?}", provider.err());
-            return;
-        }
-
-        let provider = provider.unwrap();
-        test_provider_basics(&provider);
+        assert!(provider.is_ok());
+        test_provider_basics(&provider.unwrap());
     }
 
     #[test]
     fn test_batch_embedding() {
-        // Skip if the model files aren't available
+        // Skip if model/tokenizer aren't available
         let model_path = PathBuf::from("onnx/all-minilm-l12-v2.onnx");
         let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
 
         if !model_path.exists() || !tokenizer_path.exists() {
-            println!("Skipping ONNX batch test because model files aren't available");
+            println!("Skipping test_batch_embedding because model/tokenizer files aren't available");
             return;
         }
 
-        let provider = OnnxEmbeddingProvider::new(&model_path, &tokenizer_path);
-        if provider.is_err() {
-            println!("Failed to create ONNX provider: {:?}", provider.err());
-            return;
+        let provider = OnnxEmbeddingProvider::new(&model_path, &tokenizer_path).unwrap();
+        let texts = vec!["Hello, world!", "This is a test sentence."];
+        let embeddings = provider.embed_batch(&texts);
+
+        assert!(embeddings.is_ok());
+        let embeddings = embeddings.unwrap();
+        assert_eq!(embeddings.len(), 2);
+        assert_eq!(embeddings[0].len(), ONNX_EMBEDDING_DIM);
+        assert_eq!(embeddings[1].len(), ONNX_EMBEDDING_DIM);
+
+        // Check normalization
+        for embedding in &embeddings {
+            let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!((norm - 1.0).abs() < 0.01);
         }
 
-        let provider = provider.unwrap();
-        let texts = vec!["fn main() {}", "struct Point { x: i32, y: i32 }"];
-
-        // Test batch embedding
-        let batch_embeddings = provider.embed_batch(&texts);
-        if batch_embeddings.is_err() {
-            println!("Batch embedding failed: {:?}", batch_embeddings.err());
-            return;
-        }
-
-        let batch_embeddings = batch_embeddings.unwrap();
-        assert_eq!(batch_embeddings.len(), 2);
-
-        // Test individual embeddings
-        let embedding1 = provider.embed(texts[0]).unwrap();
-        let embedding2 = provider.embed(texts[1]).unwrap();
-
-        // Batch results should match individual results
-        assert_eq!(batch_embeddings[0], embedding1);
-        assert_eq!(batch_embeddings[1], embedding2);
-    }
-
-    #[test]
-    fn test_optimized_provider() {
-        // Skip if the model files aren't available
-        let model_path = PathBuf::from("onnx/all-minilm-l12-v2.onnx");
-        let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
-
-        if !model_path.exists() || !tokenizer_path.exists() {
-            println!("Skipping optimized ONNX test because model files aren't available");
-            return;
-        }
-
-        let provider =
-            OptimizedOnnxEmbeddingProvider::new_with_defaults(&model_path, &tokenizer_path);
-        if provider.is_err() {
-            println!(
-                "Failed to create optimized ONNX provider: {:?}",
-                provider.err()
-            );
-            return;
-        }
-
-        let provider = provider.unwrap();
-        test_provider_basics(&provider);
+        // Check that embeddings are different
+        assert_ne!(embeddings[0], embeddings[1]);
     }
 }
