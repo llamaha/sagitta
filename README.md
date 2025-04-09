@@ -4,8 +4,7 @@ A CLI tool for semantic code search and analysis.
 
 ## Features
 
-- Semantic code search with ONNX neural network models (default)
-- Fast token-based search for larger codebases
+- Semantic code search with ONNX neural network models
 - Hybrid search combining semantic and lexical matching
 - Support for multiple file formats
 - Cross-platform support (Linux, macOS)
@@ -14,8 +13,7 @@ A CLI tool for semantic code search and analysis.
 
 ## Supported File Types
 
-When using the `--fast` flag, vectordb-cli will index any non-binary file type at the file level.
-In the default (ONNX) mode, it currently indexes common text-based source files and documentation (e.g., .rs, .go, .py, .js, .ts, .md, .txt, .yaml, .json, etc.) based on whole-file content.
+The tool indexes common text-based source files and documentation (e.g., .rs, .go, .py, .js, .ts, .md, .txt, .yaml, .json, etc.). You can restrict indexing to specific file extensions using the `--file-types` argument.
 
 > **Note:** GPU support is planned for a future release to significantly improve embedding generation performance.
 
@@ -23,7 +21,7 @@ In the default (ONNX) mode, it currently indexes common text-based source files 
 
 ### Prerequisites
 
-- **Git LFS**: Required for downloading ONNX model files
+- **Git LFS**: Required for downloading the default ONNX model files if using the provided setup.
   ```bash
   # Debian/Ubuntu
   sudo apt-get install git-lfs
@@ -46,76 +44,77 @@ In the default (ONNX) mode, it currently indexes common text-based source files 
 git lfs install
 git clone https://gitlab.com/amulvany/vectordb-cli.git
 cd vectordb-cli
-git lfs pull
+git lfs pull # Downloads the default ONNX model files into ./onnx/
 
-# Build with ONNX support (default)
+# Build the project
 cargo build --release
 
 # Copy the binary to a location in your PATH
 cp target/release/vectordb-cli ~/.local/bin/
 ```
 
-#### ONNX Model Files
+### ONNX Model Setup (Required)
 
-The ONNX model files are stored in Git LFS and are required for the application to work properly.
+The tool requires an ONNX embedding model and its corresponding tokenizer file to perform semantic search. 
 
-**Important**: Git LFS is a required dependency for this project. Without it, the ONNX models won't be downloaded correctly and the semantic search functionality won't work.
+**By default, if you clone the repository using Git LFS, the necessary files (`all-minilm-l12-v2.onnx` and `minilm_tokenizer.json`) will be downloaded into an `onnx/` subdirectory.**
 
-The model files will be placed in the `./onnx/` directory in the cloned repository.
+If the tool cannot find these files in the default `./onnx/` location relative to where you run it, you **must** specify their paths using **either** environment variables **or** command-line arguments:
 
-### Environment Variables (Required)
+**Option 1: Environment Variables**
 
-**You must specify the model paths using environment variables:**
-
+Add these to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 ```bash
-export VECTORDB_ONNX_MODEL=/path/to/your/model.onnx
-export VECTORDB_ONNX_TOKENIZER=/path/to/your/tokenizer_directory
+# Path to the ONNX model file itself
+export VECTORDB_ONNX_MODEL="/path/to/your/model.onnx"
+# Path to the tokenizer JSON file
+export VECTORDB_ONNX_TOKENIZER="/path/to/your/tokenizer.json"
 ```
 
-These environment variables should be added to your shell profile (~/.bashrc, ~/.zshrc, etc.) to ensure they're always available when using vectordb-cli.
+**Option 2: Command-Line Arguments**
+
+Provide the paths when running the `index` command:
+```bash
+vectordb-cli index ./your/code \
+  --onnx-model /path/to/your/model.onnx \
+  --onnx-tokenizer /path/to/your/tokenizer.json
+```
+
+**Failure to provide valid paths through one of these methods will result in an error.**
 
 ## Usage
 
 ### Indexing Your Code
 
 ```bash
-# Index a directory (using ONNX model)
+# Index a directory (using default ONNX model location: ./onnx/)
 vectordb-cli index ./your/code/directory
 
-# Index with specific file types (using ONNX model)
+# Index with specific file types
 vectordb-cli index ./your/code/directory --file-types rs,md
 
-# Use fast model instead of ONNX (for large codebases, indexes all non-binary)
-vectordb-cli index ./your/code/directory --fast
-
-# Use fast model with specific file types
-vectordb-cli index ./your/code/directory --fast --file-types rs,go,yaml
+# Index using explicitly specified ONNX model paths
+vectordb-cli index ./your/code/directory \
+  --onnx-model /custom/path/model.onnx \
+  --onnx-tokenizer /custom/path/tokenizer.json
 ```
 
-The indexing process supports different modes:
-
-1. **Default mode**: Uses the ONNX neural network model for high-quality semantic embeddings based on whole-file content. Indexes common source/doc file types.
-
-2. **Fast mode**: Uses a token-based model that processes files more quickly but with less semantic accuracy.
-   - When using `--fast` without specifying file types, it indexes all non-binary files in the directory
-   - Ideal for large codebases or when quick indexing is more important than semantic accuracy
-
-3. **Targeted mode**: Specify exactly which file types to index using the `--file-types` parameter. This restricts indexing to only those extensions, regardless of whether the default or fast model is used.
+The indexing process uses the configured ONNX model for high-quality semantic embeddings. Use `--file-types` to restrict which file extensions are indexed.
 
 ### Searching
 
 ```bash
-# Semantic search
+# Hybrid semantic + lexical search (default)
 vectordb-cli query "how does the error handling work"
 
 # Limit number of results
 vectordb-cli query "implement authentication" --limit 5
 
-# Search in a specific repository
-vectordb-cli query "error handling" --repo my-repo-name
+# Pure vector search (disable lexical matching)
+vectordb-cli query "database connection logic" --vector-only
 
-# Search across all configured repositories
-vectordb-cli query "configuration options" --all-repos
+# Adjust hybrid search weights (weights should ideally sum to 1.0)
+vectordb-cli query "configuration loading" --vector-weight 0.8 --bm25-weight 0.2
 ```
 
 ### Managing Multiple Repositories
@@ -178,7 +177,7 @@ repositories:
     file_types:
       - rs
       - go
-    embedding_model: onnx
+    # embedding_model: onnx (This is now the only option and not needed)
     
   - path: ./relative/path/to/repo2
     name: another-project
@@ -186,7 +185,6 @@ repositories:
       - rs
       - md
       - yaml
-    embedding_model: fast
     auto_sync: true
     auto_sync_interval: 3600
 ```
@@ -195,7 +193,6 @@ The YAML file supports the following attributes:
 - `path`: Path to the repository (absolute or relative to the YAML file)
 - `name`: Optional repository name (defaults to directory name)
 - `file_types`: Optional list of file extensions to index
-- `embedding_model`: Optional model type ("onnx" or "fast")
 - `auto_sync`: Optional auto-sync setting (true/false)
 - `auto_sync_interval`: Optional auto-sync interval in seconds
 
@@ -232,10 +229,9 @@ vectordb-cli query "how to use feature" --repo my-repo-docs
 
 ### Understanding Search Types
 
-vectordb-cli now primarily relies on the **`query`** command:
+vectordb-cli now uses hybrid search (ONNX semantic + BM25 lexical) by default via the **`query`** command:
 
 - Best for conceptual, high-level searches and semantic understanding.
-- Combines vector similarity with BM25 lexical matching (hybrid search by default).
 - Optimal for questions like "How does error handling work?" or "Where is configuration loaded?"
 - Provides context-rich snippets from relevant files.
 - Automatically adjusts vector/BM25 weights based on query characteristics, or you can override them.
