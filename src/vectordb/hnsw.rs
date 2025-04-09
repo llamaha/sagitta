@@ -87,26 +87,28 @@ impl HNSWIndex {
         }
     }
 
-    /// Calculate cosine distance between two vectors
+    /// Calculate cosine distance between two vectors (range 0.0 to 2.0)
     fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
         let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
 
-        if norm_a > 0.0 && norm_b > 0.0 {
-            // Calculate normalized cosine distance with proper bounds
-            let similarity = dot_product / (norm_a * norm_b);
-            // Handle potential floating point issues that might push similarity outside [-1, 1]
-            let clamped_similarity = similarity.clamp(-1.0, 1.0);
-            // Convert to distance in range [0, 2], with identical vectors having distance 0
-            // Apply a scaling factor to increase distance sensitivity
-            // Using a steeper transformation to magnify small differences
-            let scaled_distance = (1.0 - clamped_similarity) * 1.2;
-            // Apply a power scaling to enhance small differences
-            scaled_distance.powf(0.8)
-        } else {
-            1.0 // Maximum distance if either vector is zero
+        // Handle zero vectors to avoid division by zero and return max distance
+        if norm_a == 0.0 || norm_b == 0.0 {
+            return 2.0; // Max distance for cosine
         }
+
+        // Calculate cosine similarity
+        let similarity = dot_product / (norm_a * norm_b);
+
+        // Clamp similarity to [-1.0, 1.0] to handle potential floating point inaccuracies
+        let clamped_similarity = similarity.clamp(-1.0, 1.0);
+
+        // Convert similarity to distance: distance = 1.0 - similarity
+        // This results in a distance range of [0.0, 2.0]
+        // Identical vectors (similarity 1.0) -> distance 0.0
+        // Opposite vectors (similarity -1.0) -> distance 2.0
+        1.0 - clamped_similarity
     }
 
     /// Generate a random layer for a new node
