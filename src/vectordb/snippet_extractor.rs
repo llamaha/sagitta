@@ -2,7 +2,6 @@ use anyhow::Result;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
-use std::collections::HashSet;
 // use super::code_structure::{CodeStructureAnalyzer, CodeContext, MethodInfo, TypeInfo};
 
 const DEFAULT_CONTEXT_LINES: usize = 5;
@@ -133,7 +132,6 @@ impl SnippetExtractor {
     /// Highlight query terms within a snippet (simple implementation)
     pub fn highlight_snippet(&self, snippet: &str, query_terms: &[String]) -> String {
         let mut highlighted = snippet.to_string();
-        let lower_terms: HashSet<_> = query_terms.iter().map(|s| s.to_lowercase()).collect();
 
         // Create a regex pattern to find any of the query terms, case-insensitive
         let pattern = format!("(?i)({})", query_terms.join("|"));

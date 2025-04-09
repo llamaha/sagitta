@@ -11,7 +11,7 @@ use std::time::UNIX_EPOCH;
 const CACHE_TTL: u64 = 3600; // 1 hour in seconds
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct CacheEntry {
+pub struct CacheEntry {
     embedding: Vec<f32>,
     timestamp: u64,
     file_hash: u64,
