@@ -154,7 +154,6 @@ impl SnippetExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
     #[test]
     fn test_highlight_snippet() {

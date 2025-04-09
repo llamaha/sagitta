@@ -565,7 +565,6 @@ pub struct HNSWStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f32::consts::PI;
     use std::time::{Duration, Instant};
 
     #[test]

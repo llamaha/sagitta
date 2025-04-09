@@ -925,8 +925,7 @@ impl Clone for DBStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::io::Write;
+    use crate::vectordb::test_utils::tests::create_test_files;
     use tempfile::tempdir;
 
     #[test]

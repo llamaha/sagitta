@@ -398,107 +398,72 @@ pub struct ChangeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
-    use tempfile::tempdir;
+    use std::fs;
+    use tempfile;
 
+    // Helper function to set up a temporary git repository for testing
     fn create_test_repo() -> Result<(tempfile::TempDir, GitRepo)> {
-        let temp_dir = tempdir()?;
-        let path = temp_dir.path();
+        let temp_dir = tempfile::tempdir()?;
+        let repo_path = temp_dir.path().to_path_buf();
 
         // Initialize git repo
-        Command::new("git")
-            .current_dir(path)
-            .args(["init"])
-            .output()?;
+        Command::new("git").arg("init").arg(&repo_path).output()?;
 
-        // Configure git
+        // Configure user name and email for commits
         Command::new("git")
-            .current_dir(path)
+            .current_dir(&repo_path)
+            .args(["config", "user.email", "test@example.com"])
+            .output()?;
+        Command::new("git")
+            .current_dir(&repo_path)
             .args(["config", "user.name", "Test User"])
             .output()?;
 
-        Command::new("git")
-            .current_dir(path)
-            .args(["config", "user.email", "test@example.com"])
-            .output()?;
-
-        // Create the git repo object
-        let git_repo = GitRepo::new(path.to_path_buf())?;
-
-        Ok((temp_dir, git_repo))
+        Ok((temp_dir, GitRepo::new(repo_path)?))
     }
 
+    // Helper function to create a commit in the test repository
     fn create_commit(git_repo: &GitRepo, file_name: &str, content: &str) -> Result<String> {
         let file_path = git_repo.path.join(file_name);
-        std::fs::write(&file_path, content)?;
-
-        // Add and commit
+        fs::write(&file_path, content)?;
         Command::new("git")
             .current_dir(&git_repo.path)
-            .args(["add", file_name])
+            .arg("add")
+            .arg(&file_path)
             .output()?;
-
         Command::new("git")
             .current_dir(&git_repo.path)
             .args(["commit", "-m", &format!("Add {}", file_name)])
             .output()?;
 
-        // Get the commit hash
+        // Get commit hash
         git_repo.get_commit_hash("HEAD")
     }
 
+    // Helper function to create a branch
     fn create_branch(git_repo: &GitRepo, branch_name: &str) -> Result<()> {
         Command::new("git")
             .current_dir(&git_repo.path)
             .args(["checkout", "-b", branch_name])
             .output()?;
-
         Ok(())
     }
 
+    // Helper function to checkout a branch
     fn checkout_branch(git_repo: &GitRepo, branch_name: &str) -> Result<()> {
         Command::new("git")
             .current_dir(&git_repo.path)
             .args(["checkout", branch_name])
             .output()?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_find_common_ancestor() -> Result<()> {
-        let (temp_dir, git_repo) = create_test_repo()?;
-
-        // Create initial commit on main
-        let main_commit = create_commit(&git_repo, "main.txt", "main content")?;
-
-        // Create a feature branch
-        create_branch(&git_repo, "feature")?;
-
-        // Add a commit on feature
-        let feature_commit = create_commit(&git_repo, "feature.txt", "feature content")?;
-
-        // Back to main
-        checkout_branch(&git_repo, "main")?;
-
-        // Add another commit on main
-        let main_commit2 = create_commit(&git_repo, "main2.txt", "main content 2")?;
-
-        // Find common ancestor
-        let ancestor = git_repo.find_common_ancestor("main", "feature")?;
-
-        // The common ancestor should be the first main commit
-        assert_eq!(ancestor, main_commit);
-
         Ok(())
     }
 
     #[test]
     fn test_is_ancestor_of() -> Result<()> {
-        let (temp_dir, git_repo) = create_test_repo()?;
+        let (_temp_dir, git_repo) = create_test_repo()?;
 
         // Create initial commit on main
-        let main_commit = create_commit(&git_repo, "main.txt", "main content")?;
+        let main_commit = create_commit(&git_repo, "main.txt", "initial content")?;
 
         // Create a feature branch
         create_branch(&git_repo, "feature")?;
@@ -515,10 +480,10 @@ mod tests {
 
     #[test]
     fn test_get_cross_branch_changes() -> Result<()> {
-        let (temp_dir, git_repo) = create_test_repo()?;
+        let (_temp_dir, git_repo) = create_test_repo()?;
 
         // Create initial commit on main
-        let main_commit = create_commit(&git_repo, "common.txt", "common content")?;
+        let main_commit = create_commit(&git_repo, "main.txt", "initial content")?;
 
         // Create a feature branch
         create_branch(&git_repo, "feature")?;
@@ -545,6 +510,77 @@ mod tests {
 
         // Should include feature1.txt and feature2.txt as added files
         assert_eq!(changes.added_files.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_find_common_ancestor() -> Result<()> {
+        let (_temp_dir, git_repo) = create_test_repo()?;
+
+        // Create initial commit on main
+        let _main_commit = create_commit(&git_repo, "common.txt", "common content")?;
+        let main_commit_hash = _main_commit.clone(); // Clone the hash string before moving
+
+        // Create feature branch
+        create_branch(&git_repo, "feature")?;
+        let _feature_commit = create_commit(&git_repo, "feature2.txt", "feature content 2")?;
+
+        // Checkout main and create another commit
+        checkout_branch(&git_repo, "main")?;
+        let _main_commit2 = create_commit(&git_repo, "main2.txt", "main content 2")?;
+
+        // Find common ancestor
+        let ancestor = git_repo.find_common_ancestor("main", "feature")?;
+
+        // The common ancestor should be the first main commit
+        assert_eq!(ancestor, main_commit_hash, "Common ancestor should match the first commit hash");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_simple() -> Result<()> {
+        let (_temp_dir, git_repo) = create_test_repo()?;
+
+        // Create initial commit
+        let main_commit = create_commit(&git_repo, "main.txt", "initial content")?;
+
+        // Create commit on feature branch
+        let _feature_commit = create_commit(&git_repo, "feature.txt", "feature content")?;
+
+        // Checkout main branch and make another commit
+        checkout_branch(&git_repo, "main")?;
+        let _main_commit2 = create_commit(&git_repo, "main2.txt", "main content 2")?;
+
+        // Get changed files between main and feature
+        let changed_files = git_repo.get_changed_files(&main_commit, &_main_commit2)?;
+
+        // Should include main.txt and main2.txt as added files
+        assert_eq!(changed_files.len(), 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_across_branches() -> Result<()> {
+        let (_temp_dir, git_repo) = create_test_repo()?;
+
+        // Create initial commit on main
+        let main_commit = create_commit(&git_repo, "main.txt", "initial content")?;
+
+        // Create commit on feature branch
+        let _feature_commit = create_commit(&git_repo, "feature.txt", "feature content")?;
+
+        // Checkout main branch and make another commit
+        checkout_branch(&git_repo, "main")?;
+        let _main_commit2 = create_commit(&git_repo, "main2.txt", "main content 2")?;
+
+        // Get changed files between main and feature
+        let changed_files = git_repo.get_changed_files(&main_commit, &_main_commit2)?;
+
+        // Should include main.txt and main2.txt as added files
+        assert_eq!(changed_files.len(), 2);
 
         Ok(())
     }

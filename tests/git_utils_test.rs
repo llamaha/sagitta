@@ -70,7 +70,7 @@ fn checkout_branch(git_repo: &GitRepo, branch_name: &str) -> Result<()> {
 
 #[test]
 fn test_find_common_ancestor() -> Result<()> {
-    let (temp_dir, git_repo) = setup_test_repo()?;
+    let (_temp_dir, git_repo) = setup_test_repo()?;
 
     // Create initial commit on main
     let main_commit = create_commit(&git_repo, "main.txt", "main content")?;
@@ -98,7 +98,7 @@ fn test_find_common_ancestor() -> Result<()> {
 
 #[test]
 fn test_is_ancestor_of() -> Result<()> {
-    let (temp_dir, git_repo) = setup_test_repo()?;
+    let (_temp_dir, git_repo) = setup_test_repo()?;
 
     // Create initial commit on main
     let main_commit = create_commit(&git_repo, "main.txt", "main content")?;
@@ -118,7 +118,7 @@ fn test_is_ancestor_of() -> Result<()> {
 
 #[test]
 fn test_get_cross_branch_changes() -> Result<()> {
-    let (temp_dir, git_repo) = setup_test_repo()?;
+    let (_temp_dir, git_repo) = setup_test_repo()?;
 
     // Create initial commit on main
     let main_commit = create_commit(&git_repo, "common.txt", "common content")?;
