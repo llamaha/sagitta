@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 // use super::code_structure::{CodeStructureAnalyzer, CodeContext, MethodInfo, TypeInfo};
 
-const EXTENSION_WEIGHT: f32 = 0.9;
+const MAX_SNIPPET_LENGTH: usize = 512;
+const CONTEXT_WINDOW: usize = 3;
 const DEFAULT_CONTEXT_LINES: usize = 5;
 
 /// Structure to hold context information for a code snippet

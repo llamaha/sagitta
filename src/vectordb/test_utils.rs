@@ -1,5 +1,3 @@
-use tempfile::TempDir;
-
 #[cfg(test)]
 pub mod tests {
     use std::fs;

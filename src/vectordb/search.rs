@@ -1,8 +1,9 @@
+use crate::vectordb::cache::EmbeddingCache;
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use anyhow::Result;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -16,6 +17,12 @@ const HNSW_TOP_K: usize = 30; // Increased from 20 for better recall
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7; // Default weight for vector search
 const HYBRID_BM25_WEIGHT: f32 = 0.3; // Default weight for BM25 search
 const SPECIALIZED_SEARCH_THRESHOLD: f32 = 0.3; // Lower similarity threshold for specialized queries
+
+// Added constants
+const FILE_PATH_WEIGHT: f32 = 1.2;
+
+const MAX_SNIPPETS_PER_FILE: usize = 3;
+const SNIPPET_OVERLAP: usize = 2;
 
 /// Structure to hold query analysis results
 #[derive(Debug)]
@@ -127,13 +134,6 @@ impl Search {
             "defer",
         ];
 
-        // Identify code elements in the query
-        let code_elements: Vec<String> = code_keywords
-            .iter()
-            .filter(|&&keyword| query_lower.contains(keyword))
-            .map(|&s| s.to_string())
-            .collect();
-
         // Detect language hints
         let mut language_hints = Vec::new();
         for &keyword in &rust_keywords {
@@ -156,9 +156,6 @@ impl Search {
         }
 
         // It's a code query if it contains any code keywords, scope resolution (::), or language hints
-        let is_code_query =
-            !code_elements.is_empty() || query.contains("::") || !language_hints.is_empty();
-
         // Determine query type
         let query_type = if query_lower.contains("what is") || query_lower.contains("definition") {
             QueryType::Definition
@@ -1473,89 +1470,6 @@ fn main() {
 
         Ok(())
     }
-
-    // #[test] // Test disabled as BM25 calculation is currently removed
-    // fn test_hybrid_search() -> Result<()> {
-    //     // Create a temporary directory and database file
-    //     let temp_dir = tempdir()?;
-    //     let db_path = temp_dir
-    //         .path()
-    //         .join("db.json")
-    //         .to_string_lossy()
-    //         .to_string();
-    //     let mut db = VectorDB::new(db_path)?;
-    //
-    //     // Create test files with content explicitly
-    //     let test_file1 = temp_dir.path().join("test1.txt");
-    //     fs::write(
-    //         &test_file1,
-    //         "This document is about Rust programming language and its features.",
-    //     )?;
-    //
-    //     let test_file2 = temp_dir.path().join("test2.txt");
-    //     fs::write(
-    //         &test_file2,
-    //         "Python is a high-level programming language.",
-    //     )?;
-    //
-    //     // Index the files to build the vector database
-    //     db.index_file(&test_file1)?;
-    //     db.index_file(&test_file2)?;
-    //
-    //     // Check that embeddings were created
-    //     assert!(
-    //         db.embeddings.len() >= 2,
-    //         "Should have at least 2 embeddings, has {}",
-    //         db.embeddings.len()
-    //     );
-    //
-    //     // Force a rebuild of the HNSW index to ensure it's properly created
-    //     db.rebuild_hnsw_index()?;
-    //
-    //     // Make sure we have an HNSW index
-    //     assert!(db.hnsw_index.is_some(), "HNSW index should be created");
-    //
-    //     // Check that HNSW index has nodes
-    //     if let Some(index) = &db.hnsw_index {
-    //         let total_nodes = index.stats().total_nodes;
-    //         assert!(
-    //             total_nodes >= 2,
-    //             "HNSW index should have at least 2 nodes, has {}",
-    //             total_nodes
-    //         );
-    //     }
-    //
-    //     // Create a search with the model and database
-    //     let model = EmbeddingModel::new();
-    //     let mut search = Search::new(db, model);
-    //
-    //     // Try both search methods
-    //     let hybrid_results = search.hybrid_search("Rust programming", None, None)?;
-    //
-    //     println!(
-    //         "Found {} hybrid results for \"Rust programming\" query",
-    //         hybrid_results.len()
-    //     );
-    //     for (i, result) in hybrid_results.iter().enumerate() {
-    //         println!(
-    //             "Hybrid Result {}: file={}, similarity={}",
-    //             i,
-    //             result.file_path,
-    //             result.similarity
-    //         );
-    //     }
-    //
-    //     assert!(
-    //         !hybrid_results.is_empty(),
-    //         "Expected some hybrid results for query"
-    //     );
-    //     assert!(
-    //         hybrid_results[0].file_path.contains("test1.txt"),
-    //         "First result should be test1.txt"
-    //     );
-    //
-    //     Ok(())
-    // }
 
     /// Helper function to strip ANSI codes
     fn strip_ansi(s: &str) -> String {
