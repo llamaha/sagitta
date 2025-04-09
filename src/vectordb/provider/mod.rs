@@ -10,9 +10,6 @@ pub trait EmbeddingProvider: Send + Sync {
         // Default implementation calls embed() for each text
         texts.iter().map(|text| self.embed(text)).collect()
     }
-
-    /// Get the dimension of the embeddings produced by this provider.
-    fn dim(&self) -> usize;
 }
 
 // Module exports

@@ -33,8 +33,6 @@ impl Default for EmbeddingModelType {
 pub struct EmbeddingModel {
     provider: Box<dyn EmbeddingProvider + Send + Sync>,
     model_type: EmbeddingModelType,
-    dimension: usize, // Store dimension
-    // Store paths for potential cloning or info
     onnx_model_path: Option<PathBuf>,
     onnx_tokenizer_path: Option<PathBuf>,
 }
@@ -73,12 +71,9 @@ impl EmbeddingModel {
     /// This provider is more accurate but slower than Fast
     pub fn new_onnx(model_path: &Path, tokenizer_path: &Path) -> Result<Self> {
         let provider = Box::new(OnnxEmbeddingProvider::new(model_path, tokenizer_path)?);
-        let dimension = provider.dim(); // Get dimension from the provider
         Ok(Self {
             provider,
             model_type: EmbeddingModelType::Onnx,
-            dimension, // Store it
-            // Store paths
             onnx_model_path: Some(model_path.to_path_buf()),
             onnx_tokenizer_path: Some(tokenizer_path.to_path_buf()),
         })
@@ -96,16 +91,6 @@ impl EmbeddingModel {
         self.provider
             .embed_batch(texts)
             .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
-    }
-
-    /// Get the embedding dimension for this model
-    pub fn dim(&self) -> usize {
-        self.dimension
-    }
-
-    /// Get the type of this embedding model
-    pub fn model_type(&self) -> EmbeddingModelType {
-        self.model_type
     }
 }
 

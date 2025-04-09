@@ -10,12 +10,24 @@ use std::path::Path;
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HNSWConfig {
+    #[serde(default = "default_dimension")]
     pub dimension: usize,
+    #[serde(default = "default_m")]
     pub m: usize,
+    #[serde(default = "default_ef_construction")]
     pub ef_construction: usize,
+    #[serde(default = "default_num_layers")]
     pub num_layers: usize,
+    #[serde(default = "default_random_seed")]
     pub random_seed: u64,
 }
+
+// Helper functions for serde defaults, returning values from HNSWConfig::default()
+fn default_dimension() -> usize { HNSWConfig::default().dimension }
+fn default_m() -> usize { HNSWConfig::default().m }
+fn default_ef_construction() -> usize { HNSWConfig::default().ef_construction }
+fn default_num_layers() -> usize { HNSWConfig::default().num_layers }
+fn default_random_seed() -> u64 { HNSWConfig::default().random_seed }
 
 impl Default for HNSWConfig {
     fn default() -> Self {

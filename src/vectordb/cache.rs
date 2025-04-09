@@ -218,6 +218,7 @@ impl EmbeddingCache {
     }
 
     /// Removes an entry from the cache if it exists.
+    #[allow(dead_code)] // Suppress warning, used by VectorDB::remove
     pub fn remove(&mut self, key: &str) -> Result<Option<CacheEntry>> {
         let removed = self.entries.remove(key);
         if removed.is_some() {
