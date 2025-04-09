@@ -16,7 +16,7 @@ walkdir = "2.3"
 anyhow = "1.0"
 thiserror = "1.0"
 rayon = "1.7"
-ndarray = "0.15"
+ndarray = "0.16"
 tokenizers = { version = "0.15", features = ["http"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -47,7 +47,7 @@ crossbeam-channel = "0.5"
 # quote = "1.0"
 ctrlc = "3.4"
 # ONNX Runtime dependencies
-ort = "1.16.0"
+ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
 lru = "0.11.0"
 lazy_static = "1.4.0"
 # File watching dependency

@@ -1,21 +1,16 @@
 use std::path::Path;
 use anyhow::{Result, Context};
-use ort::{Environment, Session, SessionBuilder};
+use ort::{GraphOptimizationLevel, Session};
 
 fn main() -> Result<()> {
-    // Initialize environment
-    let environment = Environment::builder()
-        .with_name("model_inspector")
-        .build()?;
-    
     // Path to ONNX model
     let model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
     println!("Analyzing model: {}", model_path.display());
     
     // Load model without optimization to inspect raw structure
-    let session = SessionBuilder::new(&environment)?
-        .with_optimization_level(ort::GraphOptimizationLevel::Disable)?
-        .with_model_from_file(model_path)
+    let session = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Disable)?
+        .commit_from_file(model_path)
         .context("Failed to load ONNX model")?;
     
     // Print model metadata

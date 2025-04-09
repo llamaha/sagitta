@@ -92,6 +92,11 @@ impl EmbeddingModel {
             .embed_batch(texts)
             .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
     }
+
+    /// Get the dimension of the embeddings produced by this model
+    pub fn dim(&self) -> usize {
+        self.provider.dimension()
+    }
 }
 
 #[cfg(test)]

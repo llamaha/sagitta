@@ -1,8 +1,10 @@
 use crate::vectordb::provider::EmbeddingProvider;
 use anyhow::{Error, Result};
 use log::debug;
-use ndarray::{Array, Array2, CowArray};
-use ort::{Environment, GraphOptimizationLevel, Session, SessionBuilder, Value};
+use ndarray::{s, Array, Array2, Ix1, Ix2};
+use ort::inputs;
+use ort::session::{Session, builder::GraphOptimizationLevel};
+use ort::value::DynValue;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
@@ -37,21 +39,12 @@ impl OnnxEmbeddingProvider {
 
         debug!("Tokenizer loaded successfully");
 
-        // Create ONNX environment and session
-        debug!("Creating ONNX environment");
-        let environment = Environment::builder()
-            .with_name("MiniLM")
-            .build()?
-            .into_arc();
-
-        debug!(
-            "Creating ONNX session with model path: {}",
-            model_path.display()
-        );
-        let session = SessionBuilder::new(&environment)?
+        // Create ONNX session
+        debug!("Creating ONNX session with model path: {}", model_path.display());
+        let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level1)?
-            .with_intra_threads(num_cpus::get() as i16)?
-            .with_model_from_file(model_path)?;
+            .with_intra_threads(num_cpus::get())?
+            .commit_from_file(model_path)?;
 
         debug!(
             "ONNX model loaded successfully from {}",
@@ -97,37 +90,55 @@ impl OnnxEmbeddingProvider {
     }
 
     /// Convert the ORT output tensor to a Vec<f32>
-    fn extract_embedding(&self, outputs: Vec<Value>) -> Result<Vec<f32>> {
-        // The second output (index 1) is the pooler_output containing the embeddings
-        let tensor = outputs[1].try_extract()?;
+    fn extract_embedding(&self, pooler_output_value: &DynValue) -> Result<Vec<f32>> {
+        // try_extract_tensor returns an ArrayViewD directly
+        let pooler_output_view = pooler_output_value.try_extract_tensor::<f32>()?;
 
-        // Convert to Vec<f32>
-        let embedding_data = tensor.view();
-        let mut embedding = vec![0.0; ONNX_EMBEDDING_DIM];
-
-        // Copy the data (assuming the tensor is in the correct shape)
-        let flat_view = embedding_data.as_slice().unwrap_or_else(|| {
-            // Fallback if we can't get a slice - this is a mock implementation
-            for i in 0..ONNX_EMBEDDING_DIM {
-                embedding[i] = (i % 10) as f32 * 0.1;
+        // Check if view is 1D or 2D with batch size 1
+        let embedding = match pooler_output_view.ndim() {
+            1 => {
+                 // Assume it's shape [embedding_dim]
+                 let view1d = pooler_output_view.into_dimensionality::<Ix1>()?;
+                 if view1d.shape()[0] != ONNX_EMBEDDING_DIM {
+                     return Err(Error::msg(format!(
+                         "Unexpected 1D pooler output shape: got {:?}, expected [{}]",
+                         view1d.shape(), ONNX_EMBEDDING_DIM
+                     )));
+                 }
+                 view1d.to_vec()
             }
-            return &[];
-        });
+            2 => {
+                // Assume it's shape [1, embedding_dim]
+                let view2d = pooler_output_view.into_dimensionality::<Ix2>()?;
+                let expected_shape = [1, ONNX_EMBEDDING_DIM];
+                if view2d.shape() != expected_shape {
+                    return Err(Error::msg(format!(
+                        "Unexpected 2D pooler output shape: got {:?}, expected {:?}",
+                        view2d.shape(), expected_shape
+                    )));
+                }
+                // Extract the first (and only) embedding row and convert to Vec<f32>
+                view2d.slice(s![0, ..]).to_vec()
+            }
+            _ => {
+                return Err(Error::msg(format!(
+                    "Pooler output has unexpected dimensionality: {:?}",
+                     pooler_output_view.shape()
+                )));
+            }
+        };
 
-        // If we got valid data, copy it
-        if !flat_view.is_empty() {
-            embedding.copy_from_slice(flat_view);
-        }
+        let mut normalized_embedding = embedding;
 
         // Normalize the embedding to unit length (L2 normalization)
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm: f32 = normalized_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
-            for x in &mut embedding {
+            for x in &mut normalized_embedding {
                 *x /= norm;
             }
         }
 
-        Ok(embedding)
+        Ok(normalized_embedding)
     }
 
     /// Normalize an embedding to unit length
@@ -155,30 +166,17 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
         let attention_mask_array =
             Array2::from_shape_vec((1, attention_mask.len()), attention_mask)?;
 
-        // Convert to dynamic shape
-        let input_ids_dyn = input_ids_array.into_dyn();
-        let attention_mask_dyn = attention_mask_array.into_dyn();
-
-        // Create CowArray from the dynamic arrays (need to keep these in scope)
-        let input_ids_cow = CowArray::from(&input_ids_dyn);
-        let attention_mask_cow = CowArray::from(&attention_mask_dyn);
-
-        // Create input values
-        let input_ids_val = Value::from_array(session.allocator(), &input_ids_cow);
-        let attention_mask_val = Value::from_array(session.allocator(), &attention_mask_cow);
-
-        let inputs = match (input_ids_val, attention_mask_val) {
-            (Ok(input_ids), Ok(attention_mask)) => {
-                vec![input_ids, attention_mask]
-            }
-            _ => return Err(Error::msg("Failed to create input tensors")),
-        };
+        // Use the inputs! macro. Assumes positional inputs "input_ids", "attention_mask".
+        // The macro handles Array -> OrtOwnedTensor internally.
+        let inputs = inputs![input_ids_array, attention_mask_array]?;
 
         // Run inference
         let outputs = session.run(inputs)?;
 
         // Extract pooler output (second output tensor)
-        self.extract_embedding(outputs)
+        let pooler_output = outputs.get("pooler_output")
+            .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
+        self.extract_embedding(pooler_output)
     }
 
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
@@ -202,34 +200,20 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
 
         // Create input tensors with shape [batch_size, sequence_length]
         let input_ids_array =
-            Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)?.into_dyn();
+            Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)?;
         let attention_mask_array =
-            Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)?
-                .into_dyn();
+            Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)?;
 
-        // Create CowArray views
-        let input_ids_cow = CowArray::from(&input_ids_array);
-        let attention_mask_cow = CowArray::from(&attention_mask_array);
-
-        // Create input values
-        let input_ids_val = Value::from_array(session.allocator(), &input_ids_cow)?;
-        let attention_mask_val = Value::from_array(session.allocator(), &attention_mask_cow)?;
-
-        let inputs = vec![input_ids_val, attention_mask_val];
+        // Use the inputs! macro. Assumes positional inputs "input_ids", "attention_mask".
+        let inputs = inputs![input_ids_array, attention_mask_array]?;
 
         // Run inference
         let outputs = session.run(inputs)?;
 
-        // Extract pooler output (second output tensor)
-        if outputs.len() < 2 {
-            return Err(Error::msg(format!(
-                "Model returned unexpected number of outputs: got {}, expected at least 2",
-                outputs.len()
-            )));
-        }
-
-        let pooler_output = outputs[1].try_extract::<f32>()?;
-        let pooler_view = pooler_output.view();
+        // Extract pooler output tensor view directly by name
+        let pooler_output = outputs.get("pooler_output")
+            .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
+        let pooler_view = pooler_output.try_extract_tensor::<f32>()?;
 
         // Check output shape: [batch_size, embedding_dim]
         let output_shape = pooler_view.shape();
@@ -247,14 +231,15 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
         let mut results = Vec::with_capacity(batch_size);
         for i in 0..batch_size {
             let embedding_slice = pooler_view.slice(ndarray::s![i, ..]);
-            let embedding = embedding_slice
-                .to_slice()
-                .ok_or_else(|| Error::msg("Failed to slice ONNX output"))?
-                .to_vec();
-            results.push(Self::normalize_embedding(embedding)); // Use static normalize method
+            let embedding = embedding_slice.to_vec();
+            results.push(Self::normalize_embedding(embedding));
         }
 
         Ok(results)
+    }
+
+    fn dimension(&self) -> usize {
+        ONNX_EMBEDDING_DIM
     }
 }
 
