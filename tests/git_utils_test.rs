@@ -1,9 +1,8 @@
 use anyhow::Result;
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
-use vectordb_cli::utils::git::{ChangeSet, GitRepo};
+use vectordb_cli::utils::git::GitRepo;
 
 fn setup_test_repo() -> Result<(tempfile::TempDir, GitRepo)> {
     let temp_dir = tempdir()?;

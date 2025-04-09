@@ -2,7 +2,6 @@ use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::error::VectorDBError;
 use crate::vectordb::search::Search;
 use crate::vectordb::VectorDB;
-use crate::vectordb::test_utils::create_test_files;
 use anyhow::Result;
 use clap::Parser;
 use ctrlc;

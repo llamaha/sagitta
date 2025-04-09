@@ -6,7 +6,7 @@ use log::{debug, warn};
 use regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const SIMILARITY_THRESHOLD: f32 = 0.5; // Increased from 0.3
 const DEFAULT_MAX_RESULTS: usize = 20; // New constant for default max results

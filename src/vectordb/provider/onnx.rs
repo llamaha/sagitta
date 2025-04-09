@@ -4,7 +4,7 @@ use crate::vectordb::provider::tokenizer_cache::{TokenizerCache, TokenizerCacheC
 use crate::vectordb::provider::EmbeddingProvider;
 use anyhow::{Error, Result};
 use log::debug;
-use ndarray::{Array, Array2, CowArray, Ix2};
+use ndarray::{Array, Array2, CowArray};
 use ort::{Environment, GraphOptimizationLevel, Session, SessionBuilder, Value};
 use std::path::Path;
 use std::sync::{Arc, Mutex};

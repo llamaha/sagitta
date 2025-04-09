@@ -2082,7 +2082,6 @@ impl VectorDB {
         let processed_clone = processed.clone();
         let should_continue = Arc::new(AtomicBool::new(true));
         let should_continue_clone = should_continue.clone();
-        let files_to_embed_count_clone = files_to_embed_count;
 
         std::thread::spawn(move || {
             let mut last_count = 0;
@@ -2097,7 +2096,6 @@ impl VectorDB {
 
                 if current > last_count {
                     // Processing is happening, update the progress bar
-                    let progress_delta = current - last_count;
                     let elapsed = start.elapsed().as_secs_f32();
                     let rate = if elapsed > 0.1 {
                         current as f32 / elapsed
@@ -2300,7 +2298,7 @@ impl VectorDB {
                 } else {
                     0.0
                 };
-                let total_processed = files_from_cache + processed_new_files;
+                // Removed: let total_processed = files_from_cache + processed_new_files;
 
                 // Update progress bar message instead of printing
                 progress.set_message(format!("Storing embeddings ({:.1} files/sec)", rate));
