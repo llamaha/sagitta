@@ -1,7 +1,5 @@
 use crate::vectordb::embedding::EMBEDDING_DIM;
 use anyhow::Result;
-use indicatif::{ProgressBar, ProgressStyle};
-use log;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -9,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,26 +22,8 @@ pub struct HNSWConfig {
 }
 
 impl HNSWConfig {
-    /// Calculate the optimal number of layers based on dataset size
-    ///
-    /// The formula used is log2(n) as recommended in the HNSW paper,
-    /// where n is the number of vectors in the dataset.
-    ///
-    /// Returns a value between MIN_LAYERS and MAX_LAYERS (2-16).
-    pub fn calculate_optimal_layers(dataset_size: usize) -> usize {
-        const MIN_LAYERS: usize = 2;
-        const MAX_LAYERS: usize = 16;
-
-        if dataset_size == 0 {
-            return MIN_LAYERS;
-        }
-
-        // Use log2(n) as recommended in the HNSW paper
-        let optimal_layers = (dataset_size as f64).log2().ceil() as usize;
-
-        // Constrain between MIN_LAYERS and MAX_LAYERS
-        optimal_layers.clamp(MIN_LAYERS, MAX_LAYERS)
-    }
+    // Removed unused function calculate_optimal_layers
+    // pub fn calculate_optimal_layers(dataset_size: usize) -> usize { ... }
 }
 
 impl Default for HNSWConfig {
@@ -338,12 +316,6 @@ impl HNSWIndex {
         Ok(unique_results.into_iter().take(k).collect())
     }
 
-    /// Search for the k nearest neighbors of a query vector
-    pub fn search(&mut self, query: &[f32], k: usize, ef: usize) -> Result<Vec<(usize, f32)>> {
-        // Simply call the parallel search implementation
-        self.search_parallel(query, k, ef)
-    }
-
     /// Get statistics about the index
     pub fn stats(&self) -> HNSWStats {
         let mut layer_stats = Vec::new();
@@ -411,135 +383,6 @@ impl HNSWIndex {
             entry_points: serialized.entry_points,
         })
     }
-
-    /// Rebuild the index with a new configuration in parallel
-    pub fn rebuild_with_config_parallel(&self, new_config: HNSWConfig) -> Result<Self> {
-        let mut new_index = HNSWIndex::new(new_config.clone());
-
-        // Set up progress bar for large datasets
-        let node_count = self.nodes.len();
-        let progress_bar = if node_count > 10000 {
-            let pb = ProgressBar::new(node_count as u64);
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} nodes ({eta})")
-                    .unwrap()
-                    .progress_chars("#>-")
-            );
-            Some(pb)
-        } else {
-            None
-        };
-
-        // Create a vector of all embeddings
-        let embeddings: Vec<Vec<f32>> = self.nodes.iter().map(|node| node.vector.clone()).collect();
-
-        // Process insertion in parallel
-        let counter = Arc::new(AtomicUsize::new(0));
-        let new_nodes = Arc::new(Mutex::new(Vec::with_capacity(node_count)));
-        let layer_count = new_config.num_layers;
-        let _entry_points = Arc::new(Mutex::new(vec![0; layer_count]));
-
-        embeddings
-            .par_iter()
-            .enumerate()
-            .for_each(|(_i, embedding)| {
-                let mut local_new_index = HNSWIndex::new(new_config.clone());
-
-                // Insert the embedding into the local index
-                let _ = local_new_index.insert(embedding.clone());
-
-                // Transfer the newly inserted node to the shared data structure
-                if let Some(node) = local_new_index.nodes.pop() {
-                    new_nodes.lock().unwrap().push(node);
-                }
-
-                // Update progress
-                if let Some(pb) = &progress_bar {
-                    let current = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    pb.set_position(current as u64);
-                }
-            });
-
-        if let Some(pb) = progress_bar {
-            pb.finish_with_message("HNSW index rebuilding complete!");
-        }
-
-        // Assign the collected nodes and entry points
-        new_index.nodes = new_nodes.lock().unwrap().clone();
-
-        // Rebuild the connections between nodes
-        new_index.optimize();
-
-        Ok(new_index)
-    }
-
-    /// Optimize the index by ensuring connections are bidirectional and consistent
-    fn optimize(&mut self) {
-        if self.nodes.is_empty() {
-            return;
-        }
-
-        // Find the highest layer
-        let mut max_layer = 0;
-        for node in &self.nodes {
-            max_layer = max_layer.max(node.max_layer);
-        }
-
-        // For each layer, rebuild connections
-        for layer in 0..=max_layer.min(self.config.num_layers - 1) {
-            // For each node at this layer or higher
-            for i in 0..self.nodes.len() {
-                if layer <= self.nodes[i].max_layer {
-                    // Find neighbors
-                    let mut neighbors = Vec::new();
-                    for j in 0..self.nodes.len() {
-                        if i != j && layer <= self.nodes[j].max_layer {
-                            let dist =
-                                Self::cosine_distance(&self.nodes[i].vector, &self.nodes[j].vector);
-                            neighbors.push((j, dist));
-                        }
-                    }
-
-                    // Sort by distance and take the closest m neighbors
-                    neighbors
-                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                    let selected = neighbors
-                        .iter()
-                        .take(self.config.m)
-                        .map(|(idx, _)| *idx)
-                        .collect::<Vec<_>>();
-
-                    // Update connections for this node
-                    self.nodes[i].connections[layer] = selected;
-                }
-            }
-        }
-
-        // Set entry points for each layer
-        for layer in 0..self.config.num_layers {
-            // Find a node at this layer
-            let nodes_at_layer: Vec<usize> = self
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| layer <= node.max_layer)
-                .map(|(i, _)| i)
-                .collect();
-
-            if !nodes_at_layer.is_empty() {
-                self.entry_points[layer] = nodes_at_layer[0];
-            }
-        }
-    }
-
-    /// Mark the index as dirty, indicating it needs rebuilding
-    pub fn mark_dirty(&mut self) {
-        // This is a placeholder in the current implementation
-        // In a more comprehensive implementation, we would track whether
-        // the index needs rebuilding after deletions
-        log::debug!("HNSW index marked as dirty, will be rebuilt on next save");
-    }
 }
 
 /// Statistics for a single layer in the HNSW index
@@ -598,27 +441,6 @@ mod tests {
             "Distance between orthogonal vectors should be moderate, got {}",
             dist
         );
-    }
-
-    #[test]
-    fn test_optimal_layer_calculation() {
-        // Test small datasets - should return minimum of 2 layers
-        assert_eq!(HNSWConfig::calculate_optimal_layers(0), 2);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(1), 2);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(2), 2);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(3), 2);
-
-        // Medium datasets - should follow log2(n) pattern
-        assert_eq!(HNSWConfig::calculate_optimal_layers(4), 2);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(8), 3);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(16), 4);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(32), 5);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(64), 6);
-
-        // Large datasets - should not exceed max of 16 layers
-        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 15), 15);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 16), 16);
-        assert_eq!(HNSWConfig::calculate_optimal_layers(1 << 20), 16); // Should be capped at 16
     }
 
     #[test]
@@ -694,47 +516,6 @@ mod tests {
         assert_eq!(stats.total_nodes, 5);
         assert_eq!(stats.layers, config.num_layers);
         assert_eq!(stats.layer_stats.len(), config.num_layers);
-    }
-
-    #[test]
-    fn test_rebuild_with_config() {
-        // Create an index with 16 layers
-        let initial_config = HNSWConfig {
-            m: 16,
-            ef_construction: 100,
-            num_layers: 16,
-            random_seed: 42,
-        };
-        let mut index = HNSWIndex::new(initial_config);
-
-        // Add some vectors
-        for i in 0..10 {
-            let mut vector = vec![0.0; EMBEDDING_DIM];
-            vector[i % EMBEDDING_DIM] = 1.0;
-            index.insert(vector).unwrap();
-        }
-
-        // Create a new config with fewer layers
-        let new_config = HNSWConfig {
-            m: 16,
-            ef_construction: 100,
-            num_layers: 4,
-            random_seed: 42,
-        };
-
-        // Rebuild the index
-        let rebuilt_index = index.rebuild_with_config_parallel(new_config).unwrap();
-
-        // Verify that the rebuilt index has the new config
-        assert_eq!(rebuilt_index.config.num_layers, 4);
-
-        // Verify that all vectors were transferred
-        assert_eq!(rebuilt_index.nodes.len(), index.nodes.len());
-
-        // Check that search still works
-        let query = vec![1.0; EMBEDDING_DIM];
-        let results = rebuilt_index.search_parallel(&query, 5, 100).unwrap();
-        assert!(!results.is_empty());
     }
 
     // Helper function for benchmarking

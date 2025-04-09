@@ -3,7 +3,6 @@ use crate::vectordb::error::{Result, VectorDBError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -91,83 +90,6 @@ impl EmbeddingCache {
         self.current_model_type = model_type;
     }
 
-    /// Get the current model type
-    pub fn model_type(&self) -> &EmbeddingModelType {
-        &self.current_model_type
-    }
-
-    pub fn get(&self, file_path: &str) -> Option<&Vec<f32>> {
-        if let Some(entry) = self.entries.get(file_path) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| VectorDBError::CacheError(e.to_string()))
-                .ok()?
-                .as_secs();
-
-            // Check both TTL and model type match
-            if now - entry.timestamp < self.ttl && entry.model_type == self.current_model_type {
-                Some(&entry.embedding)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Thread-safe version of get_file_hash for parallel processing
-    pub fn get_file_hash_thread_safe(path: &Path) -> Result<u64> {
-        Self::get_file_hash(path)
-    }
-
-    /// Insert an embedding into the cache and save it
-    pub fn insert(&mut self, file_path: String, embedding: Vec<f32>, file_hash: u64) -> Result<()> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| VectorDBError::CacheError(e.to_string()))?
-            .as_secs();
-
-        let entry = CacheEntry {
-            embedding,
-            timestamp: now,
-            file_hash,
-            model_type: self.current_model_type.clone(),
-        };
-
-        self.entries.insert(file_path, entry);
-        self.save()?;
-        Ok(())
-    }
-
-    /// Thread-safe version that prepares a cache entry without updating the cache directly
-    /// Returns the embedding for use by the main thread. The caller is responsible for updating the cache.
-    pub fn prepare_cache_entry(
-        &self,
-        embedding: Vec<f32>,
-        file_hash: u64,
-    ) -> (Vec<f32>, CacheEntry) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| VectorDBError::CacheError(e.to_string()))
-            .unwrap_or(Duration::from_secs(0))
-            .as_secs();
-
-        let entry = CacheEntry {
-            embedding: embedding.clone(),
-            timestamp: now,
-            file_hash,
-            model_type: self.current_model_type.clone(),
-        };
-
-        (embedding, entry)
-    }
-
-    /// Insert a pre-prepared cache entry without saving
-    /// To be used for batch operations where save() will be called after many inserts
-    pub fn insert_without_save(&mut self, file_path: String, entry: CacheEntry) {
-        self.entries.insert(file_path, entry);
-    }
-
     pub fn clear(&mut self) -> Result<()> {
         self.entries.clear();
         self.save()?;
@@ -233,22 +155,7 @@ impl EmbeddingCache {
         Ok(modified.wrapping_mul(31).wrapping_add(size as u64))
     }
 
-    pub fn clean(&mut self) {
-        self.entries.retain(|_, entry| {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| VectorDBError::CacheError(e.to_string()))
-                .ok()
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0);
-
-            // Only keep entries that are still valid and match the current model type
-            now - entry.timestamp < self.ttl && entry.model_type == self.current_model_type
-        });
-        self.last_cleaned = Instant::now();
-    }
-
-    /// Invalidate cache entries that don't match the current model type
+    /// Cleans the cache by removing entries whose model type doesn't match the current one.
     pub fn invalidate_different_model_types(&mut self) {
         self.entries
             .retain(|_, entry| entry.model_type == self.current_model_type);

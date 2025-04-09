@@ -330,95 +330,13 @@ impl VectorDB {
         }
     }
 
-    pub fn set_hnsw_config(&mut self, config: Option<HNSWConfig>) {
-        if let Some(config) = config {
-            let mut current_config = config;
-            if !self.embeddings.is_empty() {
-                let dataset_size = self.embeddings.len();
-                let optimal_layers = HNSWConfig::calculate_optimal_layers(dataset_size);
-                current_config.num_layers = optimal_layers;
-            }
-            let mut index = HNSWIndex::new(current_config);
-            for (_, embedding) in &self.embeddings {
-                let _ = index.insert(embedding.clone());
-            }
-            self.hnsw_index = Some(index);
-        } else {
-            self.hnsw_index = None;
-        }
-    }
-
-    pub fn rebuild_hnsw_index(&mut self) -> Result<()> {
-        if self.hnsw_index.is_none() {
-            return Ok(());
-        }
-        let current_config = self.hnsw_index.as_ref().unwrap().get_config();
-        let dataset_size = self.embeddings.len();
-        let optimal_layers = HNSWConfig::calculate_optimal_layers(dataset_size);
-        if current_config.num_layers == optimal_layers {
-            return Ok(());
-        }
-        let mut new_config = current_config.clone();
-        new_config.num_layers = optimal_layers;
-        if let Some(index) = &self.hnsw_index {
-            let new_index = index.rebuild_with_config_parallel(new_config)?;
-            self.hnsw_index = Some(new_index);
-            self.save()?;
-        }
-        Ok(())
-    }
-
-    pub fn index_file(&mut self, file_path: &Path) -> Result<()> {
-        self.index_file_without_save(file_path)?;
-        self.save()?;
-        Ok(())
-    }
-
-    pub fn index_file_without_save(&mut self, file_path: &Path) -> Result<()> {
-        let file_path_str = file_path.to_string_lossy().to_string();
-        if let Some(cached_embedding) = self.cache.get(&file_path_str) {
-            self.embeddings
-                .insert(file_path_str.clone(), cached_embedding.to_vec());
-            if let Some(index) = &mut self.hnsw_index {
-                index.insert(cached_embedding.to_vec())?;
-            }
-            return Ok(());
-        }
-        let model = self.create_embedding_model().map_err(|e| {
-            if self.embedding_model_type == EmbeddingModelType::Onnx {
-                eprintln!("Error creating ONNX embedding model: {}", e);
-                if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
-                    eprintln!(
-                        "ONNX model paths missing - model: {:?}, tokenizer: {:?}",
-                        self.onnx_model_path, self.onnx_tokenizer_path
-                    );
-                } else {
-                    eprintln!("ONNX model paths are set but model creation failed");
-                }
-            }
-            VectorDBError::EmbeddingError(e.to_string())
-        })?;
-        let contents = fs::read_to_string(file_path).map_err(|e| VectorDBError::IOError(e))?;
-        let embedding = model
-            .embed(&contents)
-            .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
-        let file_hash = EmbeddingCache::get_file_hash(file_path)?;
-        self.cache
-            .insert(file_path_str.clone(), embedding.clone(), file_hash)?;
-        self.embeddings.insert(file_path_str, embedding.clone());
-        if let Some(index) = &mut self.hnsw_index {
-            index.insert(embedding)?;
-        }
-        Ok(())
-    }
-
-    pub fn index_directory(&mut self, dir: &str, file_types: &[String]) -> Result<()> {
-        let dir_path = Path::new(dir);
+    pub fn index_directory(&mut self, dir_path: &str, file_patterns: &[String]) -> Result<()> {
+        let dir_path = Path::new(dir_path);
         if !dir_path.exists() || !dir_path.is_dir() {
-            return Err(VectorDBError::DirectoryNotFound(dir.to_string()));
+            return Err(VectorDBError::DirectoryNotFound(dir_path.to_string_lossy().to_string()));
         }
-        debug!("Starting directory scan for files to index in {}", dir);
-        let files: Vec<PathBuf> = if file_types.is_empty()
+        debug!("Starting directory scan for files to index in {}", dir_path.display());
+        let files: Vec<PathBuf> = if file_patterns.is_empty()
             && self.embedding_model_type == EmbeddingModelType::Fast
         {
             debug!("Using fast model with no file types specified - indexing all non-binary files");
@@ -445,7 +363,7 @@ impl VectorDB {
                 .filter(|entry| {
                     entry.file_type().is_file()
                         && match entry.path().extension() {
-                            Some(ext) => file_types.contains(&ext.to_string_lossy().to_string()),
+                            Some(ext) => file_patterns.contains(&ext.to_string_lossy().to_string()),
                             None => false,
                         }
                 })
@@ -534,149 +452,6 @@ impl VectorDB {
             cached_files: self.cache.len(),
             hnsw_stats: self.hnsw_index.as_ref().map(|index| index.stats()),
             embedding_model_type: self.embedding_model_type.clone(),
-        }
-    }
-
-    pub fn nearest_vectors(&mut self, query: &[f32], k: usize) -> Result<Vec<(String, f32)>> {
-        if let Some(ref mut index) = self.hnsw_index {
-            let ef = 100;
-            let results = index.search(query, k, ef)?;
-            let mut nearest = Vec::new();
-            for (node_id, dist) in results {
-                if let Some(file_path) = self.get_file_path(node_id) {
-                    let file_path = file_path.clone();
-                    let similarity = 1.0 - dist;
-                    nearest.push((file_path, similarity));
-                }
-            }
-            Ok(nearest)
-        } else {
-            let mut results: Vec<_> = self
-                .embeddings
-                .iter()
-                .map(|(path, embedding)| {
-                    let distance = Self::cosine_distance(embedding, query);
-                    let similarity = 1.0 - distance;
-                    (path.clone(), similarity)
-                })
-                .collect();
-            results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            results.truncate(k);
-            Ok(results)
-        }
-    }
-
-    pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
-        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_a > 0.0 && norm_b > 0.0 {
-            let similarity = dot_product / (norm_a * norm_b);
-            let clamped_similarity = similarity.clamp(-1.0, 1.0);
-            1.0 - clamped_similarity
-        } else {
-            1.0
-        }
-    }
-
-    pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
-        self.embeddings.keys().nth(node_id)
-    }
-
-    pub fn filter_by_filepath(&self, query: &str, max_files: usize) -> Vec<String> {
-        let query = query.to_lowercase();
-        let terms: Vec<&str> = query.split_whitespace().filter(|t| t.len() > 1).collect();
-        if terms.is_empty() {
-            return self.embeddings.keys().take(max_files).cloned().collect();
-        }
-        let mut scored_paths: Vec<(String, f32)> = self
-            .embeddings
-            .keys()
-            .map(|path| {
-                let path_lower = path.to_lowercase();
-                let path_segments: Vec<&str> =
-                    path_lower.split(|c| c == '/' || c == '\\').collect();
-                let filename = path_segments.last().unwrap_or(&"");
-                let filename_no_ext = filename.split('.').next().unwrap_or(filename);
-                let mut score = 0.0;
-                for term in &terms {
-                    if filename_no_ext == *term { score += 10.0; }
-                    else if filename_no_ext.contains(term) { score += 5.0; }
-                    else if path_lower.contains(term) { score += 2.0; }
-                    if filename.ends_with(&format!(".{}", term)) { score += 3.0; }
-                }
-                let depth_penalty = (path_segments.len() as f32 * 0.1).min(1.0);
-                score -= depth_penalty;
-                if filename.ends_with(".rs") || filename.ends_with(".rb") || filename.ends_with(".go") { score += 1.0; }
-                (path.clone(), score)
-            })
-            .filter(|(_, score)| *score > 0.0)
-            .collect();
-        scored_paths.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored_paths.into_iter().take(max_files).map(|(path, _)| path).collect()
-    }
-
-    pub fn record_feedback( &mut self, query: &str, file_path: &str, is_relevant: bool ) -> Result<()> {
-        let query = query.to_lowercase();
-        let query_map = self.feedback.query_feedback.entry(query.clone()).or_insert_with(HashMap::new);
-        let entry = query_map.entry(file_path.to_string()).or_insert(FeedbackEntry {
-            relevant_count: 0, irrelevant_count: 0, relevance_score: 0.5,
-        });
-        if is_relevant { entry.relevant_count += 1; } else { entry.irrelevant_count += 1; }
-        let total = entry.relevant_count + entry.irrelevant_count;
-        if total > 0 { entry.relevance_score = entry.relevant_count as f32 / total as f32; }
-        self.save()?;
-        Ok(())
-    }
-
-    pub fn get_feedback_score(&self, query: &str, file_path: &str) -> Option<f32> {
-        let query = query.to_lowercase();
-        self.feedback.query_feedback.get(&query).and_then(|file_map| file_map.get(file_path)).map(|entry| entry.relevance_score)
-    }
-
-    pub fn get_similar_queries(&self, query: &str, max_queries: usize) -> Vec<String> {
-        let query = query.to_lowercase();
-        let query_terms: Vec<&str> = query.split_whitespace().collect();
-        if query_terms.is_empty() { return Vec::new(); }
-        let mut scored_queries: Vec<(String, f32)> = self.feedback.query_feedback.keys()
-            .filter(|&existing_query| existing_query != &query)
-            .map(|existing_query| {
-                let existing_terms: Vec<&str> = existing_query.split_whitespace().collect();
-                let intersection: Vec<&&str> = query_terms.iter().filter(|t| existing_terms.contains(t)).collect();
-                let union_size = query_terms.len() + existing_terms.len() - intersection.len();
-                let similarity = if union_size > 0 { intersection.len() as f32 / union_size as f32 } else { 0.0 };
-                (existing_query.clone(), similarity)
-            })
-            .filter(|(_, score)| *score > 0.2)
-            .collect();
-        scored_queries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored_queries.into_iter().take(max_queries).map(|(query, _)| query).collect()
-    }
-
-    pub fn apply_feedback_boost(&self, query: &str, file_scores: &mut HashMap<String, f32>) {
-        let query = query.to_lowercase();
-        if let Some(feedback_map) = self.feedback.query_feedback.get(&query) {
-            for (file_path, entry) in feedback_map {
-                if let Some(score) = file_scores.get_mut(file_path) {
-                    let confidence = (entry.relevant_count + entry.irrelevant_count) as f32 / 5.0;
-                    let confidence_factor = confidence.min(1.0);
-                    let feedback_factor = (entry.relevance_score - 0.5) * 2.0;
-                    *score += feedback_factor * confidence_factor * 0.2;
-                }
-            }
-        }
-        let similar_queries = self.get_similar_queries(&query, 3);
-        for similar_query in similar_queries {
-            if let Some(feedback_map) = self.feedback.query_feedback.get(&similar_query) {
-                for (file_path, entry) in feedback_map {
-                    if let Some(score) = file_scores.get_mut(file_path) {
-                        let confidence = (entry.relevant_count + entry.irrelevant_count) as f32 / 10.0;
-                        let confidence_factor = confidence.min(1.0);
-                        let feedback_factor = (entry.relevance_score - 0.5) * 2.0;
-                        *score += feedback_factor * confidence_factor * 0.1;
-                    }
-                }
-            }
         }
     }
 
@@ -898,6 +673,25 @@ impl VectorDB {
         }
         Ok(())
     }
+
+    // Restore cosine_distance
+    pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm_a > 0.0 && norm_b > 0.0 {
+            let similarity = dot_product / (norm_a * norm_b);
+            let clamped_similarity = similarity.clamp(-1.0, 1.0);
+            1.0 - clamped_similarity
+        } else {
+            1.0
+        }
+    }
+
+    // Restore get_file_path
+    pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
+        self.embeddings.keys().nth(node_id)
+    }
 }
 
 pub struct DBStats {
@@ -935,18 +729,5 @@ mod tests {
         let _db = VectorDB::new(db_path)?;
         // Basic test - more tests needed for specific functionality
         Ok(())
-    }
-
-    #[test]
-    fn test_optimal_layer_count() {
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().to_string_lossy().to_string();
-        let _db = VectorDB::new(db_path).unwrap();
-        let optimal = HNSWConfig::calculate_optimal_layers(1_000);
-        assert!(optimal > 0);
-        let optimal = HNSWConfig::calculate_optimal_layers(10_000);
-        assert!(optimal > 0);
-        let optimal = HNSWConfig::calculate_optimal_layers(100_000);
-        assert!(optimal > 0);
     }
 }
