@@ -72,10 +72,12 @@ Failure to provide a valid model and tokenizer will result in an error.
 
 ### 1. Indexing Files
 
-Create a search index for a directory. Run this command from the root of the `vectordb-cli` directory or ensure the `onnx/` subdirectory (or configured paths) are accessible.
+Create a search index for a directory. By default, the tool only indexes files with common source code and text extensions (e.g., `.rs`, `.go`, `.py`, `.js`, `.ts`, `.md`, `.txt`, etc. - see `VectorDB::get_supported_file_types()` in the code for the full default list). Use the `--file-types` flag to specify your own list or override the defaults. The content of these allowed files is then processed as text by the semantic embedding model.
+
+Run this command from the root of the `vectordb-cli` directory or ensure the `onnx/` subdirectory (or configured paths) are accessible.
 
 ```bash
-# Index a directory (assuming default ./onnx/ model)
+# Index a directory using default file types (assuming default ./onnx/ model)
 vectordb-cli index /path/to/your/code
 
 # Index only specific file types
@@ -89,7 +91,6 @@ vectordb-cli index /path/to/your/code \
 # Use more threads for potentially faster indexing
 vectordb-cli index /path/to/your/code -j 8 
 ```
-Supported file types for indexing include common source code and text formats (e.g., `.rs`, `.go`, `.py`, `.js`, `.ts`, `.md`, `.txt`, `.yaml`, `.json`).
 
 ### 2. Searching the Index
 
