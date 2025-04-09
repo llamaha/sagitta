@@ -81,6 +81,9 @@ pub enum VectorDBError {
 
     #[error("Other error: {0}")]
     Other(String),
+
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
 }
 
 /// Conversion from anyhow::Error
@@ -133,6 +136,7 @@ impl Clone for VectorDBError {
             Self::DeserializationError(s) => Self::DeserializationError(s.clone()),
             Self::SearchError(s) => Self::SearchError(s.clone()),
             Self::Other(s) => Self::Other(s.clone()),
+            Self::ConfigurationError(s) => Self::ConfigurationError(s.clone()),
         }
     }
 }

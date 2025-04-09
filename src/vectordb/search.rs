@@ -1177,16 +1177,9 @@ impl Default for SearchOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vectordb::embedding::EmbeddingModelType;
+    use crate::vectordb::db::VectorDB;
     use tempfile::tempdir;
-    use std::fs; // Added missing import
-
-    // Removed unused import: use std::path::PathBuf;
-
-    // Helper function to initialize logging for tests - Removed as unused
-    // fn init_test_logging() {
-    //     let _ = env_logger::builder().is_test(true).try_init();
-    // }
+    use std::fs;
 
     // Helper function to set up a test environment with indexed files
     fn setup_test_env() -> (tempfile::TempDir, VectorDB) {
@@ -1201,9 +1194,6 @@ mod tests {
 
         // Use VectorDB::new for initialization
         let mut db = VectorDB::new(db_path_str.clone()).unwrap();
-
-        // Set model type (assuming default or required for tests)
-        db.set_embedding_model_type(EmbeddingModelType::Fast).unwrap();
 
         // Create and index test files with more distinct content
         let files_data = vec![

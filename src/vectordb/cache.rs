@@ -2,12 +2,9 @@ use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::error::{Result, VectorDBError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
-use std::time::Instant;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
-
-const CACHE_TTL: u64 = 3600; // 1 hour in seconds
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CacheEntry {
@@ -27,62 +24,40 @@ pub enum CacheCheckResult {
     Miss(Option<u64>), // Cache miss, contains Option<file_hash>
 }
 
+/// Cache structure
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EmbeddingCache {
     entries: HashMap<String, CacheEntry>,
+    #[serde(skip)]
     cache_path: String,
-    ttl: u64,
-    last_cleaned: Instant,
-    current_model_type: EmbeddingModelType,
-}
-
-impl Clone for EmbeddingCache {
-    fn clone(&self) -> Self {
-        Self {
-            entries: self.entries.clone(),
-            cache_path: self.cache_path.clone(),
-            ttl: self.ttl,
-            last_cleaned: self.last_cleaned,
-            current_model_type: self.current_model_type.clone(),
-        }
-    }
+    #[serde(skip)]
+    ttl: u64, // Time-to-live in seconds
+    #[serde(skip)]
+    current_model_type: EmbeddingModelType, // Track current model type
 }
 
 impl EmbeddingCache {
     pub fn new(cache_path: String) -> Result<Self> {
-        Self::new_with_ttl(cache_path, CACHE_TTL)
-    }
+        let ttl = 86400 * 7; // Default TTL: 7 days
 
-    fn new_with_ttl(cache_path: String, ttl: u64) -> Result<Self> {
-        let entries = if Path::new(&cache_path).exists() {
-            match std::fs::read_to_string(&cache_path) {
-                Ok(contents) => {
-                    match serde_json::from_str::<CacheFile>(&contents) {
-                        Ok(cache_file) => cache_file.entries,
-                        Err(e) => {
-                            // Handle corrupted cache file
-                            eprintln!("Warning: Cache file appears corrupted: {}", e);
-                            // Don't return an error, just start with an empty cache
-                            HashMap::new()
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Handle file reading error
-                    eprintln!("Warning: Couldn't read cache file: {}", e);
-                    HashMap::new()
-                }
-            }
+        if Path::new(&cache_path).exists() {
+            let contents = fs::read_to_string(&cache_path)
+                .map_err(|e| VectorDBError::CacheError(e.to_string()))?;
+            let mut cache: Self = serde_json::from_str(&contents)
+                .map_err(|e| VectorDBError::CacheError(e.to_string()))?;
+            cache.cache_path = cache_path;
+            cache.ttl = ttl;
+            // Default model type on load, user should set it via db
+            cache.current_model_type = EmbeddingModelType::Onnx; // Default to Onnx
+            Ok(cache)
         } else {
-            HashMap::new()
-        };
-
-        Ok(Self {
-            entries,
-            cache_path,
-            ttl,
-            last_cleaned: Instant::now(),
-            current_model_type: EmbeddingModelType::Fast,
-        })
+            Ok(Self {
+                entries: HashMap::new(),
+                cache_path,
+                ttl,
+                current_model_type: EmbeddingModelType::Onnx, // Default to Onnx
+            })
+        }
     }
 
     /// Set the current model type
@@ -285,6 +260,7 @@ mod tests {
         let cache_path = dir.path().join("cache.json").to_string_lossy().to_string();
 
         let mut cache = EmbeddingCache::new(cache_path)?;
+        cache.set_model_type(EmbeddingModelType::Onnx); // Ensure consistent model type
 
         // Create an entry with an expired TTL
         let embedding = vec![1.0, 2.0, 3.0];
@@ -292,7 +268,7 @@ mod tests {
             embedding: embedding.clone(),
             timestamp: 0, // Very old timestamp
             file_hash: 12345u64,
-            model_type: EmbeddingModelType::Fast,
+            model_type: EmbeddingModelType::Onnx, // Use Onnx
         };
 
         cache.entries.insert("test".to_string(), entry);
@@ -339,49 +315,33 @@ mod tests {
         let test_file_path = dir.path().join("test_file_model_type.txt");
         std::fs::write(&test_file_path, "content for model type test")?;
 
-        // Insert an item with Fast model type
+        // Insert an item with Onnx model type (was Fast)
         let embedding = vec![1.0, 2.0, 3.0];
         let file_hash = EmbeddingCache::get_file_hash(&test_file_path)?;
-        cache.set_model_type(EmbeddingModelType::Fast);
+        cache.set_model_type(EmbeddingModelType::Onnx);
         cache.insert_with_hash("test".to_string(), embedding.clone(), file_hash)?;
         cache.save()?; // Save after insert
 
-        // Reload cache and check the entry with Fast type
+        // Reload cache and check the entry with Onnx type
         let mut cache_reloaded = EmbeddingCache::new(cache_path.clone())?;
-        cache_reloaded.set_model_type(EmbeddingModelType::Fast);
-        let check_result_fast = cache_reloaded.check_cache_and_get_hash("test", &test_file_path)?;
-        assert!(matches!(check_result_fast, CacheCheckResult::Hit(_)));
-
-        // Change model type to Onnx
         cache_reloaded.set_model_type(EmbeddingModelType::Onnx);
+        let check_result_onnx = cache_reloaded.check_cache_and_get_hash("test", &test_file_path)?;
+        assert!(matches!(check_result_onnx, CacheCheckResult::Hit(_)));
 
-        // Check the item again - should be Miss because model type doesn't match
-        let check_result_onnx_miss = cache_reloaded.check_cache_and_get_hash("test", &test_file_path)?;
-        assert!(matches!(check_result_onnx_miss, CacheCheckResult::Miss(_)));
+        // Change model type to simulate a different (hypothetical) model
+        // We can't change *to* Fast, so let's just clear and re-insert with Onnx again
+        // cache_reloaded.set_model_type(EmbeddingModelType::Hypothetical); // This doesn't exist
 
-        // Insert a new item with Onnx model type
-        let embedding2 = vec![4.0, 5.0, 6.0];
-        // Ensure the file exists for hash calculation during insert
-        let test_file_path2 = dir.path().join("test_file_model_type2.txt");
-        std::fs::write(&test_file_path2, "content for onnx test")?;
-        let file_hash2 = EmbeddingCache::get_file_hash(&test_file_path2)?;
-        cache_reloaded.insert_with_hash("test2".to_string(), embedding2.clone(), file_hash2)?;
-        cache_reloaded.save()?; // Save after insert
+        // Let's test invalidation instead
+        cache_reloaded.invalidate_different_model_types(); // Should do nothing as current is Onnx
+        let check_result_onnx_still_hit = cache_reloaded.check_cache_and_get_hash("test", &test_file_path)?;
+        assert!(matches!(check_result_onnx_still_hit, CacheCheckResult::Hit(_)));
 
-        // Reload again and check the Onnx item - should exist
-        let mut cache_final = EmbeddingCache::new(cache_path)?;
-        cache_final.set_model_type(EmbeddingModelType::Onnx);
-        let check_result_onnx_hit = cache_final.check_cache_and_get_hash("test2", &test_file_path2)?;
-        assert!(matches!(check_result_onnx_hit, CacheCheckResult::Hit(_)));
-        if let CacheCheckResult::Hit(retrieved_embedding) = check_result_onnx_hit {
-            assert_eq!(retrieved_embedding, embedding2);
-        } else {
-            panic!("Expected CacheCheckResult::Hit for ONNX entry");
-        }
-
-        // Verify the Fast entry is still a miss with Onnx model type selected
-        let check_result_fast_miss_final = cache_final.check_cache_and_get_hash("test", &test_file_path)?;
-        assert!(matches!(check_result_fast_miss_final, CacheCheckResult::Miss(_)));
+        // If we could set a different type and invalidate, the entry would be removed.
+        // Since we only have Onnx, this test is less meaningful now.
+        // We can keep it simple by checking the default is Onnx.
+        assert_eq!(cache.current_model_type, EmbeddingModelType::Onnx);
+        assert_eq!(cache_reloaded.current_model_type, EmbeddingModelType::Onnx);
 
         Ok(())
     }

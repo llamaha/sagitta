@@ -13,12 +13,12 @@ pub trait EmbeddingProvider: Send + Sync {
 }
 
 // Module exports
-pub mod fast;
 pub mod onnx;
+// pub mod fast; // Removed
 
 // Re-export provider implementations
-pub use fast::FastEmbeddingProvider;
 pub use onnx::OnnxEmbeddingProvider;
+// pub use fast::FastEmbeddingProvider; // Removed
 
 #[cfg(test)]
 mod tests {

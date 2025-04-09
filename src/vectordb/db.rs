@@ -1,8 +1,8 @@
 use crate::vectordb::cache::{CacheCheckResult, EmbeddingCache};
-use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType, EMBEDDING_DIM};
+use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::hnsw::{HNSWConfig, HNSWIndex, HNSWStats};
-use crate::vectordb::onnx::ONNX_EMBEDDING_DIM;
+use crate::vectordb::provider::onnx::ONNX_EMBEDDING_DIM;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use num_cpus;
@@ -11,7 +11,6 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -32,7 +31,7 @@ pub struct FeedbackData {
     pub query_feedback: HashMap<String, HashMap<String, FeedbackEntry>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct DBFile {
     embeddings: HashMap<String, Vec<f32>>,
     hnsw_config: Option<HNSWConfig>,
@@ -84,37 +83,27 @@ impl VectorDB {
             match fs::read_to_string(&db_path) {
                 Ok(contents) => {
                     debug!("Database file read successfully, parsing JSON");
-                    match serde_json::from_str::<DBFile>(&contents) {
-                        Ok(db_file) => {
-                            debug!(
-                                "Database parsed successfully: {} embeddings",
-                                db_file.embeddings.len()
-                            );
-                            (
-                                db_file.embeddings,
-                                db_file.hnsw_config,
-                                db_file.feedback.unwrap_or_default(),
-                                db_file.embedding_model_type.unwrap_or_default(),
-                                db_file.onnx_model_path.map(PathBuf::from),
-                                db_file.onnx_tokenizer_path.map(PathBuf::from),
-                            )
-                        }
-                        Err(e) => {
-                            error!("Database file appears to be corrupted: {}", e);
-                            eprintln!("Warning: Database file appears to be corrupted: {}", e);
-                            eprintln!("Creating a new empty database.");
-                            let _ = fs::remove_file(&db_path);
-                            debug!("Creating a new empty database");
-                            (
-                                HashMap::new(),
-                                Some(HNSWConfig::default()),
-                                FeedbackData::default(),
-                                EmbeddingModelType::Fast,
-                                None,
-                                None,
-                            )
-                        }
-                    }
+                    let db_file: DBFile = serde_json::from_str(&contents)?;
+
+                    // Determine model type - default to Onnx if missing or if Fast is found (treat Fast as Onnx now)
+                    let loaded_model_type = db_file.embedding_model_type.unwrap_or(EmbeddingModelType::Onnx);
+                    // if loaded_model_type == EmbeddingModelType::Fast { // Remove this check
+                    //     warn!("Loaded DB file used deprecated Fast model type. Treating as Onnx.");
+                    //     loaded_model_type = EmbeddingModelType::Onnx;
+                    // }
+
+                    debug!(
+                        "Database parsed successfully: {} embeddings",
+                        db_file.embeddings.len()
+                    );
+                    (
+                        db_file.embeddings,
+                        db_file.hnsw_config,
+                        db_file.feedback.unwrap_or_default(),
+                        loaded_model_type,
+                        db_file.onnx_model_path.map(PathBuf::from),
+                        db_file.onnx_tokenizer_path.map(PathBuf::from),
+                    )
                 }
                 Err(e) => {
                     error!("Couldn't read database file: {}", e);
@@ -125,7 +114,7 @@ impl VectorDB {
                         HashMap::new(),
                         Some(HNSWConfig::default()),
                         FeedbackData::default(),
-                        EmbeddingModelType::Fast,
+                        EmbeddingModelType::Onnx,
                         None,
                         None,
                     )
@@ -137,7 +126,7 @@ impl VectorDB {
                 HashMap::new(),
                 Some(HNSWConfig::default()),
                 FeedbackData::default(),
-                EmbeddingModelType::Fast,
+                EmbeddingModelType::Onnx,
                 None,
                 None,
             )
@@ -271,62 +260,16 @@ impl VectorDB {
         Ok(())
     }
 
-    pub fn set_embedding_model_type(&mut self, model_type: EmbeddingModelType) -> Result<()> {
-        if model_type == EmbeddingModelType::Onnx {
-            if self.onnx_model_path.is_none() || self.onnx_tokenizer_path.is_none() {
-                return Err(VectorDBError::EmbeddingError(
-                    "Cannot set ONNX model type: model or tokenizer paths not set".to_string(),
-                ));
-            }
-            let onnx_model_path = self.onnx_model_path.as_ref().unwrap();
-            let onnx_tokenizer_path = self.onnx_tokenizer_path.as_ref().unwrap();
-            if !onnx_model_path.exists() {
-                return Err(VectorDBError::EmbeddingError(format!(
-                    "ONNX model file not found: {}",
-                    onnx_model_path.display()
-                )));
-            }
-            if !onnx_tokenizer_path.exists() {
-                return Err(VectorDBError::EmbeddingError(format!(
-                    "ONNX tokenizer file not found: {}",
-                    onnx_tokenizer_path.display()
-                )));
-            }
-            match EmbeddingModel::new_onnx(onnx_model_path, onnx_tokenizer_path) {
-                Ok(_) => self.embedding_model_type = model_type,
-                Err(e) => {
-                    return Err(VectorDBError::EmbeddingError(format!(
-                        "Failed to initialize ONNX model: {}",
-                        e
-                    )));
-                }
-            }
-        } else {
-            self.embedding_model_type = model_type;
-        }
-        self.save()?;
-        Ok(())
-    }
-
-    pub fn embedding_model_type(&self) -> &EmbeddingModelType {
-        &self.embedding_model_type
-    }
-
     pub fn create_embedding_model(&self) -> Result<EmbeddingModel> {
-        match &self.embedding_model_type {
-            EmbeddingModelType::Fast => Ok(EmbeddingModel::new()),
-            EmbeddingModelType::Onnx => {
-                if let (Some(model_path), Some(tokenizer_path)) =
-                    (&self.onnx_model_path, &self.onnx_tokenizer_path)
-                {
-                    EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                        .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
-                } else {
-                    Err(VectorDBError::EmbeddingError(
-                        "ONNX model paths not set. Environment variables VECTORDB_ONNX_MODEL and VECTORDB_ONNX_TOKENIZER are required".to_string()
-                    ))
-                }
-            }
+        if let (Some(model_path), Some(tokenizer_path)) =
+            (&self.onnx_model_path, &self.onnx_tokenizer_path)
+        {
+            EmbeddingModel::new_onnx(model_path, tokenizer_path)
+                .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
+        } else {
+            Err(VectorDBError::EmbeddingError(
+                "ONNX model paths not set. Required via set_onnx_model_paths or env vars.".to_string()
+            ))
         }
     }
 
@@ -336,40 +279,18 @@ impl VectorDB {
             return Err(VectorDBError::DirectoryNotFound(dir_path.to_string_lossy().to_string()));
         }
         debug!("Starting directory scan for files to index in {}", dir_path.display());
-        let files: Vec<PathBuf> = if file_patterns.is_empty()
-            && self.embedding_model_type == EmbeddingModelType::Fast
-        {
-            debug!("Using fast model with no file types specified - indexing all non-binary files");
-            WalkDir::new(dir_path)
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter(|entry| {
-                    if !entry.file_type().is_file() { return false; }
-                    if let Ok(file) = std::fs::File::open(entry.path()) {
-                        let mut buffer = [0u8; 512];
-                        let mut reader = std::io::BufReader::new(file);
-                        if let Ok(bytes_read) = reader.read(&mut buffer) {
-                            if bytes_read > 0 { return !buffer[..bytes_read].contains(&0); }
-                            }
-                        }
-                    true
-                })
-                .map(|entry| entry.path().to_path_buf())
-                .collect()
-        } else {
-            WalkDir::new(dir_path)
+        let files: Vec<PathBuf> = WalkDir::new(dir_path)
                 .into_iter()
                 .filter_map(|entry| entry.ok())
                 .filter(|entry| {
                     entry.file_type().is_file()
                         && match entry.path().extension() {
-                            Some(ext) => file_patterns.contains(&ext.to_string_lossy().to_string()),
-                            None => false,
+                            Some(ext) => file_patterns.is_empty() || file_patterns.contains(&ext.to_string_lossy().to_string()),
+                            None => file_patterns.is_empty(),
                         }
                 })
                 .map(|entry| entry.path().to_path_buf())
-                .collect()
-        };
+                .collect();
 
         let file_count = files.len();
         if file_count == 0 {
@@ -437,14 +358,7 @@ impl VectorDB {
     }
 
     pub fn stats(&self) -> DBStats {
-        let embedding_dimension = if !self.embeddings.is_empty() {
-            self.embeddings.values().next().unwrap().len()
-        } else {
-            match &self.embedding_model_type {
-                EmbeddingModelType::Fast => EMBEDDING_DIM,
-                EmbeddingModelType::Onnx => ONNX_EMBEDDING_DIM,
-            }
-        };
+        let embedding_dimension = ONNX_EMBEDDING_DIM;
         DBStats {
             indexed_files: self.embeddings.len(),
             embedding_dimension,
@@ -691,6 +605,75 @@ impl VectorDB {
     // Restore get_file_path
     pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
         self.embeddings.keys().nth(node_id)
+    }
+
+    // New method to index a single file
+    pub fn index_single_file(&mut self, file_path: &Path) -> Result<()> {
+        let file_path_str = file_path.to_string_lossy().to_string();
+        debug!("Indexing single file: {}", file_path_str);
+
+        // 1. Check cache
+        match self.cache.check_cache_and_get_hash(&file_path_str, file_path) {
+            Ok(CacheCheckResult::Hit(embedding)) => {
+                debug!("Cache hit for {}", file_path_str);
+                self.embeddings.insert(file_path_str.clone(), embedding.clone());
+                if let Some(index) = &mut self.hnsw_index {
+                    if let Err(e) = index.insert(embedding) {
+                        error!("Failed to insert cached embedding into HNSW index for {}: {}", file_path.display(), e);
+                    }
+                }
+                return Ok(());
+            }
+            Ok(CacheCheckResult::Miss(hash_opt)) => {
+                // Continue to embedding
+                debug!("Cache miss for {}, generating embedding.", file_path_str);
+                match fs::read_to_string(file_path) {
+                    Ok(content) => {
+                        let model = self.create_embedding_model()?;
+                        let embedding = model.embed(&content)?;
+
+                        // Insert into embeddings map
+                        self.embeddings.insert(file_path_str.clone(), embedding.clone());
+
+                        // Insert into HNSW index
+                        if let Some(index) = &mut self.hnsw_index {
+                            if let Err(e) = index.insert(embedding.clone()) {
+                                error!("Failed to insert new embedding into HNSW index for {}: {}", file_path.display(), e);
+                            }
+                        }
+
+                        // Update cache
+                        if let Some(hash) = hash_opt {
+                             if let Err(e) = self.cache.insert_with_hash(file_path_str.clone(), embedding, hash) {
+                                error!("Failed to insert into cache for {}: {}", file_path.display(), e);
+                            }
+                        } else {
+                            // If hash wasn't available before, try getting it now
+                             match EmbeddingCache::get_file_hash(file_path) {
+                                Ok(new_hash) => {
+                                    if let Err(e) = self.cache.insert_with_hash( file_path_str, embedding, new_hash ) {
+                                        error!("Failed to insert into cache (retry hash) for {}: {}", file_path.display(), e);
+                                    }
+                                }
+                                Err(e) => { error!("Failed again to get hash for cache insertion for {}: {}", file_path.display(), e); }
+                            }
+                        }
+
+                         // Save changes periodically if needed (or just rely on external save)
+                        // Consider adding self.save() here if necessary, but might be slow for many single files.
+                        // For tests, relying on the test cleanup or an explicit save at the end is likely better.
+
+                        Ok(())
+                    }
+                    Err(e) => Err(VectorDBError::IOError(e)),
+                }
+            }
+            Err(e) => {
+                 error!("Cache check/hash error for {}: {}", file_path.display(), e);
+                 // Decide how to handle - fail or proceed without cache? For now, fail.
+                 Err(VectorDBError::CacheError(format!("Cache check failed for {}: {}", file_path.display(), e)))
+            }
+        }
     }
 }
 
