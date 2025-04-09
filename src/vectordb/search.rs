@@ -3,7 +3,6 @@ use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use anyhow::Result;
 use log::{debug, warn};
-use regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -896,11 +895,6 @@ impl Search {
         (vector_weight, bm25_weight)
     }
 
-    /// Helper to get all file paths from the database
-    fn get_all_file_paths(&self) -> Result<Vec<String>> {
-        Ok(self.db.embeddings.keys().cloned().collect())
-    }
-
     /// Get snippet from file matching the query
     fn get_snippet(&self, file_path: &str, query: &str) -> Result<String> {
         // This method is now a fallback when the SnippetExtractor fails
@@ -1043,74 +1037,6 @@ impl Default for SearchOptions {
             vector_weight: None,
             bm25_weight: None,
         }
-    }
-}
-
-/// Normalize text by removing extra whitespace, converting to lowercase etc.
-fn normalize_text(text: &str) -> String {
-    // Convert to lowercase
-    let lowercase = text.to_lowercase();
-
-    // Replace multiple whitespace with single space
-    let re_whitespace = regex::Regex::new(r"\s+").unwrap();
-    let normalized = re_whitespace.replace_all(&lowercase, " ").to_string();
-
-    // Remove common punctuation
-    let re_punctuation = regex::Regex::new(r#"[.,;:!?()\[\]{}'""]"#).unwrap();
-    let normalized = re_punctuation.replace_all(&normalized, "").to_string();
-
-    normalized.trim().to_string()
-}
-
-/// Calculate similarity between two text snippets
-fn text_similarity(text1: &str, text2: &str) -> f32 {
-    let normalized1 = normalize_text(text1);
-    let normalized2 = normalize_text(text2);
-
-    // If either text is empty, return 0 similarity
-    if normalized1.is_empty() || normalized2.is_empty() {
-        return 0.0;
-    }
-
-    // Split into words
-    let words1: HashSet<&str> = normalized1.split_whitespace().collect();
-    let words2: HashSet<&str> = normalized2.split_whitespace().collect();
-
-    // Count intersection and union
-    let intersection_count = words1.intersection(&words2).count();
-    let union_count = words1.union(&words2).count();
-
-    // Calculate Jaccard similarity
-    if union_count == 0 {
-        0.0
-    } else {
-        intersection_count as f32 / union_count as f32
-    }
-}
-
-/// Calculate cosine similarity between two vectors
-fn cosine_similarity(vec1: &[f32], vec2: &[f32]) -> f32 {
-    if vec1.len() != vec2.len() || vec1.is_empty() {
-        return 0.0;
-    }
-
-    let mut dot_product = 0.0;
-    let mut norm1 = 0.0;
-    let mut norm2 = 0.0;
-
-    for i in 0..vec1.len() {
-        dot_product += vec1[i] * vec2[i];
-        norm1 += vec1[i] * vec1[i];
-        norm2 += vec2[i] * vec2[i];
-    }
-
-    norm1 = norm1.sqrt();
-    norm2 = norm2.sqrt();
-
-    if norm1 == 0.0 || norm2 == 0.0 {
-        0.0
-    } else {
-        dot_product / (norm1 * norm2)
     }
 }
 
