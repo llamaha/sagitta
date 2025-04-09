@@ -9,19 +9,11 @@ use std::fs;
 use std::path::Path;
 
 const SIMILARITY_THRESHOLD: f32 = 0.5; // Increased from 0.3
-const DEFAULT_MAX_RESULTS: usize = 20; // New constant for default max results
-const MIN_CONTEXT_LINES: usize = 2;
 const MAX_CONTEXT_LINES: usize = 8;
 const HNSW_TOP_K: usize = 30; // Increased from 20 for better recall
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7; // Default weight for vector search
 const HYBRID_BM25_WEIGHT: f32 = 0.3; // Default weight for BM25 search
 const SPECIALIZED_SEARCH_THRESHOLD: f32 = 0.3; // Lower similarity threshold for specialized queries
-
-// Added constants
-const FILE_PATH_WEIGHT: f32 = 1.2;
-
-const MAX_SNIPPETS_PER_FILE: usize = 3;
-const SNIPPET_OVERLAP: usize = 2;
 
 /// Structure to hold query analysis results
 #[derive(Debug)]
@@ -162,7 +154,7 @@ impl Search {
 
     /// Standard search using vector similarity
     pub fn search(&mut self, query: &str) -> Result<Vec<SearchResult>> {
-        self.search_with_limit(query, DEFAULT_MAX_RESULTS)
+        self.search_with_limit(query, 20)
     }
 
     /// Standard search using vector similarity with a limit on the number of results
@@ -342,7 +334,7 @@ impl Search {
         vector_weight: Option<f32>,
         bm25_weight: Option<f32>,
     ) -> Result<Vec<SearchResult>> {
-        self.hybrid_search_with_limit(query, vector_weight, bm25_weight, DEFAULT_MAX_RESULTS)
+        self.hybrid_search_with_limit(query, vector_weight, bm25_weight, 20)
     }
 
     /// Hybrid search combining vector similarity and BM25 lexical matching with a limit on the number of results
