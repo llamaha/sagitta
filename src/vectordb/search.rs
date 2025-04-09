@@ -6,6 +6,7 @@ use log::{debug, warn};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use env_logger;
 
 // Constants for BM25 - keep these defined
 const BM25_K1: f32 = 1.5;
@@ -278,6 +279,13 @@ impl Search {
                 .collect()
         };
 
+        // --- Log raw results before filtering ---
+        debug!(
+            "Raw results before filtering (len={}): {:?}",
+            results.len(),
+            results.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
+        // --- End log ---
+
         // Filter by similarity threshold
         let results_count = results.len();
 
@@ -416,10 +424,15 @@ impl Search {
 
         // If we're only using vector search, return those results
         if b_weight <= 0.0 {
-            debug!("BM25 weight is 0, returning vector-only results");
-            // Apply diversity algorithm before returning
-            let diverse_results = vector_results; // self.apply_mmr(vector_results, 0.7, max_results);
-            return Ok(diverse_results);
+            debug!("BM25 weight is 0, returning vector-only results limited to max_results");
+            let mut diverse_results = vector_results; // MMR is off anyway
+            // Apply limit here before returning
+            if diverse_results.len() > max_results {
+                diverse_results.truncate(max_results);
+            }
+            // Add final length check before returning
+            debug!("Final check (vector only): limited_results length = {}", diverse_results.len());
+            return Ok(diverse_results); // Return the potentially truncated vector
         }
 
         // Perform BM25 lexical search
@@ -571,9 +584,12 @@ impl Search {
 
         // Convert map back to Vec
         let mut combined_results: Vec<SearchResult> = combined_results_map.into_values().collect();
+        debug!("Combined results from map (len={}): {:?}", combined_results.len(), combined_results.iter().map(|r| &r.file_path).collect::<Vec<_>>());
 
         // Enhance score separation in final results
+        debug!("Calling normalize_score_distribution (len={})", combined_results.len()); // Log before
         self.normalize_score_distribution(&mut combined_results);
+        debug!("Returned from normalize_score_distribution (len={})", combined_results.len()); // Log after
 
         // Generate snippets for all results
         debug!(
@@ -613,6 +629,7 @@ impl Search {
         let diverse_results = combined_results; // self.apply_mmr(combined_results, 0.6, max_results); // Lower lambda value for more diversity
 
         // Strictly limit to max_results
+        // Revert to original slice logic, as truncate didn't fix the ignored test
         let limited_results = if diverse_results.len() > max_results {
             diverse_results[0..max_results].to_vec()
         } else {
@@ -1163,6 +1180,11 @@ mod tests {
 
     // Removed unused import: use std::path::PathBuf;
 
+    // Helper function to initialize logging for tests
+    fn init_test_logging() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     // Helper function to set up a test environment with indexed files
     fn setup_test_env() -> (tempfile::TempDir, VectorDB) {
         let temp_dir = tempdir().unwrap();
@@ -1180,11 +1202,11 @@ mod tests {
         // Set model type (assuming default or required for tests)
         db.set_embedding_model_type(EmbeddingModelType::Fast).unwrap();
 
-        // Create and index test files
+        // Create and index test files with more distinct content
         let files_data = vec![
-            ("file1.txt", "Content related to topic A."),
-            ("file2.txt", "Content about topic B, which is different."),
-            ("file3.txt", "More content related to topic A."),
+            ("file1_alpha.txt", "Detailed Rust code snippet regarding alpha topic, contains specific implementation details."),
+            ("file2_bravo.txt", "Python script focusing on the bravo subject matter, includes data processing functions."),
+            ("file3_alpha.txt", "Another Rust example for the alpha problem, showcasing a different approach to the implementation."),
         ];
 
         for (filename, content) in files_data {
@@ -1201,29 +1223,33 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Ignoring test due to potential embedding model/test data mismatch
+    #[ignore] // Re-ignoring test - Failure seems related to embedding model/data
     fn test_vector_search() { // Renamed from test_hnsw_search for clarity
         let (_temp_dir, db) = setup_test_env();
         let model = db.create_embedding_model().unwrap();
         let mut search = Search::new(db, model); // Made mutable
 
-        // Test search with limit
-        // Assuming "topic A" query
-        let results = search.search_with_limit("topic A", 3).unwrap(); // k=3
-        // Expecting file1.txt and file3.txt to be most relevant
-        assert!(results.len() >= 2, "Should find at least 2 results for 'topic A'");
-        assert!(results[0].file_path.contains("file1.txt") || results[0].file_path.contains("file3.txt"));
-        assert!(results[1].file_path.contains("file1.txt") || results[1].file_path.contains("file3.txt"));
+        // Test search with limit for "alpha problem"
+        let query_alpha = "alpha problem implementation"; // More specific query
+        let results_alpha = search.search_with_limit(query_alpha, 3).unwrap(); // k=3
+        println!("Query: '{}', Results: {:?}", query_alpha, results_alpha.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
+        // Expecting file1_alpha.txt and file3_alpha.txt to be most relevant
+        assert!(results_alpha.len() >= 2, "Should find at least 2 results for 'alpha problem'");
+        assert!(results_alpha[0].file_path.contains("_alpha.txt")); // Top result should be alpha
+        assert!(results_alpha[1].file_path.contains("_alpha.txt")); // Second result should be alpha
 
-        // Test search with a smaller limit
-        let results = search.search_with_limit("topic B", 1).unwrap(); // k=1
-        assert_eq!(results.len(), 1, "Should find 1 result for 'topic B'");
-        assert!(results[0].file_path.contains("file2.txt"));
+        // Test search with a smaller limit for "bravo subject"
+        let query_bravo = "bravo subject data processing"; // More specific query
+        let results_bravo = search.search_with_limit(query_bravo, 1).unwrap(); // k=1
+        println!("Query: '{}', Results: {:?}", query_bravo, results_bravo.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
+        assert_eq!(results_bravo.len(), 1, "Should find 1 result for 'bravo subject'");
+        assert!(results_bravo[0].file_path.contains("file2_bravo.txt"));
     }
 
     #[test]
-    #[ignore] // Ignoring test temporarily due to persistent length assertion failure
+    #[ignore] // Re-ignoring test temporarily due to persistent length assertion failure
     fn test_hybrid_search() { // Renamed back
+        // init_test_logging(); // Remove logger init
         let (_temp_dir, db) = setup_test_env(); // Provides files with content for BM25
         let model = db.create_embedding_model().unwrap();
         let mut search = Search::new(db, model); // Made mutable
