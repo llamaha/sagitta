@@ -11,11 +11,11 @@ pub use result::SearchResult;
 
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
-use crate::vectordb::error::{Result, VectorDBError}; // Import VectorDBError here
+use crate::vectordb::error::Result; // Import VectorDBError here
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use bm25::{build_bm25_index, BM25Index}; // Keep this import
 use log::{debug, warn};
-use std::collections::HashMap; // Keep HashMap if needed by tests or Search struct
+ // Keep HashMap if needed by tests or Search struct
 // Remove HashSet if not needed
 
 // --- Removed Structs --- 

@@ -1,5 +1,4 @@
 use log::debug;
-use std::collections::HashMap;
 
 /// Structure to hold query analysis results
 #[derive(Debug)]

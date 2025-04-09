@@ -3,7 +3,7 @@ use crate::vectordb::embedding::EmbeddingModel;
 use crate::vectordb::error::Result;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use super::result::SearchResult;
-use super::query_analysis::{self, QueryAnalysis};
+use super::query_analysis::{self};
 use super::bm25::{self, BM25Index};
 use super::vector;
 use log::{debug, warn};
@@ -142,12 +142,8 @@ pub(crate) fn hybrid_search_with_limit(
     normalize_score_distribution(&mut bm25_results);
 
     // Normalize vector scores before combining
-    let mut normalized_vector_results = vector_results; // Clone or reuse based on ownership needs
+    let mut normalized_vector_results = vector_results; // Reuse the vector results vec
     normalize_score_distribution(&mut normalized_vector_results);
-
-    // Track the highest BM25 score for relative scaling (optional, could use normalized scores directly)
-    let max_bm25_score = bm25_results.first().map_or(1.0, |r| r.similarity).max(0.001); // Avoid division by zero
-    let max_vector_score = normalized_vector_results.first().map_or(1.0, |r| r.similarity).max(0.001);
 
     // Combine vector and BM25 results using a HashMap to ensure uniqueness
     debug!("Combining vector and BM25 results using HashMap");
