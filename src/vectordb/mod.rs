@@ -7,7 +7,6 @@ pub mod error;
 pub mod hnsw;
 pub mod onnx;
 // pub mod parsing;
-pub mod path_relevance;
 pub mod provider;
 pub mod search;
 // pub mod search_ranking;
