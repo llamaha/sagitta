@@ -1,4 +1,3 @@
-use crate::vectordb::embedding::EMBEDDING_DIM;
 use anyhow::Result;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -11,30 +10,28 @@ use std::path::Path;
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HNSWConfig {
-    /// Maximum number of connections per layer per element
+    pub dimension: usize,
     pub m: usize,
-    /// Size of dynamic candidate list for construction
     pub ef_construction: usize,
-    /// Number of layers in the index
     pub num_layers: usize,
-    /// Random seed for layer assignment
     pub random_seed: u64,
-}
-
-impl HNSWConfig {
-    // Removed unused function calculate_optimal_layers
-    // pub fn calculate_optimal_layers(dataset_size: usize) -> usize { ... }
 }
 
 impl Default for HNSWConfig {
     fn default() -> Self {
         Self {
-            m: 16,                // Higher m value for better recall
-            ef_construction: 200, // Increased from 100 for better index quality
-            num_layers: 16,       // Will be dynamically adjusted based on dataset size
+            dimension: 768, // Default to a common embedding size
+            m: 16,
+            ef_construction: 200,
+            num_layers: 1, // Start with 1, might need adjustment based on data size
             random_seed: 42,
         }
     }
+}
+
+impl HNSWConfig {
+    // Removed unused function calculate_optimal_layers
+    // pub fn calculate_optimal_layers(dataset_size: usize) -> usize { ... }
 }
 
 /// Represents a node in the HNSW graph
@@ -79,6 +76,7 @@ struct SerializedHNSWIndex {
 
 impl HNSWIndex {
     pub fn new(config: HNSWConfig) -> Self {
+        assert!(config.dimension > 0, "HNSW dimension must be positive");
         let num_layers = config.num_layers;
         Self {
             config,
@@ -180,8 +178,12 @@ impl HNSWIndex {
 
     /// Insert a new vector into the index
     pub fn insert(&mut self, vector: Vec<f32>) -> Result<usize> {
-        if vector.len() != EMBEDDING_DIM {
-            return Err(anyhow::anyhow!("Invalid vector dimension"));
+        if vector.len() != self.config.dimension {
+            return Err(anyhow::anyhow!(
+                "Invalid vector dimension: expected {}, got {}",
+                self.config.dimension,
+                vector.len()
+            ));
         }
 
         let max_layer = self.random_layer();
@@ -241,8 +243,12 @@ impl HNSWIndex {
 
     /// Search for the k nearest neighbors of a query vector in parallel
     pub fn search_parallel(&self, query: &[f32], k: usize, ef: usize) -> Result<Vec<(usize, f32)>> {
-        if query.len() != EMBEDDING_DIM {
-            return Err(anyhow::anyhow!("Invalid query vector dimension"));
+        if query.len() != self.config.dimension {
+            return Err(anyhow::anyhow!(
+                "Invalid query vector dimension: expected {}, got {}",
+                self.config.dimension,
+                query.len()
+            ));
         }
 
         if self.nodes.is_empty() {
@@ -411,6 +417,17 @@ pub struct HNSWStats {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    const TEST_DIM: usize = 4;
+
+    fn test_config() -> HNSWConfig {
+        HNSWConfig {
+            dimension: TEST_DIM,
+            m: 8,
+            ef_construction: 100,
+            num_layers: 4,
+            random_seed: 42,
+        }
+    }
 
     #[test]
     fn test_cosine_distance() {
@@ -447,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_node_creation() {
-        let vector = vec![1.0; EMBEDDING_DIM];
+        let vector = vec![1.0; TEST_DIM];
         let node = HNSWNode::new(vector, 3);
         assert_eq!(node.max_layer, 3);
         assert_eq!(node.connections.len(), 4);
@@ -455,13 +472,12 @@ mod tests {
 
     #[test]
     fn test_insertion() {
-        let config = HNSWConfig::default();
+        let config = test_config();
         let mut index = HNSWIndex::new(config);
 
-        // Insert a few test vectors
-        let v1 = vec![1.0; EMBEDDING_DIM];
-        let v2 = vec![0.0; EMBEDDING_DIM];
-        let v3 = vec![0.5; EMBEDDING_DIM];
+        let v1 = vec![1.0; TEST_DIM];
+        let v2 = vec![0.0; TEST_DIM];
+        let v3 = vec![0.5; TEST_DIM];
 
         let idx1 = index.insert(v1).unwrap();
         let idx2 = index.insert(v2).unwrap();
@@ -471,46 +487,43 @@ mod tests {
         assert_eq!(idx2, 1);
         assert_eq!(idx3, 2);
 
-        // Check that nodes were created with correct dimensions
         assert_eq!(index.nodes.len(), 3);
-        assert_eq!(index.nodes[0].vector.len(), EMBEDDING_DIM);
+        assert_eq!(index.nodes[0].vector.len(), TEST_DIM);
+
+        let wrong_dim_vec = vec![1.0; TEST_DIM + 1];
+        assert!(index.insert(wrong_dim_vec).is_err());
     }
 
     #[test]
     fn test_search() {
-        let config = HNSWConfig::default();
+        let config = test_config();
         let mut index = HNSWIndex::new(config);
 
-        // Insert test vectors
-        let v1 = vec![1.0; EMBEDDING_DIM];
-        let v2 = vec![0.0; EMBEDDING_DIM];
-        let v3 = vec![0.5; EMBEDDING_DIM];
+        let v1 = vec![1.0; TEST_DIM];
+        let v2 = vec![0.0; TEST_DIM];
+        let v3 = vec![0.5; TEST_DIM];
 
         index.insert(v1).unwrap();
         index.insert(v2).unwrap();
         index.insert(v3).unwrap();
 
-        // Search for nearest neighbors
-        let query = vec![0.8; EMBEDDING_DIM];
+        let query = vec![0.8; TEST_DIM];
         let results = index.search_parallel(&query, 2, 10).unwrap();
 
         assert_eq!(results.len(), 2);
-
-        // Print results for debugging
         println!("Search results: {:?}", results);
 
-        // Just verify we got 2 results, don't check order since it might vary
-        // due to tie-breaking in different floating point operations
+        let wrong_dim_query = vec![0.8; TEST_DIM + 1];
+        assert!(index.search_parallel(&wrong_dim_query, 2, 10).is_err());
     }
 
     #[test]
     fn test_stats() {
-        let config = HNSWConfig::default();
+        let config = test_config();
         let mut index = HNSWIndex::new(config.clone());
 
-        // Insert some test vectors
         for i in 0..5 {
-            let v = vec![i as f32; EMBEDDING_DIM];
+            let v = vec![i as f32; TEST_DIM];
             index.insert(v).unwrap();
         }
 
@@ -518,9 +531,9 @@ mod tests {
         assert_eq!(stats.total_nodes, 5);
         assert_eq!(stats.layers, config.num_layers);
         assert_eq!(stats.layer_stats.len(), config.num_layers);
+        assert_eq!(index.config.dimension, TEST_DIM);
     }
 
-    // Helper function for benchmarking
     fn benchmark<F>(name: &str, iterations: u32, mut f: F) -> Duration
     where
         F: FnMut() -> (),
@@ -548,45 +561,33 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // This test is a performance benchmark that can take a long time to run
+    #[ignore]
     fn benchmark_linear_vs_hnsw() {
-        // Create random data
+        let test_dim = 16;
         let num_vectors = 1000;
         let num_queries = 10;
         let k = 10;
 
-        // Create random vectors
         let mut vectors = Vec::with_capacity(num_vectors);
         for _ in 0..num_vectors {
-            let mut v = vec![0.0; EMBEDDING_DIM];
-            for j in 0..EMBEDDING_DIM {
-                v[j] = rand::random::<f32>();
-            }
-            // Normalize
+            let mut v = vec![0.0; test_dim];
+            for j in 0..test_dim { v[j] = rand::random::<f32>(); }
             let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-            for j in 0..EMBEDDING_DIM {
-                v[j] /= norm;
-            }
+            if norm > 0.0 { for j in 0..test_dim { v[j] /= norm; } }
             vectors.push(v);
         }
 
-        // Create random queries
         let mut queries = Vec::with_capacity(num_queries);
         for _ in 0..num_queries {
-            let mut q = vec![0.0; EMBEDDING_DIM];
-            for j in 0..EMBEDDING_DIM {
-                q[j] = rand::random::<f32>();
-            }
-            // Normalize
+            let mut q = vec![0.0; test_dim];
+            for j in 0..test_dim { q[j] = rand::random::<f32>(); }
             let norm: f32 = q.iter().map(|x| x * x).sum::<f32>().sqrt();
-            for j in 0..EMBEDDING_DIM {
-                q[j] /= norm;
-            }
+            if norm > 0.0 { for j in 0..test_dim { q[j] /= norm; } }
             queries.push(q);
         }
 
-        // Build HNSW index
         let config = HNSWConfig {
+            dimension: test_dim,
             m: 16,
             ef_construction: 200,
             num_layers: 4,
@@ -594,27 +595,18 @@ mod tests {
         };
         let mut hnsw_index = HNSWIndex::new(config);
 
-        for v in &vectors {
-            hnsw_index.insert(v.clone()).unwrap();
-        }
+        for v in &vectors { hnsw_index.insert(v.clone()).unwrap(); }
 
-        // Linear search function
         let linear_search = |query: &[f32], k: usize| -> Vec<(usize, f32)> {
-            let mut distances = Vec::with_capacity(vectors.len());
-
-            for (i, vector) in vectors.iter().enumerate() {
-                let dist = HNSWIndex::cosine_distance(query, vector);
-                distances.push((i, dist));
-            }
-
-            // Sort by distance
+            let mut distances: Vec<(usize, f32)> = vectors
+                .iter()
+                .enumerate()
+                .map(|(i, vector)| (i, HNSWIndex::cosine_distance(query, vector)))
+                .collect();
             distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-            // Take top k
             distances.into_iter().take(k).collect()
         };
 
-        // Benchmark linear search
         let mut query_idx = 0;
         let linear_time = benchmark("Linear search", num_queries as u32, || {
             let query = &queries[query_idx];
@@ -622,7 +614,6 @@ mod tests {
             query_idx = (query_idx + 1) % num_queries;
         });
 
-        // Benchmark HNSW search
         query_idx = 0;
         let hnsw_time = benchmark("HNSW search", num_queries as u32, || {
             let query = &queries[query_idx];
@@ -634,31 +625,18 @@ mod tests {
             "HNSW is {:.2}x faster than linear search",
             linear_time.as_nanos() as f64 / hnsw_time.as_nanos() as f64
         );
-
-        // Check search quality
+        
         for query in &queries {
             let linear_results = linear_search(query, k);
             let hnsw_results = hnsw_index.search_parallel(query, k, 100).unwrap();
-
-            // Calculate recall@k (how many of the exact top-k results were found by HNSW)
             let mut found = 0;
             let linear_ids: HashSet<usize> = linear_results.iter().map(|(idx, _)| *idx).collect();
-
             for (idx, _) in hnsw_results {
-                if linear_ids.contains(&idx) {
-                    found += 1;
-                }
+                if linear_ids.contains(&idx) { found += 1; }
             }
-
             let recall = found as f32 / k as f32;
             println!("Recall@{}: {:.2}", k, recall);
-
-            // We generally want recall to be at least 0.9
-            assert!(
-                recall >= 0.7,
-                "HNSW search quality is too low: {:.2}",
-                recall
-            );
+            assert!(recall >= 0.7, "HNSW search quality is too low: {:.2}", recall);
         }
     }
 }
