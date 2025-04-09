@@ -12,6 +12,4 @@ pub mod search;
 // pub mod search_ranking;
 pub mod snippet_extractor;
 
-pub mod test_utils;
-
 pub use db::VectorDB;

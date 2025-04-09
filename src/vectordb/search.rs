@@ -1180,6 +1180,7 @@ mod tests {
     use crate::vectordb::db::VectorDB;
     use tempfile::tempdir;
     use std::fs;
+    use std::path::Path;
 
     // Helper function to set up a test environment with indexed files
     fn setup_test_env() -> (tempfile::TempDir, VectorDB) {
@@ -1192,8 +1193,17 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
 
-        // Use VectorDB::new for initialization
+        // Create a new DB. It won't have ONNX paths initially.
         let mut db = VectorDB::new(db_path_str.clone()).unwrap();
+
+        // Attempt to set default ONNX paths if available, otherwise tests needing model will fail later
+        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
+        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
+        if default_model_path.exists() && default_tokenizer_path.exists() {
+             if let Err(e) = db.set_onnx_paths(Some(default_model_path.to_path_buf()), Some(default_tokenizer_path.to_path_buf())) {
+                warn!("Setup_test_env: Failed to set default ONNX paths: {}", e);
+             }
+        }
 
         // Create and index test files with more distinct content
         let files_data = vec![
@@ -1216,10 +1226,18 @@ mod tests {
     }
 
     #[test_log::test]
-    #[ignore] // Re-ignoring test - Failure seems related to embedding model/data
+    // #[ignore] // Un-ignore test
     fn test_vector_search() { // Renamed from test_hnsw_search for clarity
+        // Skip test if default ONNX files don't exist
+        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
+        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
+        if !default_model_path.exists() || !default_tokenizer_path.exists() {
+            println!("Skipping test_vector_search because default ONNX model files aren't available in ./onnx/");
+            return;
+        }
+
         let (_temp_dir, db) = setup_test_env();
-        let model = db.create_embedding_model().unwrap();
+        let model = db.create_embedding_model().expect("Failed to create ONNX model in test_vector_search");
         let mut search = Search::new(db, model); // Made mutable
 
         // Test search with limit for "alpha problem"
@@ -1227,11 +1245,10 @@ mod tests {
         let results_alpha = search.search_with_limit(query_alpha, 3).unwrap(); // k=3
         println!("Query: '{}', Results: {:?}", query_alpha, results_alpha.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
 
-        // Adjust assertions based on observed behavior with FastText
-        assert!(results_alpha.len() >= 1, "Should find at least 1 result for 'alpha problem' (after threshold)");
-        // Acknowledge that bravo might rank higher than alpha for this model/data
-        // assert!(results_alpha[0].file_path.contains("_alpha.txt"));
-        // assert!(results_alpha[1].file_path.contains("_alpha.txt"));
+        // Assertions should now work with ONNX model
+        assert!(results_alpha.len() >= 2, "Should find at least 2 results for 'alpha problem' (after threshold)");
+        assert!(results_alpha[0].file_path.contains("_alpha.txt")); // Top result should be alpha
+        assert!(results_alpha[1].file_path.contains("_alpha.txt")); // Second result should be alpha
 
         // Test search with a smaller limit for "bravo subject"
         let query_bravo = "bravo subject data processing"; // More specific query
@@ -1241,12 +1258,19 @@ mod tests {
         assert!(results_bravo[0].file_path.contains("file2_bravo.txt"));
     }
 
-    #[test]
-    #[ignore] // Re-ignoring test temporarily due to persistent length assertion failure
+    #[test_log::test] // Use test-log attribute
+    // #[ignore] // Re-enabling test
     fn test_hybrid_search() { // Renamed back
-        // init_test_logging(); // Remove logger init
+        // Skip test if default ONNX files don't exist
+        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
+        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
+        if !default_model_path.exists() || !default_tokenizer_path.exists() {
+            println!("Skipping test_hybrid_search because default ONNX model files aren't available in ./onnx/");
+            return;
+        }
+
         let (_temp_dir, db) = setup_test_env(); // Provides files with content for BM25
-        let model = db.create_embedding_model().unwrap();
+        let model = db.create_embedding_model().expect("Failed to create ONNX model in test_hybrid_search"); // Should succeed now if skipped
         let mut search = Search::new(db, model); // Made mutable
 
         // Ensure BM25 index was built (check Search::new logs or add assert here if needed)
