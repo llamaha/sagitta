@@ -84,6 +84,9 @@ pub enum VectorDBError {
 
     #[error("Configuration error: {0}")]
     ConfigurationError(String),
+
+    #[error("Dimension mismatch: Expected {expected}, found {found}")]
+    DimensionMismatch { expected: usize, found: usize },
 }
 
 /// Conversion from anyhow::Error
@@ -137,6 +140,10 @@ impl Clone for VectorDBError {
             Self::SearchError(s) => Self::SearchError(s.clone()),
             Self::Other(s) => Self::Other(s.clone()),
             Self::ConfigurationError(s) => Self::ConfigurationError(s.clone()),
+            Self::DimensionMismatch { expected, found } => Self::DimensionMismatch {
+                expected: *expected,
+                found: *found,
+            },
         }
     }
 }
@@ -176,5 +183,21 @@ mod tests {
         let error = VectorDBError::ParserError("Failed to parse file".to_string());
         let err_string = error.to_string();
         assert!(err_string.contains("Failed to parse file"));
+    }
+
+    #[test]
+    fn test_dimension_mismatch_error() {
+        let error = VectorDBError::DimensionMismatch { expected: 10, found: 5 };
+        let err_string = error.to_string();
+        assert!(err_string.contains("Dimension mismatch: Expected 10, found 5"));
+
+        let cloned_error = error.clone();
+        match cloned_error {
+            VectorDBError::DimensionMismatch { expected, found } => {
+                assert_eq!(expected, 10);
+                assert_eq!(found, 5);
+            }
+            _ => panic!("Expected DimensionMismatch error after cloning"),
+        }
     }
 }
