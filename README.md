@@ -121,6 +121,8 @@ You can use other sentence-transformer models compatible with ONNX, such as Code
 -   It will **clear the existing incompatible embeddings** from the database and **create a new vector index** compatible with the new model.
 -   Alternatively, you can manually run `vectordb-cli clear` before indexing with a different model to ensure a clean state.
 
+Failure to provide a valid model and tokenizer will result in an error.
+
 ## Usage
 
 ### 1. Indexing Files
