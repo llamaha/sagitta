@@ -1,9 +1,11 @@
+#![allow(dead_code)]
+
 use anyhow::Result;
 use clap::Parser;
 use dirs::data_local_dir;
-use env_logger;
 use log::debug;
 use std::path::PathBuf;
+use tracing_subscriber;
 
 mod cli;
 mod utils;
@@ -16,9 +18,10 @@ struct Cli {
     command: cli::commands::Command,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
     // Initialize the logger
-    env_logger::init();
 
     let cli = Cli::parse();
 

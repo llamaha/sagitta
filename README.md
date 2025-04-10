@@ -46,6 +46,10 @@ A lightweight command-line tool for fast, local search across your codebases and
     cp target/release/vectordb-cli ~/.local/bin/ 
     ```
 
+For GPU acceleration (highly recommended for large datasets), you will need a compatible GPU and the necessary drivers/libraries installed. **Using a compatible GPU can result in significantly faster performance (e.g., 10x or more) during indexing.**
+*   **NVIDIA:** See [CUDA Setup](docs/CUDA_SETUP.md) for detailed instructions.
+*   **macOS (Apple Silicon):** See [macOS GPU Setup](docs/MACOS_GPU_SETUP.md) for details (Note: Currently untested).
+
 ## ONNX Model Setup (Required)
 
 `vectordb-cli` requires an ONNX embedding model and its corresponding tokenizer file for semantic search.
@@ -123,47 +127,3 @@ vectordb-cli index /path/to/your/code \
 # Use more threads for potentially faster indexing
 vectordb-cli index /path/to/your/code -j 8 
 ```
-
-### 2. Searching the Index
-
-Query the index using natural language or keywords.
-
-```bash
-# Hybrid search (semantic + lexical) - default
-vectordb-cli query "how does the authentication logic work?"
-
-# Limit the number of results (default is 20)
-vectordb-cli query "error handling in the API" --limit 5
-
-# Perform only vector (semantic) search
-vectordb-cli query "database schema migration" --vector-only
-
-# Adjust hybrid search weights (defaults are vector=0.6, bm25=0.4)
-# Increase BM25 for more keyword focus:
-vectordb-cli query "struct DatabaseConfig" --vector-weight 0.3 --bm25-weight 0.7
-# Increase vector for more semantic focus:
-vectordb-cli query "async task processing" --vector-weight 0.8 --bm25-weight 0.2
-```
-
-### 3. Other Commands
-
-```bash
-# Show database statistics
-vectordb-cli stats
-
-# Clear the entire search index and database
-vectordb-cli clear 
-```
-
-## Database Location
-
-The search index and database are stored locally within your user's data directory:
-
--   **Linux:** `~/.local/share/vectordb-cli/`
--   **macOS:** `~/Library/Application Support/vectordb-cli/`
-
-The primary database file is typically named `vectordb.json` within this directory. To backup, simply copy this directory or the `vectordb.json` file.
-
-## License
-
-MIT 
