@@ -5,6 +5,7 @@ use ndarray::{s, Array, Array2, Ix1, Ix2};
 use ort::inputs;
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::DynValue;
+use ort::execution_providers::{CUDAExecutionProvider, ExecutionProvider};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
@@ -41,9 +42,28 @@ impl OnnxEmbeddingProvider {
 
         // Create ONNX session
         debug!("Creating ONNX session with model path: {}", model_path.display());
+
+        // --- Configure Execution Provider ---
+        // Check if CUDA is available and intended
+        // For now, unconditionally try to add CUDA if the feature is enabled.
+        // The build flag 'ort/cuda' should ensure the necessary library is present.
+        let cuda_provider_config = CUDAExecutionProvider::default(); // Create the config struct first
+
+        // --- Check CUDA Provider Status ---
+        // Call is_available() on the specific provider config struct
+        match cuda_provider_config.is_available() {
+            Ok(true) => debug!("CUDA Execution Provider reports available."),
+            Ok(false) => debug!("CUDA Execution Provider reports *not* available. Ensure ONNX Runtime was built with CUDA support and CUDA drivers/runtime are correctly installed and found."),
+            Err(e) => debug!("Error checking CUDA Execution Provider availability: {}", e),
+        }
+
+        // Now build the dispatchable provider for the session builder
+        let cuda_provider_dispatch = cuda_provider_config.build();
+
         let session = Session::builder()?
+            .with_execution_providers([cuda_provider_dispatch])? // Use the built dispatch provider
             .with_optimization_level(GraphOptimizationLevel::Level1)?
-            .with_intra_threads(num_cpus::get())?
+            // .with_intra_threads(num_cpus::get())? // Typically not needed when using GPU
             .commit_from_file(model_path)?;
 
         debug!(

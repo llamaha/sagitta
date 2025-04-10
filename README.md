@@ -68,6 +68,38 @@ A lightweight command-line tool for fast, local search across your codebases and
 
 Failure to provide a valid model and tokenizer will result in an error.
 
+## GPU Acceleration (CUDA)
+
+To enable GPU acceleration using CUDA, follow these steps:
+
+1.  **Install CUDA:** Ensure you have a compatible NVIDIA driver and the CUDA Toolkit installed. You can verify your installation using `nvidia-smi` and `nvcc --version`.
+2.  **Enable `ort` CUDA Feature:** When building or running your project, enable the `cuda` feature for the `ort` crate. **This tells the `ort` build process to download and use the GPU-enabled version of the ONNX Runtime library.**
+    *   **Option 1 (Recommended):** Add the feature to your `Cargo.toml`:
+        ```toml
+        [dependencies]
+        ort = { version = "2.0.0-rc.9", features = ["cuda"] }
+        ```
+    *   **Option 2:** Enable the feature via the command line:
+        ```bash
+        cargo build --features ort/cuda
+        cargo run --features ort/cuda
+        ```
+3.  **Configure Session:** In your Rust code, configure the `SessionBuilder` to use the CUDA execution provider:
+    ```rust
+    use ort::{execution_providers::CUDAExecutionProvider, Session, SessionBuilder};
+
+    // ...
+
+    let providers = [CUDAExecutionProvider::default().build()];
+    let session = Session::builder()?
+        .with_execution_providers(providers)?
+        .commit_from_file("your_model.onnx")?; // Replace with your model path
+
+    // ... use the session ...
+    ```
+
+    You can customize the `CUDAExecutionProvider` further if needed (e.g., selecting a specific GPU device). Refer to the `ort` documentation for details.
+
 ## Usage
 
 ### 1. Indexing Files
