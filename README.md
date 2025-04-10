@@ -27,103 +27,105 @@ A lightweight command-line tool for fast, local search across your codebases and
 
 1.  **Clone the Repository:**
     ```bash
-    # If using the default model, ensure LFS is installed first
-    # git lfs install 
-    git clone https://gitlab.com/amulvany/vectordb-cli.git 
+    git clone https://gitlab.com/amulvany/vectordb-cli.git
     cd vectordb-cli
-    # If using the default model, pull the LFS files
-    # git lfs pull 
     ```
 
-2.  **Build:**
+2.  **Download Default Model (Optional):** The default model (`all-minilm-l6-v2`) is included via Git LFS. If you want to use it and haven't already configured LFS:
+    ```bash
+    # Install Git LFS (if not already installed)
+    # Debian/Ubuntu: sudo apt-get install git-lfs
+    # macOS: brew install git-lfs
+    # Then, install LFS hooks for your user:
+    git lfs install
+    # Pull the LFS files (downloads the model/tokenizer)
+    git lfs pull
+    ```
+    The default model (`onnx/all-minilm-l6-v2.onnx`) and its tokenizer (`onnx/tokenizer.json`) will be downloaded into the `onnx/` directory.
+
+3.  **Build:**
     ```bash
     cargo build --release
     ```
 
-3.  **Install Binary:** Copy the compiled binary to a location in your `PATH`.
+4.  **Install Binary:** Copy the compiled binary to a location in your `PATH`.
     ```bash
     # Example:
-    cp target/release/vectordb-cli ~/.local/bin/ 
+    cp target/release/vectordb-cli ~/.local/bin/
     ```
 
-For GPU acceleration (highly recommended for large datasets), you will need a compatible GPU and the necessary drivers/libraries installed. **Using a compatible GPU can result in significantly faster performance (e.g., 10x or more) during indexing.**
-*   **NVIDIA:** See [CUDA Setup](docs/CUDA_SETUP.md) for detailed instructions.
-*   **macOS (Apple Silicon):** See [macOS GPU Setup](docs/MACOS_GPU_SETUP.md) for details (Note: Currently untested).
+For GPU acceleration details, see [CUDA Setup](docs/CUDA_SETUP.md) and [macOS GPU Setup](docs/MACOS_GPU_SETUP.md).
 
-## ONNX Model Setup (Required)
+## Embedding Models
 
-`vectordb-cli` requires an ONNX embedding model and its corresponding tokenizer file for semantic search.
+`vectordb-cli` uses ONNX embedding models for semantic search. You can use the default model or provide your own.
 
-**Default:** If you cloned the repository using `git lfs pull`, the default model (`all-minilm-l12-v2.onnx`) and tokenizer (`minilm_tokenizer.json`) should be present in an `./onnx/` subdirectory relative to where you run the tool.
+### Default Model (all-MiniLM-L6-v2)
 
-**Manual Configuration:** If the default files aren't found, you **must** specify their paths using **either** environment variables **or** command-line arguments during indexing:
+-   **Dimension:** 384
+-   **Description:** A fast and effective model suitable for general semantic search.
+-   **Setup:** If you followed step 2 of the Installation (using `git lfs pull`), the model and tokenizer are already downloaded in the `onnx/` directory.
+-   **Usage:** When using the default model, `vectordb-cli` will automatically find it if you run the tool from the repository root, or if the `onnx/` directory is present in the current working directory. If it cannot find the files, you can specify the paths explicitly (see below).
 
-*   **Environment Variables:**
-    ```bash
-    export VECTORDB_ONNX_MODEL="/path/to/your/model.onnx"
-    export VECTORDB_ONNX_TOKENIZER="/path/to/your/tokenizer.json"
-    ```
-    (Add these to your `~/.bashrc`, `~/.zshrc`, etc.)
+### Using CodeBERT (or other models)
 
-*   **Command-Line Arguments (during `index`):**
-    ```bash
-    vectordb-cli index ./your/code --onnx-model /path/to/model.onnx --onnx-tokenizer /path/to/tokenizer.json
-    ```
+You can use other sentence-transformer models compatible with ONNX, such as CodeBERT, which is specifically trained on code.
 
-Failure to provide a valid model and tokenizer will result in an error.
-
-## GPU Acceleration (CUDA)
-
-To enable GPU acceleration using CUDA, follow these steps:
-
-1.  **Install CUDA:** Ensure you have a compatible NVIDIA driver and the CUDA Toolkit installed. You can verify your installation using `nvidia-smi` and `nvcc --version`.
-2.  **Enable `ort` CUDA Feature:** When building or running your project, enable the `ort` CUDA feature for the `ort` crate. **This tells the `ort` build process to download and use the GPU-enabled version of the ONNX Runtime library.**
-    *   **Option 1 (Recommended):** Add the feature to your `Cargo.toml`:
-        ```toml
-        [dependencies]
-        ort = { version = "2.0.0-rc.9", features = ["cuda"] }
-        ```
-    *   **Option 2:** Enable the feature via the command line:
+1.  **Generate ONNX Model & Tokenizer:**
+    -   Run the provided Python script:
         ```bash
-        cargo build --features ort/cuda
-        cargo run --features ort/cuda
+        # Ensure you have Python and necessary libraries (transformers, torch, onnx, tokenizers)
+        # pip install transformers torch onnx tokenizers
+        python scripts/codebert.py
         ```
-3.  **Configure Session:** In your Rust code, configure the `SessionBuilder` to use the CUDA execution provider:
-    ```rust
-    use ort::{execution_providers::CUDAExecutionProvider, Session, SessionBuilder};
+    -   This will download the `microsoft/codebert-base` model, convert it to ONNX format, and save it along with its tokenizer files into the `codebert_onnx/` directory.
+    -   The script will output instructions on how to use these files with `vectordb-cli`.
 
-    // ...
+2.  **Configure `vectordb-cli`:** You **must** tell `vectordb-cli` where to find the CodeBERT model and tokenizer using **either** environment variables **or** command-line arguments:
 
-    let providers = [CUDAExecutionProvider::default().build()];
-    let session = Session::builder()?
-        .with_execution_providers(providers)?
-        .commit_from_file("your_model.onnx")?; // Replace with your model path
+    *   **Environment Variables:** (Set these in your shell or `.bashrc`/`.zshrc`)
+        ```bash
+        export VECTORDB_ONNX_MODEL="/path/to/your/vectordb-cli/codebert_onnx/codebert_model.onnx"
+        export VECTORDB_ONNX_TOKENIZER="/path/to/your/vectordb-cli/codebert_onnx/tokenizer"
+        ```
+        Then run `vectordb-cli index ...` normally.
 
-    // ... use the session ...
-    ```
+    *   **Command-Line Arguments (during `index`):**
+        ```bash
+        vectordb-cli index ./your/code \
+          --onnx-model ./codebert_onnx/codebert_model.onnx \
+          --onnx-tokenizer ./codebert_onnx/tokenizer
+        ```
 
-    You can customize the `CUDAExecutionProvider` further if needed (e.g., selecting a specific GPU device). Refer to the `ort` documentation for details.
+### Switching Models
+
+**Important:** Different models usually produce embeddings of different dimensions (e.g., MiniLM=384, CodeBERT=768). The vector index (`hnsw_index.json`) is tied to a specific dimension.
+
+-   When you run `vectordb-cli index` using a model with a different dimension than the one used to create the existing index, the tool will automatically detect the mismatch.
+-   It will **clear the existing incompatible embeddings** from the database and **create a new vector index** compatible with the new model.
+-   Alternatively, you can manually run `vectordb-cli clear` before indexing with a different model to ensure a clean state.
 
 ## Usage
 
 ### 1. Indexing Files
 
-Create a search index for a directory. By default, the tool only indexes files with common source code and text extensions (e.g., `.rs`, `.go`, `.py`, `.js`, `.ts`, `.md`, `.txt`, etc. - see `VectorDB::get_supported_file_types()` in the code for the full default list). Use the `--file-types` flag to specify your own list or override the defaults. The content of these allowed files is then processed as text by the semantic embedding model.
-
-Run this command from the root of the `vectordb-cli` directory or ensure the `onnx/` subdirectory (or configured paths) are accessible.
+Create a search index for a directory. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
 
 ```bash
-# Index a directory using default file types (assuming default ./onnx/ model)
+# Index using the default MiniLM model (if present in ./onnx/)
 vectordb-cli index /path/to/your/code
 
-# Index only specific file types
+# Index using CodeBERT via environment variables (assuming they are set)
+vectordb-cli index /path/to/your/code
+
+# Index using CodeBERT via command-line flags
+vectordb-cli index /path/to/your/code \
+  --onnx-model ./codebert_onnx/codebert_model.onnx \
+  --onnx-tokenizer ./codebert_onnx/tokenizer
+
+# Index only specific file types (works with any configured model)
 vectordb-cli index /path/to/your/code --file-types rs,md,py
 
-# Index using specific model paths
-vectordb-cli index /path/to/your/code \
-  --onnx-model /custom/model.onnx \
-  --onnx-tokenizer /custom/tokenizer.json
-
 # Use more threads for potentially faster indexing
-vectordb-cli index /path/to/your/code -j 8 
+vectordb-cli index /path/to/your/code -j 8
 ```

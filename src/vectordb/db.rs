@@ -167,36 +167,36 @@ impl VectorDB {
             debug!("HNSW index file exists, attempting to load");
             match HNSWIndex::load_from_file(&hnsw_path) {
                 Ok(index) => {
-                    debug!("HNSW index loaded successfully");
-                    Some(index)
+                    // ** Check dimension compatibility with loaded embeddings/model type **
+                    // We need the expected dimension here. Let's try getting it from the potentially loaded hnsw_config
+                    // or fall back to the dimension associated with the loaded embedding_model_type.
+                    // NOTE: This might still be imperfect if db.json/hnsw_config is missing/wrong,
+                    // the definitive check will happen during indexing.
+                    let expected_dim = hnsw_config.map(|c| c.dimension)
+                        .unwrap_or_else(|| embedding_model_type.default_dimension()); // Helper needed
+
+                    if index.get_config().dimension == expected_dim {
+                         debug!("HNSW index loaded successfully with matching dimension {}", expected_dim);
+                         Some(index)
+                    } else {
+                        warn!(
+                            "Loaded HNSW index dimension ({}) does not match expected dimension ({}) based on db.json/model type. Discarding loaded index.",
+                            index.get_config().dimension, expected_dim
+                        );
+                         let _ = fs::remove_file(&hnsw_path); // Remove incompatible index
+                         None // Discard the loaded index
+                    }
                 }
                 Err(e) => {
-                    error!("Couldn't load HNSW index: {}", e);
-                    eprintln!("Warning: Couldn't load HNSW index: {}", e);
-                    eprintln!("Creating a new index or rebuilding from embeddings.");
-                    let _ = fs::remove_file(&hnsw_path);
-                    debug!("Rebuilding HNSW index from embeddings");
-                    let config = hnsw_config.unwrap_or_else(HNSWConfig::default);
-                    let mut index = HNSWIndex::new(config);
-                    for (_, embedding) in &embeddings {
-                        let _ = index.insert(embedding.clone());
-                    }
-                    debug!("HNSW index rebuilt with {} embeddings", embeddings.len());
-                    Some(index)
+                    error!("Couldn't load HNSW index: {}. Discarding invalid index file.", e);
+                    eprintln!("Warning: Couldn't load existing HNSW index: {}. It will be rebuilt on next index command.", e);
+                    let _ = fs::remove_file(&hnsw_path); // Remove the corrupted file
+                    None // Set to None, index will be created on demand later
                 }
             }
         } else {
-            debug!("No HNSW index file found, creating new index");
-            let config = hnsw_config.unwrap_or_else(HNSWConfig::default);
-            let mut index = HNSWIndex::new(config);
-            for (_, embedding) in &embeddings {
-                let _ = index.insert(embedding.clone());
-            }
-            debug!(
-                "New HNSW index created with {} embeddings",
-                embeddings.len()
-            );
-            Some(index)
+            debug!("No HNSW index file found. It will be created on the next index command.");
+            None // Set to None, index will be created on demand later
         };
 
         debug!("VectorDB initialization complete");
@@ -344,14 +344,14 @@ impl VectorDB {
     }
 
     pub fn clear(&mut self) -> Result<()> {
+        debug!("Clearing VectorDB database and index");
         self.embeddings.clear();
-        if let Some(index) = &self.hnsw_index {
-            let config = index.get_config();
-            self.hnsw_index = Some(HNSWIndex::new(config));
-        }
+        self.hnsw_index = None; // Remove the index instance entirely
         self.cache.clear()?;
         self.feedback = FeedbackData::default();
+        // Save the cleared state (empty embeddings, no index)
         self.save()?;
+        debug!("VectorDB cleared successfully");
         Ok(())
     }
 
@@ -399,6 +399,37 @@ impl VectorDB {
         let num_threads = num_cpus::get();
         let file_count = files.len();
         info!("Starting parallel indexing for {} files using {} threads.", file_count, num_threads);
+
+        // --- HNSW Index Validation and Creation ---
+        let target_dim = model.dim();
+        debug!("Target embedding dimension for this indexing operation: {}", target_dim);
+
+        match &mut self.hnsw_index {
+            Some(index) => {
+                let current_dim = index.get_config().dimension;
+                if current_dim == target_dim {
+                    debug!("Existing HNSW index found with matching dimension {}. Reusing index.", current_dim);
+                } else {
+                    warn!(
+                        "Existing HNSW index dimension ({}) does not match model dimension ({}). Clearing embeddings and creating a new index.",
+                        current_dim, target_dim
+                    );
+                    // Dimension mismatch, need to clear incompatible embeddings and create a new index
+                    self.embeddings.clear(); // Clear embeddings as they belong to the old index
+                    let new_config = HNSWConfig::new(target_dim);
+                    *index = HNSWIndex::new(new_config); // Replace the index
+                    // Cache should also be cleared or handled carefully, but clearing embeddings is the minimum
+                    // For simplicity, let's rely on the cache check logic below to re-embed if needed.
+                }
+            }
+            None => {
+                debug!("No HNSW index found. Creating a new index with dimension {}.", target_dim);
+                let new_config = HNSWConfig::new(target_dim);
+                self.hnsw_index = Some(HNSWIndex::new(new_config));
+            }
+        }
+        // --- End HNSW Index Validation ---
+
         let progress = ProgressBar::new(file_count as u64);
         progress.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files indexed ({eta}) {msg}")

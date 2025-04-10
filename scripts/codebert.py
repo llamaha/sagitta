@@ -5,6 +5,7 @@ import os
 import torch
 from transformers import RobertaModel, RobertaTokenizer
 from pathlib import Path
+import sys
 
 def download_and_convert_codebert_to_onnx(output_dir="codebert_onnx", model_name="microsoft/codebert-base"):
     """
@@ -70,7 +71,44 @@ def download_and_convert_codebert_to_onnx(output_dir="codebert_onnx", model_name
     tokenizer_path = os.path.join(output_dir, "tokenizer")
     tokenizer.save_pretrained(tokenizer_path)
     print(f"Tokenizer saved to: {tokenizer_path}")
-    
+
+    # --- Explicitly create tokenizer.json using the tokenizers library ---
+    try:
+        from tokenizers import Tokenizer
+        from tokenizers.models import BPE
+        
+        # Paths to the files saved by save_pretrained
+        vocab_file = os.path.join(tokenizer_path, "vocab.json")
+        merges_file = os.path.join(tokenizer_path, "merges.txt")
+        output_tokenizer_json = os.path.join(tokenizer_path, "tokenizer.json")
+
+        if os.path.exists(vocab_file) and os.path.exists(merges_file):
+            print(f"Found vocab: {vocab_file}, merges: {merges_file}")
+            # Initialize a BPE model from the vocab and merges files
+            # Note: Roberta uses BPE. Adjust if using a different model type.
+            # We might need to load special tokens from special_tokens_map.json 
+            # and tokenizer_config.json for a more complete tokenizer, but 
+            # start with just vocab/merges for compatibility with Rust.
+            tokenizer_lib = Tokenizer(BPE.from_file(vocab_file, merges_file))
+            
+            # Set truncation (optional but good practice)
+            # Check tokenizer_config.json or model defaults for appropriate length
+            # Example: tokenizer_lib.enable_truncation(max_length=512)
+            
+            # Set padding (optional but good practice)
+            # Example: tokenizer_lib.enable_padding(pad_id=1, pad_token="<pad>") # Check config for pad token/id
+
+            # Save the combined tokenizer.json
+            tokenizer_lib.save(output_tokenizer_json)
+            print(f"Successfully created explicit tokenizer.json at: {output_tokenizer_json}")
+        else:
+            print("Warning: Could not find vocab.json and/or merges.txt to create explicit tokenizer.json", file=sys.stderr)
+    except ImportError:
+        print("Warning: 'tokenizers' library not found. Cannot create explicit tokenizer.json.", file=sys.stderr)
+    except Exception as e:
+        print(f"Error creating explicit tokenizer.json: {e}", file=sys.stderr)
+    # --- End explicit creation ---
+
     return onnx_path
 
 def verify_onnx_model(onnx_path):
@@ -120,26 +158,31 @@ def main():
     # Verify the ONNX model
     verify_onnx_model(onnx_path)
     
-    print("\nModel conversion complete. Usage example:")
-    print("---------------------------------------------------")
-    print("import onnxruntime as ort")
-    print("import numpy as np")
-    print("from transformers import RobertaTokenizer")
-    print()
-    print("# Load tokenizer and ONNX runtime session")
-    print("tokenizer = RobertaTokenizer.from_pretrained('codebert_onnx/tokenizer')")
-    print("session = ort.InferenceSession('codebert_onnx/codebert_model.onnx')")
-    print()
-    print("# Tokenize input")
-    print("code = 'def hello_world():\\n    print(\"Hello, World!\")\\n'")
-    print("inputs = tokenizer(code, return_tensors='np')")
-    print()
-    print("# Run inference")
-    print("outputs = session.run(None, {")
-    print("    'input_ids': inputs['input_ids'],")
-    print("    'attention_mask': inputs['attention_mask']")
-    print("})")
-    print("---------------------------------------------------")
+    print("\nModel conversion complete.")
+    print("--------------------------")
+    print("The CodeBERT ONNX model and tokenizer have been saved to the 'codebert_onnx' directory.")
+    print("To use this model with vectordb-cli:")
+    print("\nMethod 1: Command Line Arguments")
+    print("  Provide the paths directly during indexing:")
+    print(f"    ./target/debug/vectordb-cli index <your_code_dir> \\")
+    print(f"        --onnx-model {os.path.join(output_dir, 'codebert_model.onnx')} \\" # Adjusted for potential output_dir changes
+          f"        --onnx-tokenizer {os.path.join(output_dir, 'tokenizer')}")
+    print("\nMethod 2: Environment Variables")
+    print("  Set the following environment variables before running vectordb-cli:")
+    # Use absolute paths for env vars to avoid ambiguity
+    abs_model_path = os.path.abspath(os.path.join(output_dir, 'codebert_model.onnx'))
+    abs_tokenizer_path = os.path.abspath(os.path.join(output_dir, 'tokenizer'))
+    print(f"    export VECTORDB_ONNX_MODEL=\"{abs_model_path}\"")
+    print(f"    export VECTORDB_ONNX_TOKENIZER=\"{abs_tokenizer_path}\"")
+    print("  Then run indexing normally:")
+    print("    ./target/debug/vectordb-cli index <your_code_dir>")
+    print("\nImportant Note:")
+    print("  When switching between models (e.g., from the default MiniLM to CodeBERT, or vice-versa),")
+    print("  the underlying vector index needs to be rebuilt due to different embedding dimensions.")
+    print("  The 'index' command will automatically detect this mismatch, clear old incompatible data,")
+    print("  and create a new index. Alternatively, you can manually run './target/debug/vectordb-cli clear'")
+    print("  before indexing with a different model type.")
+    print("--------------------------")
 
 if __name__ == "__main__":
     main()

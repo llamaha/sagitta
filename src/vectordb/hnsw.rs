@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-// Import the ONNX dimension constant
-use crate::vectordb::provider::onnx::ONNX_EMBEDDING_DIM;
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +32,7 @@ fn default_random_seed() -> u64 { HNSWConfig::default().random_seed }
 impl Default for HNSWConfig {
     fn default() -> Self {
         Self {
-            dimension: ONNX_EMBEDDING_DIM,
+            dimension: 128,
             m: 16,
             ef_construction: 200,
             num_layers: 1, // Start with 1, might need adjustment based on data size
@@ -44,6 +42,15 @@ impl Default for HNSWConfig {
 }
 
 impl HNSWConfig {
+    /// Creates a new HNSWConfig with the specified dimension and default values for other parameters.
+    pub fn new(dimension: usize) -> Self {
+        assert!(dimension > 0, "Dimension must be positive");
+        Self {
+            dimension,
+            ..Self::default() // Use default values for other fields
+        }
+    }
+
     // Removed unused function calculate_optimal_layers
     // pub fn calculate_optimal_layers(dataset_size: usize) -> usize { ... }
 }

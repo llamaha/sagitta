@@ -15,6 +15,18 @@ pub enum EmbeddingModelType {
     // No specific CodeBert type needed if we handle dimensions dynamically
 }
 
+impl EmbeddingModelType {
+    /// Returns the default embedding dimension for this model type.
+    /// Used as a fallback when loading an index without an explicit dimension stored.
+    pub fn default_dimension(&self) -> usize {
+        match self {
+            // TODO: Make this dynamically configurable or read from a default ONNX model?
+            // For now, assume the default ONNX is MiniLM with 384 dims.
+            EmbeddingModelType::Onnx => 384,
+        }
+    }
+}
+
 impl std::fmt::Display for EmbeddingModelType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
