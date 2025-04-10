@@ -111,7 +111,7 @@ You can use other sentence-transformer models compatible with ONNX, such as Code
 | **Memory Usage**    | Lower                                    | Higher                                       |
 | **Setup**           | Included (via Git LFS)                   | Requires generation script (`scripts/codebert.py`) |
 
-**Recommendation:** Start with the default MiniLM model. If you primarily work with the languages CodeBERT supports and find MiniLM's code-specific results lacking, try generating and using CodeBERT.
+**Recommendation:** Start with the default MiniLM model. If you primarily work with the languages CodeBERT supports and find MiniLM's code-specific results lacking, try generating and using CodeBERT. Note that while CodeBERT is specialized for code, its performance within this tool's hybrid search algorithm (relative to MiniLM) has not been extensively tested or optimized, and may vary depending on your codebase and queries.
 
 ### Switching Models
 
