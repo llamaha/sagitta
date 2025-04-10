@@ -4,9 +4,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use vectordb_cli::vectordb::provider::onnx::{
     OnnxEmbeddingProvider,
-    ONNX_EMBEDDING_DIM,
 };
 use vectordb_cli::vectordb::provider::EmbeddingProvider;
+use std::path::Path;
+use std::env;
+use vectordb_cli::vectordb::embedding::EmbeddingModel;
 
 /// Command line arguments
 #[derive(Parser, Debug)]
@@ -153,9 +155,6 @@ fn benchmark_basic(
 
         // Verify the embeddings
         assert_eq!(embeddings.len(), batch_size);
-        for embedding in &embeddings {
-            assert_eq!(embedding.len(), ONNX_EMBEDDING_DIM);
-        }
 
         results.push(duration);
     }
@@ -188,7 +187,7 @@ fn calculate_stats(durations: &[Duration]) -> (Duration, Duration, Duration) {
     (mean, median, total)
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse arguments
     let args = Args::parse();
 
@@ -308,6 +307,25 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    // --- Create model to get dimension ---
+    let model_path_str = env::var("VECTORDB_ONNX_MODEL")
+        .unwrap_or_else(|_| "onnx/all-minilm-l12-v2.onnx".to_string());
+    let tokenizer_path_str = env::var("VECTORDB_ONNX_TOKENIZER")
+        .unwrap_or_else(|_| "onnx".to_string());
+
+    let model_path = Path::new(&model_path_str);
+    let tokenizer_path = Path::new(&tokenizer_path_str);
+
+    println!(
+        "Starting ONNX benchmark with model: {} and tokenizer: {}",
+        model_path.display(),
+        tokenizer_path.display()
+    );
+
+    let model = EmbeddingModel::new_onnx(model_path, tokenizer_path)?;
+    let embedding_dim = model.dim();
+    println!("Detected Embedding Dimension: {}", embedding_dim);
 
     Ok(())
 }
