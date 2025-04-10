@@ -1,6 +1,6 @@
 use crate::vectordb::provider::EmbeddingProvider;
 use anyhow::{Error, Result};
-use log::debug;
+use log::{debug, error};
 use ndarray::{s, Array, Array2, Ix1, Ix2};
 use ort::inputs;
 use ort::session::{Session, builder::GraphOptimizationLevel};
@@ -10,10 +10,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
 
-/// Dimension of the ONNX MiniLM embeddings
-pub const ONNX_EMBEDDING_DIM: usize = 384;
-
-/// ONNX-based embedding provider using MiniLM model
+/// ONNX-based embedding provider
 pub struct OnnxEmbeddingProvider {
     /// The tokenizer for preprocessing input text
     tokenizer: Tokenizer,
@@ -21,6 +18,8 @@ pub struct OnnxEmbeddingProvider {
     max_seq_length: usize,
     /// ONNX session for running inference
     session: Arc<Mutex<Session>>,
+    /// The actual dimension of the loaded model's embeddings
+    dimension: usize,
 }
 
 impl OnnxEmbeddingProvider {
@@ -35,7 +34,7 @@ impl OnnxEmbeddingProvider {
         let tokenizer_json_path = tokenizer_path.join("tokenizer.json");
         debug!("Loading tokenizer from: {}", tokenizer_json_path.display());
 
-        let tokenizer = Tokenizer::from_file(tokenizer_json_path)
+        let tokenizer = Tokenizer::from_file(&tokenizer_json_path)
             .map_err(|e| Error::msg(format!("Failed to load tokenizer: {}", e)))?;
 
         debug!("Tokenizer loaded successfully");
@@ -66,15 +65,32 @@ impl OnnxEmbeddingProvider {
             // .with_intra_threads(num_cpus::get())? // Typically not needed when using GPU
             .commit_from_file(model_path)?;
 
+        // --- ADDED: Determine dimension from model output ---
+        let pooler_output_name = "pooler_output"; // Assuming this is the output we use
+        let output_dim = session.outputs.iter()
+            .find(|meta| meta.name == pooler_output_name)
+            .and_then(|meta| {
+                match &meta.output_type {
+                    ort::value::ValueType::Tensor { dimensions, .. } => {
+                        // Assume dimensions.last() gives Option<&i64>
+                        dimensions.last().map(|dim_ref| *dim_ref as usize)
+                    }
+                    _ => None,
+                }
+            })
+            .ok_or_else(|| Error::msg(format!("Could not determine embedding dimension from model output '{}'", pooler_output_name)))?;
+
         debug!(
-            "ONNX model loaded successfully from {}",
-            model_path.display()
+            "ONNX model loaded successfully from {}, determined embedding dimension: {}",
+            model_path.display(),
+            output_dim
         );
 
         Ok(Self {
             tokenizer,
-            max_seq_length: 128, // Default for MiniLM
+            max_seq_length: 128, // TODO: Make this configurable or detect from model?
             session: Arc::new(Mutex::new(session)),
+            dimension: output_dim,
         })
     }
 
@@ -111,39 +127,37 @@ impl OnnxEmbeddingProvider {
 
     /// Convert the ORT output tensor to a Vec<f32>
     fn extract_embedding(&self, pooler_output_value: &DynValue) -> Result<Vec<f32>> {
-        // try_extract_tensor returns an ArrayViewD directly
         let pooler_output_view = pooler_output_value.try_extract_tensor::<f32>()?;
 
-        // Check if view is 1D or 2D with batch size 1
+        // Use self.dimension for validation
+        let expected_dim = self.dimension;
+
         let embedding = match pooler_output_view.ndim() {
             1 => {
-                 // Assume it's shape [embedding_dim]
-                 let view1d = pooler_output_view.into_dimensionality::<Ix1>()?;
-                 if view1d.shape()[0] != ONNX_EMBEDDING_DIM {
-                     return Err(Error::msg(format!(
-                         "Unexpected 1D pooler output shape: got {:?}, expected [{}]",
-                         view1d.shape(), ONNX_EMBEDDING_DIM
-                     )));
-                 }
-                 view1d.to_vec()
+                let view1d = pooler_output_view.into_dimensionality::<Ix1>()?;
+                if view1d.shape()[0] != expected_dim {
+                    return Err(Error::msg(format!(
+                        "Unexpected 1D pooler output shape: got {:?}, expected [{}]",
+                        view1d.shape(), expected_dim
+                    )));
+                }
+                view1d.to_vec()
             }
             2 => {
-                // Assume it's shape [1, embedding_dim]
                 let view2d = pooler_output_view.into_dimensionality::<Ix2>()?;
-                let expected_shape = [1, ONNX_EMBEDDING_DIM];
+                let expected_shape = [1, expected_dim];
                 if view2d.shape() != expected_shape {
                     return Err(Error::msg(format!(
                         "Unexpected 2D pooler output shape: got {:?}, expected {:?}",
                         view2d.shape(), expected_shape
                     )));
                 }
-                // Extract the first (and only) embedding row and convert to Vec<f32>
                 view2d.slice(s![0, ..]).to_vec()
             }
             _ => {
                 return Err(Error::msg(format!(
                     "Pooler output has unexpected dimensionality: {:?}",
-                     pooler_output_view.shape()
+                    pooler_output_view.shape()
                 )));
             }
         };
@@ -236,30 +250,31 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
         let pooler_view = pooler_output.try_extract_tensor::<f32>()?;
 
         // Check output shape: [batch_size, embedding_dim]
+        let expected_dim = self.dimension;
         let output_shape = pooler_view.shape();
         if output_shape.len() != 2
             || output_shape[0] != batch_size
-            || output_shape[1] != ONNX_EMBEDDING_DIM
+            || output_shape[1] != expected_dim
         {
             return Err(Error::msg(format!(
                 "Unexpected pooler output shape: got {:?}, expected [{}, {}]",
-                output_shape, batch_size, ONNX_EMBEDDING_DIM
+                output_shape, batch_size, expected_dim
             )));
         }
 
         // Extract individual embeddings and normalize
-        let mut results = Vec::with_capacity(batch_size);
+        let mut embeddings = Vec::with_capacity(batch_size);
         for i in 0..batch_size {
-            let embedding_slice = pooler_view.slice(ndarray::s![i, ..]);
-            let embedding = embedding_slice.to_vec();
-            results.push(Self::normalize_embedding(embedding));
+            let embedding_view = pooler_view.slice(s![i, ..]);
+            let embedding_vec = embedding_view.to_vec();
+            embeddings.push(Self::normalize_embedding(embedding_vec));
         }
 
-        Ok(results)
+        Ok(embeddings)
     }
 
     fn dimension(&self) -> usize {
-        ONNX_EMBEDDING_DIM
+        self.dimension
     }
 }
 
@@ -303,8 +318,8 @@ mod tests {
         assert!(embeddings.is_ok());
         let embeddings = embeddings.unwrap();
         assert_eq!(embeddings.len(), 2);
-        assert_eq!(embeddings[0].len(), ONNX_EMBEDDING_DIM);
-        assert_eq!(embeddings[1].len(), ONNX_EMBEDDING_DIM);
+        assert_eq!(embeddings[0].len(), provider.dimension);
+        assert_eq!(embeddings[1].len(), provider.dimension);
 
         // Check normalization
         for embedding in &embeddings {

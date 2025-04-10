@@ -74,11 +74,7 @@ pub enum Command {
     Stats,
 
     /// Clear the database
-    Clear {
-        /// Show help information
-        #[arg(short, long)]
-        help: bool,
-    },
+    Clear {},
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -372,15 +368,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 println!("  You may want to rebuild the index with the 'index' command.");
             }
         }
-        Command::Clear { help } => {
-            if help {
-                println!("Usage: vectordb-cli clear [OPTIONS]");
-                println!("Clears the database");
-                println!("Options:");
-                println!("  -h, --help         Show help information");
-                return Ok(());
-            }
-
+        Command::Clear {} => {
             // Show warning and ask for confirmation
             println!("WARNING: You are about to clear the database.");
             println!("This action cannot be undone.");
