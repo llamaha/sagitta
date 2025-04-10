@@ -97,6 +97,22 @@ You can use other sentence-transformer models compatible with ONNX, such as Code
           --onnx-tokenizer ./codebert_onnx/tokenizer
         ```
 
+### MiniLM vs. CodeBERT Comparison
+
+| Feature             | Default (all-MiniLM-L6-v2)               | CodeBERT (microsoft/codebert-base)           |
+| ------------------- | ---------------------------------------- | -------------------------------------------- |
+| **Primary Use**     | General semantic search                  | Semantic search focused on source code     |
+| **Speed**           | Faster                                   | Slower                                       |
+| **Accuracy (General)**| Good all-rounder                         | Potentially less accurate on non-code text |
+| **Accuracy (Code)** | Decent                                   | Potentially higher for supported languages |
+| **Language Focus**  | Broad (trained on diverse web text)      | Specific (Python, Java, JS, PHP, Ruby, Go) |
+| **Dimension**       | 384                                      | 768                                          |
+| **Index Size**      | Smaller                                  | Larger (due to higher dimension)           |
+| **Memory Usage**    | Lower                                    | Higher                                       |
+| **Setup**           | Included (via Git LFS)                   | Requires generation script (`scripts/codebert.py`) |
+
+**Recommendation:** Start with the default MiniLM model. If you primarily work with the languages CodeBERT supports and find MiniLM's code-specific results lacking, try generating and using CodeBERT.
+
 ### Switching Models
 
 **Important:** Different models usually produce embeddings of different dimensions (e.g., MiniLM=384, CodeBERT=768). The vector index (`hnsw_index.json`) is tied to a specific dimension.
