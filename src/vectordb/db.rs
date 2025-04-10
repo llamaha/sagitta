@@ -2,7 +2,6 @@ use crate::vectordb::cache::{CacheCheckResult, EmbeddingCache};
 use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::hnsw::{HNSWConfig, HNSWIndex, HNSWStats};
-use crate::vectordb::provider::onnx::ONNX_EMBEDDING_DIM;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info, warn};
 use num_cpus;
@@ -177,14 +176,13 @@ impl VectorDB {
                     eprintln!("Creating a new index or rebuilding from embeddings.");
                     let _ = fs::remove_file(&hnsw_path);
                     debug!("Rebuilding HNSW index from embeddings");
-                    hnsw_config.map(|config| {
-                        let mut index = HNSWIndex::new(config);
-                        for (_, embedding) in &embeddings {
-                            let _ = index.insert(embedding.clone());
-                        }
-                        debug!("HNSW index rebuilt with {} embeddings", embeddings.len());
-                        index
-                    })
+                    let config = hnsw_config.unwrap_or_else(HNSWConfig::default);
+                    let mut index = HNSWIndex::new(config);
+                    for (_, embedding) in &embeddings {
+                        let _ = index.insert(embedding.clone());
+                    }
+                    debug!("HNSW index rebuilt with {} embeddings", embeddings.len());
+                    Some(index)
                 }
             }
         } else {
@@ -358,7 +356,10 @@ impl VectorDB {
     }
 
     pub fn stats(&self) -> DBStats {
-        let embedding_dimension = ONNX_EMBEDDING_DIM;
+        let embedding_dimension = self.create_embedding_model()
+            .map(|model| model.dim())
+            .unwrap_or(0);
+
         DBStats {
             indexed_files: self.embeddings.len(),
             embedding_dimension,
