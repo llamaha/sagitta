@@ -77,7 +77,7 @@ Failure to provide a valid model and tokenizer will result in an error.
 To enable GPU acceleration using CUDA, follow these steps:
 
 1.  **Install CUDA:** Ensure you have a compatible NVIDIA driver and the CUDA Toolkit installed. You can verify your installation using `nvidia-smi` and `nvcc --version`.
-2.  **Enable `ort` CUDA Feature:** When building or running your project, enable the `cuda` feature for the `ort` crate. **This tells the `ort` build process to download and use the GPU-enabled version of the ONNX Runtime library.**
+2.  **Enable `ort` CUDA Feature:** When building or running your project, enable the `ort` CUDA feature for the `ort` crate. **This tells the `ort` build process to download and use the GPU-enabled version of the ONNX Runtime library.**
     *   **Option 1 (Recommended):** Add the feature to your `Cargo.toml`:
         ```toml
         [dependencies]
