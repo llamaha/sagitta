@@ -10,6 +10,12 @@ use rayon;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use crate::vectordb::search::result::SearchResult;
+use crate::vectordb::search::{chunking, snippet};
+use std::collections::HashMap;
+use std::fs;
+use std::collections::HashSet;
+use crate::vectordb::utils::cosine_distance;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -68,6 +74,10 @@ pub enum Command {
         /// File types to search (e.g. rs,rb,go,js,ts)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
+
+        /// Use faster, keyword-based snippet extraction instead of semantic chunking.
+        #[arg(long = "fast-snippets")]
+        fast_snippets: bool,
     },
 
     /// Show database statistics
@@ -182,18 +192,15 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             vector_weight,
             bm25_weight,
             file_types,
+            fast_snippets,
         } => {
             debug!("Executing Query command: \"{}\"", query);
-
-            // Get the max_results value or use the default
             let limit = max_results.unwrap_or(20);
             debug!("Using max_results limit: {}", limit);
             println!("Limiting results to a maximum of {}", limit);
 
-            // Directly create the ONNX model. This will error out if paths aren't set.
-            println!("Using ONNX model for semantic search.");
             let model = db.create_embedding_model()?;
-            let mut search = Search::new(db, model);
+            let mut search = Search::new(db.clone(), model.clone());
 
             // Prepare file type filter
             let file_types_to_use = if let Some(types) = file_types {
@@ -209,11 +216,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 Some(VectorDB::get_supported_file_types())
             };
 
-            // Do a regular search
-            debug!("Performing standard search (not multi-repository)");
-
-            // Determine search type based on flags
-            let mut results = if vector_only {
+            // Initial Search
+            debug!("Performing initial search...");
+            let mut initial_results: Vec<SearchResult> = if vector_only {
                 debug!("Performing vector-only search");
                 println!("Performing vector-only search...");
                 search.search_with_limit(&query, limit)?
@@ -245,7 +250,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             if let Some(types) = file_types_to_use {
                 if !types.is_empty() {
                     debug!("Filtering results by file types: {:?}", types);
-                    results.retain(|result| {
+                    initial_results.retain(|result| {
                         let path = Path::new(&result.file_path);
                         if let Some(ext) = path.extension() {
                             let ext_str = ext.to_string_lossy().to_string();
@@ -257,67 +262,157 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 }
             }
 
-            if results.is_empty() {
+            if initial_results.is_empty() {
                 debug!("No results found for query: \"{}\"", query);
                 println!("No results found.");
                 return Ok(());
             }
 
-            // Check if this is a method-related query
-            let is_method_query = query.to_lowercase().contains("method")
-                || query.to_lowercase().contains("function")
-                || query.to_lowercase().contains("fn ");
+            println!("\nSearch results for: {}\n", query);
 
-            if is_method_query {
-                debug!(
-                    "Presenting method search results, {} results found",
-                    results.len()
-                );
-                println!("\nSearch results for methods: {}\n", query);
-            } else {
-                debug!(
-                    "Presenting general search results, {} results found",
-                    results.len()
-                );
-                println!("\nSearch results for: {}\n", query);
-            }
-
-            for (i, result) in results.iter().enumerate() {
-                println!(
-                    "{}. {} (similarity: {:.2})",
-                    i + 1,
-                    result.file_path,
-                    result.similarity
-                );
-
-                // Limit the snippet size to avoid displaying entire files
-                let max_lines = 20; // Reasonable number of lines to display
-                let snippet_lines: Vec<&str> = result.snippet.lines().collect();
-
-                // If snippet is too large, only show a subset with indication
-                if snippet_lines.len() > max_lines {
-                    // Show first few lines
-                    for line in &snippet_lines[0..max_lines / 2] {
-                        println!("{}", line);
-                    }
-
-                    // Show ellipsis to indicate truncation
+            // --- Conditional Snippet Logic ---
+            if fast_snippets {
+                // --- Fast Snippet Path (Old Logic) ---
+                debug!("Using fast snippet extraction.");
+                for (i, result) in initial_results.iter().enumerate() {
                     println!(
-                        "... [truncated {} lines] ...",
-                        snippet_lines.len() - max_lines
+                        "{}. {} (score: {:.2})",
+                        i + 1,
+                        result.file_path,
+                        result.similarity
                     );
-
-                    // Show last few lines
-                    for line in &snippet_lines[snippet_lines.len() - max_lines / 2..] {
-                        println!("{}", line);
+                    match snippet::get_snippet(&result.file_path, &query) {
+                        Ok(snippet_text) => {
+                            println!("{}", snippet_text);
+                        }
+                        Err(e) => {
+                            error!("Failed to get snippet for {}: {}", result.file_path, e);
+                            println!("  Error getting snippet: {}", e);
+                        }
                     }
-                } else {
-                    // Show entire snippet if it's reasonably sized
-                    println!("{}", result.snippet);
+                    println!();
+                }
+            } else {
+                // --- Semantic Snippet Path (New Logic) ---
+                debug!("Using semantic snippet extraction.");
+
+                let query_embedding = model.embed(&query)?;
+                let mut all_chunks: Vec<(String, chunking::ChunkInfo, Vec<f32>)> = Vec::new();
+                let mut file_contents: HashMap<String, String> = HashMap::new();
+
+                // 1. Read content and chunk top N files
+                debug!("Reading and chunking top {} files...", initial_results.len());
+                for result in &initial_results {
+                    if file_contents.contains_key(&result.file_path) {
+                        continue;
+                    }
+                    match fs::read_to_string(&result.file_path) {
+                        Ok(content) => {
+                            let chunks = chunking::chunk_by_paragraphs(&content);
+                            file_contents.insert(result.file_path.clone(), content);
+                            for chunk in chunks {
+                                all_chunks.push((result.file_path.clone(), chunk, Vec::new()));
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to read file {} for semantic snippets: {}", result.file_path, e);
+                        }
+                    }
                 }
 
-                println!();
+                if all_chunks.is_empty() {
+                    println!("Could not read or chunk any of the top results to generate semantic snippets.");
+                    return Ok(());
+                }
+
+                // 2. Embed all chunks
+                debug!("Embedding {} chunks...", all_chunks.len());
+                let chunk_texts: Vec<&str> = all_chunks.iter().map(|(_, chunk, _)| chunk.text.as_str()).collect();
+                // --- DEBUG: Log first few chunk texts ---
+                for (idx, text) in chunk_texts.iter().take(5).enumerate() {
+                    debug!("Chunk Text [{}]: {:?}", idx, text.chars().take(100).collect::<String>());
+                }
+                // --- END DEBUG ---
+                let chunk_embeddings = model.embed_batch(&chunk_texts)?;
+
+                // --- DEBUG: Log first few chunk embeddings (partial) ---
+                for (idx, embedding) in chunk_embeddings.iter().take(5).enumerate() {
+                    debug!("Chunk Embedding [{}]: dim={}, first 5 vals=[{:?}...]",
+                          idx, embedding.len(), &embedding[..5.min(embedding.len())]);
+                }
+                // --- END DEBUG ---
+
+                // Assign embeddings back to chunks
+                for (i, embedding) in chunk_embeddings.into_iter().enumerate() {
+                    if let Some(entry) = all_chunks.get_mut(i) {
+                        entry.2 = embedding;
+                    }
+                }
+
+                // 3. Calculate scores for chunks
+                debug!("Calculating semantic scores for chunks...");
+                let mut scored_chunks: Vec<(String, chunking::ChunkInfo, f32)> = Vec::new();
+                let mut debug_scores_logged = 0; // Counter for debug logging
+                for (file_path, chunk_info, chunk_embedding) in all_chunks {
+                    if chunk_embedding.is_empty() { continue; }
+                    let similarity = 1.0 - cosine_distance(&query_embedding, &chunk_embedding);
+                    // --- DEBUG: Log first few similarity scores ---
+                    if debug_scores_logged < 5 {
+                        debug!("Chunk Score [{} @ L{}]: {:?}",
+                              file_path.split('/').last().unwrap_or("?"), chunk_info.start_line, similarity);
+                        debug_scores_logged += 1;
+                    }
+                    // --- END DEBUG ---
+                    scored_chunks.push((file_path, chunk_info, similarity));
+                }
+
+                // 4. Find the best chunk for each of the *original* top N files
+                debug!("Finding best semantic snippet for each top file...");
+                let mut final_results: Vec<(String, f32, chunking::ChunkInfo)> = Vec::new();
+                let mut processed_files = HashSet::new();
+
+                for initial_result in &initial_results {
+                    if !processed_files.insert(initial_result.file_path.clone()) {
+                        continue;
+                    }
+
+                    let best_chunk_for_file = scored_chunks.iter()
+                        .filter(|(fp, _, _)| *fp == initial_result.file_path)
+                        .max_by(|(_, _, score_a), (_, _, score_b)| score_a.partial_cmp(score_b).unwrap_or(std::cmp::Ordering::Equal));
+
+                    // --- DEBUG: Log best chunk found for first file ---
+                    if processed_files.len() == 1 { // Only log for the very first file processed
+                        if let Some((_fp, _info, score)) = best_chunk_for_file {
+                            debug!("Best chunk for {}: Score={:?}", initial_result.file_path, score);
+                        } else {
+                            debug!("Best chunk for {}: None found", initial_result.file_path);
+                        }
+                    }
+                    // --- END DEBUG ---
+
+                    if let Some((_, chunk_info, chunk_score)) = best_chunk_for_file {
+                        final_results.push((initial_result.file_path.clone(), *chunk_score, chunk_info.clone()));
+                    } else {
+                        debug!("No valid semantic chunk found for {}", initial_result.file_path);
+                    }
+                }
+
+                // Sort final results by chunk score (highest similarity first)
+                final_results.sort_by(|(_, score_a, _), (_, score_b, _)| score_b.partial_cmp(score_a).unwrap_or(std::cmp::Ordering::Equal));
+
+                // 5. Display results
+                for (i, (file_path, chunk_score, chunk_info)) in final_results.iter().take(limit).enumerate() {
+                    println!(
+                        "{}. {} (semantic score: {:.4})",
+                        i + 1,
+                        file_path,
+                        chunk_score
+                    );
+                    println!("[Line {}] {}\n", chunk_info.start_line, chunk_info.text);
+                    println!();
+                }
             }
+            // --- End Conditional Snippet Logic ---
         }
         Command::Stats => {
             let stats = db.stats();

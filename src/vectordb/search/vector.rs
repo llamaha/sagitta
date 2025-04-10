@@ -4,6 +4,7 @@ use crate::vectordb::error::Result;
 use crate::vectordb::snippet_extractor::SnippetExtractor;
 use super::result::SearchResult;
 use super::snippet::get_snippet; // Use the fallback snippet function from the snippet module
+use crate::vectordb::utils::cosine_distance; // Ensure this import is present
 use log::{debug, warn};
 use std::collections::HashMap;
 
@@ -74,12 +75,13 @@ pub(crate) fn search_with_limit(
     } else {
         debug!("Using brute force search (slower)");
 
-        // Fall back to brute force search (This part already calculates similarity correctly)
+        // Fall back to brute force search
         let mut results: Vec<_> = db
             .embeddings
             .iter()
             .map(|(path, embedding)| {
-                let distance = VectorDB::cosine_distance(embedding, &query_embedding);
+                // Use the imported free function
+                let distance = cosine_distance(embedding, &query_embedding);
                 let similarity = 1.0 - distance;
                 (path.clone(), similarity)
             })

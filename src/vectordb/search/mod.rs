@@ -1,9 +1,10 @@
 // Declare the modules within the search directory
-mod bm25;
-mod hybrid;
-mod query_analysis;
+pub mod bm25;
+pub mod chunking;
+pub mod hybrid;
+pub mod query_analysis;
 pub mod result; // Make result public so SearchResult can be used outside
-mod snippet;
+pub mod snippet; // Make snippet public
 mod vector;
 
 // Re-export the necessary public items

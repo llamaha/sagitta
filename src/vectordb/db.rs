@@ -620,20 +620,6 @@ impl VectorDB {
         Ok(())
     }
 
-    // Restore cosine_distance
-    pub fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
-        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_a > 0.0 && norm_b > 0.0 {
-            let similarity = dot_product / (norm_a * norm_b);
-            let clamped_similarity = similarity.clamp(-1.0, 1.0);
-            1.0 - clamped_similarity
-        } else {
-            1.0
-        }
-    }
-
     // Restore get_file_path
     pub fn get_file_path(&self, node_id: usize) -> Option<&String> {
         self.embeddings.keys().nth(node_id)

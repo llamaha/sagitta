@@ -2,8 +2,9 @@ use crate::vectordb::error::{Result, VectorDBError};
 use std::fs;
 use std::path::Path;
 
-// Constant for fallback snippet context
-pub(crate) const MAX_CONTEXT_LINES: usize = 8;
+// Constants for snippet context
+const SNIPPET_LINES_ABOVE: usize = 5;
+const SNIPPET_LINES_BELOW: usize = 25;
 
 /// Fallback function to get snippet from file matching the query
 pub(crate) fn get_snippet(file_path: &str, query: &str) -> Result<String> {
@@ -50,9 +51,8 @@ pub(crate) fn get_snippet(file_path: &str, query: &str) -> Result<String> {
     }
 
     // Extract context around the matching line
-    let context_lines = (MAX_CONTEXT_LINES).min(lines.len());
-    let start = best_line.saturating_sub(context_lines / 2);
-    let end = (best_line + context_lines / 2 + 1).min(lines.len());
+    let start = best_line.saturating_sub(SNIPPET_LINES_ABOVE);
+    let end = (best_line + SNIPPET_LINES_BELOW + 1).min(lines.len());
 
     // Create the snippet
     let mut snippet = String::new();
