@@ -62,7 +62,9 @@ A lightweight command-line tool for fast, local search across your codebases and
     cp target/release/vectordb-cli ~/.local/bin/
     ```
 
-For GPU acceleration details, see [CUDA Setup](docs/CUDA_SETUP.md) and [macOS GPU Setup](docs/MACOS_GPU_SETUP.md).
+To enable GPU acceleration (CUDA on Linux, Core ML/Metal on macOS), you will need to compile with specific features. Please read the relevant documentation *before* attempting to build with GPU support:
+- **CUDA (Linux):** See [CUDA Setup](docs/CUDA_SETUP.md). Compile with: `cargo build --release --features ort/cuda`
+- **Core ML / Metal (macOS):** See [macOS GPU Setup](docs/MACOS_GPU_SETUP.md). Compile with: `cargo build --release --features ort/coreml`
 
 ## Embedding Models
 
