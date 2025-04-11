@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 use std::time::Instant;
 use chrono::{Utc};
-use crate::vectordb::search::chunking::{chunk_by_paragraphs};
+use crate::vectordb::search::chunking::{chunk_by_paragraphs, chunk_by_lines};
 
 // Add From implementation here
 impl From<TemplateError> for VectorDBError {
@@ -560,11 +560,34 @@ impl VectorDB {
                 // Store metadata and owned text strings for the batch
                 let mut chunk_batch_meta = Vec::with_capacity(embedding_batch_size);
                 let mut chunk_batch_texts: Vec<String> = Vec::with_capacity(embedding_batch_size); // Store owned Strings
+                
+                // Define code extensions for line-based chunking
+                const CODE_EXTENSIONS: [&str; 6] = ["js", "ts", "py", "go", "rs", "rb"];
+                const CODE_CHUNK_SIZE: usize = 20; // Lines per chunk for code
+                const CODE_OVERLAP: usize = 5;    // Lines overlap for code chunks
 
                 for (canonical_path_buf, canonical_path_str, file_hash_opt) in receiver {
                     match fs::read_to_string(&canonical_path_buf) {
                         Ok(content) => {
-                            let file_chunks = chunk_by_paragraphs(&content);
+                            // --- Determine chunking strategy based on file extension ---
+                            let file_extension = canonical_path_buf
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            
+                            let file_chunks = 
+                                if CODE_EXTENSIONS.contains(&file_extension.as_str()) {
+                                    debug!(
+                                        "Using line chunking (size={}, overlap={}) for: {}", 
+                                        CODE_CHUNK_SIZE, CODE_OVERLAP, canonical_path_str
+                                    );
+                                    chunk_by_lines(&content, CODE_CHUNK_SIZE, CODE_OVERLAP)
+                                } else {
+                                    debug!("Using paragraph chunking for: {}", canonical_path_str);
+                                    chunk_by_paragraphs(&content)
+                                };
+                            // --- End chunking strategy ---
                             
                             if file_chunks.is_empty() {
                                 // Handle empty files (as before)
@@ -579,9 +602,6 @@ impl VectorDB {
                                 pb_clone.inc(1); 
                                 continue;
                             }
-
-                            // Chunk the content directly
-                            let file_chunks = chunk_by_paragraphs(&content);
 
                             let mut file_processed_chunks = Vec::<IndexedChunk>::new();
 
