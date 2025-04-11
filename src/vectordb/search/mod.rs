@@ -4,7 +4,7 @@ pub mod chunking;
 // pub mod hybrid; // Removed unused module
 pub mod query_analysis;
 pub mod result; // Make result public so SearchResult can be used outside
-pub mod snippet; // Make snippet public
+// pub mod snippet; // Removed unused module
 mod vector;
 
 // Re-export the necessary public items

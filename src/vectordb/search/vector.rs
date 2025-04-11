@@ -6,11 +6,6 @@ use anyhow::anyhow;
 use std::cmp::Ordering;
 use super::result::SearchResult;
 
-// Constants for Vector Search
-pub(crate) const SIMILARITY_THRESHOLD: f32 = 0.25;
-pub(crate) const SPECIALIZED_SEARCH_THRESHOLD: f32 = 0.25;
-pub(crate) const HNSW_TOP_K: usize = 20;
-
 /// Standard search using vector similarity with a limit on the number of results
 pub(crate) fn search_with_limit(
     db: &VectorDB, // Pass db as reference
