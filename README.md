@@ -125,13 +125,30 @@ Failure to provide a valid model and tokenizer will result in an error.
 
 ## Usage
 
-By default, `vectordb-cli` stores its database (`db.json`), cache (`cache.json`), and vector index (`hnsw_index.json`) in the standard user local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS). You can override this location using the global `--db-path` flag, which should point to the desired `db.json` file path (the tool will manage the other files relative to it).
+By default, `vectordb-cli` stores its database (`db.json`), cache (`cache.json`), and vector index (`hnsw_index.json`) in the standard user local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS).
 
-```bash
-# Use a custom database location
-vectordb-cli --db-path /path/to/my/project_db.json index /path/to/projectA
-vectordb-cli --db-path /path/to/my/project_db.json query "search term"
-```
+**Working with Multiple Repositories:**
+
+*   **Combined Index:** You can index multiple repositories into a single database. Subsequent queries will search across all of them. This can be done either by providing multiple paths to a single `index` command or by running `index` multiple times targeting the same database.
+    ```bash
+    # Index two repos into the default database in one command
+    vectordb-cli index /path/to/repoA /path/to/repoB
+
+    # Index two repos into the default database separately
+    vectordb-cli index /path/to/repoA 
+    vectordb-cli index /path/to/repoC
+    ```
+*   **Isolated Indexes:** To keep indexes for different projects or repositories completely separate, use the global `--db-path` flag to specify a different database file location for each one. The cache and vector index files will be stored alongside the specified `db.json`.
+    ```bash
+    # Index repoA into its own database
+    vectordb-cli --db-path /data/databases/repoA_index.json index /path/to/repoA
+
+    # Index repoB into a different database
+    vectordb-cli --db-path /data/databases/repoB_index.json index /path/to/repoB
+
+    # Query a specific isolated database
+    vectordb-cli --db-path /data/databases/repoA_index.json query "search term for repo A"
+    ```
 
 ### 1. Indexing Files
 
@@ -187,7 +204,18 @@ vectordb-cli query "data structure serialization" --fast-snippets
 vectordb-cli --db-path /data/shared_index.json query "deployment script"
 ```
 
-### 3. Database Statistics
+### 3. Writing Effective Queries
+
+`vectordb-cli` combines semantic (meaning-based) and lexical (keyword-based) search. Here are tips for getting the best results:
+
+*   **Be Specific but Natural:** Instead of just keywords like "database config", try a more descriptive query like "database connection configuration for production" or "how to handle async errors in Rust middleware". The semantic search understands the intent.
+*   **Include Context:** Add terms related to the language, framework, or feature area. Examples: "python async http request library", "react state management hook example", "kubernetes deployment yaml ingress setup".
+*   **Use Code Snippets (Carefully):** You can paste short code snippets directly into the query. The default model (MiniLM) has some code understanding, but models like CodeBERT (if configured) are better suited for this. Keep snippets concise.
+*   **Experiment with Weights:** If you find keyword matches are too dominant (or not dominant enough), adjust the `--vector-weight` (default 0.7) and `--bm25-weight` (default 0.3). For pure semantic search, use `--vector-only`.
+*   **Filter by File Type:** Use `-t` or `--file-types` (e.g., `-t py,md`) to narrow down results if you know the type of file you're looking for.
+*   **Iterate:** If your first query doesn't yield the desired results, refine it based on the snippets you see. Add more detail, remove ambiguity, or try different phrasing.
+
+### 4. Database Statistics
 
 Show information about the current database.
 
@@ -197,7 +225,7 @@ vectordb-cli stats
 vectordb-cli --db-path /data/shared_index.json stats
 ```
 
-### 4. Clearing the Database
+### 5. Clearing the Database
 
 Remove all indexed data (embeddings, cache, vector index).
 
@@ -207,9 +235,9 @@ vectordb-cli clear
 vectordb-cli --db-path /data/shared_index.json clear
 ```
 
-### 5. Listing Indexed Directories
+### 6. Listing Indexed Directories
 
-List the likely top-level directories that have been indexed into the database. This command uses a heuristic based on the parent directories of indexed files.
+List the directories that have been explicitly indexed into the database, along with the timestamp of their last successful indexing.
 
 ```bash
 # List directories in the default database
@@ -237,3 +265,18 @@ vectordb-cli --db-path /data/shared_index.json list
     -   **BM25 Search:** The BM25 index is used to find files containing the query keywords, scored by relevance (term frequency, inverse document frequency).
     -   **Hybrid Ranking:** Scores from vector search and BM25 search are normalized and combined using configurable weights.
     -   Relevant snippets from the top-ranking files are extracted and displayed.
+
+## Performance Notes
+
+*   **Indexing:** Indexing large codebases or using a high number of threads (`-j` option) can consume significant RAM and CPU resources, especially during embedding generation and HNSW index construction.
+*   **Querying:** Query performance is generally fast due to the HNSW index. Using CodeBERT instead of the default MiniLM model will typically result in slower query times due to the larger model size and higher embedding dimension.
+
+## Known Issues / Future Work
+
+*   The HNSW index is rebuilt entirely on every `index` command, which can be slow if the total number of indexed files across all repositories is very large. Future versions could explore incremental index updates.
+*   File content chunking during indexing is currently basic (often whole files). More sophisticated chunking could improve snippet relevance.
+*   Consider adding a mechanism to automatically remove deleted files from the index.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). (Assuming MIT, please update if different) 
