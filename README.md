@@ -50,7 +50,7 @@ A lightweight command-line tool for fast, local search across your codebases and
     ```bash
     # Set these in your shell or .bashrc/.zshrc, replacing /path/to/vectordb-cli appropriately
     export VECTORDB_ONNX_MODEL="/path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx"
-    export VECTORDB_ONNX_TOKENIZER="/path/to/vectordb-cli/onnx/tokenizer.json"
+    export VECTORDB_ONNX_TOKENIZER="/path/to/vectordb-cli/onnx/"
     ```
     Failure to configure access to a valid model and tokenizer will result in an error.
 
