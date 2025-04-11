@@ -16,6 +16,15 @@ A lightweight command-line tool for fast, local search across your codebases and
     ```bash
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
     ```
+-   **Build Tools:** Rust often requires a C linker and build tools.
+    -   **Linux (Debian/Ubuntu):**
+        ```bash
+        sudo apt-get update && sudo apt-get install build-essential
+        ```
+    -   **macOS:** Install the Xcode Command Line Tools. If you don't have Xcode installed, running the following command in your terminal will prompt you to install them:
+        ```bash
+        xcode-select --install
+        ```
 -   **(Optional) Git LFS:** Needed only if you intend to use the default embedding model provided in the repository via Git LFS.
     ```bash
     # Debian/Ubuntu: sudo apt-get install git-lfs
