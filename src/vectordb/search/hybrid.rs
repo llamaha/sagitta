@@ -17,7 +17,7 @@ pub(crate) const HYBRID_BM25_WEIGHT: f32 = 0.4;
 pub(crate) fn hybrid_search_with_limit(
     db: &VectorDB,
     model: &mut EmbeddingModel,
-    snippet_extractor: &mut SnippetExtractor,
+    _snippet_extractor: &mut SnippetExtractor,
     bm25_index_opt: &Option<BM25Index>,
     _all_file_paths: Vec<String>,
     query: &str,

@@ -1,11 +1,10 @@
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
-use anyhow::Result;
-use super::result::SearchResult;
 use log::{debug, warn, error};
 use std::collections::HashSet;
 use anyhow::anyhow;
 use std::cmp::Ordering;
+use super::result::SearchResult;
 
 // Constants for Vector Search
 pub(crate) const SIMILARITY_THRESHOLD: f32 = 0.25;
