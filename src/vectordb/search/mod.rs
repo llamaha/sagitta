@@ -12,8 +12,7 @@ pub use result::SearchResult;
 
 use crate::vectordb::db::VectorDB;
 use crate::vectordb::embedding::EmbeddingModel;
-// use crate::vectordb::error::Result; // Import VectorDBError here // Removed
-use crate::vectordb::snippet_extractor::SnippetExtractor;
+use crate::vectordb::error::Result;
 use log::{warn};
 use std::collections::HashSet;
 use std::fs; // Re-add fs import
@@ -31,17 +30,16 @@ use std::path::Path;
 pub struct Search {
     pub db: VectorDB,
     model: EmbeddingModel,
-    snippet_extractor: SnippetExtractor,
 }
 
 impl Search {
     /// Creates a new Search instance.
-    pub fn new(db: VectorDB, model: EmbeddingModel) -> Self {
-        Self {
+    pub fn new(db: VectorDB) -> Result<Self> {
+        let model = db.create_embedding_model()?;
+        Ok(Self {
             db,
             model,
-            snippet_extractor: SnippetExtractor::new(),
-        }
+        })
     }
 
     /// Lists unique file types present in the database.
@@ -83,18 +81,6 @@ impl Search {
         // Alternative: Directly return keys from db.indexed_roots() if that's desired?
         // return self.db.indexed_roots().keys().cloned().collect();
         top_dirs.into_iter().collect()
-    }
-
-    /// Retrieves all file paths from the database (used by hybrid search).
-    fn get_all_file_paths(&self) -> Vec<String> {
-        // Use indexed_chunks to get unique file paths
-        self.db.indexed_chunks
-            .iter()
-            .map(|chunk| chunk.file_path.clone())
-            .collect::<HashSet<_>>() // Collect into HashSet for uniqueness
-            .into_iter()
-            .collect() // Convert back to Vec
-        // self.db.embeddings.keys().cloned().collect() // Old line
     }
 
     /// Standard search using vector similarity with a limit on the number of results.
@@ -166,16 +152,17 @@ mod tests {
 
     #[test_log::test]
     fn test_vector_search() {
+        // Restore check for ONNX model files
         let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
         let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
         if !default_model_path.exists() || !default_tokenizer_path.exists() {
-            println!("Skipping test_vector_search because default ONNX model files aren't available in ./onnx/");
-            return;
+            warn!("Skipping test_vector_search because default ONNX model/tokenizer files are not available in ./onnx/");
+            return; // Skip test if files are missing
         }
 
         let (_temp_dir, db) = setup_test_env();
-        let model = db.create_embedding_model().expect("Failed to create ONNX model in test_vector_search");
-        let mut search = Search::new(db, model);
+        let _model = db.create_embedding_model().expect("Failed to create ONNX model in test_vector_search");
+        let mut search = Search::new(db).expect("Failed to create Search instance in test_vector_search");
 
         let query_alpha = "alpha problem implementation";
         let results_alpha = search.search_with_limit(query_alpha, 3).unwrap();
