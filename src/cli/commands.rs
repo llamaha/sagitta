@@ -18,12 +18,13 @@ use std::fs;
 // use crate::vectordb::utils::cosine_distance; // Removed
 // use walkdir::WalkDir; // Removed
 // use chrono::{DateTime, Utc, TimeZone, Local}; // Removed DateTime, TimeZone, Local
-use chrono::{Utc, Local, TimeZone}; // Add back Local and TimeZone
+use chrono::{Utc, TimeZone};
 
 // Global flag for handling interrupts
 pub static mut INTERRUPT_RECEIVED: bool = false;
 
 #[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 pub enum Command {
     /// Index files in one or more directories
     Index {
@@ -71,6 +72,13 @@ pub enum Command {
 
     /// List the unique top-level directories found in the index
     List,
+
+    /// Remove an indexed directory and its associated data
+    Remove {
+        /// Directory path to remove from the index
+        #[arg(required = true)]
+        dir: String,
+    },
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
@@ -396,7 +404,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
         Command::Clear {} => {
             println!("Clearing database...");
             db.clear()?;
-            println!("Database cleared successfully.");
+            println!("Database cleared.");
             Ok(())
         }
         Command::List => {
@@ -421,21 +429,43 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
 
             // Print path and formatted timestamp
             for (root_path_str, timestamp) in sorted_roots {
-                 // Convert UNIX timestamp to DateTime<Local>
+                // Convert UNIX timestamp to DateTime<Utc> and then format locally
                 let dt = match Utc.timestamp_opt(timestamp as i64, 0) {
-                    chrono::LocalResult::Single(dt) => dt.with_timezone(&Local),
+                    chrono::LocalResult::Single(dt) => dt, // Keep as UTC
                     _ => { // Handle potential invalid timestamp
-                         warn!("Invalid timestamp ({}) found for directory {}", timestamp, root_path_str);
-                         // Print placeholder or skip?
-                         println!("  - {} (Invalid Timestamp)", root_path_str);
-                         continue;
+                        warn!("Invalid timestamp ({}) found for directory {}", timestamp, root_path_str);
+                        println!("  - {} (Invalid Timestamp)", root_path_str);
+                        continue;
                     }
-                 };
-                 // Format the timestamp
-                 let formatted_time = dt.format("%Y-%m-%d %H:%M:%S").to_string();
-                 println!("  - {} ({})", root_path_str, formatted_time);
+                };
+                // Format the timestamp (implicitly using local timezone via `println!`)
+                let formatted_time = dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                println!("  - {} ({})", root_path_str, formatted_time);
             }
             Ok(())
+        }
+        Command::Remove { dir } => {
+            debug!("Executing Remove command for directory: {}", dir);
+            println!("Removing directory '{}' from index...", dir);
+            match db.remove_directory(&dir) {
+                Ok(_) => {
+                    println!("Successfully removed directory '{}' and associated data.", dir);
+                    // Optionally save the DB state after removal
+                    if let Err(e) = db.save() {
+                        error!("Failed to save database after removing directory {}: {}", dir, e);
+                        eprintln!("Error saving database state: {}", e);
+                        // Return error even if removal itself succeeded, as state is not persisted
+                        Err(anyhow!("Failed to save DB after removal: {}", e))
+                    } else {
+                        Ok(())
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to remove directory '{}': {}", dir, e);
+                    eprintln!("Error removing directory '{}': {}", dir, e);
+                    Err(e.into()) // Propagate the error
+                }
+            }
         }
     }
 }

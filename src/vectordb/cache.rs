@@ -234,6 +234,81 @@ impl EmbeddingCache {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use std::fs;
+    use crate::vectordb::embedding::EmbeddingModelType;
+
+    // Helper to create a cache for testing
+    fn setup_cache_test() -> (tempfile::TempDir, String) {
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_path_str = cache_path.to_str().unwrap().to_string();
+        (temp_dir, cache_path_str)
+    }
+
+    #[test]
+    fn test_cache_insert_get_save_load() -> Result<()> {
+        let (_temp_dir, cache_path_str) = setup_cache_test();
+        let mut cache = EmbeddingCache::new(cache_path_str.clone())?;
+        cache.set_model_type(EmbeddingModelType::Onnx);
+
+        let file_name = "test.txt";
+        let file_path = _temp_dir.path().join(file_name);
+        fs::write(&file_path, "content")?;
+        let file_hash = EmbeddingCache::get_file_hash(&file_path)?;
+
+        // Test insert using insert_file_hash
+        cache.insert_file_hash(file_path.to_str().unwrap().to_string(), file_hash)?;
+        assert_eq!(cache.len(), 1);
+
+        // Test get (Hit) using check_cache_and_get_hash
+        let cache_result = cache.check_cache_and_get_hash(file_path.to_str().unwrap(), &file_path)?;
+        assert!(matches!(cache_result, CacheCheckResult::Hit), "Cache hit failed");
+
+        // Test get (Miss - wrong hash simulated by changing file)
+        fs::write(&file_path, "new content")?;
+        let new_file_hash = EmbeddingCache::get_file_hash(&file_path)?;
+        assert_ne!(file_hash, new_file_hash);
+        let cache_result_wrong_hash = cache.check_cache_and_get_hash(file_path.to_str().unwrap(), &file_path)?;
+        assert!(matches!(cache_result_wrong_hash, CacheCheckResult::Miss(_)), "Cache wrong hash failed");
+
+        // Test get (Miss - different file)
+        let other_file_name = "other.txt";
+        let other_file_path = _temp_dir.path().join(other_file_name);
+        fs::write(&other_file_path, "other content")?;
+        let cache_result_miss = cache.check_cache_and_get_hash(other_file_path.to_str().unwrap(), &other_file_path)?;
+        assert!(matches!(cache_result_miss, CacheCheckResult::Miss(_)), "Cache miss failed");
+
+        // Test save
+        cache.save()?;
+
+        // Test load
+        let mut loaded_cache = EmbeddingCache::new(cache_path_str)?;
+        loaded_cache.set_model_type(EmbeddingModelType::Onnx);
+        assert_eq!(loaded_cache.len(), 1, "Loaded cache length mismatch");
+        assert!(loaded_cache.entries.contains_key(file_path.to_str().unwrap()));
+        assert_eq!(loaded_cache.entries[file_path.to_str().unwrap()].file_hash, file_hash);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_cache_invalidate_types() -> Result<()> {
+        let (_temp_dir, cache_path_str) = setup_cache_test();
+        let mut cache = EmbeddingCache::new(cache_path_str)?;
+        cache.set_model_type(EmbeddingModelType::Onnx);
+
+        // Use insert_file_hash
+        cache.insert_file_hash("file1.txt".to_string(), 1)?;
+        assert_eq!(cache.len(), 1);
+
+        cache.set_model_type(EmbeddingModelType::Onnx);
+        assert_eq!(cache.len(), 1, "Cache size should remain after model type set");
+
+        cache.invalidate_different_model_types();
+        assert_eq!(cache.len(), 1, "Cache should NOT be empty when invalidating matching type");
+
+        Ok(())
+    }
 
     #[test]
     fn test_cache_basic() -> Result<()> {
@@ -243,31 +318,24 @@ mod tests {
         let mut cache = EmbeddingCache::new(cache_path.clone())?;
         assert_eq!(cache.len(), 0);
 
-        // Insert an item
-        // let embedding = vec![1.0, 2.0, 3.0]; // Removed
-        let file_hash = 12345u64; // Example hash
-        // cache.insert_with_hash("test".to_string(), embedding.clone(), file_hash)?; // Removed
-        cache.insert_file_hash("test".to_string(), file_hash)?; // Use new method
+        let file_hash = 12345u64;
+        cache.insert_file_hash("test".to_string(), file_hash)?;
         assert_eq!(cache.len(), 1);
 
-        // Check cache hit
         let temp_file = dir.path().join("test_file.txt");
         fs::write(&temp_file, "content")?;
         let file_hash_check = EmbeddingCache::get_file_hash(&temp_file)?;
-        // Need to insert again with the actual hash for check to work
         cache.insert_file_hash("test_file.txt".to_string(), file_hash_check)?;
 
         let check_result = cache.check_cache_and_get_hash("test_file.txt", &temp_file)?;
         match check_result {
-            // CacheCheckResult::Hit(cached_embedding) => assert_eq!(cached_embedding, embedding),
             CacheCheckResult::Hit => { /* Correct */ },
             CacheCheckResult::Miss(_) => panic!("Expected cache hit"),
         }
 
-        // Save and reload
         cache.save()?;
         let reloaded_cache = EmbeddingCache::new(cache_path)?;
-        assert_eq!(reloaded_cache.len(), 2); // test and test_file.txt
+        assert_eq!(reloaded_cache.len(), 2);
         Ok(())
     }
 
@@ -276,26 +344,22 @@ mod tests {
         let dir = tempdir()?;
         let cache_path = dir.path().join("cache.json").to_string_lossy().to_string();
         let mut cache = EmbeddingCache::new(cache_path.clone())?;
-        cache.ttl = 1; // Set TTL to 1 second for testing
+        cache.ttl = 1;
 
         let file_path = "ttl_test.txt".to_string();
         let temp_file_path = dir.path().join(&file_path);
         fs::write(&temp_file_path, "some data")?;
         let file_hash = EmbeddingCache::get_file_hash(&temp_file_path)?;
 
-        // Insert entry
         cache.insert_file_hash(file_path.clone(), file_hash)?;
 
-        // Check immediately (should be hit)
         match cache.check_cache_and_get_hash(&file_path, &temp_file_path)? {
             CacheCheckResult::Hit => { /* OK */ }
             _ => panic!("Expected immediate cache hit"),
         }
 
-        // Wait for TTL to expire
         std::thread::sleep(std::time::Duration::from_secs(2));
 
-        // Check again (should be miss)
         match cache.check_cache_and_get_hash(&file_path, &temp_file_path)? {
             CacheCheckResult::Miss(Some(h)) => assert_eq!(h, file_hash),
             _ => panic!("Expected cache miss due to TTL expiry"),
@@ -315,12 +379,10 @@ mod tests {
         fs::write(&temp_file_path, "data")?;
         let file_hash = EmbeddingCache::get_file_hash(&temp_file_path)?;
 
-        // Set initial model type (e.g., Onnx) and insert
         cache.set_model_type(EmbeddingModelType::Onnx);
         cache.insert_file_hash(file_path.clone(), file_hash)?;
         assert_eq!(cache.len(), 1);
 
-        // Check (should be hit)
         match cache.check_cache_and_get_hash(&file_path, &temp_file_path)? {
             CacheCheckResult::Hit => { /* OK */ }
             _ => panic!("Expected cache hit with matching model type"),
@@ -334,21 +396,15 @@ mod tests {
         let dir = tempdir()?;
         let file_path = dir.path().join("hash_test.txt");
 
-        // Create file
         fs::write(&file_path, "initial content")?;
         let hash1 = EmbeddingCache::get_file_hash(&file_path)?;
 
-        // Check hash again without modification
         let hash2 = EmbeddingCache::get_file_hash(&file_path)?;
         assert_eq!(hash1, hash2);
 
-        // Modify content
         fs::write(&file_path, "modified content")?;
         let hash3 = EmbeddingCache::get_file_hash(&file_path)?;
         assert_ne!(hash1, hash3);
-
-        // Modify timestamp (tricky to do precisely, but changing content changes timestamp)
-        // Let's just assert hash changes after modification
 
         Ok(())
     }

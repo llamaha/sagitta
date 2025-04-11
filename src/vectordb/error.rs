@@ -90,6 +90,9 @@ pub enum VectorDBError {
 
     #[error("Indexing error: {0}")]
     IndexingError(String),
+
+    #[error("Directory '{0}' is not present in the index")]
+    DirectoryNotIndexed(String),
 }
 
 /// Conversion from anyhow::Error
@@ -148,6 +151,7 @@ impl Clone for VectorDBError {
                 found: *found,
             },
             Self::IndexingError(s) => Self::IndexingError(s.clone()),
+            Self::DirectoryNotIndexed(s) => Self::DirectoryNotIndexed(s.clone()),
         }
     }
 }

@@ -355,11 +355,7 @@ impl VectorDB {
         
         // Record the timestamp for the indexed root directory
         let timestamp = Utc::now().timestamp() as u64;
-        if let Some(root_dir) = Path::new(dir_path).canonicalize().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
-             self.update_indexed_root_timestamp(root_dir.to_string_lossy().to_string(), timestamp);
-        } else {
-            warn!("Could not determine parent directory for {} to update timestamp.", dir_path);
-        }
+        self.update_indexed_root_timestamp(root_path_str.clone(), timestamp);
 
         self.save()?;
 
@@ -810,6 +806,72 @@ impl VectorDB {
     pub fn indexed_roots(&self) -> &HashMap<String, u64> {
         &self.indexed_roots
     }
+
+    /// Removes an indexed directory and all associated data (chunks, HNSW entries).
+    pub fn remove_directory(&mut self, dir_path: &str) -> Result<()> {
+        let canonical_dir = canonicalize(Path::new(dir_path)).map_err(|e| {
+            VectorDBError::IndexingError(format!(
+                "Failed to canonicalize directory '{}': {}",
+                dir_path, e
+            ))
+        })?;
+        let canonical_dir_str = canonical_dir.to_string_lossy().to_string();
+
+        debug!("Attempting to remove canonical directory: {}", canonical_dir_str);
+
+        // 1. Remove from indexed_roots
+        if self.indexed_roots.remove(&canonical_dir_str).is_none() {
+            warn!(
+                "Directory '{}' (canonical: {}) not found in indexed roots.",
+                dir_path, canonical_dir_str
+            );
+            return Err(VectorDBError::DirectoryNotIndexed(canonical_dir_str));
+        }
+        debug!("Removed '{}' from indexed_roots.", canonical_dir_str);
+
+        // 2. Filter indexed_chunks
+        let initial_chunk_count = self.indexed_chunks.len();
+        let path_prefix = format!("{}", canonical_dir.display()); // Ensure no trailing slash issues
+        self.indexed_chunks.retain(|chunk| {
+            // Keep chunks whose path does NOT start with the directory being removed.
+            // Use Path::starts_with for robust path comparison.
+            !Path::new(&chunk.file_path).starts_with(&path_prefix)
+        });
+        let removed_chunk_count = initial_chunk_count - self.indexed_chunks.len();
+        debug!(
+            "Removed {} chunks associated with directory '{}'.",
+            removed_chunk_count,
+            canonical_dir_str
+        );
+
+        // 3. Clear the HNSW index if chunks were removed
+        //    A full rebuild is required as removing elements is complex.
+        if removed_chunk_count > 0 {
+            if self.hnsw_index.is_some() {
+                debug!("Clearing HNSW index due to chunk removal.");
+                self.hnsw_index = None;
+                // Also remove the physical index file
+                let hnsw_path = Path::new(&self.db_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("hnsw_index.json");
+                let _ = fs::remove_file(&hnsw_path);
+                debug!("Removed HNSW index file: {}", hnsw_path.display());
+            }
+        }
+        
+        // 4. Persist changes (caller `execute_command` handles this via db.save())
+        //    It might be better to call self.save() here for consistency, but
+        //    leaving it to the caller allows potential batching if needed later.
+
+        println!(
+            "Removed index entry for '{}' and {} associated data chunks.",
+            canonical_dir_str,
+            removed_chunk_count
+        );
+
+        Ok(())
+    }
 }
 
 pub struct DBStats {
@@ -959,27 +1021,33 @@ mod tests {
 
     #[test]
     fn test_vectordb_set_onnx_paths_valid() -> Result<()> {
-        let (_temp_dir, db_path_str) = setup_db_test_env();
-        let mut db = VectorDB::new(db_path_str)?;
+        // Check for default ONNX files, skip if missing
+        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
+        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
+        if !default_model_path.exists() || !default_tokenizer_path.exists() {
+            warn!("Skipping test_vectordb_set_onnx_paths_valid because default ONNX files are not available in ./onnx/");
+            return Ok(()); // Skip test
+        }
 
-        // Create dummy files
-        let model_path = _temp_dir.path().join("model.onnx");
-        let tokenizer_path = _temp_dir.path().join("tokenizer.json");
-        fs::write(&model_path, "dummy model data")?;
-        fs::write(&tokenizer_path, "dummy tokenizer data")?;
+        let (_temp_dir, db_path) = setup_db_test_env();
+        let mut db = VectorDB::new(db_path)?;
 
-        let result = db.set_onnx_paths(Some(model_path.clone()), Some(tokenizer_path.clone()));
+        // Use the actual default paths
+        let result = db.set_onnx_paths(
+            Some(default_model_path.to_path_buf()),
+            Some(default_tokenizer_path.parent().unwrap().to_path_buf()), // Use parent dir for tokenizer
+        );
         assert!(result.is_ok(), "Setting valid paths should succeed");
-        assert_eq!(db.onnx_model_path(), Some(&model_path));
-        assert_eq!(db.onnx_tokenizer_path(), Some(&tokenizer_path));
+        assert_eq!(db.onnx_model_path(), Some(&default_model_path.to_path_buf()));
+        assert_eq!(db.onnx_tokenizer_path(), Some(&default_tokenizer_path.parent().unwrap().to_path_buf()));
 
         Ok(())
     }
 
     #[test]
     fn test_vectordb_set_onnx_paths_invalid() -> Result<()> {
-        let (_temp_dir, db_path_str) = setup_db_test_env();
-        let mut db = VectorDB::new(db_path_str)?;
+        let (_temp_dir, db_path) = setup_db_test_env();
+        let mut db = VectorDB::new(db_path)?;
 
         let non_existent_path = _temp_dir.path().join("non_existent.onnx");
 
@@ -1036,4 +1104,93 @@ mod tests {
         // ... rest of original test ... 
         Ok(())
     }
+
+    // --- Tests for remove_directory ---
+    #[test]
+    fn test_remove_directory_success() -> Result<()> {
+        // Check for default ONNX files, skip if missing
+        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
+        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
+        if !default_model_path.exists() || !default_tokenizer_path.exists() {
+            warn!("Skipping test_remove_directory_success because default ONNX files are not available in ./onnx/");
+            return Ok(()); // Skip test
+        }
+
+        let (temp_dir, db_path) = setup_db_test_env();
+        let mut db = VectorDB::new(db_path)?;
+
+        // Use the actual default paths
+        db.set_onnx_paths(
+            Some(default_model_path.to_path_buf()),
+            Some(default_tokenizer_path.parent().unwrap().to_path_buf()), // Use parent dir for tokenizer
+        )?;
+
+        // Create test directories and files
+        let dir1 = temp_dir.path().join("dir1");
+        let dir2 = temp_dir.path().join("dir2");
+        fs::create_dir_all(&dir1)?;
+        fs::create_dir_all(&dir2)?;
+        fs::write(dir1.join("file1.txt"), "Content of file 1 in dir1.")?;
+        fs::write(dir2.join("file2.txt"), "Content of file 2 in dir2.")?;
+
+        // Index the directories
+        db.index_directory(dir1.to_str().unwrap(), &["txt".to_string()])?;
+        db.index_directory(dir2.to_str().unwrap(), &["txt".to_string()])?;
+        let initial_roots = db.indexed_roots().clone();
+        let initial_chunk_count = db.indexed_chunks.len();
+
+        assert!(initial_roots.contains_key(dir1.canonicalize()?.to_str().unwrap()));
+        assert!(initial_roots.contains_key(dir2.canonicalize()?.to_str().unwrap()));
+        assert!(initial_chunk_count > 0);
+
+        // Remove dir1
+        db.remove_directory(dir1.to_str().unwrap())?;
+
+        // Verify dir1 is removed from roots
+        let final_roots = db.indexed_roots();
+        assert!(!final_roots.contains_key(dir1.canonicalize()?.to_str().unwrap()));
+        assert!(final_roots.contains_key(dir2.canonicalize()?.to_str().unwrap()));
+
+        // Verify chunks from dir1 are removed
+        let final_chunk_count = db.indexed_chunks.len();
+        assert!(final_chunk_count < initial_chunk_count);
+        for chunk in &db.indexed_chunks {
+            assert!(!chunk.file_path.starts_with(dir1.canonicalize()?.to_str().unwrap()));
+            assert!(chunk.file_path.starts_with(dir2.canonicalize()?.to_str().unwrap()));
+        }
+
+        // HNSW index should be None if chunks were removed
+        assert!(db.hnsw_index.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_directory_not_indexed() -> Result<()> {
+        let (_temp_dir, db_path) = setup_db_test_env();
+        let mut db = VectorDB::new(db_path)?;
+
+        let non_existent_dir = "/tmp/non_existent_dir_for_remove_test";
+        let _ = fs::create_dir(non_existent_dir);
+
+        // Attempt to remove a directory that wasn't indexed
+        let result = db.remove_directory(non_existent_dir);
+        assert!(matches!(result, Err(VectorDBError::DirectoryNotIndexed(_))));
+        
+        let _ = fs::remove_dir(non_existent_dir);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_directory_does_not_exist() {
+        let (_temp_dir, db_path) = setup_db_test_env();
+        let mut db = VectorDB::new(db_path).unwrap();
+
+        // Attempt to remove a directory that doesn't exist on the filesystem
+        let result = db.remove_directory("/path/that/absolutely/does/not/exist");
+        assert!(matches!(result, Err(VectorDBError::IndexingError(_))));
+    }
+
+    // --- End Tests for remove_directory ---
 }

@@ -60,6 +60,8 @@ tempfile = "3.6.0"
 anyhow = "1.0"
 # Add test-log dependency
 test-log = "0.2"
+assert_cmd = "2.0"
+predicates = "3.1"
 
 [[bin]]
 name = "vectordb-cli"
