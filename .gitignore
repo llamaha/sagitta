@@ -1,1 +1,3 @@
-/target
+paths:
+  - ort-examples
+  - codebert_onnx
