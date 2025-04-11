@@ -20,10 +20,6 @@ use std::fs;
 // use chrono::{DateTime, Utc, TimeZone, Local}; // Removed DateTime, TimeZone, Local
 use chrono::{Utc, Local, TimeZone}; // Add back Local and TimeZone
 
-// Default weights for hybrid search
-const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
-const HYBRID_BM25_WEIGHT: f32 = 0.3;
-
 // Global flag for handling interrupts
 pub static mut INTERRUPT_RECEIVED: bool = false;
 
