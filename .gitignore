@@ -1,3 +1,25 @@
-paths:
-  - ort-examples
-  - codebert_onnx
+# Rust Build Artifacts
+target/
+
+# Lock file (Keep if this is a library, ignore if binary. This is binary, but keeping tracked for reproducible builds)
+# Cargo.lock
+
+# Environment variables
+.env*
+
+# OS generated files
+.DS_Store
+
+# Editor configuration
+.vscode/
+
+# Project Specific Files
+db.json
+cache.json
+hnsw_index.json
+
+# Large model files (should be managed separately)
+onnx/
+
+# Test/Output files
+vectordb_search_results.txt
