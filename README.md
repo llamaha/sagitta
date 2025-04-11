@@ -25,12 +25,6 @@ A lightweight command-line tool for fast, local search across your codebases and
         ```bash
         xcode-select --install
         ```
--   **(Optional) Git LFS:** Needed only if you intend to use the default embedding model provided in the repository via Git LFS.
-    ```bash
-    # Debian/Ubuntu: sudo apt-get install git-lfs
-    # macOS: brew install git-lfs
-    git lfs install 
-    ```
 
 ## Installation
 
@@ -74,6 +68,8 @@ A lightweight command-line tool for fast, local search across your codebases and
 To enable GPU acceleration (CUDA on Linux, Core ML/Metal on macOS), you will need to compile with specific features. Please read the relevant documentation *before* attempting to build with GPU support:
 - **CUDA (Linux):** See [CUDA Setup](docs/CUDA_SETUP.md). Compile with: `cargo build --release --features ort/cuda`
 - **Core ML / Metal (macOS):** See [macOS GPU Setup](docs/MACOS_GPU_SETUP.md). Compile with: `cargo build --release --features ort/coreml`
+
+**Note on GPU Usage:** While GPU acceleration significantly speeds up the *embedding generation* process during indexing (and for the query itself), the core similarity search uses an efficient CPU-based HNSW index. This means that even without a compatible GPU, indexing will still work (just slower), and querying will remain relatively fast. Don't worry if you don't have a GPU - the tool is still very usable!
 
 ## Embedding Models
 
@@ -248,6 +244,30 @@ vectordb-cli list
 # List directories in a custom database
 vectordb-cli --db-path /data/shared_index.json list
 ```
+
+### 7. Backing Up the Database
+
+The application stores its state in three main files:
+
+*   `db.json`: Contains the indexed text chunks and their metadata.
+*   `cache.json`: Stores file hashes and timestamps to speed up re-indexing.
+*   `hnsw_index.json`: Holds the HNSW vector index for fast searching.
+
+By default, these files are located in the user's local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS). If you use the `--db-path` option, they will be located in the same directory as the specified `.json` file.
+
+To back up your index, simply copy these three files to a safe location. You can also use `tar` to create a compressed archive:
+
+```bash
+# Example backup (replace path with your actual data directory)
+DATA_DIR="$HOME/.local/share/vectordb-cli"
+BACKUP_DEST="$HOME/backups/vectordb-cli_backup_$(date +%Y%m%d).tar.gz"
+
+tar czvf "$BACKUP_DEST" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
+
+echo "Backup created at $BACKUP_DEST"
+```
+
+To restore, simply place the backed-up `db.json`, `cache.json`, and `hnsw_index.json` files back into the expected data directory before running the application.
 
 ## How it Works
 
