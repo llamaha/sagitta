@@ -1,8 +1,8 @@
 // use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::error::VectorDBError;
-use crate::vectordb::search::Search;
+// use crate::vectordb::search::Search; // Removed
 use crate::vectordb::VectorDB;
-use crate::vectordb::cache::CacheCheckResult;
+// use crate::vectordb::cache::CacheCheckResult; // Removed
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use log::{debug, error, warn};
@@ -10,14 +10,15 @@ use num_cpus;
 use rayon;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use crate::vectordb::search::result::SearchResult;
-use crate::vectordb::search::{chunking, snippet};
-use std::collections::HashMap;
+// use crate::vectordb::search::result::SearchResult; // Removed
+// use crate::vectordb::search::{chunking, snippet}; // Removed
+// use std::collections::HashMap; // Removed
 use std::fs;
-use std::collections::HashSet;
-use crate::vectordb::utils::cosine_distance;
-use walkdir::WalkDir;
-use chrono::{DateTime, Utc, TimeZone, Local};
+// use std::collections::HashSet; // Removed
+// use crate::vectordb::utils::cosine_distance; // Removed
+// use walkdir::WalkDir; // Removed
+// use chrono::{DateTime, Utc, TimeZone, Local}; // Removed DateTime, TimeZone, Local
+use chrono::{Utc, Local, TimeZone}; // Add back Local and TimeZone
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -61,25 +62,9 @@ pub enum Command {
         #[arg(short = 'l', long = "limit")]
         max_results: Option<usize>,
 
-        /// Use only vector search (without hybrid BM25 combination)
-        #[arg(long = "vector-only")]
-        vector_only: bool,
-
-        /// Weight for vector search (default: 0.7)
-        #[arg(long = "vector-weight")]
-        vector_weight: Option<f32>,
-
-        /// Weight for BM25 lexical search (default: 0.3)
-        #[arg(long = "bm25-weight")]
-        bm25_weight: Option<f32>,
-
         /// File types to search (e.g. rs,rb,go,js,ts)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
-
-        /// Use faster, keyword-based snippet extraction instead of semantic chunking.
-        #[arg(long = "fast-snippets")]
-        fast_snippets: bool,
     },
 
     /// Show database statistics
@@ -252,255 +237,171 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
         Command::Query {
             query,
             max_results,
-            vector_only,
-            vector_weight,
-            bm25_weight,
             file_types,
-            fast_snippets,
         } => {
-            debug!("Executing Query command: \"{}\"", query);
+            debug!("Executing Query command with query: '{}'", query);
+            let start_time = Instant::now();
+
+            // --- Define QueryResultChunk struct ---
+            #[derive(Debug)] // Added Debug derive for easier printing/logging
+            struct QueryResultChunk {
+                file_path: String,
+                start_line: usize,
+                end_line: usize,
+                text: String,
+                score: f32,
+            }
+
+            // Get search limit
             let limit = max_results.unwrap_or(20);
-            debug!("Using max_results limit: {}", limit);
-            println!("Limiting results to a maximum of {}", limit);
 
-            let model = db.create_embedding_model()?;
-            let mut search = Search::new(db.clone(), model.clone());
+            // --- New Chunk-Based Query Logic ---
 
-            // Prepare file type filter
-            let file_types_to_use = if let Some(types) = file_types {
-                if types.is_empty() {
-                    println!("No specific file types specified, searching all supported file types");
-                    Some(VectorDB::get_supported_file_types())
-                } else {
-                    println!("Filtering results by file types: {}", types.join(", "));
-                    Some(types.clone())
+            // 1. Create Embedding Model
+            let model = match db.create_embedding_model() {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Failed to create embedding model for query: {}", e);
+                    eprintln!("Error initializing embedding model: {}. Have you indexed any data?", e);
+                    return Err(e.into());
                 }
-            } else {
-                println!("No file types filter, searching all supported file types");
-                Some(VectorDB::get_supported_file_types())
             };
 
-            // Initial Search
-            debug!("Performing initial search...");
-            let mut initial_results: Vec<SearchResult> = if vector_only {
-                debug!("Performing vector-only search");
-                println!("Performing vector-only search...");
-                search.search_with_limit(&query, limit)?
-            } else {
-                debug!("Performing hybrid search (vector + BM25)");
-                println!("Performing hybrid search (combining semantic and lexical matching)...");
+            // 2. Generate Query Embedding
+            let query_embedding = match model.embed(&query) {
+                Ok(emb) => emb,
+                Err(e) => {
+                    error!("Failed to generate embedding for query '{}': {}", query, e);
+                    eprintln!("Error generating query embedding: {}", e);
+                    return Err(e.into());
+                }
+            };
+            debug!("Query embedding generated (dim={})", query_embedding.len());
 
-                // Show weights being used
-                let v_weight = vector_weight.unwrap_or(HYBRID_VECTOR_WEIGHT);
-                let b_weight = bm25_weight.unwrap_or(HYBRID_BM25_WEIGHT);
-                debug!(
-                    "Using weights: vector={:.2}, bm25={:.2}",
-                    v_weight, b_weight
-                );
-                println!(
-                    "Using weights: vector={:.2}, bm25={:.2}",
-                    v_weight, b_weight
-                );
-
-                search.hybrid_search_with_limit(
-                    &query,
-                    vector_weight,
-                    bm25_weight,
-                    limit,
-                )?
+            // 3. Access HNSW Index
+            let hnsw_index = match db.hnsw_index() {
+                Some(index) => index,
+                None => {
+                    warn!("HNSW index is not available. No search results can be returned.");
+                    eprintln!("Search index is not built. Please run the 'index' command first.");
+                    return Ok(()); // Or return an error?
+                }
             };
 
-            // Filter results by file type if specified
-            if let Some(types) = file_types_to_use {
-                if !types.is_empty() {
-                    debug!("Filtering results by file types: {:?}", types);
-                    initial_results.retain(|result| {
-                        let path = Path::new(&result.file_path);
-                        if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy().to_string();
-                            types.contains(&ext_str)
-                        } else {
-                            false
+            // Verify index dimension matches query embedding dimension
+            if hnsw_index.get_config().dimension != query_embedding.len() {
+                error!(
+                    "Query embedding dimension ({}) does not match HNSW index dimension ({}).",
+                    query_embedding.len(),
+                    hnsw_index.get_config().dimension
+                );
+                eprintln!(
+                    "Error: Query embedding dimension ({}) does not match the index dimension ({}). \\
+                     The index might be corrupted or built with a different model. Please re-index.",
+                    query_embedding.len(),
+                    hnsw_index.get_config().dimension
+                );
+                return Err(anyhow!("Index dimension mismatch"));
+            }
+
+            // 4. Perform HNSW Search
+            // TODO: Make ef_search configurable?
+            let ef_search = 100; // Example value
+            debug!("Performing HNSW search with k={}, ef_search={}", limit, ef_search);
+            let search_results = hnsw_index.search_parallel(&query_embedding, limit, ef_search)?;
+            debug!("HNSW search returned {} results", search_results.len());
+
+            // 5. Process HNSW Results
+            let mut chunk_results: Vec<QueryResultChunk> = Vec::with_capacity(search_results.len());
+            for (node_id, distance) in search_results {
+                if let Some(chunk_data) = db.indexed_chunks.get(node_id) {
+                    let similarity = 1.0 - distance;
+                    // Basic filtering (optional, can add more like file_type filtering here if needed)
+                    if similarity < 0.0 { continue; } // Skip results with negative similarity (highly dissimilar)
+
+                    // Filter by file type if specified
+                    if let Some(ref allowed_types) = file_types {
+                        if !allowed_types.is_empty() {
+                             if let Some(extension) = Path::new(&chunk_data.file_path).extension().and_then(|ext| ext.to_str()) {
+                                 if !allowed_types.iter().any(|ft| ft.eq_ignore_ascii_case(extension)) {
+                                     debug!("Skipping chunk from file {} due to file type filter", chunk_data.file_path);
+                                     continue; // Skip chunk if file type doesn't match
+                                 }
+                             } else {
+                                 continue; // Skip files with no extension if filtering
+                             }
                         }
+                    }
+
+                    chunk_results.push(QueryResultChunk {
+                        file_path: chunk_data.file_path.clone(),
+                        start_line: chunk_data.start_line,
+                        end_line: chunk_data.end_line,
+                        text: chunk_data.text.clone(),
+                        score: similarity,
                     });
+                } else {
+                    error!("Invalid node ID {} returned from HNSW search, data mismatch!", node_id);
+                    // This indicates a potential corruption or bug
                 }
             }
 
-            if initial_results.is_empty() {
-                debug!("No results found for query: \"{}\"", query);
-                println!("No results found.");
-                return Ok(());
-            }
-
-            println!("\nSearch results for: {}\n", query);
-
-            // --- Conditional Snippet Logic ---
-            if fast_snippets {
-                // --- Fast Snippet Path (Old Logic) ---
-                debug!("Using fast snippet extraction.");
-                for (i, result) in initial_results.iter().enumerate() {
-                    println!(
-                        "{}. {} (score: {:.2})",
-                        i + 1,
-                        result.file_path,
-                        result.similarity
-                    );
-                    match snippet::get_snippet(&result.file_path, &query) {
-                        Ok(snippet_text) => {
-                            println!("{}", snippet_text);
-                        }
-                        Err(e) => {
-                            error!("Failed to get snippet for {}: {}", result.file_path, e);
-                            println!("  Error getting snippet: {}", e);
-                        }
-                    }
-                    println!();
-                }
+            // 6. Display Results
+            let elapsed = start_time.elapsed();
+            if chunk_results.is_empty() {
+                println!("No relevant chunks found for query '{}'", query);
             } else {
-                // --- Semantic Snippet Path (New Logic) ---
-                debug!("Using semantic snippet extraction.");
-
-                let query_embedding = model.embed(&query)?;
-                let mut all_chunks: Vec<(String, chunking::ChunkInfo, Vec<f32>)> = Vec::new();
-                let mut file_contents: HashMap<String, String> = HashMap::new();
-
-                // 1. Read content and chunk top N files
-                debug!("Reading and chunking top {} files...", initial_results.len());
-                for result in &initial_results {
-                    if file_contents.contains_key(&result.file_path) {
-                        continue;
-                    }
-                    match fs::read_to_string(&result.file_path) {
-                        Ok(content) => {
-                            let chunks = chunking::chunk_by_paragraphs(&content);
-                            file_contents.insert(result.file_path.clone(), content);
-                            for chunk in chunks {
-                                all_chunks.push((result.file_path.clone(), chunk, Vec::new()));
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to read file {} for semantic snippets: {}", result.file_path, e);
-                        }
-                    }
-                }
-
-                if all_chunks.is_empty() {
-                    println!("Could not read or chunk any of the top results to generate semantic snippets.");
-                    return Ok(());
-                }
-
-                // 2. Embed all chunks
-                debug!("Embedding {} chunks...", all_chunks.len());
-                let chunk_texts: Vec<&str> = all_chunks.iter().map(|(_, chunk, _)| chunk.text.as_str()).collect();
-                // --- DEBUG: Log first few chunk texts ---
-                for (idx, text) in chunk_texts.iter().take(5).enumerate() {
-                    debug!("Chunk Text [{}]: {:?}", idx, text.chars().take(100).collect::<String>());
-                }
-                // --- END DEBUG ---
-                let chunk_embeddings = model.embed_batch(&chunk_texts)?;
-
-                // --- DEBUG: Log first few chunk embeddings (partial) ---
-                for (idx, embedding) in chunk_embeddings.iter().take(5).enumerate() {
-                    debug!("Chunk Embedding [{}]: dim={}, first 5 vals=[{:?}...]",
-                          idx, embedding.len(), &embedding[..5.min(embedding.len())]);
-                }
-                // --- END DEBUG ---
-
-                // Assign embeddings back to chunks
-                for (i, embedding) in chunk_embeddings.into_iter().enumerate() {
-                    if let Some(entry) = all_chunks.get_mut(i) {
-                        entry.2 = embedding;
-                    }
-                }
-
-                // 3. Calculate scores for chunks
-                debug!("Calculating semantic scores for chunks...");
-                let mut scored_chunks: Vec<(String, chunking::ChunkInfo, f32)> = Vec::new();
-                let mut debug_scores_logged = 0; // Counter for debug logging
-                for (file_path, chunk_info, chunk_embedding) in all_chunks {
-                    if chunk_embedding.is_empty() { continue; }
-                    let similarity = 1.0 - cosine_distance(&query_embedding, &chunk_embedding);
-                    // --- DEBUG: Log first few similarity scores ---
-                    if debug_scores_logged < 5 {
-                        debug!("Chunk Score [{} @ L{}]: {:?}",
-                              file_path.split('/').last().unwrap_or("?"), chunk_info.start_line, similarity);
-                        debug_scores_logged += 1;
-                    }
-                    // --- END DEBUG ---
-                    scored_chunks.push((file_path, chunk_info, similarity));
-                }
-
-                // 4. Find the best chunk for each of the *original* top N files
-                debug!("Finding best semantic snippet for each top file...");
-                let mut final_results: Vec<(String, f32, chunking::ChunkInfo)> = Vec::new();
-                let mut processed_files = HashSet::new();
-
-                for initial_result in &initial_results {
-                    if !processed_files.insert(initial_result.file_path.clone()) {
-                        continue;
-                    }
-
-                    let best_chunk_for_file = scored_chunks.iter()
-                        .filter(|(fp, _, _)| *fp == initial_result.file_path)
-                        .max_by(|(_, _, score_a), (_, _, score_b)| score_a.partial_cmp(score_b).unwrap_or(std::cmp::Ordering::Equal));
-
-                    // --- DEBUG: Log best chunk found for first file ---
-                    if processed_files.len() == 1 { // Only log for the very first file processed
-                        if let Some((_fp, _info, score)) = best_chunk_for_file {
-                            debug!("Best chunk for {}: Score={:?}", initial_result.file_path, score);
-                        } else {
-                            debug!("Best chunk for {}: None found", initial_result.file_path);
-                        }
-                    }
-                    // --- END DEBUG ---
-
-                    if let Some((_, chunk_info, chunk_score)) = best_chunk_for_file {
-                        final_results.push((initial_result.file_path.clone(), *chunk_score, chunk_info.clone()));
-                    } else {
-                        debug!("No valid semantic chunk found for {}", initial_result.file_path);
-                    }
-                }
-
-                // Sort final results by chunk score (highest similarity first)
-                final_results.sort_by(|(_, score_a, _), (_, score_b, _)| score_b.partial_cmp(score_a).unwrap_or(std::cmp::Ordering::Equal));
-
-                // 5. Display results
-                for (i, (file_path, chunk_score, chunk_info)) in final_results.iter().take(limit).enumerate() {
+                println!("Found {} relevant chunks ({:.2} seconds):", chunk_results.len(), elapsed.as_secs_f32());
+                println!("---");
+                for (i, result) in chunk_results.iter().enumerate() {
+                    // Use canonicalize to try and resolve symlinks/relative paths
+                    let display_path = match fs::canonicalize(&result.file_path) {
+                         Ok(p) => p.to_string_lossy().into_owned(),
+                         Err(_) => result.file_path.clone(), // Fallback to original path if canonicalization fails
+                    };
                     println!(
-                        "{}. {} (semantic score: {:.4})",
+                        "{}. {} (Lines {}-{}) (score: {:.4})",
                         i + 1,
-                        file_path,
-                        chunk_score
+                        display_path,
+                        result.start_line,
+                        result.end_line,
+                        result.score
                     );
-                    println!("[Line {}] {}\n", chunk_info.start_line, chunk_info.text);
-                    println!();
+                    // Indent the chunk text slightly
+                    for line in result.text.lines() {
+                        println!("  {}", line);
+                    }
+                    println!("---");
                 }
             }
-            // --- End Conditional Snippet Logic ---
+            debug!("Query processing took {:.4} seconds", elapsed.as_secs_f32());
+
+            Ok(())
         }
         Command::Stats => {
-            debug!("Executing Stats command");
             let stats = db.stats();
             println!("Database Statistics:");
             println!("  DB Path: {}", stats.db_path);
-            println!("  Embedding Model: {}", stats.embedding_model_type);
-            println!("  Indexed Files: {}", stats.indexed_files);
-            println!("  Cached Files: {}", stats.cached_files);
+            println!("  Model Type: {}", stats.embedding_model_type);
             println!("  Embedding Dimension: {}", stats.embedding_dimension);
+            println!("  Unique Files Indexed: {}", stats.unique_files);
+            println!("  Total Chunks Indexed: {}", stats.indexed_chunks);
+            println!("  Cached Files (hashes): {}", stats.cached_files);
             if let Some(hnsw_stats) = stats.hnsw_stats {
                 println!("  HNSW Index:");
                 println!("    Total Nodes: {}", hnsw_stats.total_nodes);
                 println!("    Layers: {}", hnsw_stats.layers);
-                for (i, layer_stat) in hnsw_stats.layer_stats.iter().enumerate() {
-                    println!("      Layer {}: Nodes={}, Avg Connections={:.2}",
-                             i, layer_stat.nodes, layer_stat.avg_connections);
-                }
+                // Add more HNSW stats if desired
+            } else {
+                println!("  HNSW Index: Not built");
             }
+            Ok(())
         }
         Command::Clear {} => {
             println!("Clearing database...");
             db.clear()?;
             println!("Database cleared successfully.");
+            Ok(())
         }
         Command::List => {
             debug!("Executing List command");
@@ -538,7 +439,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                  let formatted_time = dt.format("%Y-%m-%d %H:%M:%S").to_string();
                  println!("  - {} ({})", root_path_str, formatted_time);
             }
+            Ok(())
         }
     }
-    Ok(())
 }

@@ -15,7 +15,8 @@ use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 use std::time::Instant;
-use chrono::{DateTime, Utc, TimeZone};
+use chrono::{Utc};
+use crate::vectordb::search::chunking::{chunk_by_paragraphs};
 
 // Add From implementation here
 impl From<TemplateError> for VectorDBError {
@@ -38,9 +39,19 @@ pub struct FeedbackData {
     pub query_feedback: HashMap<String, HashMap<String, FeedbackEntry>>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct IndexedChunk {
+    pub file_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub text: String,
+    // Embedding vector is stored in HNSW, not duplicated here by default
+    pub embedding: Vec<f32>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct DBFile {
-    embeddings: HashMap<String, Vec<f32>>,
+    indexed_chunks: Vec<IndexedChunk>,
     hnsw_config: Option<HNSWConfig>,
     feedback: Option<FeedbackData>,
     embedding_model_type: Option<EmbeddingModelType>,
@@ -51,7 +62,7 @@ struct DBFile {
 }
 
 pub struct VectorDB {
-    pub embeddings: HashMap<String, Vec<f32>>,
+    pub indexed_chunks: Vec<IndexedChunk>,
     db_path: String,
     pub cache: EmbeddingCache,
     pub hnsw_index: Option<HNSWIndex>,
@@ -65,7 +76,7 @@ pub struct VectorDB {
 impl Clone for VectorDB {
     fn clone(&self) -> Self {
         Self {
-            embeddings: self.embeddings.clone(),
+            indexed_chunks: self.indexed_chunks.clone(),
             db_path: self.db_path.clone(),
             cache: self.cache.clone(),
             hnsw_index: self.hnsw_index.clone(),
@@ -83,7 +94,7 @@ impl VectorDB {
         debug!("Creating VectorDB with database path: {}", db_path);
 
         let (
-            embeddings,
+            indexed_chunks,
             hnsw_config,
             feedback,
             embedding_model_type,
@@ -105,12 +116,12 @@ impl VectorDB {
                     // }
 
                     debug!(
-                        "Database parsed successfully: {} embeddings, {} indexed roots",
-                        db_file.embeddings.len(),
+                        "Database parsed successfully: {} indexed chunks, {} indexed roots",
+                        db_file.indexed_chunks.len(),
                         db_file.indexed_roots.len()
                     );
                     (
-                        db_file.embeddings,
+                        db_file.indexed_chunks,
                         db_file.hnsw_config,
                         db_file.feedback.unwrap_or_default(),
                         loaded_model_type,
@@ -125,7 +136,7 @@ impl VectorDB {
                     eprintln!("Creating a new empty database.");
                     debug!("Creating a new empty database");
                     (
-                        HashMap::new(),
+                        Vec::new(),
                         Some(HNSWConfig::default()),
                         FeedbackData::default(),
                         EmbeddingModelType::Onnx,
@@ -138,7 +149,7 @@ impl VectorDB {
         } else {
             debug!("Database file doesn't exist, creating new database");
             (
-                HashMap::new(),
+                Vec::new(),
                 Some(HNSWConfig::default()),
                 FeedbackData::default(),
                 EmbeddingModelType::Onnx,
@@ -218,7 +229,7 @@ impl VectorDB {
 
         debug!("VectorDB initialization complete");
         Ok(Self {
-            embeddings,
+            indexed_chunks,
             db_path,
             cache,
             hnsw_index,
@@ -305,6 +316,7 @@ impl VectorDB {
 
         let model = self.create_embedding_model()?;
         let model_arc = Arc::new(model);
+        let embedding_dim = model_arc.dim(); // Get dimension from model
 
         let file_list = self.collect_files(&root_path_str, file_patterns)?;
 
@@ -313,7 +325,42 @@ impl VectorDB {
             return Ok(());
         }
 
-        self.index_directory_parallel(file_list, model_arc, 10)?;
+        // Determine embedding batch size (e.g., from config or default)
+        // TODO: Make this configurable
+        let embedding_batch_size = 32; 
+
+        // Check HNSW index compatibility *before* indexing
+        if let Some(existing_index) = &self.hnsw_index {
+            if existing_index.get_config().dimension != embedding_dim {
+                warn!(
+                    "Existing HNSW index dimension ({}) does not match current model dimension ({}). Discarding index.",
+                    existing_index.get_config().dimension, embedding_dim
+                );
+                self.hnsw_index = None;
+                // Optionally, delete the physical index file here
+                let hnsw_path = Path::new(&self.db_path).parent().unwrap_or_else(|| Path::new(".")).join("hnsw_index.json");
+                let _ = fs::remove_file(&hnsw_path);
+            }
+        }
+
+        let processed_chunks_data = self.index_files_parallel(file_list, model_arc, embedding_batch_size)?;
+        
+        // Rebuild HNSW index using *all* current chunks
+        if !processed_chunks_data.is_empty() {
+            debug!("Rebuilding HNSW index with new and existing chunks...");
+            self.rebuild_hnsw_index_from_state(embedding_dim)?; 
+        } else {
+            debug!("No new chunks were processed, skipping HNSW rebuild.");
+        }
+        
+        // Record the timestamp for the indexed root directory
+        let timestamp = Utc::now().timestamp() as u64;
+        if let Some(root_dir) = Path::new(dir_path).canonicalize().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
+             self.update_indexed_root_timestamp(root_dir.to_string_lossy().to_string(), timestamp);
+        } else {
+            warn!("Could not determine parent directory for {} to update timestamp.", dir_path);
+        }
+
         self.save()?;
 
         Ok(())
@@ -359,30 +406,12 @@ impl VectorDB {
     }
 
     pub fn save(&mut self) -> Result<()> {
-        debug!("Attempting to save database to {}", self.db_path);
+        debug!("Saving VectorDB to {}", self.db_path);
+        let start = Instant::now();
 
-        // Make sure cache is saved
-        if let Err(e) = self.cache.save() {
-            error!("Failed to save cache: {}", e);
-            // Decide if this should be a hard error for the main save operation
-            // For now, log it and continue saving the main db file
-        }
-
-        // Optionally, rebuild HNSW index before saving if needed
-        if self.hnsw_index.is_none() || self.hnsw_index.as_ref().unwrap().stats().total_nodes != self.embeddings.len() {
-             debug!("Rebuilding HNSW index before saving...");
-             match self.rebuild_hnsw_index() {
-                  Ok(_) => debug!("HNSW index rebuilt successfully."),
-                  Err(e) => {
-                      error!("Failed to rebuild HNSW index: {}. Index may be outdated.", e);
-                      // Continue saving without the updated index?
-                      // Or return error? Let's return error for now.
-                      return Err(VectorDBError::HNSWError(format!("Failed to rebuild HNSW index during save: {}", e)));
-                  }
-             }
-        }
-
-        // Save HNSW index if it exists
+        // --- Rebuild HNSW Index before saving ---
+        // Rebuilding HNSW is now tied to indexing, not saving.
+        // If an index exists, save it. If not, that's fine.
         if let Some(hnsw_index) = &self.hnsw_index {
             let hnsw_path = Path::new(&self.db_path)
                 .parent()
@@ -391,70 +420,73 @@ impl VectorDB {
             debug!("Saving HNSW index to {}", hnsw_path.display());
             if let Err(e) = hnsw_index.save_to_file(&hnsw_path) {
                 error!("Failed to save HNSW index: {}", e);
-                return Err(VectorDBError::HNSWError(format!(
-                    "Failed to save HNSW index to {}: {}",
-                    hnsw_path.display(),
-                    e
-                )));
+                // Don't return error, allow db.json and cache to save
+                eprintln!("Warning: Failed to save HNSW index: {}", e);
+            } else {
+                debug!("HNSW index saved successfully.");
             }
+        } else {
+            debug!("No HNSW index found, skipping save.");
         }
 
-        // Save main DB file
         let db_file = DBFile {
-            embeddings: self.embeddings.clone(),
-            hnsw_config: self.hnsw_index.as_ref().map(|idx| idx.get_config()),
+            indexed_chunks: self.indexed_chunks.clone(),
+            hnsw_config: self.hnsw_index.as_ref().map(|idx| idx.get_config().clone()),
             feedback: Some(self.feedback.clone()),
-            embedding_model_type: Some(self.embedding_model_type),
-            onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
-            onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            embedding_model_type: Some(self.embedding_model_type.clone()),
+            onnx_model_path: self.onnx_model_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            onnx_tokenizer_path: self.onnx_tokenizer_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             indexed_roots: self.indexed_roots.clone(),
         };
 
         let contents = serde_json::to_string_pretty(&db_file)?;
-        debug!("Serialized DB file size: {} bytes", contents.len());
         fs::write(&self.db_path, contents)?;
+        debug!("Saved database file successfully to {}", self.db_path);
 
-        debug!("Database saved successfully to {}", self.db_path);
+        // debug!("Saving cache to {}", self.cache.cache_path); // Removed log using private field
+        self.cache.save()?;
+        debug!("Saved cache successfully.");
+
+        debug!("VectorDB saved in {:.2?}", start.elapsed());
         Ok(())
     }
 
     pub fn clear(&mut self) -> Result<()> {
-        self.embeddings.clear();
-        self.cache.clear();
-        self.hnsw_index = None; // Clear the HNSW index object
+        debug!("Clearing VectorDB data");
+        self.indexed_chunks.clear();
+        self.hnsw_index = None;
         self.feedback = FeedbackData::default();
         self.indexed_roots.clear();
 
-        // Delete the persistent files
-        let _ = fs::remove_file(&self.db_path); // Ignore error if file doesn't exist
-        // Ignore result of cache clear, best effort
-        let _ = self.cache.clear(); 
-        let cache_path = Path::new(&self.db_path)
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("cache.json");
-        let _ = fs::remove_file(&cache_path);
+        // Also clear the physical files
+        let _ = fs::remove_file(&self.db_path);
         let hnsw_path = Path::new(&self.db_path)
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("hnsw_index.json");
-        let _ = fs::remove_file(&hnsw_path);
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("hnsw_index.json");
+        let _ = fs::remove_file(hnsw_path);
+        self.cache.clear()?; // Clear cache content and file
 
-        self.save() // Save the now empty state (optional, but consistent)
+        debug!("VectorDB cleared");
+        Ok(())
     }
 
     pub fn stats(&self) -> DBStats {
-        let embedding_dimension = self.create_embedding_model()
-            .map(|model| model.dim())
-            .unwrap_or(0);
+        // Calculate unique files from indexed_chunks
+        let unique_files = self.indexed_chunks.iter()
+            .map(|chunk| &chunk.file_path)
+            .collect::<HashSet<_>>()
+            .len();
 
         DBStats {
-            indexed_files: self.embeddings.len(),
-            embedding_dimension,
+            indexed_chunks: self.indexed_chunks.len(),
+            unique_files,
+            embedding_dimension: self.hnsw_index.as_ref()
+                .map_or(self.embedding_model_type.default_dimension(), |idx| idx.get_config().dimension),
             db_path: self.db_path.clone(),
             cached_files: self.cache.len(),
-            hnsw_stats: self.hnsw_index.as_ref().map(|index| index.stats()),
-            embedding_model_type: self.embedding_model_type.clone(),
+            hnsw_stats: self.hnsw_index.as_ref().map(|idx| idx.stats()),
+            embedding_model_type: self.embedding_model_type,
         }
     }
 
@@ -483,129 +515,163 @@ impl VectorDB {
         ]
     }
 
-    // Internal function for parallel indexing
-    // index_directory_parallel now receives already canonicalized paths
-    fn index_directory_parallel(
+    // Renamed from index_directory_parallel to clarify it processes files
+    fn index_files_parallel(
         &mut self,
         files: Vec<PathBuf>, // These paths are already canonicalized
         model: Arc<EmbeddingModel>,
-        batch_size: usize,
-    ) -> Result<()> {
+        embedding_batch_size: usize,
+    ) -> Result<Vec<IndexedChunk>> { // Return processed chunk data
         let total_files = files.len() as u64;
         if total_files == 0 {
-            return Ok(());
+            return Ok(Vec::new());
         }
+
+        // Remove existing chunks originating from the files being indexed
+        let files_to_reindex: HashSet<String> = files.iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let initial_chunk_count = self.indexed_chunks.len();
+        self.indexed_chunks.retain(|chunk| !files_to_reindex.contains(&chunk.file_path));
+        debug!("Removed {} existing chunks for {} files being re-indexed.", 
+               initial_chunk_count - self.indexed_chunks.len(), files_to_reindex.len());
 
         let progress_bar = ProgressBar::new(total_files);
         progress_bar.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({percent}%)")?
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({percent}%) - Chunks: {msg}")?
                 .progress_chars("#>- ")
         );
+        progress_bar.set_message("0"); // Initial chunk count for this run
 
-        // Channel includes Option<u64> for hash
-        let (files_to_embed_sender, files_to_embed_receiver) = mpsc::channel::<(PathBuf, String, Option<u64>)>();
+        let (files_to_process_sender, files_to_process_receiver) = mpsc::channel::<(PathBuf, String, Option<u64>)>();
 
-        // Shared state for results from the embedder thread
-        let new_embeddings_arc = Arc::new(Mutex::new(HashMap::<String, Vec<f32>>::new()));
-        let updated_cache_arc = Arc::new(Mutex::new(self.cache.clone())); // Clone cache for embed thread to update
+        // Shared state for results from the processor thread
+        let processed_chunks_arc = Arc::new(Mutex::new(Vec::<IndexedChunk>::new()));
+        let updated_cache_arc = Arc::new(Mutex::new(self.cache.clone())); 
+        let processed_chunk_count_this_run = Arc::new(Mutex::new(0_usize));
 
-        let model_type_clone = self.embedding_model_type.clone();
-
-        // --- Embedder Thread --- 
-        let embed_thread_handle = std::thread::spawn({
+        // --- Processor Thread (Embeds Chunks) --- 
+        let processor_thread_handle = std::thread::spawn({
             let model_arc = model.clone();
-            let receiver = files_to_embed_receiver;
-            let embeddings_map_write_ref = new_embeddings_arc.clone();
+            let receiver = files_to_process_receiver;
+            let chunks_write_ref = processed_chunks_arc.clone();
             let cache_write_ref = updated_cache_arc.clone();
-            let _model_type_clone_for_cache = model_type_clone.clone();
+            let chunk_count_ref = processed_chunk_count_this_run.clone();
+            let pb_clone = progress_bar.clone(); 
 
             move || -> Result<()> {
-                // Store paths, strings, and optional hashes
-                let mut batch_paths_hashes = Vec::with_capacity(batch_size);
-                let mut batch_texts = Vec::with_capacity(batch_size);
+                // Store metadata and owned text strings for the batch
+                let mut chunk_batch_meta = Vec::with_capacity(embedding_batch_size);
+                let mut chunk_batch_texts: Vec<String> = Vec::with_capacity(embedding_batch_size); // Store owned Strings
 
-                // Receive path, string, and optional hash
-                for (canonical_path_buf, canonical_path_str, hash_opt) in receiver {
+                for (canonical_path_buf, canonical_path_str, file_hash_opt) in receiver {
                     match fs::read_to_string(&canonical_path_buf) {
                         Ok(content) => {
-                            batch_paths_hashes.push((canonical_path_buf, canonical_path_str, hash_opt));
-                            batch_texts.push(content);
+                            let file_chunks = chunk_by_paragraphs(&content);
+                            
+                            if file_chunks.is_empty() {
+                                // Handle empty files (as before)
+                                debug!("Skipping empty file or file with no text: {}", canonical_path_str);
+                                if let Some(hash_to_insert) = file_hash_opt.or_else(|| EmbeddingCache::get_file_hash(&canonical_path_buf).ok()) {
+                                     if let Err(e) = cache_write_ref.lock().unwrap().insert_file_hash(canonical_path_str.clone(), hash_to_insert) {
+                                         error!("Failed to update cache for skipped file {}: {}", canonical_path_str, e);
+                                     }
+                                } else {
+                                     error!("Could not get hash for skipped file {}. Cache not updated.", canonical_path_str);
+                                }
+                                pb_clone.inc(1); 
+                                continue;
+                            }
 
-                            if batch_texts.len() >= batch_size {
-                                let texts_to_embed: Vec<&str> = batch_texts.iter().map(|s| s.as_str()).collect();
-                                let embeddings_result = model_arc.embed_batch(&texts_to_embed);
+                            // Chunk the content directly
+                            let file_chunks = chunk_by_paragraphs(&content);
 
-                                match embeddings_result {
-                                    Ok(embeddings) => {
-                                        let mut embeddings_map_guard = embeddings_map_write_ref.lock().unwrap();
-                                        let mut cache_guard = cache_write_ref.lock().unwrap();
-                                        // Iterate through paths_hashes
-                                        for ((path_buf_processed, path_str_processed, received_hash_opt), embedding) in batch_paths_hashes.drain(..).zip(embeddings) {
-                                            // Get hash: use received hash or calculate if None
-                                            let hash_to_insert = match received_hash_opt {
-                                                Some(h) => h,
-                                                None => match EmbeddingCache::get_file_hash(&path_buf_processed) {
-                                                    Ok(h) => h,
-                                                    Err(e) => {
-                                                        error!("Failed to get hash for {}: {}. Cannot update cache.", path_str_processed, e);
-                                                        continue; // Skip cache update if hash fails
-                                                    }
-                                                }
-                                            };
-                                            // Use insert_with_hash
-                                            if let Err(e) = cache_guard.insert_with_hash(path_str_processed.clone(), embedding.clone(), hash_to_insert) {
-                                                error!("Failed to insert into cache for {}: {}", path_str_processed, e);
+                            let mut file_processed_chunks = Vec::<IndexedChunk>::new();
+
+                            for chunk_info in file_chunks.into_iter() {
+                                // Store metadata
+                                chunk_batch_meta.push((chunk_info.clone(), canonical_path_str.clone())); 
+                                // Store owned text string for batching
+                                chunk_batch_texts.push(chunk_info.text);
+
+                                if chunk_batch_texts.len() >= embedding_batch_size {
+                                    // Convert Vec<String> to Vec<&str> for embed_batch
+                                    let text_refs: Vec<&str> = chunk_batch_texts.iter().map(|s| s.as_str()).collect();
+                                    match model_arc.embed_batch(&text_refs) {
+                                        Ok(embeddings) => {
+                                            for (i, embedding) in embeddings.into_iter().enumerate() {
+                                                 let (info, path) = chunk_batch_meta[i].clone(); 
+                                                 file_processed_chunks.push(IndexedChunk {
+                                                     file_path: path,
+                                                     start_line: info.start_line,
+                                                     end_line: info.end_line,
+                                                     text: info.text, // Text is already owned in info
+                                                     embedding: embedding,
+                                                 });
                                             }
-                                            embeddings_map_guard.insert(path_str_processed, embedding);
+                                        }
+                                        Err(e) => {
+                                            error!("Chunk batch embedding failed: {}. Skipping batch.", e);
+                                        }
+                                    }
+                                    chunk_batch_meta.clear();
+                                    chunk_batch_texts.clear(); // Clear owned strings
+                                }
+                            }
+
+                            // Process remaining batch for the file
+                            if !chunk_batch_texts.is_empty() {
+                                let text_refs: Vec<&str> = chunk_batch_texts.iter().map(|s| s.as_str()).collect();
+                                match model_arc.embed_batch(&text_refs) {
+                                    Ok(embeddings) => {
+                                        for (i, embedding) in embeddings.into_iter().enumerate() {
+                                            let (info, path) = chunk_batch_meta[i].clone();
+                                             file_processed_chunks.push(IndexedChunk {
+                                                 file_path: path,
+                                                 start_line: info.start_line,
+                                                 end_line: info.end_line,
+                                                 text: info.text, // Text is already owned in info
+                                                 embedding: embedding,
+                                             });
                                         }
                                     }
                                     Err(e) => {
-                                        error!("Batch embedding failed: {}. Skipping batch.", e);
-                                        batch_paths_hashes.clear(); // Clear paths for the failed batch
+                                        error!("Final chunk batch embedding failed: {}. Skipping batch.", e);
                                     }
                                 }
-                                batch_texts.clear();
+                                // Clear meta and texts after processing
+                                chunk_batch_meta.clear();
+                                chunk_batch_texts.clear(); 
+                            }
+
+                            // Add successfully processed chunks for this file to the main shared vec
+                            if !file_processed_chunks.is_empty() {
+                                let num_added = file_processed_chunks.len(); // Count before moving
+                                let mut processed_chunks_guard = chunks_write_ref.lock().unwrap();
+                                processed_chunks_guard.extend(file_processed_chunks); // Extend with Vec<IndexedChunk>
+                                
+                                let mut chunk_count_guard = chunk_count_ref.lock().unwrap();
+                                *chunk_count_guard += num_added;
+                                pb_clone.set_message(format!("{}", *chunk_count_guard)); 
+                            }
+                            
+                            // Update file cache
+                            if let Some(hash_to_insert) = file_hash_opt.or_else(|| EmbeddingCache::get_file_hash(&canonical_path_buf).ok()) {
+                                if let Err(e) = cache_write_ref.lock().unwrap().insert_file_hash(canonical_path_str.clone(), hash_to_insert) {
+                                    error!("Failed to update cache for {}: {}", canonical_path_str, e);
+                                }
+                            } else {
+                                error!("Could not get hash for {}. Cache not updated.", canonical_path_str);
                             }
                         }
                         Err(e) => {
-                            error!("Failed to read file {} during embedding: {}. Skipping.", canonical_path_str, e);
+                            error!("Failed to read file {} during processing: {}. Skipping.", canonical_path_str, e);
                         }
                     }
+                    pb_clone.inc(1); // Increment file progress bar
                 }
 
-                // Process remaining batch
-                if !batch_texts.is_empty() {
-                     let texts_to_embed: Vec<&str> = batch_texts.iter().map(|s| s.as_str()).collect();
-                     match model_arc.embed_batch(&texts_to_embed) {
-                         Ok(embeddings) => {
-                            let mut embeddings_map_guard = embeddings_map_write_ref.lock().unwrap();
-                            let mut cache_guard = cache_write_ref.lock().unwrap();
-                            // Iterate through paths_hashes
-                             for ((path_buf_processed, path_str_processed, received_hash_opt), embedding) in batch_paths_hashes.drain(..).zip(embeddings) {
-                                 // Get hash: use received hash or calculate if None
-                                 let hash_to_insert = match received_hash_opt {
-                                     Some(h) => h,
-                                     None => match EmbeddingCache::get_file_hash(&path_buf_processed) {
-                                        Ok(h) => h,
-                                        Err(e) => {
-                                            error!("Failed to get hash for {}: {}. Cannot update cache.", path_str_processed, e);
-                                            continue; // Skip cache update
-                                        }
-                                    }
-                                 };
-                                 // Use insert_with_hash
-                                 if let Err(e) = cache_guard.insert_with_hash(path_str_processed.clone(), embedding.clone(), hash_to_insert) {
-                                     error!("Failed to insert into cache for {}: {}", path_str_processed, e);
-                                 }
-                                 embeddings_map_guard.insert(path_str_processed, embedding);
-                             }
-                         }
-                         Err(e) => {
-                             error!("Final batch embedding failed: {}. Skipping batch.", e);
-                         }
-                     }
-                 }
                 Ok(())
             }
         });
@@ -617,72 +683,62 @@ impl VectorDB {
             let cache_result = original_cache.check_cache_and_get_hash(&canonical_path_str, &canonical_path_buf);
 
             match cache_result {
-                Ok(CacheCheckResult::Hit(_embedding)) => { 
-                    debug!("Cache hit for {}", canonical_path_str);
+                Ok(CacheCheckResult::Hit) => {
+                    debug!("Cache hit for file {}. Skipping chunk processing.", canonical_path_str);
                     progress_bar.inc(1);
                 }
-                Ok(CacheCheckResult::Miss(hash_opt)) => { // Pass hash_opt 
-                    debug!("Cache miss/invalidated for {}. Needs embedding.", canonical_path_str);
-                    // Send path, string, and optional hash
-                    files_to_embed_sender.send((canonical_path_buf.clone(), canonical_path_str, hash_opt))
-                        .expect("Failed to send path to embedding thread");
+                Ok(CacheCheckResult::Miss(hash_opt)) => {
+                    debug!("Cache miss/invalidated for file {}. Needs processing.", canonical_path_str);
+                    files_to_process_sender.send((canonical_path_buf.clone(), canonical_path_str, hash_opt))
+                        .expect("Failed to send file path to processing thread");
                 }
                 Err(e) => {
-                    error!("Failed cache check/hash for {}: {}. Assuming needs embedding.", canonical_path_str, e);
-                    // Send path, string, and None hash
-                    files_to_embed_sender.send((canonical_path_buf.clone(), canonical_path_str, None))
-                        .expect("Failed to send path (cache error)");
-                    progress_bar.inc(1); 
+                    error!("Failed cache check/hash for file {}: {}. Assuming needs processing.", canonical_path_str, e);
+                    files_to_process_sender.send((canonical_path_buf.clone(), canonical_path_str, None))
+                        .expect("Failed to send file path (cache error)");
+                     // Let processor thread inc progress after trying to read
                 }
             }
         });
 
-        // Signal embedder thread no more files are coming
-        drop(files_to_embed_sender);
+        drop(files_to_process_sender);
 
         // --- Wait and Merge Results --- 
-        let embed_result = embed_thread_handle.join().expect("Embedding thread panicked");
-        progress_bar.finish_with_message("File processing complete");
+        let process_result = processor_thread_handle.join().expect("Processing thread panicked");
+        progress_bar.finish_with_message(format!("File processing complete. New chunks: {}", *processed_chunk_count_this_run.lock().unwrap()));
 
-        if let Err(e) = embed_result {
-            return Err(VectorDBError::EmbeddingError(format!("Error during embedding generation: {}", e)));
+        if let Err(e) = process_result {
+            return Err(VectorDBError::EmbeddingError(format!("Error during chunk processing: {}", e)));
         }
 
-        // Update the main state with results
-        let new_embeddings = Arc::try_unwrap(new_embeddings_arc)
-            .expect("Failed to unwrap new_embeddings Arc")
+        let processed_chunks_data = Arc::try_unwrap(processed_chunks_arc)
+            .expect("Failed to unwrap processed_chunks Arc")
             .into_inner()
-            .expect("Failed to get new_embeddings from Mutex");
-        debug!("Merging {} new/updated embeddings", new_embeddings.len());
-        self.embeddings.extend(new_embeddings); // Add new/updated embeddings
-
-        // Update the cache state from the one modified by the embedder thread
+            .expect("Failed to get processed_chunks from Mutex");
+        
+        debug!("Adding {} new indexed chunks to main state", processed_chunks_data.len());
+        self.indexed_chunks.extend(processed_chunks_data.clone()); // Clone needed if returning below
+        
         self.cache = Arc::try_unwrap(updated_cache_arc)
             .expect("Failed to unwrap updated_cache Arc")
             .into_inner()
             .expect("Failed to get updated_cache from Mutex");
-
-        // Note: HNSW index rebuild happens in self.save() which is called by index_directory
-
-        Ok(())
+        
+        Ok(processed_chunks_data) // Return the processed data for HNSW build
     }
 
-    fn rebuild_hnsw_index(&mut self) -> Result<()> {
-        if self.embeddings.is_empty() {
-            debug!("No embeddings found, skipping HNSW index rebuild.");
+    // Rebuilds HNSW index using the current `self.indexed_chunks`
+    fn rebuild_hnsw_index_from_state(&mut self, dimension: usize) -> Result<()> {
+        if self.indexed_chunks.is_empty() {
+            debug!("No indexed chunks found, skipping HNSW index rebuild.");
             self.hnsw_index = None;
             return Ok(());
         }
 
-        debug!("Rebuilding HNSW index with {} vectors...", self.embeddings.len());
+        debug!("Rebuilding HNSW index with {} vectors...", self.indexed_chunks.len());
         let start = Instant::now();
 
-        // Determine dimension from the first embedding or model type
-        let dimension = self.embeddings.values().next().map_or_else(
-            || self.embedding_model_type.default_dimension(),
-            |v| v.len(),
-        );
-
+        // Dimension is now passed in
         if dimension == 0 {
             return Err(VectorDBError::HNSWError("Cannot build HNSW index with dimension 0".to_string()));
         }
@@ -690,31 +746,45 @@ impl VectorDB {
         let config = HNSWConfig::new(dimension);
         let mut hnsw_index = HNSWIndex::new(config);
 
-        let pb = ProgressBar::new(self.embeddings.len() as u64);
+        let pb = ProgressBar::new(self.indexed_chunks.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} Building HNSW index: [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")?
                 .progress_chars("#>- ")
         );
 
-        // Create a stable order for insertion based on file paths
-        let mut sorted_paths: Vec<String> = self.embeddings.keys().cloned().collect();
-        sorted_paths.sort();
+        // Need embeddings for all chunks in self.indexed_chunks.
+        // This requires re-embedding everything, which is inefficient.
+        // We MUST store embeddings alongside IndexedChunk or retrieve them.
+        // TEMPORARY: Simulate retrieval (THIS WILL PANIC IF EMBEDDINGS ARE NOT STORED)
+        // TODO: Fix this by storing embeddings or having a proper retrieval mechanism.
+        // let model = self.create_embedding_model()?; // No longer needed
+        
+        // Iterate through stored chunks and use their embeddings
+        for (i, chunk) in self.indexed_chunks.iter().enumerate() {
+            // Simulate getting the embedding (REPLACE THIS)
+            // let embedding = self.get_embedding_for_chunk(i)?; // Hypothetical method
+            // let embedding = model.embed(&chunk.text)?; // Inefficiently re-embed
+            
+            // Directly use the stored embedding
+            let embedding = &chunk.embedding; // Borrow the embedding
 
-        for path_str in sorted_paths {
-            if let Some(embedding) = self.embeddings.get(&path_str) {
-                if let Err(e) = hnsw_index.insert(embedding.clone()) {
-                    error!("Failed to insert vector for {} into HNSW index: {}", path_str, e);
-                    // Decide whether to continue or fail hard
-                    return Err(VectorDBError::HNSWError(format!(
-                        "Failed to insert vector for {} into HNSW index: {}",
-                        path_str, e
-                    )));
-                }
-                pb.inc(1);
-            } else {
-                 warn!("Path {} found in sorted keys but not in embeddings map during HNSW build", path_str);
+            if embedding.len() != dimension {
+                 error!("Fatal error: Chunk {} ({}:{}) has embedding dimension {} but index expects {}. Aborting build.", 
+                       i, chunk.file_path, chunk.start_line, embedding.len(), dimension);
+                 return Err(VectorDBError::HNSWError(format!(
+                     "Dimension mismatch for vector {} during HNSW rebuild.", i
+                 )));
             }
+
+            if let Err(e) = hnsw_index.insert(embedding.clone()) { // Clone embedding for insertion
+                error!("Fatal error inserting vector for chunk {} ({}:{}) into HNSW index: {}. Aborting build.", 
+                       i, chunk.file_path, chunk.start_line, e);
+                return Err(VectorDBError::HNSWError(format!(
+                    "Failed to insert vector {} into HNSW index during rebuild: {}", i, e
+                )));
+            }
+            pb.inc(1);
         }
 
         pb.finish_with_message("HNSW index build complete");
@@ -727,10 +797,8 @@ impl VectorDB {
 
     // Helper to get file path associated with an HNSW node ID
     pub fn get_file_path(&self, node_id: usize) -> Option<String> {
-        // Assuming node IDs correspond to the insertion order, which we now enforce by sorting keys
-        let mut sorted_paths: Vec<String> = self.embeddings.keys().cloned().collect();
-        sorted_paths.sort();
-        sorted_paths.get(node_id).cloned()
+        // The HNSW node ID now corresponds directly to the index in indexed_chunks
+        self.indexed_chunks.get(node_id).map(|chunk| chunk.file_path.clone())
     }
 
     // Add getter for cache
@@ -755,7 +823,8 @@ impl VectorDB {
 }
 
 pub struct DBStats {
-    pub indexed_files: usize,
+    pub indexed_chunks: usize,
+    pub unique_files: usize,
     pub embedding_dimension: usize,
     pub db_path: String,
     pub cached_files: usize,
@@ -766,7 +835,8 @@ pub struct DBStats {
 impl Clone for DBStats {
     fn clone(&self) -> Self {
         Self {
-            indexed_files: self.indexed_files,
+            indexed_chunks: self.indexed_chunks,
+            unique_files: self.unique_files,
             embedding_dimension: self.embedding_dimension,
             db_path: self.db_path.clone(),
             cached_files: self.cached_files,

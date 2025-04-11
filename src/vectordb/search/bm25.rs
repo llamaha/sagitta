@@ -8,6 +8,15 @@ use std::fs;
 pub(crate) const BM25_K1: f32 = 1.5;
 pub(crate) const BM25_B: f32 = 0.75;
 
+/// Simple tokenization helper
+fn tokenize_content(content: &str) -> Vec<String> {
+    content
+        .to_lowercase()
+        .split_whitespace()
+        .map(|s| s.to_string()) // Basic tokenization
+        .collect()
+}
+
 /// Holds term frequencies and document length for BM25.
 #[derive(Debug, Clone)]
 pub(crate) struct BM25DocumentData {
@@ -30,8 +39,12 @@ pub(crate) fn build_bm25_index(db: &VectorDB) -> Result<BM25Index> {
     let mut doc_data = HashMap::new();
     let mut doc_freqs = HashMap::new(); // term -> count of docs containing term
     let mut total_length = 0;
-    // Get paths from embeddings map, assuming these are the docs to index
-    let file_paths: Vec<String> = db.embeddings.keys().cloned().collect();
+    // Iterate through the database embeddings to get file paths and content
+    debug!("Building BM25 index for {} files", db.indexed_chunks.len()); // Use indexed_chunks
+    // let file_paths: Vec<String> = db.embeddings.keys().cloned().collect(); // Old line
+    // Need unique file paths from chunks
+    let file_paths: HashSet<String> = db.indexed_chunks.iter().map(|chunk| chunk.file_path.clone()).collect();
+
     let total_docs = file_paths.len();
 
     if total_docs == 0 {
@@ -45,15 +58,11 @@ pub(crate) fn build_bm25_index(db: &VectorDB) -> Result<BM25Index> {
     }
 
     for file_path in &file_paths {
+        // TODO: This requires reading the file content again. Optimize?
+        // Maybe store content in DB or pass content map?
         match fs::read_to_string(file_path) {
             Ok(content) => {
-                // Simple tokenization: lowercase, split by whitespace
-                let tokens: Vec<String> = content
-                    .to_lowercase()
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-
+                let tokens = tokenize_content(&content);
                 let doc_len = tokens.len();
                 total_length += doc_len;
 
@@ -80,7 +89,7 @@ pub(crate) fn build_bm25_index(db: &VectorDB) -> Result<BM25Index> {
             }
             Err(e) => {
                 // Log error but continue building index with available files
-                warn!("Failed to read file {} for BM25 indexing: {}. Skipping.", file_path, e);
+                warn!("Failed to read file {} for BM25 indexing: {}", file_path, e);
             }
         }
     }
