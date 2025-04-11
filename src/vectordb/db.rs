@@ -15,6 +15,7 @@ use std::sync::mpsc::{self};
 use std::sync::{Arc, Mutex};
 use walkdir::WalkDir;
 use std::time::Instant;
+use chrono::{DateTime, Utc, TimeZone};
 
 // Add From implementation here
 impl From<TemplateError> for VectorDBError {
@@ -46,7 +47,7 @@ struct DBFile {
     onnx_model_path: Option<String>,
     onnx_tokenizer_path: Option<String>,
     #[serde(default)]
-    indexed_roots: HashSet<String>,
+    indexed_roots: HashMap<String, u64>,
 }
 
 pub struct VectorDB {
@@ -58,7 +59,7 @@ pub struct VectorDB {
     pub embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
     onnx_tokenizer_path: Option<PathBuf>,
-    indexed_roots: HashSet<String>,
+    indexed_roots: HashMap<String, u64>,
 }
 
 impl Clone for VectorDB {
@@ -130,7 +131,7 @@ impl VectorDB {
                         EmbeddingModelType::Onnx,
                         None,
                         None,
-                        HashSet::new(),
+                        HashMap::new(),
                     )
                 }
             }
@@ -143,7 +144,7 @@ impl VectorDB {
                 EmbeddingModelType::Onnx,
                 None,
                 None,
-                HashSet::new(),
+                HashMap::new(),
             )
         };
 
@@ -742,13 +743,13 @@ impl VectorDB {
         self.embedding_model_type
     }
 
-    // Add method to add a root
-    pub fn add_indexed_root(&mut self, path_str: String) {
-        self.indexed_roots.insert(path_str);
+    // Replace add_indexed_root with update_indexed_root_timestamp
+    pub fn update_indexed_root_timestamp(&mut self, path_str: String, timestamp: u64) {
+        self.indexed_roots.insert(path_str, timestamp);
     }
 
-    // Add getter for indexed roots
-    pub fn indexed_roots(&self) -> &HashSet<String> {
+    // Update getter for indexed roots
+    pub fn indexed_roots(&self) -> &HashMap<String, u64> {
         &self.indexed_roots
     }
 }

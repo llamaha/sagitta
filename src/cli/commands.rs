@@ -17,6 +17,7 @@ use std::fs;
 use std::collections::HashSet;
 use crate::vectordb::utils::cosine_distance;
 use walkdir::WalkDir;
+use chrono::{DateTime, Utc, TimeZone, Local};
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -192,8 +193,9 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                                 canonical_dir_str
                             );
                             println!("Finished indexing for: {}", canonical_dir_str);
-                            // Add successfully indexed root to the set
-                            db.add_indexed_root(canonical_dir_str); 
+                            // Get current UTC timestamp and update
+                            let now_ts = Utc::now().timestamp() as u64;
+                            db.update_indexed_root_timestamp(canonical_dir_str, now_ts); 
                         }
                     }
                     Err(e) => {
@@ -504,67 +506,37 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             debug!("Executing List command");
             println!("Retrieving indexed directories...");
 
-            // Get roots directly from the stored set
-            let indexed_roots_set = db.indexed_roots();
+            let indexed_roots_map = db.indexed_roots();
 
-            if indexed_roots_set.is_empty() {
+            if indexed_roots_map.is_empty() {
                 println!("  No directories have been explicitly indexed yet.");
                 return Ok(());
             }
 
-            // Sort for consistent display
-            let mut sorted_roots: Vec<String> = indexed_roots_set.iter().cloned().collect();
-            sorted_roots.sort();
+            // Convert HashMap to Vec for sorting
+            let mut sorted_roots: Vec<(String, u64)> = indexed_roots_map.iter()
+                                                    .map(|(k, v)| (k.clone(), *v))
+                                                    .collect();
+            // Sort by path (the String key)
+            sorted_roots.sort_by(|a, b| a.0.cmp(&b.0));
 
-            println!("Indexed Directories:");
-            let cache = &db.cache; // Access public field
-            let model_type = db.embedding_model_type; // Access public field
+            println!("Indexed Directories (Last Indexed):");
 
-            // Perform up-to-date check for each stored root
-            for root_path_str in sorted_roots {
-                let root_path = Path::new(&root_path_str);
-                let mut needs_indexing = false;
-
-                if !root_path.is_dir() {
-                    // If the stored path isn't a directory anymore
-                    println!("  - {} (Path not found or not a directory)", root_path_str);
-                    continue;
-                }
-
-                // Check status against cache...
-                for entry in WalkDir::new(root_path)
-                     .follow_links(false)
-                     .into_iter()
-                     .filter_map(|e| e.ok()) 
-                     .filter(|e| e.file_type().is_file())
-                 {
-                     let current_file_path = entry.path();
-                     match fs::canonicalize(current_file_path) {
-                         Ok(canonical_file_path) => {
-                             let canonical_file_str = canonical_file_path.to_string_lossy(); 
-                             match cache.check_cache_and_get_hash(&canonical_file_str, &canonical_file_path) {
-                                 Ok(CacheCheckResult::Miss(_)) => { 
-                                     debug!("Found file needing index in {}: {}", root_path_str, canonical_file_path.display());
-                                     needs_indexing = true;
-                                     break; 
-                                 }
-                                 Ok(CacheCheckResult::Hit(_)) => { /* Continue */ }
-                                 Err(e) => {
-                                     warn!("Cache check failed for {} within {}: {}. Assuming needs indexing.",
-                                         canonical_file_path.display(), root_path_str, e);
-                                     needs_indexing = true; 
-                                     break;
-                                 }
-                             }
-                         }
-                         Err(e) => {
-                             warn!("Could not canonicalize file {} during list check: {}", current_file_path.display(), e);
-                         }
-                     }
-                 }
-
-                let status = if needs_indexing { "(Needs Indexing)" } else { "(Up-to-date)" };
-                println!("  - {} {}", root_path_str, status);
+            // Print path and formatted timestamp
+            for (root_path_str, timestamp) in sorted_roots {
+                 // Convert UNIX timestamp to DateTime<Local>
+                let dt = match Utc.timestamp_opt(timestamp as i64, 0) {
+                    chrono::LocalResult::Single(dt) => dt.with_timezone(&Local),
+                    _ => { // Handle potential invalid timestamp
+                         warn!("Invalid timestamp ({}) found for directory {}", timestamp, root_path_str);
+                         // Print placeholder or skip?
+                         println!("  - {} (Invalid Timestamp)", root_path_str);
+                         continue;
+                    }
+                 };
+                 // Format the timestamp
+                 let formatted_time = dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                 println!("  - {} ({})", root_path_str, formatted_time);
             }
         }
     }

@@ -46,7 +46,7 @@ crossbeam-channel = "0.5"
 # quote = "1.0"
 ctrlc = "3.4"
 # ONNX Runtime dependencies
-ort = { version = "2.0.0-rc.9", features = ["ndarray"] }
+ort = { version = "2.0.0-rc.9", features = ["cuda"] }
 lru = "0.11.0"
 lazy_static = "1.4.0"
 # File watching dependency
