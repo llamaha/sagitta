@@ -298,4 +298,4 @@ To restore, simply place the backed-up `db.json`, `cache.json`, and `hnsw_index.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). (Assuming MIT, please update if different) 
+This project is licensed under the [MIT License](LICENSE). 
