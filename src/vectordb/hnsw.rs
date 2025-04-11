@@ -3,9 +3,11 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BinaryHeap, HashSet};
+use std::cmp::{Ordering, Reverse};
 use std::fs;
 use std::path::Path;
+use ndarray::{ArrayView1};
 
 /// Configuration parameters for HNSW index
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +97,19 @@ struct SerializedHNSWIndex {
     entry_points: Vec<usize>,
 }
 
+// --- Added OrderedFloat wrapper for f32 in BinaryHeap ---
+#[derive(PartialEq, PartialOrd, Debug, Copy, Clone)]
+struct OrderedFloat(f32);
+
+impl Eq for OrderedFloat {}
+
+impl Ord for OrderedFloat {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
+    }
+}
+// --- End OrderedFloat ---
+
 impl HNSWIndex {
     pub fn new(config: HNSWConfig) -> Self {
         assert!(config.dimension > 0, "HNSW dimension must be positive");
@@ -106,11 +121,16 @@ impl HNSWIndex {
         }
     }
 
-    /// Calculate cosine distance between two vectors (range 0.0 to 2.0)
-    fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
-        let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    /// Calculate cosine distance between two vectors (range 0.0 to 2.0) using ndarray
+    /// Requires vectors to have the same dimension.
+    #[inline(always)]
+    fn cosine_distance(a: ArrayView1<f32>, b: ArrayView1<f32>) -> f32 {
+        // ndarray handles dimension check internally in dot product
+        let dot_product = a.dot(&b);
+        
+        // Calculate L2 norm manually: sqrt(sum(x*x))
+        let norm_a = a.mapv(|x| x * x).sum().sqrt();
+        let norm_b = b.mapv(|x| x * x).sum().sqrt();
 
         // Handle zero vectors to avoid division by zero and return max distance
         if norm_a == 0.0 || norm_b == 0.0 {
@@ -124,9 +144,7 @@ impl HNSWIndex {
         let clamped_similarity = similarity.clamp(-1.0, 1.0);
 
         // Convert similarity to distance: distance = 1.0 - similarity
-        // This results in a distance range of [0.0, 2.0]
-        // Identical vectors (similarity 1.0) -> distance 0.0
-        // Opposite vectors (similarity -1.0) -> distance 2.0
+        // Range [0.0, 2.0]
         1.0 - clamped_similarity
     }
 
@@ -140,64 +158,59 @@ impl HNSWIndex {
         layer
     }
 
-    /// Find the nearest neighbors in a given layer
+    /// Find the nearest neighbors in a given layer using BinaryHeap (Phase 1 Opt)
     fn search_layer(
         &self,
         query: &[f32],
         entry_point: usize,
-        ef: usize,
+        ef: usize, // Number of candidates to explore
         layer: usize,
     ) -> Vec<(usize, f32)> {
-        let mut candidates = HashSet::new();
-        let mut results = Vec::new();
-        let mut distances = HashMap::new();
-
-        // Initialize with entry point
-        let entry_dist = Self::cosine_distance(query, &self.nodes[entry_point].vector);
-        candidates.insert(entry_point);
-        distances.insert(entry_point, entry_dist);
-        results.push((entry_point, entry_dist));
-
-        while !candidates.is_empty() {
-            // Find the closest candidate
-            let current = match candidates.iter().min_by(|&&a, &&b| {
-                distances[&a]
-                    .partial_cmp(&distances[&b])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }) {
-                Some(&c) => c,
-                None => break,
-            };
-            candidates.remove(&current);
-
-            // Add to results if it's better than our current worst result
-            let worst_dist = results.last().map_or(f32::INFINITY, |&(_, dist)| dist);
-            if results.len() < ef || distances[&current] < worst_dist {
-                results.push((current, distances[&current]));
-                results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                if results.len() > ef {
-                    results.pop();
-                }
-            }
-
-            // Explore neighbors
-            for &neighbor in &self.nodes[current].connections[layer] {
-                if !distances.contains_key(&neighbor) {
-                    let dist = Self::cosine_distance(query, &self.nodes[neighbor].vector);
-                    distances.insert(neighbor, dist);
-
-                    let worst_dist = results.last().map_or(f32::INFINITY, |&(_, d)| d);
-                    if results.len() < ef || dist < worst_dist {
-                        candidates.insert(neighbor);
-                    }
-                }
-            }
+        if self.nodes.is_empty() { return Vec::new(); }
+        if entry_point >= self.nodes.len() { return Vec::new(); }
+        let query_view = ArrayView1::from(query);
+        let mut candidates_heap = BinaryHeap::new();
+        let mut results_heap: BinaryHeap<(OrderedFloat, usize)> = BinaryHeap::new();
+        let mut visited = HashSet::new();
+        let entry_node_view = ArrayView1::from(&self.nodes[entry_point].vector);
+        let entry_dist = Self::cosine_distance(query_view, entry_node_view);
+        candidates_heap.push(Reverse((OrderedFloat(entry_dist), entry_point)));
+        visited.insert(entry_point);
+        while let Some(Reverse((dist_wrapped, current))) = candidates_heap.pop() {
+             let current_dist = dist_wrapped.0;
+             if results_heap.len() >= ef {
+                  if let Some(&(farthest_dist_wrapped, _)) = results_heap.peek() {
+                      if current_dist > farthest_dist_wrapped.0 { continue; }
+                  }
+             }
+             if results_heap.len() < ef {
+                 results_heap.push((OrderedFloat(current_dist), current));
+             } else if current_dist < results_heap.peek().unwrap().0.0 {
+                 results_heap.pop();
+                 results_heap.push((OrderedFloat(current_dist), current));
+             }
+             if layer >= self.nodes[current].connections.len() { continue; }
+             for &neighbor in &self.nodes[current].connections[layer] {
+                 if !visited.contains(&neighbor) {
+                     visited.insert(neighbor);
+                     let neighbor_node_view = ArrayView1::from(&self.nodes[neighbor].vector);
+                     let neighbor_dist = Self::cosine_distance(query_view, neighbor_node_view);
+                     let mut add_to_candidates = false;
+                     if results_heap.len() < ef {
+                         add_to_candidates = true;
+                     } else if let Some(&(farthest_dist_wrapped, _)) = results_heap.peek() {
+                         if neighbor_dist < farthest_dist_wrapped.0 { add_to_candidates = true; }
+                     }
+                     if add_to_candidates {
+                         candidates_heap.push(Reverse((OrderedFloat(neighbor_dist), neighbor)));
+                     }
+                 }
+             }
         }
-
-        results
+        results_heap.into_sorted_vec().into_iter().map(|(dist_wrapped, idx)| (idx, dist_wrapped.0)).collect()
     }
 
-    /// Insert a new vector into the index
+    /// Insert a new vector into the index (Restored Sequential Logic)
     pub fn insert(&mut self, vector: Vec<f32>) -> Result<usize> {
         if vector.len() != self.config.dimension {
             return Err(anyhow::anyhow!(
@@ -208,54 +221,112 @@ impl HNSWIndex {
         }
 
         let max_layer = self.random_layer();
-        let node = HNSWNode::new(vector, max_layer);
-        let node_idx = self.nodes.len();
+        let node_idx = self.nodes.len(); // Calculate index before adding node
+        let node = HNSWNode::new(vector.clone(), max_layer);
+        self.nodes.push(node); // Add node to graph
 
-        // If this is the first node, set it as entry point for all layers
+        // --- Handle First Node Entry Point Update ---
         if node_idx == 0 {
-            self.nodes.push(node);
-            return Ok(node_idx);
+             for l in 0..=max_layer {
+                 if l < self.entry_points.len() {
+                     self.entry_points[l] = node_idx;
+                 } else {
+                      eprintln!("Warning: First node max_layer {} exceeds configured layers {}. Entry point not set.", max_layer, self.entry_points.len());
+                 }
+             }
+            return Ok(node_idx); // No connections needed for the first node
         }
 
-        self.nodes.push(node);
+        // --- Find Entry Point for Insertion --- 
+        let mut current_entry_idx = self.entry_points.last().copied().unwrap_or(0);
+        let top_layer = self.entry_points.len() - 1;
 
-        // Start from top layer and work down
-        let mut current_entry = self.entry_points[max_layer];
+        // 1. Search layers above max_layer to find the nearest node to start insertion search
+        for layer in (max_layer + 1..=top_layer).rev() {
+            // Defensive checks for entry point validity
+             if current_entry_idx >= self.nodes.len() -1 { // -1 because we just pushed the new node
+                 eprintln!("Warning: Global entry point {} invalid at layer {} during top-down search. Resetting.", current_entry_idx, layer);
+                 current_entry_idx = 0;
+             }
+             if current_entry_idx >= self.nodes.len() - 1 { 
+                  eprintln!("Error: Still no valid entry point at layer {}. Skipping layer.", layer);
+                  continue;
+             }
+            
+            // Use search_layer with ef=1 to greedily find the path down
+            let nearest_neighbors = self.search_layer(
+                &vector, // Use the vector being inserted
+                current_entry_idx,
+                1, // ef=1
+                layer,
+            );
+            if let Some(&(nearest_idx, _)) = nearest_neighbors.first() {
+                current_entry_idx = nearest_idx;
+            } else {
+                 eprintln!("Warning: search_layer returned empty at layer {} during top-down search. Keeping entry point {}.", layer, current_entry_idx);
+            }
+        }
+
+        // 2. Insert connections from max_layer down to layer 0
         for layer in (0..=max_layer).rev() {
-            let neighbors = self.search_layer(
-                &self.nodes[node_idx].vector,
-                current_entry,
+            // Defensive check for entry point validity
+            if current_entry_idx >= self.nodes.len() - 1 {
+                eprintln!("Warning: Entry point {} invalid at layer {} before neighborhood search. Resetting.", current_entry_idx, layer);
+                current_entry_idx = 0; 
+            }
+            if current_entry_idx >= self.nodes.len() - 1 {
+                  eprintln!("Error: Still no valid entry point at layer {}. Cannot find neighbors.", layer);
+                  continue; // Skip connection phase for this layer if entry point is bad
+             }
+
+            // Find candidate neighbors using ef_construction
+            let mut neighbors = self.search_layer(
+                &vector,
+                current_entry_idx,
                 self.config.ef_construction,
                 layer,
             );
 
-            // Select neighbors to connect to
-            let selected = neighbors
-                .into_iter()
-                .take(self.config.m)
-                .map(|(idx, _)| idx)
-                .collect::<Vec<_>>();
+            // Select M nearest neighbors
+            neighbors.truncate(self.config.m); // Keep only the top M closest
+            let selected_indices: Vec<usize> = neighbors.iter().map(|(idx, _)| *idx).collect();
+            
+            // --- Perform Connections ---
+            // Ensure the new node's connections vec is large enough
+             if layer >= self.nodes[node_idx].connections.len() {
+                 self.nodes[node_idx].connections.resize_with(layer + 1, Vec::new);
+             }
 
-            // Add bidirectional connections
-            for &neighbor in &selected {
-                self.nodes[node_idx].connections[layer].push(neighbor);
-                self.nodes[neighbor].connections[layer].push(node_idx);
-            }
-
-            // Update entry point for this layer if the new node is closer to query
-            if !selected.is_empty() {
-                let current_dist = Self::cosine_distance(
-                    &self.nodes[current_entry].vector,
-                    &self.nodes[node_idx].vector,
-                );
-                let best_dist = Self::cosine_distance(
-                    &self.nodes[selected[0]].vector,
-                    &self.nodes[node_idx].vector,
-                );
-                if best_dist < current_dist {
-                    self.entry_points[layer] = selected[0];
-                    current_entry = selected[0];
+            for &neighbor_idx in &selected_indices {
+                if neighbor_idx >= self.nodes.len() { // Check neighbor validity
+                    eprintln!("Error: Invalid neighbor index {} found during insert at layer {}. Skipping connection.", neighbor_idx, layer);
+                    continue;
                 }
+                
+                // Ensure neighbor's connections vec is large enough
+                 if layer >= self.nodes[neighbor_idx].connections.len() {
+                     self.nodes[neighbor_idx].connections.resize_with(layer + 1, Vec::new);
+                 }
+
+                // Add forward connection (new node -> neighbor)
+                self.nodes[node_idx].connections[layer].push(neighbor_idx);
+
+                // Add backward connection (neighbor -> new node) with pruning
+                 let max_neighbor_connections = self.config.m * 2; // M_max = 2 * M
+                 if self.nodes[neighbor_idx].connections[layer].len() < max_neighbor_connections {
+                    self.nodes[neighbor_idx].connections[layer].push(node_idx);
+                 } else {
+                     // TODO: Implement connection pruning if M_max is reached (optional)
+                 }
+            }
+            
+            // Update entry point for the next layer down (layer - 1)
+            // Use the closest neighbor found in this layer as the entry point for the next search
+            if let Some(&(nearest_idx, _)) = neighbors.first() {
+                 current_entry_idx = nearest_idx;
+            } else {
+                 // Keep the same entry point if no neighbors found (should be rare)
+                 eprintln!("Warning: No neighbors found at layer {} during connection phase. Keeping entry point {}.", layer, current_entry_idx);
             }
         }
 
@@ -284,7 +355,10 @@ impl HNSWIndex {
 
         // We'll use thread-local storage for the current entry and distance
         let mut current_entry = self.entry_points[max_layer.min(self.entry_points.len() - 1)];
-        let mut current_dist = Self::cosine_distance(query, &self.nodes[current_entry].vector);
+        let mut current_dist = Self::cosine_distance(
+            ArrayView1::from(query),
+            ArrayView1::from(&self.nodes[current_entry].vector),
+        );
 
         // Traverse the upper layers sequentially (they're small anyway)
         for layer in (1..=max_layer).rev() {
@@ -412,10 +486,20 @@ impl HNSWIndex {
             entry_points: serialized.entry_points,
         })
     }
+
+    /// Returns the number of nodes (vectors) in the index.
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns true if the index contains no nodes.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
 }
 
 /// Statistics for a single layer in the HNSW index
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerStats {
     /// Number of nodes in this layer
     pub nodes: usize,
@@ -424,7 +508,7 @@ pub struct LayerStats {
 }
 
 /// Overall statistics for the HNSW index
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HNSWStats {
     /// Total number of nodes in the index
     pub total_nodes: usize,
@@ -438,6 +522,8 @@ pub struct HNSWStats {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+    use rand::distributions::{Distribution, Uniform}; // Added for vector generation
+
     const TEST_DIM: usize = 4;
 
     fn test_config() -> HNSWConfig {
@@ -450,37 +536,38 @@ mod tests {
         }
     }
 
+    fn generate_random_vector(dim: usize, rng: &mut StdRng) -> Vec<f32> {
+        let mut v = Vec::with_capacity(dim);
+        for _ in 0..dim {
+            v.push(rng.gen::<f32>());
+        }
+        v
+    }
+
     #[test]
     fn test_cosine_distance() {
-        // Vectors pointing in opposite directions should have maximum distance
-        let v1 = vec![1.0, 0.0];
-        let v2 = vec![-1.0, 0.0];
-        let dist = HNSWIndex::cosine_distance(&v1, &v2);
-        // With our scaling, the maximum distance is now 1.0
-        // but transformed with (1.0 - similarity) * 1.2 and then power scaling of 0.8
-        // so the maximum value is (1.0 - (-1.0)) * 1.2 = 2.4, transformed with 2.4^0.8 ≈ 1.89
-        // We just check that it's close to 2.0
-        assert!(
-            dist > 1.5,
-            "Distance between opposite vectors should be high, got {}",
-            dist
-        );
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let c = vec![1.0, 0.0, 0.0];
+        let d = vec![-1.0, 0.0, 0.0];
+        let zero = vec![0.0, 0.0, 0.0];
 
-        // Identical vectors should have zero distance
-        let v3 = vec![1.0, 0.0];
-        let dist = HNSWIndex::cosine_distance(&v1, &v3);
-        assert_eq!(dist, 0.0);
+        let view_a = ArrayView1::from(&a);
+        let view_b = ArrayView1::from(&b);
+        let view_c = ArrayView1::from(&c);
+        let view_d = ArrayView1::from(&d);
+        let view_zero = ArrayView1::from(&zero);
 
-        // Orthogonal vectors should have a mid-range distance
-        let v4 = vec![0.0, 1.0];
-        let dist = HNSWIndex::cosine_distance(&v1, &v4);
-        // With our scaling, the 90° distance is transformed with (1.0 - 0.0) * 1.2 = 1.2, then 1.2^0.8 ≈ 1.15
-        // We verify it's in the expected range
-        assert!(
-            dist > 0.9 && dist < 1.3,
-            "Distance between orthogonal vectors should be moderate, got {}",
-            dist
-        );
+        // Orthogonal vectors (similarity 0) -> distance 1.0
+        assert!((HNSWIndex::cosine_distance(view_a.clone(), view_b.clone()) - 1.0).abs() < 1e-6);
+        // Identical vectors (similarity 1) -> distance 0.0
+        assert!((HNSWIndex::cosine_distance(view_a.clone(), view_c.clone()) - 0.0).abs() < 1e-6);
+        // Opposite vectors (similarity -1) -> distance 2.0
+        assert!((HNSWIndex::cosine_distance(view_a.clone(), view_d.clone()) - 2.0).abs() < 1e-6);
+         // Distance with zero vector -> distance 2.0
+         assert!((HNSWIndex::cosine_distance(view_a.clone(), view_zero.clone()) - 2.0).abs() < 1e-6);
+         assert!((HNSWIndex::cosine_distance(view_zero.clone(), view_b.clone()) - 2.0).abs() < 1e-6);
+         assert!((HNSWIndex::cosine_distance(view_zero.clone(), view_zero.clone()) - 2.0).abs() < 1e-6);
     }
 
     #[test]
@@ -492,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insertion() {
+    fn test_insertion() -> Result<()> {
         let config = test_config();
         let mut index = HNSWIndex::new(config);
 
@@ -500,9 +587,9 @@ mod tests {
         let v2 = vec![0.0; TEST_DIM];
         let v3 = vec![0.5; TEST_DIM];
 
-        let idx1 = index.insert(v1).unwrap();
-        let idx2 = index.insert(v2).unwrap();
-        let idx3 = index.insert(v3).unwrap();
+        let idx1 = index.insert(v1)?;
+        let idx2 = index.insert(v2)?;
+        let idx3 = index.insert(v3)?;
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
@@ -513,6 +600,8 @@ mod tests {
 
         let wrong_dim_vec = vec![1.0; TEST_DIM + 1];
         assert!(index.insert(wrong_dim_vec).is_err());
+
+        Ok(())
     }
 
     #[test]
@@ -524,12 +613,12 @@ mod tests {
         let v2 = vec![0.0; TEST_DIM];
         let v3 = vec![0.5; TEST_DIM];
 
-        index.insert(v1).unwrap();
-        index.insert(v2).unwrap();
-        index.insert(v3).unwrap();
+        index.insert(v1)?;
+        index.insert(v2)?;
+        index.insert(v3)?;
 
         let query = vec![0.8; TEST_DIM];
-        let results = index.search_parallel(&query, 2, 10).unwrap();
+        let results = index.search_parallel(&query, 2, 10)?;
 
         assert_eq!(results.len(), 2);
         println!("Search results: {:?}", results);
@@ -545,7 +634,7 @@ mod tests {
 
         for i in 0..5 {
             let v = vec![i as f32; TEST_DIM];
-            index.insert(v).unwrap();
+            index.insert(v)?;
         }
 
         let stats = index.stats();
@@ -616,13 +705,13 @@ mod tests {
         };
         let mut hnsw_index = HNSWIndex::new(config);
 
-        for v in &vectors { hnsw_index.insert(v.clone()).unwrap(); }
+        for v in &vectors { hnsw_index.insert(v.clone())?; }
 
         let linear_search = |query: &[f32], k: usize| -> Vec<(usize, f32)> {
             let mut distances: Vec<(usize, f32)> = vectors
                 .iter()
                 .enumerate()
-                .map(|(i, vector)| (i, HNSWIndex::cosine_distance(query, vector)))
+                .map(|(i, vector)| (i, HNSWIndex::cosine_distance(ArrayView1::from(query), ArrayView1::from(vector))))
                 .collect();
             distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             distances.into_iter().take(k).collect()
@@ -638,7 +727,7 @@ mod tests {
         query_idx = 0;
         let hnsw_time = benchmark("HNSW search", num_queries as u32, || {
             let query = &queries[query_idx];
-            let _ = hnsw_index.search_parallel(query, k, 100).unwrap();
+            let _ = hnsw_index.search_parallel(query, k, 100)?;
             query_idx = (query_idx + 1) % num_queries;
         });
 
@@ -649,7 +738,7 @@ mod tests {
         
         for query in &queries {
             let linear_results = linear_search(query, k);
-            let hnsw_results = hnsw_index.search_parallel(query, k, 100).unwrap();
+            let hnsw_results = hnsw_index.search_parallel(query, k, 100)?;
             let mut found = 0;
             let linear_ids: HashSet<usize> = linear_results.iter().map(|(idx, _)| *idx).collect();
             for (idx, _) in hnsw_results {
@@ -659,5 +748,35 @@ mod tests {
             println!("Recall@{}: {:.2}", k, recall);
             assert!(recall >= 0.7, "HNSW search quality is too low: {:.2}", recall);
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn benchmark_insertion() {
+        let config = HNSWConfig {
+            dimension: 128, // More realistic dimension
+            m: 16,
+            ef_construction: 100, // Lower ef for faster build benchmark
+            num_layers: 5, // More layers for larger dataset
+            random_seed: 42,
+        };
+        let dim = config.dimension;
+        let num_vectors = 5000; // Number of vectors to insert
+        let mut rng = StdRng::seed_from_u64(config.random_seed);
+
+        // Pre-generate vectors
+        let vectors: Vec<Vec<f32>> = (0..num_vectors)
+            .map(|_| generate_random_vector(dim, &mut rng))
+            .collect();
+
+        benchmark("HNSW Insertion", 1, || {
+            let mut index = HNSWIndex::new(config.clone());
+            for vec in vectors.iter() {
+                // Using expect here for benchmark simplicity, relies on tests for correctness
+                index.insert(vec.clone()).expect("Insert failed in benchmark");
+            }
+            // Ensure index size is correct after insertion
+            assert_eq!(index.len(), num_vectors);
+        });
     }
 }

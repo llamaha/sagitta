@@ -5,8 +5,7 @@ use crate::vectordb::hnsw::{HNSWConfig, HNSWIndex, HNSWStats};
 use indicatif::{ProgressBar, ProgressStyle};
 use indicatif::style::TemplateError;
 use log::{debug, error, warn};
-use rayon::iter::ParallelIterator;
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, canonicalize};
@@ -743,61 +742,55 @@ impl VectorDB {
         Ok(processed_chunks_data) // Return the processed data for HNSW build
     }
 
-    // Rebuilds HNSW index using the current `self.indexed_chunks`
+    /// Rebuilds the HNSW index from the current `indexed_chunks` state sequentially.
     fn rebuild_hnsw_index_from_state(&mut self, dimension: usize) -> Result<()> {
+        debug!("Starting sequential HNSW index rebuild..."); // Updated log message
+        let start_time = Instant::now();
+
         if self.indexed_chunks.is_empty() {
-            debug!("No indexed chunks found, skipping HNSW index rebuild.");
-            self.hnsw_index = None;
+            debug!("No chunks to index. Clearing existing index if any.");
+            self.hnsw_index = None; 
             return Ok(());
         }
 
-        debug!("Rebuilding HNSW index with {} vectors...", self.indexed_chunks.len());
-        let start = Instant::now();
-
-        // Dimension is now passed in
-        if dimension == 0 {
-            return Err(VectorDBError::HNSWError("Cannot build HNSW index with dimension 0".to_string()));
-        }
-
-        let config = HNSWConfig::new(dimension);
+        // --- Initialize new HNSW Index ---
+        let config = self.hnsw_index.as_ref()
+                       .map(|idx| idx.get_config().clone())
+                       .filter(|cfg| cfg.dimension == dimension) 
+                       .unwrap_or_else(|| {
+                            debug!("Creating new HNSW config for dimension {}.", dimension);
+                            HNSWConfig::new(dimension) 
+                       });
+        
         let mut hnsw_index = HNSWIndex::new(config);
+        // hnsw_index.nodes.reserve(self.indexed_chunks.len()); // Optional
 
-        // Uncomment progress bar
+        // --- Sequential Insertion Loop ---
+        debug!("Building HNSW index sequentially for {} chunks...", self.indexed_chunks.len());
         let pb = ProgressBar::new(self.indexed_chunks.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} Building HNSW index: [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")?
+                .template("{spinner:.green} Building HNSW index: [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) ETA: {eta}")?
                 .progress_chars("#>- ")
         );
 
-        // Iterate through stored chunks and use their embeddings
         for (i, chunk) in self.indexed_chunks.iter().enumerate() {
-            // Directly use the stored embedding
-            let embedding = &chunk.embedding; // Borrow the embedding
-
-            if embedding.len() != dimension {
-                 error!("Fatal error: Chunk {} ({}:{}) has embedding dimension {} but index expects {}. Aborting build.", 
-                       i, chunk.file_path, chunk.start_line, embedding.len(), dimension);
-                 return Err(VectorDBError::HNSWError(format!(
-                     "Dimension mismatch for vector {} during HNSW rebuild.", i
-                 )));
-            }
-
-            if let Err(e) = hnsw_index.insert(embedding.clone()) { // Clone embedding for insertion
+            // Clone embedding for insertion
+            if let Err(e) = hnsw_index.insert(chunk.embedding.clone()) { 
                 error!("Fatal error inserting vector for chunk {} ({}:{}) into HNSW index: {}. Aborting build.", 
                        i, chunk.file_path, chunk.start_line, e);
                 return Err(VectorDBError::HNSWError(format!(
                     "Failed to insert vector {} into HNSW index during rebuild: {}", i, e
                 )));
             }
-            pb.inc(1); // Uncomment progress bar increment
+            pb.inc(1); 
         }
+        pb.finish_with_message("HNSW index build complete.");
 
-        pb.finish_with_message("HNSW index build complete"); // Uncomment progress bar finish
-        let duration = start.elapsed();
-        debug!("HNSW index rebuild took {:.2} seconds", duration.as_secs_f32());
+        let duration = start_time.elapsed();
+        debug!("Sequential HNSW index rebuild took {:.2?}", duration);
 
-        self.hnsw_index = Some(hnsw_index);
+        self.hnsw_index = Some(hnsw_index); // Store the newly built index
         Ok(())
     }
 
