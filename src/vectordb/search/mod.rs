@@ -1,7 +1,7 @@
 // Declare the modules within the search directory
-pub mod bm25;
+// pub mod bm25; // Removed unused module
 pub mod chunking;
-pub mod hybrid;
+// pub mod hybrid; // Removed unused module
 pub mod query_analysis;
 pub mod result; // Make result public so SearchResult can be used outside
 pub mod snippet; // Make snippet public
