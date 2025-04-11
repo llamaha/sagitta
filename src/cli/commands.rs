@@ -52,17 +52,17 @@ pub enum Command {
         onnx_tokenizer: Option<String>,
     },
 
-    /// Search for files by content
+    /// Search across indexed text chunks using semantic similarity
     Query {
-        /// Search query
+        /// Search query string
         #[arg(required = true)]
         query: String,
 
-        /// Maximum number of results to return (default: 20)
+        /// Maximum number of relevant chunks to return (default: 20)
         #[arg(short = 'l', long = "limit")]
         max_results: Option<usize>,
 
-        /// File types to search (e.g. rs,rb,go,js,ts)
+        /// Only show chunks from files with these extensions (e.g. rs,md,py)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
         file_types: Option<Vec<String>>,
     },

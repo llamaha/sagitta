@@ -1,10 +1,10 @@
 # vectordb-cli
 
-A lightweight command-line tool for fast, local search across your codebases and text files using both semantic (vector) and lexical (keyword) retrieval.
+A lightweight command-line tool for fast, local search across your codebases and text files using semantic retrieval.
 
 ## Features
 
--   **Hybrid Search:** Combines deep semantic understanding (via ONNX models) with efficient BM25 lexical matching for relevant results.
+-   **Semantic Search:** Finds relevant text chunks based on meaning using ONNX models.
 -   **Local First:** Indexes and searches files directly on your machine. No data leaves your system.
 -   **Simple Indexing:** Recursively indexes specified directories.
 -   **Configurable:** Supports custom ONNX embedding models and tokenizers.
@@ -118,7 +118,7 @@ By default, `vectordb-cli` stores its database (`db.json`), cache (`cache.json`)
 
 ### 1. Indexing Files
 
-Create or update a search index for one or more directories. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
+Create or update a search index for one or more directories. This process reads files, splits them into text chunks, generates embeddings for each chunk, and builds the search index. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
 
 ```bash
 # Index a single directory using the default MiniLM model
@@ -128,6 +128,7 @@ vectordb-cli index /path/to/your/code
 vectordb-cli index /path/to/repoA /path/to/repoB ~/another/project
 
 # Index using CodeBERT via environment variables (assuming they are set)
+# (Ensure CodeBERT model/tokenizer paths are set in env vars)
 vectordb-cli index /path/to/your/code
 
 # Index using CodeBERT via command-line flags and specific file types
@@ -145,41 +146,76 @@ vectordb-cli --db-path /data/shared_index.json index /path/to/team/project
 
 ### 2. Querying Files
 
-Search across all indexed files using hybrid (semantic + lexical) search.
+Search across all indexed text chunks using semantic search.
 
 ```bash
-# Basic query
+# Basic query - finds relevant chunks
 vectordb-cli query "database connection configuration"
 
-# Limit results to 10
+# Limit results to 10 chunks
 vectordb-cli query "error handling middleware" -l 10
 
-# Perform vector-only search
-vectordb-cli query "async function examples" --vector-only
-
-# Adjust hybrid search weights (vector 80%, BM25 20%)
-vectordb-cli query "authentication logic" --vector-weight 0.8 --bm25-weight 0.2
-
-# Filter search by file types
+# Filter search by file types (shows chunks only from matching files)
 vectordb-cli query "user schema definition" -t sql,prisma
-
-# Use fast (keyword-based) snippets instead of semantic ones
-vectordb-cli query "data structure serialization" --fast-snippets
 
 # Query using a custom database location
 vectordb-cli --db-path /data/shared_index.json query "deployment script"
 ```
 
+**Example Output:**
+
+```
+Found 3 relevant chunks (0.12 seconds):
+---
+1. src/db/connection.rs (Lines 55-68) (score: 0.8734)
+  // Function to establish database connection
+  pub fn connect(config: &DatabaseConfig) -> Result<PgConnection, ConnectionError> {
+      let database_url = format!(
+          "postgres://{}:{}@{}:{}/{}",
+          config.user,
+          config.password,
+          config.host,
+          config.port,
+          config.name
+      );
+      PgConnection::establish(&database_url)
+          .map_err(|e| ConnectionError::EstablishmentError(e.to_string()))
+  }
+---
+2. config/production.yaml (Lines 12-18) (score: 0.8105)
+  database:
+    host: prod-db.example.com
+    port: 5432
+    user: prod_user
+    password: "${PROD_DB_PASSWORD}"
+    name: main_prod_db
+---
+3. tests/integration/db_test.rs (Lines 20-35) (score: 0.7950)
+  #[test]
+  fn test_database_connection() {
+      let config = DatabaseConfig {
+          host: "localhost".to_string(),
+          port: 5433, // Test DB port
+          user: "test_user".to_string(),
+          password: "test_password".to_string(),
+          name: "test_db".to_string(),
+      };
+      
+      let connection = connect(&config);
+      assert!(connection.is_ok(), "Failed to connect to test database");
+  }
+---
+```
+
 ### 3. Writing Effective Queries
 
-`vectordb-cli` combines semantic (meaning-based) and lexical (keyword-based) search. Here are tips for getting the best results:
+`vectordb-cli` uses semantic (meaning-based) search. Here are tips for getting the best results:
 
 *   **Be Specific but Natural:** Instead of just keywords like "database config", try a more descriptive query like "database connection configuration for production" or "how to handle async errors in Rust middleware". The semantic search understands the intent.
 *   **Include Context:** Add terms related to the language, framework, or feature area. Examples: "python async http request library", "react state management hook example", "kubernetes deployment yaml ingress setup".
 *   **Use Code Snippets (Carefully):** You can paste short code snippets directly into the query. The default model (MiniLM) has some code understanding, but models like CodeBERT (if configured) are better suited for this. Keep snippets concise.
-*   **Experiment with Weights:** If you find keyword matches are too dominant (or not dominant enough), adjust the `--vector-weight` (default 0.7) and `--bm25-weight` (default 0.3). For pure semantic search, use `--vector-only`.
 *   **Filter by File Type:** Use `-t` or `--file-types` (e.g., `-t py,md`) to narrow down results if you know the type of file you're looking for.
-*   **Iterate:** If your first query doesn't yield the desired results, refine it based on the snippets you see. Add more detail, remove ambiguity, or try different phrasing.
+*   **Iterate:** If your first query doesn't yield the desired results, refine it based on the text chunks you see. Add more detail, remove ambiguity, or try different phrasing.
 
 ### 4. Database Statistics
 
@@ -217,20 +253,17 @@ vectordb-cli --db-path /data/shared_index.json list
 
 1.  **Indexing:**
     -   Files in the specified directories are scanned.
-    -   Supported file types are parsed (if tree-sitter parsers are available) or read as plain text.
-    -   Text content is split into chunks (currently, often whole files, future work may improve chunking).
-    -   An ONNX embedding model generates vector representations for each chunk/file.
-    -   Embeddings are stored along with file paths in `db.json` (or the file specified by `--db-path`).
-    -   File metadata is stored in `cache.json` to avoid re-processing unchanged files on subsequent runs.
-    -   A BM25 index is built in memory for lexical search (based on term frequencies in indexed files).
-    -   An HNSW (Hierarchical Navigable Small World) index is built from the embeddings and saved to `hnsw_index.json` for fast approximate nearest neighbor search.
+    -   Supported file types are read as plain text.
+    -   Text content is split into chunks (based on paragraphs/double newlines).
+    -   An ONNX embedding model generates vector representations for each chunk.
+    -   Chunk metadata (file path, lines, text) and embeddings are stored in `db.json` (or the file specified by `--db-path`).
+    -   File metadata (hash, timestamp) is stored in `cache.json` to avoid re-processing unchanged files on subsequent runs.
+    -   An HNSW (Hierarchical Navigable Small World) index is built from the chunk embeddings and saved to `hnsw_index.json` for fast approximate nearest neighbor search.
 
 2.  **Querying:**
     -   The search query is embedded using the same ONNX model.
-    -   **Vector Search:** The HNSW index is used to find files with embeddings semantically similar to the query embedding.
-    -   **BM25 Search:** The BM25 index is used to find files containing the query keywords, scored by relevance (term frequency, inverse document frequency).
-    -   **Hybrid Ranking:** Scores from vector search and BM25 search are normalized and combined using configurable weights.
-    -   Relevant snippets from the top-ranking files are extracted and displayed.
+    -   **Vector Search:** The HNSW index is used to find text chunks with embeddings semantically similar to the query embedding.
+    -   The most relevant chunks are retrieved along with their file path, line numbers, and text, then displayed ranked by similarity score.
 
 ## Performance Notes
 
@@ -239,8 +272,8 @@ vectordb-cli --db-path /data/shared_index.json list
 
 ## Known Issues / Future Work
 
-*   The HNSW index is rebuilt entirely on every `index` command, which can be slow if the total number of indexed files across all repositories is very large. Future versions could explore incremental index updates.
-*   File content chunking during indexing is currently basic (often whole files). More sophisticated chunking could improve snippet relevance.
+*   The HNSW index is rebuilt entirely on every `index` command if *any* files were re-indexed, which can be slow if the total number of indexed chunks across all repositories is very large. Future versions could explore incremental index updates.
+*   Consider adding more sophisticated chunking strategies (e.g., code-aware chunking).
 *   Consider adding a mechanism to automatically remove deleted files from the index.
 
 ## License
