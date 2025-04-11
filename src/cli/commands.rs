@@ -1,13 +1,13 @@
-use crate::vectordb::embedding::EmbeddingModelType;
+// use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::error::VectorDBError;
 use crate::vectordb::search::Search;
 use crate::vectordb::VectorDB;
-use anyhow::Result;
+use crate::vectordb::cache::CacheCheckResult;
+use anyhow::{anyhow, Result};
 use clap::Parser;
-use log::{debug, error};
+use log::{debug, error, warn};
 use num_cpus;
 use rayon;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use crate::vectordb::search::result::SearchResult;
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::collections::HashSet;
 use crate::vectordb::utils::cosine_distance;
+use walkdir::WalkDir;
 
 // Default weights for hybrid search
 const HYBRID_VECTOR_WEIGHT: f32 = 0.7;
@@ -26,11 +27,11 @@ pub static mut INTERRUPT_RECEIVED: bool = false;
 
 #[derive(Parser, Debug)]
 pub enum Command {
-    /// Index files in a directory
+    /// Index files in one or more directories
     Index {
-        /// Directory to index
+        /// Directories to index (provide one or more paths)
         #[arg(required = true)]
-        dir: String,
+        dirs: Vec<String>,
 
         /// File types to index (e.g. rs,rb,go,js,ts,yaml,md)
         #[arg(short = 't', long = "file-types", value_delimiter = ',')]
@@ -85,19 +86,22 @@ pub enum Command {
 
     /// Clear the database
     Clear {},
+
+    /// List the unique top-level directories found in the index
+    List,
 }
 
 pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
     match command {
         Command::Index {
-            dir,
+            dirs,
             file_types,
             threads,
             onnx_model,
             onnx_tokenizer,
         } => {
-            debug!("Executing Index command for directory: {}", dir);
-            println!("Indexing files in {}...", dir);
+            debug!("Executing Index command for directories: {:?}", dirs);
+            println!("Indexing files in {:?}...", dirs);
 
             // Try to set paths from args or env vars
             let model_path_opt = onnx_model.or_else(|| std::env::var("VECTORDB_ONNX_MODEL").ok());
@@ -136,54 +140,112 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to build thread pool: {}", e))?;
 
             let start = Instant::now();
+            let mut overall_result = Ok(()); // Track overall success
 
-            // Determine file types to use based on input flags and fast mode
+            // Determine file types to use based on input flags
             let file_types_to_use = if file_types.is_empty() {
-                // Standard mode with no specified file types, use all supported types with code parsers
                 let supported = VectorDB::get_supported_file_types();
                 println!(
-                    "No file types specified, using all supported types with code parsers: {}",
+                    "No file types specified, using all supported types: {}",
                     supported.join(", ")
                 );
                 supported
             } else {
-                // User specified file types, use those regardless of mode
                 println!("Indexing file types: {}", file_types.join(", "));
                 file_types
             };
 
-            // Check for interrupt periodically during indexing
-            debug!(
-                "Starting directory indexing: {}, file types: {:?}",
-                dir, file_types_to_use
-            );
-            match db.index_directory(&dir, &file_types_to_use) {
-                Ok(_) => {
-                    let duration = start.elapsed();
-                    if unsafe { INTERRUPT_RECEIVED } {
-                        debug!("Indexing was interrupted but data saved safely");
-                        println!("Indexing was interrupted but data has been saved safely.");
-                    } else {
-                        debug!(
-                            "Indexing completed successfully in {:.2} seconds",
-                            duration.as_secs_f32()
-                        );
-                        println!(
-                            "Indexing complete in {:.2} seconds!",
-                            duration.as_secs_f32()
-                        );
+            // Loop through each directory provided
+            for dir_path_str in dirs {
+                 // Canonicalize the input path string
+                 let canonical_dir = match fs::canonicalize(&dir_path_str) {
+                     Ok(path) => path,
+                     Err(e) => {
+                         error!("Failed to find or canonicalize directory '{}': {}", dir_path_str, e);
+                         eprintln!("Error: Invalid directory '{}': {}", dir_path_str, e);
+                         if overall_result.is_ok() {
+                             overall_result = Err(anyhow!("Invalid directory: {}", dir_path_str));
+                         }
+                         continue; // Skip to the next directory
+                     }
+                 };
+                 let canonical_dir_str = canonical_dir.to_string_lossy().to_string();
+
+                 println!("Starting indexing for: {}", canonical_dir_str);
+                 debug!(
+                    "Starting directory indexing: {}, file types: {:?}",
+                    canonical_dir_str,
+                    &file_types_to_use
+                 );
+                // Index the current canonical directory
+                match db.index_directory(&canonical_dir_str, &file_types_to_use) {
+                    Ok(_) => {
+                        if unsafe { INTERRUPT_RECEIVED } {
+                            debug!("Indexing interrupted for {}, data saved safely", canonical_dir_str);
+                            println!("Indexing interrupted for {}, data saved safely.", canonical_dir_str);
+                            // Set overall result to error if interrupted
+                            overall_result = Err(anyhow!("Indexing interrupted"));
+                            break; // Stop processing more directories if interrupted
+                        } else {
+                            debug!(
+                                "Indexing for {} completed successfully",
+                                canonical_dir_str
+                            );
+                            println!("Finished indexing for: {}", canonical_dir_str);
+                            // Add successfully indexed root to the set
+                            db.add_indexed_root(canonical_dir_str); 
+                        }
                     }
-                }
-                Err(e) => {
-                    if unsafe { INTERRUPT_RECEIVED } {
-                        debug!("Indexing was interrupted but data saved safely");
-                        println!("Indexing was interrupted but data has been saved safely.");
-                    } else {
-                        error!("Indexing failed: {}", e);
-                        return Err(e.into());
+                    Err(e) => {
+                        if unsafe { INTERRUPT_RECEIVED } {
+                            debug!("Indexing interrupted for {}, data saved safely", canonical_dir_str);
+                            println!("Indexing interrupted for {}, data saved safely.", canonical_dir_str);
+                             overall_result = Err(anyhow!("Indexing interrupted"));
+                            break; // Stop processing more directories
+                        } else {
+                            error!("Indexing failed for {}: {}", canonical_dir_str, e);
+                            eprintln!("Error indexing {}: {}", canonical_dir_str, e);
+                            // Store the first error encountered, but continue if possible
+                            if overall_result.is_ok() {
+                                overall_result = Err(e.into());
+                            }
+                            // Do not break here, allow indexing other directories if requested
+                        }
                     }
                 }
             }
+
+            // Save db once after all directories are processed (save includes HNSW rebuild)
+             if overall_result.is_ok() {
+                  if let Err(e) = db.save() {
+                      error!("Failed to save database after indexing: {}", e);
+                      overall_result = Err(e.into());
+                  }
+              }
+            
+            // Final summary message based on overall result
+            let duration = start.elapsed();
+            if overall_result.is_ok() {
+                debug!(
+                    "All indexing tasks completed successfully in {:.2} seconds",
+                    duration.as_secs_f32()
+                );
+                println!(
+                    "\nTotal indexing time: {:.2} seconds!",
+                    duration.as_secs_f32()
+                );
+            } else if unsafe { INTERRUPT_RECEIVED } {
+                // Message already printed during the loop for interruption
+                println!("\nTotal time before interruption: {:.2} seconds.", duration.as_secs_f32());
+            } else {
+                // Report that some errors occurred
+                eprintln!(
+                    "\nIndexing completed with errors in {:.2} seconds. Check logs for details.",
+                    duration.as_secs_f32()
+                );
+            }
+
+            return overall_result; // Return the final result (Ok or the first error)
         }
         Command::Query {
             query,
@@ -415,70 +477,94 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             // --- End Conditional Snippet Logic ---
         }
         Command::Stats => {
+            debug!("Executing Stats command");
             let stats = db.stats();
-            println!("Indexed files: {}", stats.indexed_files);
-            println!("Embedding dimension: {}", stats.embedding_dimension);
-            println!("Embedding model: {:?}", stats.embedding_model_type);
-            println!("Database path: {}", stats.db_path);
-            println!("Cached files: {}", stats.cached_files);
-
-            // Display ONNX paths if using ONNX model
-            if stats.embedding_model_type == EmbeddingModelType::Onnx {
-                println!("ONNX model paths:");
-                println!(
-                    "  - Model: {}",
-                    db.onnx_model_path().map_or_else(
-                        || "Not set".to_string(),
-                        |p| p.to_string_lossy().to_string()
-                    )
-                );
-                println!(
-                    "  - Tokenizer: {}",
-                    db.onnx_tokenizer_path().map_or_else(
-                        || "Not set".to_string(),
-                        |p| p.to_string_lossy().to_string()
-                    )
-                );
-            }
-
-            // Display HNSW stats if available
+            println!("Database Statistics:");
+            println!("  DB Path: {}", stats.db_path);
+            println!("  Embedding Model: {}", stats.embedding_model_type);
+            println!("  Indexed Files: {}", stats.indexed_files);
+            println!("  Cached Files: {}", stats.cached_files);
+            println!("  Embedding Dimension: {}", stats.embedding_dimension);
             if let Some(hnsw_stats) = stats.hnsw_stats {
-                println!("\nHNSW Index:");
-                println!("  Nodes: {}", hnsw_stats.total_nodes);
-                println!("  Layers: {}", hnsw_stats.layers);
-                println!("  Info: The HNSW index provides faster search on large codebases.");
-                println!("        This is enabled by default for optimal performance.");
-
-                // Display layer stats
-                println!("\n  Layer Statistics:");
-                for (i, layer) in hnsw_stats.layer_stats.iter().enumerate() {
-                    println!(
-                        "    Layer {}: {} nodes, {:.2} avg. connections",
-                        i, layer.nodes, layer.avg_connections
-                    );
+                println!("  HNSW Index:");
+                println!("    Total Nodes: {}", hnsw_stats.total_nodes);
+                println!("    Layers: {}", hnsw_stats.layers);
+                for (i, layer_stat) in hnsw_stats.layer_stats.iter().enumerate() {
+                    println!("      Layer {}: Nodes={}, Avg Connections={:.2}",
+                             i, layer_stat.nodes, layer_stat.avg_connections);
                 }
-            } else {
-                println!("\nHNSW Index: Not found");
-                println!("  This is unusual as HNSW is enabled by default.");
-                println!("  You may want to rebuild the index with the 'index' command.");
             }
         }
         Command::Clear {} => {
-            // Show warning and ask for confirmation
-            println!("WARNING: You are about to clear the database.");
-            println!("This action cannot be undone.");
-            print!("Continue? [y/N]: ");
-            std::io::stdout().flush()?;
+            println!("Clearing database...");
+            db.clear()?;
+            println!("Database cleared successfully.");
+        }
+        Command::List => {
+            debug!("Executing List command");
+            println!("Retrieving indexed directories...");
 
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
+            // Get roots directly from the stored set
+            let indexed_roots_set = db.indexed_roots();
 
-            if input.trim().to_lowercase() == "y" {
-                println!("Clearing database...");
-                db.clear()?;
-                println!("Database cleared successfully.");
-            } else {
-                println!("Operation cancelled.");
+            if indexed_roots_set.is_empty() {
+                println!("  No directories have been explicitly indexed yet.");
+                return Ok(());
+            }
+
+            // Sort for consistent display
+            let mut sorted_roots: Vec<String> = indexed_roots_set.iter().cloned().collect();
+            sorted_roots.sort();
+
+            println!("Indexed Directories:");
+            let cache = &db.cache; // Access public field
+            let model_type = db.embedding_model_type; // Access public field
+
+            // Perform up-to-date check for each stored root
+            for root_path_str in sorted_roots {
+                let root_path = Path::new(&root_path_str);
+                let mut needs_indexing = false;
+
+                if !root_path.is_dir() {
+                    // If the stored path isn't a directory anymore
+                    println!("  - {} (Path not found or not a directory)", root_path_str);
+                    continue;
+                }
+
+                // Check status against cache...
+                for entry in WalkDir::new(root_path)
+                     .follow_links(false)
+                     .into_iter()
+                     .filter_map(|e| e.ok()) 
+                     .filter(|e| e.file_type().is_file())
+                 {
+                     let current_file_path = entry.path();
+                     match fs::canonicalize(current_file_path) {
+                         Ok(canonical_file_path) => {
+                             let canonical_file_str = canonical_file_path.to_string_lossy(); 
+                             match cache.check_cache_and_get_hash(&canonical_file_str, &canonical_file_path) {
+                                 Ok(CacheCheckResult::Miss(_)) => { 
+                                     debug!("Found file needing index in {}: {}", root_path_str, canonical_file_path.display());
+                                     needs_indexing = true;
+                                     break; 
+                                 }
+                                 Ok(CacheCheckResult::Hit(_)) => { /* Continue */ }
+                                 Err(e) => {
+                                     warn!("Cache check failed for {} within {}: {}. Assuming needs indexing.",
+                                         canonical_file_path.display(), root_path_str, e);
+                                     needs_indexing = true; 
+                                     break;
+                                 }
+                             }
+                         }
+                         Err(e) => {
+                             warn!("Could not canonicalize file {} during list check: {}", current_file_path.display(), e);
+                         }
+                     }
+                 }
+
+                let status = if needs_indexing { "(Needs Indexing)" } else { "(Up-to-date)" };
+                println!("  - {} {}", root_path_str, status);
             }
         }
     }

@@ -49,7 +49,7 @@ pub(crate) fn search_with_limit(
         for (node_id, distance) in nearest { // Renamed similarity -> distance
             if let Some(file_path) = db.get_file_path(node_id) {
                 let similarity = 1.0 - distance; // Calculate similarity
-                file_results.push((file_path.clone(), similarity)); // Store similarity
+                file_results.push((file_path, similarity)); // Store owned String
             }
         }
 

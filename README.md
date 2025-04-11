@@ -125,25 +125,115 @@ Failure to provide a valid model and tokenizer will result in an error.
 
 ## Usage
 
-### 1. Indexing Files
-
-Create a search index for a directory. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
+By default, `vectordb-cli` stores its database (`db.json`), cache (`cache.json`), and vector index (`hnsw_index.json`) in the standard user local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS). You can override this location using the global `--db-path` flag, which should point to the desired `db.json` file path (the tool will manage the other files relative to it).
 
 ```bash
-# Index using the default MiniLM model (if present in ./onnx/)
+# Use a custom database location
+vectordb-cli --db-path /path/to/my/project_db.json index /path/to/projectA
+vectordb-cli --db-path /path/to/my/project_db.json query "search term"
+```
+
+### 1. Indexing Files
+
+Create or update a search index for one or more directories. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
+
+```bash
+# Index a single directory using the default MiniLM model
 vectordb-cli index /path/to/your/code
+
+# Index multiple directories in one command
+vectordb-cli index /path/to/repoA /path/to/repoB ~/another/project
 
 # Index using CodeBERT via environment variables (assuming they are set)
 vectordb-cli index /path/to/your/code
 
-# Index using CodeBERT via command-line flags
+# Index using CodeBERT via command-line flags and specific file types
 vectordb-cli index /path/to/your/code \
   --onnx-model ./codebert_onnx/codebert_model.onnx \
-  --onnx-tokenizer ./codebert_onnx/tokenizer
+  --onnx-tokenizer ./codebert_onnx/tokenizer \
+  --file-types rs,md,py
 
-# Index only specific file types (works with any configured model)
-vectordb-cli index /path/to/your/code --file-types rs,md,py
+# Index multiple directories with more threads
+vectordb-cli index /path/to/repoA /path/to/repoB -j 8
 
-# Use more threads for potentially faster indexing
-vectordb-cli index /path/to/your/code -j 8
+# Index using a custom database location
+vectordb-cli --db-path /data/shared_index.json index /path/to/team/project
 ```
+
+### 2. Querying Files
+
+Search across all indexed files using hybrid (semantic + lexical) search.
+
+```bash
+# Basic query
+vectordb-cli query "database connection configuration"
+
+# Limit results to 10
+vectordb-cli query "error handling middleware" -l 10
+
+# Perform vector-only search
+vectordb-cli query "async function examples" --vector-only
+
+# Adjust hybrid search weights (vector 80%, BM25 20%)
+vectordb-cli query "authentication logic" --vector-weight 0.8 --bm25-weight 0.2
+
+# Filter search by file types
+vectordb-cli query "user schema definition" -t sql,prisma
+
+# Use fast (keyword-based) snippets instead of semantic ones
+vectordb-cli query "data structure serialization" --fast-snippets
+
+# Query using a custom database location
+vectordb-cli --db-path /data/shared_index.json query "deployment script"
+```
+
+### 3. Database Statistics
+
+Show information about the current database.
+
+```bash
+vectordb-cli stats
+# Specify db path if not default
+vectordb-cli --db-path /data/shared_index.json stats
+```
+
+### 4. Clearing the Database
+
+Remove all indexed data (embeddings, cache, vector index).
+
+```bash
+vectordb-cli clear
+# Specify db path if not default
+vectordb-cli --db-path /data/shared_index.json clear
+```
+
+### 5. Listing Indexed Directories
+
+List the likely top-level directories that have been indexed into the database. This command uses a heuristic based on the parent directories of indexed files.
+
+```bash
+# List directories in the default database
+vectordb-cli list
+
+# List directories in a custom database
+vectordb-cli --db-path /data/shared_index.json list
+```
+
+## How it Works
+
+1.  **Indexing:**
+    -   Files in the specified directories are scanned.
+    -   Supported file types are parsed (if tree-sitter parsers are available) or read as plain text.
+    -   Text content is split into chunks (currently, often whole files, future work may improve chunking).
+    -   An ONNX embedding model generates vector representations for each chunk/file.
+    -   Embeddings are stored along with file paths in `db.json` (or the file specified by `--db-path`).
+    -   File metadata is stored in `cache.json` to avoid re-processing unchanged files on subsequent runs.
+    -   A BM25 index is built in memory for lexical search (based on term frequencies in indexed files).
+    -   An HNSW (Hierarchical Navigable Small World) index is built from the embeddings and saved to `hnsw_index.json` for fast approximate nearest neighbor search.
+
+2.  **Querying:**
+    -   The search query is embedded using the same ONNX model.
+    -   **Vector Search:** The HNSW index is used to find files with embeddings semantically similar to the query embedding.
+    -   **BM25 Search:** The BM25 index is used to find files containing the query keywords, scored by relevance (term frequency, inverse document frequency).
+    -   **Hybrid Ranking:** Scores from vector search and BM25 search are normalized and combined using configurable weights.
+    -   Relevant snippets from the top-ranking files are extracted and displayed.

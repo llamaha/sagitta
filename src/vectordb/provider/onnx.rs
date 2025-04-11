@@ -1,11 +1,10 @@
 use crate::vectordb::provider::EmbeddingProvider;
-use anyhow::{Error, Result};
-use log::{debug, error};
+use anyhow::{Error, Result, anyhow};
+use log::{debug};
 use ndarray::{s, Array, Array2, Ix1, Ix2};
-use ort::inputs;
 use ort::session::{Session, builder::GraphOptimizationLevel};
-use ort::value::DynValue;
-use ort::execution_providers::{CUDAExecutionProvider, ExecutionProvider};
+use ort::value::{DynValue, Value};
+use ort::execution_providers::{CUDAExecutionProvider};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
@@ -13,11 +12,11 @@ use tokenizers::Tokenizer;
 /// ONNX-based embedding provider
 pub struct OnnxEmbeddingProvider {
     /// The tokenizer for preprocessing input text
-    tokenizer: Tokenizer,
+    tokenizer: Arc<Mutex<Tokenizer>>,
     /// Maximum sequence length for the model
     max_seq_length: usize,
     /// ONNX session for running inference
-    session: Arc<Mutex<Session>>,
+    session: Session,
     /// The actual dimension of the loaded model's embeddings
     dimension: usize,
 }
@@ -39,34 +38,20 @@ impl OnnxEmbeddingProvider {
 
         debug!("Tokenizer loaded successfully");
 
-        // Create ONNX session
-        debug!("Creating ONNX session with model path: {}", model_path.display());
+        // Initialize Environment using ort::init()
+        let cuda_provider = CUDAExecutionProvider::default();
+        ort::init()
+            .with_name("vectordb-onnx")
+            .with_execution_providers([cuda_provider.build()]) // Configure EPs here
+            .commit()?;
 
-        // --- Configure Execution Provider ---
-        // Check if CUDA is available and intended
-        // For now, unconditionally try to add CUDA if the feature is enabled.
-        // The build flag 'ort/cuda' should ensure the necessary library is present.
-        let cuda_provider_config = CUDAExecutionProvider::default(); // Create the config struct first
-
-        // --- Check CUDA Provider Status ---
-        // Call is_available() on the specific provider config struct
-        match cuda_provider_config.is_available() {
-            Ok(true) => debug!("CUDA Execution Provider reports available."),
-            Ok(false) => debug!("CUDA Execution Provider reports *not* available. Ensure ONNX Runtime was built with CUDA support and CUDA drivers/runtime are correctly installed and found."),
-            Err(e) => debug!("Error checking CUDA Execution Provider availability: {}", e),
-        }
-
-        // Now build the dispatchable provider for the session builder
-        let cuda_provider_dispatch = cuda_provider_config.build();
-
-        let session = Session::builder()?
-            .with_execution_providers([cuda_provider_dispatch])? // Use the built dispatch provider
+        // Build session using Session::builder() - EPs are global now
+        let session = Session::builder()? 
             .with_optimization_level(GraphOptimizationLevel::Level1)?
-            // .with_intra_threads(num_cpus::get())? // Typically not needed when using GPU
             .commit_from_file(model_path)?;
 
-        // --- ADDED: Determine dimension from model output ---
-        let pooler_output_name = "pooler_output"; // Assuming this is the output we use
+        // Determine dimension
+        let pooler_output_name = "pooler_output"; 
         let output_dim = session.outputs.iter()
             .find(|meta| meta.name == pooler_output_name)
             .and_then(|meta| {
@@ -86,10 +71,12 @@ impl OnnxEmbeddingProvider {
             output_dim
         );
 
+        let tokenizer = Arc::new(Mutex::new(tokenizer));
+
         Ok(Self {
+            session,
             tokenizer,
             max_seq_length: 128, // TODO: Make this configurable or detect from model?
-            session: Arc::new(Mutex::new(session)),
             dimension: output_dim,
         })
     }
@@ -99,6 +86,8 @@ impl OnnxEmbeddingProvider {
         // Encode the text with the tokenizer
         let encoding = self
             .tokenizer
+            .lock()
+            .unwrap()
             .encode(text, true)
             .map_err(|e| Error::msg(format!("Failed to encode text with tokenizer: {}", e)))?;
 
@@ -189,23 +178,21 @@ impl OnnxEmbeddingProvider {
 
 impl EmbeddingProvider for OnnxEmbeddingProvider {
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        // Prepare inputs
         let (input_ids, attention_mask) = self.prepare_inputs(text)?;
-
-        // Lock the session for inference
-        let session = self.session.lock().unwrap();
-
-        // Create input tensors with proper shapes for ORT
-        let input_ids_array = Array2::from_shape_vec((1, input_ids.len()), input_ids)?;
+        
+        let input_ids_array = Array2::from_shape_vec((1, input_ids.len()), input_ids)
+            .map_err(|e| anyhow!("Input ID shape error: {}", e))?; 
         let attention_mask_array =
-            Array2::from_shape_vec((1, attention_mask.len()), attention_mask)?;
+            Array2::from_shape_vec((1, attention_mask.len()), attention_mask)
+            .map_err(|e| anyhow!("Attention mask shape error: {}", e))?; 
 
-        // Use the inputs! macro. Assumes positional inputs "input_ids", "attention_mask".
-        // The macro handles Array -> OrtOwnedTensor internally.
-        let inputs = inputs![input_ids_array, attention_mask_array]?;
+        // Use Value::from_array
+        let input_ids_value = Value::from_array(input_ids_array)?;
+        let attention_mask_value = Value::from_array(attention_mask_array)?;
 
-        // Run inference
-        let outputs = session.run(inputs)?;
+        // Use inputs! macro with Values
+        let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
+             .map_err(|e| anyhow!("ONNX session run failed: {}", e))?; 
 
         // Extract pooler output (second output tensor)
         let pooler_output = outputs.get("pooler_output")
@@ -229,20 +216,20 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
             all_attention_masks.append(&mut attention_mask);
         }
 
-        // Lock the session for inference
-        let session = self.session.lock().unwrap();
-
-        // Create input tensors with shape [batch_size, sequence_length]
         let input_ids_array =
-            Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)?;
+            Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)
+            .map_err(|e| anyhow!("Input ID batch shape error: {}", e))?;
         let attention_mask_array =
-            Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)?;
+            Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)
+            .map_err(|e| anyhow!("Attention mask batch shape error: {}", e))?;
 
-        // Use the inputs! macro. Assumes positional inputs "input_ids", "attention_mask".
-        let inputs = inputs![input_ids_array, attention_mask_array]?;
+        // Use Value::from_array
+        let input_ids_value = Value::from_array(input_ids_array)?;
+        let attention_mask_value = Value::from_array(attention_mask_array)?;
 
-        // Run inference
-        let outputs = session.run(inputs)?;
+        // Use inputs! macro with Values
+        let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
+             .map_err(|e| anyhow!("ONNX session run failed (batch): {}", e))?; 
 
         // Extract pooler output tensor view directly by name
         let pooler_output = outputs.get("pooler_output")

@@ -87,6 +87,9 @@ pub enum VectorDBError {
 
     #[error("Dimension mismatch: Expected {expected}, found {found}")]
     DimensionMismatch { expected: usize, found: usize },
+
+    #[error("Indexing error: {0}")]
+    IndexingError(String),
 }
 
 /// Conversion from anyhow::Error
@@ -144,6 +147,7 @@ impl Clone for VectorDBError {
                 expected: *expected,
                 found: *found,
             },
+            Self::IndexingError(s) => Self::IndexingError(s.clone()),
         }
     }
 }
