@@ -2,13 +2,13 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use vectordb_cli::vectordb::provider::onnx::{
+use vectordb_lib::vectordb::provider::onnx::{
     OnnxEmbeddingProvider,
 };
-use vectordb_cli::vectordb::provider::EmbeddingProvider;
+use vectordb_lib::vectordb::provider::EmbeddingProvider;
 use std::path::Path;
 use std::env;
-use vectordb_cli::vectordb::embedding::EmbeddingModel;
+use vectordb_lib::vectordb::embedding::EmbeddingModel;
 
 /// Command line arguments
 #[derive(Parser, Debug)]

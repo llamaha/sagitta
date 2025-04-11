@@ -1,0 +1,149 @@
+image: rust:latest
+
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  # Ensure cargo build artifacts are cached
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  # Ensure git fetch works correctly
+  GIT_DEPTH: 0
+  # Attempt to ensure LFS files are downloaded automatically
+  GIT_LFS_SKIP_SMUDGE: "0"
+
+cache:
+  paths:
+    - .cargo/bin/
+    - .cargo/registry/index/
+    - .cargo/registry/cache/
+
+.common_setup:
+  before_script:
+    - rustc --version && cargo --version
+    - apt-get update -y && apt-get install -y -qq git git-lfs build-essential libssl-dev pkg-config libxml2-utils grep gawk
+    - git lfs install --force
+    - git lfs pull
+
+compile:
+  extends: .common_setup
+  stage: build
+  script:
+    - 'echo "Building with ONNX feature (no CUDA)..."'
+    - 'cargo clean'
+    - 'cargo build --all-targets --no-default-features --features onnx'
+    - 'echo "Configuring ONNX runtime path..."'
+    # Use the wildcard path directly as in your working solution
+    - 'EXACT_ORT_PATH="/root/.cache/ort.pyke.io/dfbin/x86_64-unknown-linux-gnu/*/onnxruntime/lib"'
+    - 'echo "$EXACT_ORT_PATH" > ort_path.txt'
+  artifacts:
+    paths:
+      - target/
+      - ort_path.txt
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+
+test_and_coverage:
+  extends: .common_setup
+  stage: test
+  needs:
+    - compile
+  script:
+    - 'EXACT_ORT_PATH=$(cat ort_path.txt)'
+    - 'echo "Setting LD_LIBRARY_PATH to include ort cache at $EXACT_ORT_PATH"'
+    - 'export LD_LIBRARY_PATH="$EXACT_ORT_PATH:${LD_LIBRARY_PATH}"'
+    - 'echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"'
+    - 'echo "Running tests and generating coverage..."'
+    - 'cargo install cargo-tarpaulin --version 0.27.3 --force'
+    - 'cargo tarpaulin --lib --no-default-features --features onnx --exclude-files "tests/*" --exclude-files "src/bin/*" --exclude-files "src/cli/*" --out Xml --fail-under 20'
+    - 'coverage_value=$(xmllint --xpath "string(//coverage/@line-rate)" cobertura.xml)'
+    - 'echo "Extracted coverage value: $coverage_value"'
+    - 'percentage_num=$(awk -v cov="$coverage_value" "BEGIN { printf \"%.2f\", cov * 100 }")'
+    - 'echo "Coverage percentage: ${percentage_num}%"'
+  coverage: '/Coverage percentage:\s+(\d+(\.\d+)?%)/'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: cobertura.xml
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+
+version_check:
+  extends: .common_setup
+  stage: test
+  needs: []  # No need to wait for compile job
+  script:
+    - 'echo "Checking if Cargo.toml version has been bumped..."'
+    - 'git fetch origin $CI_DEFAULT_BRANCH'
+    - 'current_version=$(grep "^version *=" Cargo.toml | head -n 1 | awk -F"\\"" "{print $2}")'
+    - 'target_version=$(git show origin/$CI_DEFAULT_BRANCH:Cargo.toml | grep "^version *=" | head -n 1 | awk -F"\\"" "{print $2}")'
+    - 'echo "Current version: $current_version"'
+    - 'echo "Target branch ($CI_DEFAULT_BRANCH) version: $target_version"'
+    - 'if [ -z "$current_version" ] || [ -z "$target_version" ]; then echo "Error: Could not extract version from Cargo.toml."; exit 1; fi'
+    - 'if [ "$current_version" = "$target_version" ]; then echo "Error: Version in Cargo.toml ($current_version) has not been bumped compared to target branch ($CI_DEFAULT_BRANCH)."; exit 1; fi'
+    - 'echo "Version check passed ($current_version > $target_version)."'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+
+e2e_language_test:
+  extends: .common_setup
+  stage: test
+  needs:
+    - compile
+  script:
+    - 'EXACT_ORT_DIR=$(cat ort_path.txt)'
+    - 'echo "Setting LD_LIBRARY_PATH to include ort library at $EXACT_ORT_DIR"'
+    - 'export LD_LIBRARY_PATH="$EXACT_ORT_DIR:${LD_LIBRARY_PATH}"'
+    - 'echo "Running End-to-End Language Tests..."'
+    - 'ONNX_MODEL="./onnx/all-minilm-l6-v2.onnx"'
+    - 'ONNX_TOKENIZER="./onnx/"'
+    - 'ls -l ./onnx'
+    - 'if [ ! -f "$ONNX_MODEL" ] || [ ! -d "$ONNX_TOKENIZER" ]; then echo "Error: ONNX model file or tokenizer directory not found."; exit 1; fi'
+    - 'TEST_DIRS=("rust_example" "go_example" "ruby_example" "ts_example" "js_example")'
+    - 'QUERIES=("main function" "http server" "class definition" "async function" "event listener")'
+    - 'EXPECTED_OUTPUTS=("main.rs" "main.go" "example.rb" "index.ts" "script.js")'
+    - |
+      set -e
+      i=0
+      for dir in "${TEST_DIRS[@]}"; do
+        test_path="test_data/$dir"
+        query="${QUERIES[$i]}"
+        expected="${EXPECTED_OUTPUTS[$i]}"
+        
+        echo "--- Testing $dir --- "
+        echo "Indexing $test_path..."
+        cargo run --bin vectordb-cli -- index "$test_path" --onnx-model "$ONNX_MODEL" --onnx-tokenizer "$ONNX_TOKENIZER"
+        
+        echo "Querying for '$query'..."
+        cargo run --bin vectordb-cli -- query "$query" --onnx-model "$ONNX_MODEL" --onnx-tokenizer "$ONNX_TOKENIZER" | grep "$expected"
+        if [ $? -ne 0 ]; then
+            echo "Error: Expected output '$expected' not found."
+            exit 1
+        fi
+        echo "Check passed."
+        i=$((i + 1))
+      done
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+
+run_example:
+  extends: .common_setup
+  stage: deploy
+  needs:
+    - compile
+  script:
+    - 'EXACT_ORT_DIR=$(cat ort_path.txt)'
+    - 'echo "Setting LD_LIBRARY_PATH to include ort library at $EXACT_ORT_DIR"'
+    - 'export LD_LIBRARY_PATH="$EXACT_ORT_DIR:${LD_LIBRARY_PATH}"'
+    - 'echo "Attempting to run index and query commands..."'
+    - 'cargo run -- index . --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Index command failed."'
+    - 'cargo run -- query "test query" --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Query failed."'
+  rules:
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'

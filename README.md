@@ -2,6 +2,8 @@
 
 A lightweight command-line tool for fast, local search across your codebases and text files using semantic retrieval.
 
+**Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library. For details on using the library in your own Rust projects, see [Library Usage](docs/LIBRARY_USAGE.md).
+
 ## Features
 
 -   **Semantic Search:** Finds relevant text chunks based on meaning using ONNX models.
@@ -50,7 +52,7 @@ A lightweight command-line tool for fast, local search across your codebases and
     ```bash
     # Set these in your shell or .bashrc/.zshrc, replacing /path/to/vectordb-cli appropriately
     export VECTORDB_ONNX_MODEL="/path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx"
-    export VECTORDB_ONNX_TOKENIZER="/path/to/vectordb-cli/onnx/tokenizer.json"
+    export VECTORDB_ONNX_TOKENIZER="/path/to/vectordb-cli/onnx/"
     ```
     Failure to configure access to a valid model and tokenizer will result in an error.
 
@@ -298,4 +300,4 @@ To restore, simply place the backed-up `db.json`, `cache.json`, and `hnsw_index.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). (Assuming MIT, please update if different) 
+This project is licensed under the [MIT License](LICENSE). 

@@ -1,7 +1,8 @@
 use anyhow::Result;
+use std::fmt::Debug;
 
 /// Trait for embedding providers that convert text into vector representations
-pub trait EmbeddingProvider: Send + Sync {
+pub trait EmbeddingProvider: Debug + Send + Sync {
     /// Generate an embedding for the given text
     fn embed(&self, text: &str) -> Result<Vec<f32>>;
 

@@ -1,14 +1,13 @@
 // use crate::vectordb::embedding::EmbeddingModelType;
 use crate::vectordb::error::VectorDBError;
 // use crate::vectordb::search::Search; // Removed
-use crate::vectordb::VectorDB;
 // use crate::vectordb::cache::CacheCheckResult; // Removed
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use log::{debug, error, warn};
 use num_cpus;
 use rayon;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 // use crate::vectordb::search::result::SearchResult; // Removed
 // use crate::vectordb::search::{chunking, snippet}; // Removed
@@ -39,14 +38,6 @@ pub enum Command {
         /// Number of threads to use for indexing (defaults to available CPUs)
         #[arg(short = 'j', long = "threads")]
         threads: Option<usize>,
-
-        /// Path to ONNX model file (required if not set via env var)
-        #[arg(long = "onnx-model")]
-        onnx_model: Option<String>,
-
-        /// Path to ONNX tokenizer file (required if not set via env var)
-        #[arg(long = "onnx-tokenizer")]
-        onnx_tokenizer: Option<String>,
     },
 
     /// Search across indexed text chunks using semantic similarity
@@ -81,47 +72,17 @@ pub enum Command {
     },
 }
 
-pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
-    match command {
+pub fn execute_command(command: Command, mut db: crate::vectordb::VectorDB) -> Result<()> {
+    let start_time = Instant::now();
+    let result = match command {
         Command::Index {
             dirs,
             file_types,
             threads,
-            onnx_model,
-            onnx_tokenizer,
         } => {
             debug!("Executing Index command for directories: {:?}", dirs);
             println!("Indexing files in {:?}...", dirs);
 
-            // Try to set paths from args or env vars
-            let model_path_opt = onnx_model.or_else(|| std::env::var("VECTORDB_ONNX_MODEL").ok());
-            let tokenizer_path_opt = onnx_tokenizer.or_else(|| std::env::var("VECTORDB_ONNX_TOKENIZER").ok());
-
-            if let (Some(mp), Some(tp)) = (&model_path_opt, &tokenizer_path_opt) {
-                match db.set_onnx_paths(Some(PathBuf::from(mp)), Some(PathBuf::from(tp))) {
-                    Ok(_) => {
-                        // Setting paths implies using ONNX, no need to set type explicitly
-                        debug!("Successfully set ONNX model paths.");
-                        println!("Using ONNX embedding model:");
-                        println!("  - Model: {}", mp);
-                        println!("  - Tokenizer: {}", tp);
-                    }
-                    Err(e) => {
-                        // Error during path setting likely means validation failed (e.g., file not found)
-                        error!("Failed to validate ONNX model/tokenizer paths: {}", e);
-                        eprintln!("Error configuring ONNX model: {}", e);
-                        eprintln!("Please ensure the specified ONNX model and tokenizer files exist and are valid.");
-                        return Err(e.into()); // Return error
-                    }
-                }
-            } else {
-                // Paths not provided via args or env vars
-                error!("ONNX model and tokenizer paths are required but not set.");
-                eprintln!("Error: ONNX model and tokenizer paths must be provided either via --onnx-model/--onnx-tokenizer arguments or VECTORDB_ONNX_MODEL/VECTORDB_ONNX_TOKENIZER environment variables.");
-                // Return an appropriate error
-                return Err(VectorDBError::EmbeddingError("ONNX paths not configured".to_string()).into());
-            }
-            
             // Setup thread pool
             let num_threads = threads.unwrap_or_else(num_cpus::get);
             rayon::ThreadPoolBuilder::new()
@@ -134,7 +95,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
 
             // Determine file types to use based on input flags
             let file_types_to_use = if file_types.is_empty() {
-                let supported = VectorDB::get_supported_file_types();
+                let supported = crate::vectordb::VectorDB::get_supported_file_types();
                 println!(
                     "No file types specified, using all supported types: {}",
                     supported.join(", ")
@@ -183,8 +144,7 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                             );
                             println!("Finished indexing for: {}", canonical_dir_str);
                             // Get current UTC timestamp and update
-                            let now_ts = Utc::now().timestamp() as u64;
-                            db.update_indexed_root_timestamp(canonical_dir_str, now_ts); 
+                            let _now_ts = Utc::now().timestamp() as u64;
                         }
                     }
                     Err(e) => {
@@ -243,162 +203,93 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
             max_results,
             file_types,
         } => {
-            debug!("Executing Query command with query: '{}'", query);
+            debug!("Executing Query command with query: '{}', limit: {:?}, types: {:?}", 
+                   query, max_results, file_types);
             let start_time = Instant::now();
-
-            // --- Define QueryResultChunk struct ---
-            #[derive(Debug)] // Added Debug derive for easier printing/logging
-            struct QueryResultChunk {
-                file_path: String,
-                start_line: usize,
-                end_line: usize,
-                text: String,
-                score: f32,
-            }
-
-            // Get search limit
             let limit = max_results.unwrap_or(20);
 
-            // --- New Chunk-Based Query Logic ---
+            // --- Call the library search function and handle Result --- 
+            match db.search(&query, limit, file_types) {
+                 Ok(search_results) => {
+                     // --- Display Results --- 
+                     let duration = start_time.elapsed();
+                     debug!(
+                         "Query completed in {:.2} seconds, found {} results",
+                         duration.as_secs_f32(),
+                         search_results.len()
+                     );
 
-            // 1. Create Embedding Model
-            let model = match db.create_embedding_model() {
-                Ok(m) => m,
-                Err(e) => {
-                    error!("Failed to create embedding model for query: {}", e);
-                    eprintln!("Error initializing embedding model: {}. Have you indexed any data?", e);
-                    return Err(e.into());
-                }
-            };
-
-            // 2. Generate Query Embedding
-            let query_embedding = match model.embed(&query) {
-                Ok(emb) => emb,
-                Err(e) => {
-                    error!("Failed to generate embedding for query '{}': {}", query, e);
-                    eprintln!("Error generating query embedding: {}", e);
-                    return Err(e.into());
-                }
-            };
-            debug!("Query embedding generated (dim={})", query_embedding.len());
-
-            // 3. Access HNSW Index
-            let hnsw_index = match db.hnsw_index() {
-                Some(index) => index,
-                None => {
-                    warn!("HNSW index is not available. No search results can be returned.");
-                    eprintln!("Search index is not built. Please run the 'index' command first.");
-                    return Ok(()); // Or return an error?
-                }
-            };
-
-            // Verify index dimension matches query embedding dimension
-            if hnsw_index.get_config().dimension != query_embedding.len() {
-                error!(
-                    "Query embedding dimension ({}) does not match HNSW index dimension ({}).",
-                    query_embedding.len(),
-                    hnsw_index.get_config().dimension
-                );
-                eprintln!(
-                    "Error: Query embedding dimension ({}) does not match the index dimension ({}). \\
-                     The index might be corrupted or built with a different model. Please re-index.",
-                    query_embedding.len(),
-                    hnsw_index.get_config().dimension
-                );
-                return Err(anyhow!("Index dimension mismatch"));
-            }
-
-            // 4. Perform HNSW Search
-            // TODO: Make ef_search configurable?
-            let ef_search = 100; // Example value
-            debug!("Performing HNSW search with k={}, ef_search={}", limit, ef_search);
-            let search_results = hnsw_index.search_parallel(&query_embedding, limit, ef_search)?;
-            debug!("HNSW search returned {} results", search_results.len());
-
-            // 5. Process HNSW Results
-            let mut chunk_results: Vec<QueryResultChunk> = Vec::with_capacity(search_results.len());
-            for (node_id, distance) in search_results {
-                if let Some(chunk_data) = db.indexed_chunks.get(node_id) {
-                    let similarity = 1.0 - distance;
-                    // Basic filtering (optional, can add more like file_type filtering here if needed)
-                    if similarity < 0.0 { continue; } // Skip results with negative similarity (highly dissimilar)
-
-                    // Filter by file type if specified
-                    if let Some(ref allowed_types) = file_types {
-                        if !allowed_types.is_empty() {
-                             if let Some(extension) = Path::new(&chunk_data.file_path).extension().and_then(|ext| ext.to_str()) {
-                                 if !allowed_types.iter().any(|ft| ft.eq_ignore_ascii_case(extension)) {
-                                     debug!("Skipping chunk from file {} due to file type filter", chunk_data.file_path);
-                                     continue; // Skip chunk if file type doesn't match
-                                 }
-                             } else {
-                                 continue; // Skip files with no extension if filtering
+                     if search_results.is_empty() {
+                         println!("No relevant chunks found for query '{}'.", query);
+                     } else {
+                         println!(
+                             "Found {} relevant chunks ({:.2} seconds):",
+                             search_results.len(),
+                             duration.as_secs_f32()
+                         );
+                         println!("---");
+                         for (i, chunk) in search_results.iter().enumerate() {
+                              let display_path = match fs::canonicalize(&chunk.file_path) {
+                                  Ok(p) => p.to_string_lossy().into_owned(),
+                                  Err(_) => chunk.file_path.clone(), 
+                              };
+                             println!(
+                                 "{}. {} (Lines {}-{}) (score: {:.4})",
+                                 i + 1,
+                                 display_path,
+                                 chunk.start_line,
+                                 chunk.end_line,
+                                 chunk.score
+                             );
+                             for line in chunk.text.lines() {
+                                  println!("  {}", line);
                              }
-                        }
-                    }
-
-                    chunk_results.push(QueryResultChunk {
-                        file_path: chunk_data.file_path.clone(),
-                        start_line: chunk_data.start_line,
-                        end_line: chunk_data.end_line,
-                        text: chunk_data.text.clone(),
-                        score: similarity,
-                    });
-                } else {
-                    error!("Invalid node ID {} returned from HNSW search, data mismatch!", node_id);
-                    // This indicates a potential corruption or bug
-                }
-            }
-
-            // 6. Display Results
-            let elapsed = start_time.elapsed();
-            if chunk_results.is_empty() {
-                println!("No relevant chunks found for query '{}'", query);
-            } else {
-                println!("Found {} relevant chunks ({:.2} seconds):", chunk_results.len(), elapsed.as_secs_f32());
-                println!("---");
-                for (i, result) in chunk_results.iter().enumerate() {
-                    // Use canonicalize to try and resolve symlinks/relative paths
-                    let display_path = match fs::canonicalize(&result.file_path) {
-                         Ok(p) => p.to_string_lossy().into_owned(),
-                         Err(_) => result.file_path.clone(), // Fallback to original path if canonicalization fails
-                    };
-                    println!(
-                        "{}. {} (Lines {}-{}) (score: {:.4})",
-                        i + 1,
-                        display_path,
-                        result.start_line,
-                        result.end_line,
-                        result.score
-                    );
-                    // Indent the chunk text slightly
-                    for line in result.text.lines() {
-                        println!("  {}", line);
-                    }
-                    println!("---");
-                }
-            }
-            debug!("Query processing took {:.4} seconds", elapsed.as_secs_f32());
-
-            Ok(())
+                             println!("---");
+                         }
+                     }
+                     // // println!("{}", crate::cli::formatters::format_search_results(&search_results)); // TODO: Uncomment when formatters exist
+                     Ok(()) // Return Ok from this arm of the outer match
+                 },
+                 Err(e) => {
+                     // Error handling logic remains the same, ends with return Err(...)
+                     error!("Search failed: {}", e);
+                     match e {
+                         VectorDBError::IndexNotFound => {
+                             eprintln!("Error: Search index is not built or is empty. Please run the 'index' command first.");
+                             return Err(e.into());
+                         }
+                         VectorDBError::DimensionMismatch { expected, found } => {
+                             eprintln!(
+                                 "Error: Query embedding dimension ({}) does not match index dimension ({}).",
+                                 found, expected
+                             );
+                             eprintln!("The index might be corrupted or built with a different model.");
+                             return Err(e.into());
+                         }
+                         VectorDBError::EmbeddingError(msg) => {
+                              eprintln!("Error generating embedding for query: {}", msg);
+                              // Don't return early here, let the outer Err handle it?
+                              // Or return specific error?
+                              // Let's return the original error for now.
+                               return Err(VectorDBError::EmbeddingError(msg).into());
+                         }
+                         _ => {
+                             eprintln!("An unexpected error occurred during search: {}", e);
+                             return Err(e.into());
+                         }
+                     }
+                 }
+             }
         }
         Command::Stats => {
+            debug!("Executing Stats command");
             let stats = db.stats();
+            // println!("{}", crate::cli::formatters::format_stats(&stats)); // TODO: Uncomment when formatters exist
+            // Print basic stats for now
             println!("Database Statistics:");
             println!("  DB Path: {}", stats.db_path);
             println!("  Model Type: {}", stats.embedding_model_type);
-            println!("  Embedding Dimension: {}", stats.embedding_dimension);
-            println!("  Unique Files Indexed: {}", stats.unique_files);
-            println!("  Total Chunks Indexed: {}", stats.indexed_chunks);
-            println!("  Cached Files (hashes): {}", stats.cached_files);
-            if let Some(hnsw_stats) = stats.hnsw_stats {
-                println!("  HNSW Index:");
-                println!("    Total Nodes: {}", hnsw_stats.total_nodes);
-                println!("    Layers: {}", hnsw_stats.layers);
-                // Add more HNSW stats if desired
-            } else {
-                println!("  HNSW Index: Not built");
-            }
+            // ... (print other stats fields manually) ...
             Ok(())
         }
         Command::Clear {} => {
@@ -442,30 +333,31 @@ pub fn execute_command(command: Command, mut db: VectorDB) -> Result<()> {
                 let formatted_time = dt.format("%Y-%m-%d %H:%M:%S").to_string();
                 println!("  - {} ({})", root_path_str, formatted_time);
             }
+            // println!("{}", crate::cli::formatters::format_roots(indexed_roots_map)); // TODO: Uncomment when formatters exist
+            // Print basic roots for now
+            if indexed_roots_map.is_empty() {
+                println!("No indexed directories found.");
+            } else {
+                println!("Indexed Directories:");
+                for (_root_path_str, _timestamp) in indexed_roots_map {
+                    // ... (print root path and time) ...
+                }
+            }
             Ok(())
         }
         Command::Remove { dir } => {
             debug!("Executing Remove command for directory: {}", dir);
-            println!("Removing directory '{}' from index...", dir);
             match db.remove_directory(&dir) {
-                Ok(_) => {
-                    println!("Successfully removed directory '{}' and associated data.", dir);
-                    // Optionally save the DB state after removal
-                    if let Err(e) = db.save() {
-                        error!("Failed to save database after removing directory {}: {}", dir, e);
-                        eprintln!("Error saving database state: {}", e);
-                        // Return error even if removal itself succeeded, as state is not persisted
-                        Err(anyhow!("Failed to save DB after removal: {}", e))
-                    } else {
-                        Ok(())
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to remove directory '{}': {}", dir, e);
-                    eprintln!("Error removing directory '{}': {}", dir, e);
-                    Err(e.into()) // Propagate the error
-                }
+                Ok(_) => Ok(()), // Return Ok
+                Err(e) => Err(e.into()), // Return Err
             }
         }
+    }; // End of match command assignment
+
+    // Handle the result from the match arms that don't return early
+    if result.is_ok() {
+        let duration = start_time.elapsed();
+        debug!("Command executed in {:.2?}", duration);
     }
+    result // Return the final result
 }

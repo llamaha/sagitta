@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use log;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CacheEntry {
@@ -179,8 +180,8 @@ impl EmbeddingCache {
                 Err(e) => {
                     // Error getting current hash (e.g., file deleted), treat as cache miss
                     // Log the error for debugging
-                    eprintln!(
-                        "Warning: Could not get file hash for cache check {}: {}",
+                    log::warn!(
+                        "Could not get file hash for cache check {}: {}",
                         file_path.display(),
                         e
                     );

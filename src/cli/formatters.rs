@@ -1,0 +1,1 @@
+// Formatters for displaying search results, stats, etc. 
