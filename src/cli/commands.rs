@@ -1,5 +1,5 @@
 // use crate::vectordb::embedding::EmbeddingModelType;
-use crate::vectordb::error::VectorDBError;
+use crate::VectorDBError;
 // use crate::vectordb::search::Search; // Removed
 // use crate::vectordb::cache::CacheCheckResult; // Removed
 use anyhow::{anyhow, Result};
@@ -7,7 +7,7 @@ use clap::Parser;
 use log::{debug, error, warn};
 use num_cpus;
 use rayon;
-use std::path::PathBuf;
+// use std::path::PathBuf; // Remove unused import
 use std::time::Instant;
 // use crate::vectordb::search::result::SearchResult; // Removed
 // use crate::vectordb::search::{chunking, snippet}; // Removed
