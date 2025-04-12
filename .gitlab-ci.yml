@@ -80,8 +80,8 @@ version_check:
   script:
     - 'echo "Checking if Cargo.toml version has been bumped..."'
     - 'git fetch origin $CI_DEFAULT_BRANCH'
-    - 'current_version=$(grep "^version *=" Cargo.toml | head -n 1 | awk -F"\\"" "{print $2}")'
-    - 'target_version=$(git show origin/$CI_DEFAULT_BRANCH:Cargo.toml | grep "^version *=" | head -n 1 | awk -F"\\"" "{print $2}")'
+    - 'current_version=$(grep -E "^[[:space:]]*version[[:space:]]*=" Cargo.toml | head -n 1 | cut -d\" -f2)'
+    - 'target_version=$(git show origin/$CI_DEFAULT_BRANCH:Cargo.toml | grep -E "^[[:space:]]*version[[:space:]]*=" | head -n 1 | cut -d\" -f2)'
     - 'echo "Current version: $current_version"'
     - 'echo "Target branch ($CI_DEFAULT_BRANCH) version: $target_version"'
     - 'if [ -z "$current_version" ] || [ -z "$target_version" ]; then echo "Error: Could not extract version from Cargo.toml."; exit 1; fi'
