@@ -1,13 +1,19 @@
 [package]
 name = "vectordb-cli"
 description = "A CLI tool for semantic code search."
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Adam Mulvany <amulvany@gitlab.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://gitlab.com/amulvany/vectordb-cli"
+keywords = ["cli", "search", "semantic", "code", "vector", "onnx", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = ["onnx"]
-onnx = []
+onnx = ["ort"]
+cuda = ["ort/cuda"]
 
 [dependencies]
 clap = { version = "4.5.7", features = ["derive"] }
@@ -46,7 +52,7 @@ crossbeam-channel = "0.5"
 # quote = "1.0"
 ctrlc = "3.4"
 # ONNX Runtime dependencies
-ort = { version = "2.0.0-rc.9", features = ["cuda"] }
+ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
 lru = "0.11.0"
 lazy_static = "1.4.0"
 # File watching dependency
@@ -64,9 +70,17 @@ test-log = "0.2"
 assert_cmd = "2.0"
 predicates = "3.1"
 
+[lib]
+name = "vectordb_lib"
+path = "src/lib.rs"
+
 [[bin]]
 name = "vectordb-cli"
-path = "src/main.rs"
+path = "src/bin/vectordb-cli.rs"
+
+[[bin]]
+name = "model-inspector"
+path = "src/bin/model-inspector.rs"
 
 [[bin]]
 name = "onnx_benchmark"

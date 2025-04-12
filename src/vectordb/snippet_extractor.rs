@@ -1,177 +1,150 @@
-use anyhow::Result;
-// Removed unused import
-// use regex::Regex;
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
-// use super::code_structure::{CodeStructureAnalyzer, CodeContext, MethodInfo, TypeInfo};
 
-const DEFAULT_CONTEXT_LINES: usize = 5;
+const DEFAULT_CONTEXT_LINES: usize = 3; // Number of context lines above/below
 
-/// Structure to hold context information for a code snippet
-#[derive(Debug, Clone)]
-pub struct SnippetContext {
-    pub snippet_text: String,
-    // Removed unused fields
-    // pub start_line: usize,
-    // pub end_line: usize,
-    // pub file_path: String,
-    // pub is_definition: bool,
-    // pub is_usage: bool,
-}
+/// Extracts a snippet of text from a file, centered around the given line range,
+/// optionally adding context lines above and below.
+///
+/// # Arguments
+/// * `file_path` - Path to the file.
+/// * `chunk_start_line` - The 1-indexed starting line of the core chunk.
+/// * `chunk_end_line` - The 1-indexed ending line of the core chunk.
+///
+/// # Returns
+/// A `Result` containing the formatted snippet string (with line numbers and truncation markers),
+/// or an error if the file cannot be read or lines are invalid.
+pub fn extract_snippet(file_path: &str, chunk_start_line: usize, chunk_end_line: usize) -> Result<String> {
+    let path = Path::new(file_path);
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file for snippet extraction: {}", file_path))?;
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
 
-/// Simple snippet extractor based on content matching
-pub struct SnippetExtractor {}
-
-impl SnippetExtractor {
-    pub fn new() -> Self {
-        Self {}
-    }
-    
-    /// Extract a relevant snippet from a file based on the query
-    // Note: This now only uses content-based extraction
-    pub fn extract_snippet(&mut self, file_path: &str, query: &str) -> Result<SnippetContext> {
-        let path = Path::new(file_path);
-        if !path.exists() {
-            return Err(anyhow::anyhow!("File does not exist: {}", file_path));
-        }
-        
-        // Read file content
-        let content = fs::read_to_string(path)?;
-        
-        // Find the most relevant code section using query terms
-        let query_terms: Vec<String> = query
-            .to_lowercase()
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
-        
-        // Use content-based matching directly
-        self.extract_content_based_snippet(&content, file_path, &query_terms)
-    }
-    
-    // Fallback snippet extraction based on query term location
-    fn extract_content_based_snippet(&self, content: &str, _file_path: &str, query_terms: &[String]) -> Result<SnippetContext> {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.is_empty() {
-            return Ok(SnippetContext {
-                snippet_text: "".to_string(),
-                // Fields removed
-            });
-        }
-
-        // Find the line with the highest score based on query terms
-        let mut best_line_index = 0;
-        let mut max_score = 0.0;
-
-        for (i, line) in lines.iter().enumerate() {
-            let score = Self::calculate_line_score(line, query_terms);
-            if score > max_score {
-                max_score = score;
-                best_line_index = i;
-            }
-        }
-
-        // Calculate context window around the best line
-        let start_context = best_line_index.saturating_sub(DEFAULT_CONTEXT_LINES);
-        let end_context = (best_line_index + DEFAULT_CONTEXT_LINES + 1).min(lines.len());
-
-        let snippet_start_line = start_context;
-        let snippet_end_line = end_context;
-
-        // Build the snippet text
-        let mut snippet = String::new();
-        if snippet_start_line > 0 {
-            snippet.push_str("... (truncated above)\n");
-        }
-        for i in snippet_start_line..snippet_end_line {
-            snippet.push_str(&format!("{}: {}\n", i + 1, lines[i]));
-        }
-        if snippet_end_line < lines.len() {
-            snippet.push_str("... (truncated below)\n");
-        }
-
-        Ok(SnippetContext {
-            snippet_text: snippet,
-            // Fields removed
-        })
+    if chunk_start_line == 0 || chunk_end_line == 0 || chunk_start_line > chunk_end_line || chunk_end_line > total_lines {
+        return Err(anyhow::anyhow!(
+            "Invalid line range [{}, {}] for file {} with {} lines",
+            chunk_start_line, chunk_end_line, file_path, total_lines
+        ));
     }
 
-    /// Calculate a relevance score for a line based on query terms
-    fn calculate_line_score(line: &str, query_terms: &[String]) -> f32 {
-        let line_lower = line.to_lowercase();
-        let mut score = 0.0;
+    // Calculate context window (0-indexed)
+    let core_start_idx = chunk_start_line - 1;
+    let core_end_idx = chunk_end_line - 1;
 
-        for term in query_terms {
-            if line_lower.contains(term) {
-                score += 1.0;
-                // Bonus for exact word match
-                if line_lower.split_whitespace().any(|word| word == term.as_str()) {
-                    score += 1.0;
-                }
-            }
-        }
+    let context_start_idx = core_start_idx.saturating_sub(DEFAULT_CONTEXT_LINES);
+    // Add 1 to core_end_idx because end is exclusive in range, then add context lines
+    let context_end_idx = (core_end_idx + 1 + DEFAULT_CONTEXT_LINES).min(total_lines);
 
-        // Normalize score by line length (prefer shorter lines with matches)
-        if !line.is_empty() {
-            score / (line.len() as f32).sqrt()
+    let mut snippet = String::new();
+
+    // Add lines with numbers (use 1-based indexing for display)
+    for i in context_start_idx..context_end_idx {
+        // Maybe highlight the core chunk lines?
+        let line_prefix = if i >= core_start_idx && i <= core_end_idx {
+            // Indicate core chunk lines (optional)
+            format!("{:>4} | ", i + 1) // Line number for core line
         } else {
-            0.0
-        }
+            format!("{:>4} : ", i + 1) // Line number for context line
+        };
+        snippet.push_str(&line_prefix);
+        snippet.push_str(lines[i]);
+        snippet.push('\n');
     }
-    
-    // Removed unused method highlight_snippet
 
-    // Removed structure-aware methods: extract_method_snippet, extract_type_snippet,
-    // find_matching_method, find_matching_type, extract_method_usage_snippet, clear_cache
+    // Add truncation markers if necessary
+    let mut final_snippet = String::new();
+    if context_start_idx > 0 {
+        final_snippet.push_str("  ...\n");
+    }
+    final_snippet.push_str(&snippet);
+    if context_end_idx < total_lines {
+        // Add newline only if snippet wasn't empty
+        if !snippet.is_empty() { 
+            final_snippet.push('\n'); 
+        }
+        final_snippet.push_str("  ...");
+    }
+
+    Ok(final_snippet.trim_end().to_string())
 }
+
+// Remove the SnippetExtractor struct, its impl, and related tests.
+// Keep file-level tests if desired, adapted to the new function.
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
-    // Removed test test_highlight_snippet
-    
     // Helper to create a temporary file with content
     fn create_temp_file(content: &str) -> tempfile::NamedTempFile {
-        use std::io::Write;
         let mut file = tempfile::NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
         file
     }
 
     #[test]
-    fn test_extract_content_based_snippet() -> Result<()> {
-        let content = "Line 1\nLine 2: Important keyword\nLine 3\nLine 4: Another important thing\nLine 5";
+    fn test_extract_basic_snippet() -> Result<()> {
+        let content = "Line 1\nLine 2\nLine 3 - Core\nLine 4 - Core\nLine 5\nLine 6\nLine 7";
         let file = create_temp_file(content);
-        let mut extractor = SnippetExtractor::new();
-        
-        // Test with a specific keyword
-        let snippet_context = extractor.extract_snippet(file.path().to_str().unwrap(), "keyword")?;
-        assert!(snippet_context.snippet_text.contains("Line 2: Important keyword"));
-        // Removed assertions using removed fields
-        // assert!(snippet_context.start_line <= 2 && snippet_context.end_line >= 2);
-        println!("Snippet for 'keyword':\n{}", snippet_context.snippet_text);
+        let snippet = extract_snippet(file.path().to_str().unwrap(), 3, 4)?;
 
-        // Test with another keyword
-        let snippet_context_2 = extractor.extract_snippet(file.path().to_str().unwrap(), "thing")?;
-        assert!(snippet_context_2.snippet_text.contains("Line 4: Another important thing"));
-        // Removed assertions using removed fields
-        // assert!(snippet_context_2.start_line <= 4 && snippet_context_2.end_line >= 4);
-        println!("Snippet for 'thing':\n{}", snippet_context_2.snippet_text);
+        println!("Snippet (3-4):\n{}", snippet);
+        assert!(snippet.contains(" 3 | Line 3 - Core"));
+        assert!(snippet.contains(" 4 | Line 4 - Core"));
+        // Check context lines (default 3)
+        assert!(snippet.contains(" 1 : Line 1"));
+        assert!(snippet.contains(" 2 : Line 2"));
+        assert!(snippet.contains(" 5 : Line 5"));
+        assert!(snippet.contains(" 6 : Line 6"));
+        assert!(snippet.contains(" 7 : Line 7"));
+        // Check no truncation markers needed
+        assert!(!snippet.contains("..."));
 
         Ok(())
     }
 
     #[test]
-    fn test_extract_from_empty_file() -> Result<()> {
-        let content = "";
-        let file = create_temp_file(content);
-        let mut extractor = SnippetExtractor::new();
-        let snippet_context = extractor.extract_snippet(file.path().to_str().unwrap(), "anything")?;
-        assert!(snippet_context.snippet_text.is_empty());
-        // Removed assertions using removed fields
-        // assert_eq!(snippet_context.start_line, 1);
-        // assert_eq!(snippet_context.end_line, 1);
+    fn test_extract_snippet_with_truncation() -> Result<()> {
+        let content = (1..=20).map(|i| format!("Line {}", i)).collect::<Vec<_>>().join("\n");
+        let file = create_temp_file(&content);
+        let file_path = file.path().to_str().unwrap().to_string();
+
+        // Check start truncation
+        let snippet_start = extract_snippet(&file_path, 1, 2)?;
+        println!("Snippet (1-2):\n{}", snippet_start); // Debug print
+        assert!(!snippet_start.starts_with("..."), "Snippet start should not start with ...");
+        assert!(snippet_start.ends_with("\n  ..."), "Snippet start should end with truncation marker");
+
+        // Check end truncation
+        let snippet_end = extract_snippet(&file_path, 19, 20)?;
+        println!("Snippet (19-20):\n{}", snippet_end); // Debug print
+        assert!(snippet_end.starts_with("  ..."), "Snippet end should start with truncation marker");
+        assert!(!snippet_end.ends_with("..."), "Snippet end should not have extra trailing marker");
+
+        // Check middle (both truncations)
+        let snippet_middle = extract_snippet(&file_path, 8, 10)?;
+        println!("Snippet (8-10):\n{}", snippet_middle); // Debug print
+        assert!(snippet_middle.starts_with("  ..."), "Snippet middle should start with truncation marker");
+        assert!(snippet_middle.ends_with("\n  ..."), "Snippet middle should end with truncation marker");
+
         Ok(())
     }
+
+     #[test]
+     fn test_extract_invalid_lines() -> Result<()> {
+         let content = "Line 1\nLine 2";
+         let file = create_temp_file(content);
+         let path_str = file.path().to_str().unwrap();
+
+         assert!(extract_snippet(path_str, 0, 1).is_err(), "Start line 0 should fail");
+         assert!(extract_snippet(path_str, 1, 0).is_err(), "End line 0 should fail");
+         assert!(extract_snippet(path_str, 2, 1).is_err(), "Start > End should fail");
+         assert!(extract_snippet(path_str, 1, 3).is_err(), "End > Total lines should fail");
+         assert!(extract_snippet(path_str, 3, 3).is_err(), "Start > Total lines should fail");
+
+         Ok(())
+     }
 }

@@ -1,7 +1,7 @@
 use crate::vectordb::provider::EmbeddingProvider;
 use anyhow::{Error, Result, anyhow};
 use log::{debug};
-use ndarray::{s, Array, Array2, Ix1, Ix2};
+use ndarray::{Array, Array2};
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::{DynValue, Value};
 use ort::execution_providers::{CUDAExecutionProvider};
@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokenizers::Tokenizer;
 
 /// ONNX-based embedding provider
+#[derive(Debug)]
 pub struct OnnxEmbeddingProvider {
     /// The tokenizer for preprocessing input text
     tokenizer: Arc<Mutex<Tokenizer>>,
@@ -116,37 +117,45 @@ impl OnnxEmbeddingProvider {
 
     /// Convert the ORT output tensor to a Vec<f32>
     fn extract_embedding(&self, pooler_output_value: &DynValue) -> Result<Vec<f32>> {
-        let pooler_output_view = pooler_output_value.try_extract_tensor::<f32>()?;
+        let (shape, data) = pooler_output_value.try_extract_raw_tensor::<f32>()?;
 
         // Use self.dimension for validation
         let expected_dim = self.dimension;
 
-        let embedding = match pooler_output_view.ndim() {
+        let embedding = match shape.len() {
             1 => {
-                let view1d = pooler_output_view.into_dimensionality::<Ix1>()?;
-                if view1d.shape()[0] != expected_dim {
-                    return Err(Error::msg(format!(
-                        "Unexpected 1D pooler output shape: got {:?}, expected [{}]",
-                        view1d.shape(), expected_dim
-                    )));
-                }
-                view1d.to_vec()
+                 if shape[0] as usize != expected_dim {
+                     return Err(Error::msg(format!(
+                         "Unexpected 1D pooler output shape: got {:?}, expected [{}]",
+                         shape, expected_dim
+                     )));
+                 }
+                 // Directly use the data slice since it's 1D
+                 data.to_vec()
             }
             2 => {
-                let view2d = pooler_output_view.into_dimensionality::<Ix2>()?;
-                let expected_shape = [1, expected_dim];
-                if view2d.shape() != expected_shape {
-                    return Err(Error::msg(format!(
-                        "Unexpected 2D pooler output shape: got {:?}, expected {:?}",
-                        view2d.shape(), expected_shape
-                    )));
-                }
-                view2d.slice(s![0, ..]).to_vec()
+                 let expected_shape = [1, expected_dim as i64];
+                 if shape != expected_shape {
+                     return Err(Error::msg(format!(
+                         "Unexpected 2D pooler output shape: got {:?}, expected {:?}",
+                         shape, expected_shape
+                     )));
+                 }
+                 // Reconstruct ArrayView2 from shape and data
+                 // We expect shape [1, dim], so we take the first row implicitly by taking the whole slice
+                 // Ensure the length matches before creating the view to avoid panic
+                 if data.len() != expected_dim {
+                     return Err(Error::msg(format!(
+                         "Data length {} mismatch for expected shape {:?}",
+                         data.len(), expected_shape
+                     )));
+                 }
+                 data.to_vec() // Data is already the correct slice for shape [1, dim]
             }
             _ => {
                 return Err(Error::msg(format!(
-                    "Pooler output has unexpected dimensionality: {:?}",
-                    pooler_output_view.shape()
+                    "Pooler output has unexpected dimensionality: shape {:?}",
+                    shape
                 )));
             }
         };
@@ -186,9 +195,14 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
             Array2::from_shape_vec((1, attention_mask.len()), attention_mask)
             .map_err(|e| anyhow!("Attention mask shape error: {}", e))?; 
 
-        // Use Value::from_array
-        let input_ids_value = Value::from_array(input_ids_array)?;
-        let attention_mask_value = Value::from_array(attention_mask_array)?;
+        // Use Value::from_array with shape and Vec
+        let input_ids_shape = input_ids_array.shape().to_vec();
+        let input_ids_vec = input_ids_array.into_raw_vec_and_offset().0;
+        let input_ids_value = Value::from_array((input_ids_shape, input_ids_vec))?;
+
+        let attention_mask_shape = attention_mask_array.shape().to_vec();
+        let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
+        let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))?;
 
         // Use inputs! macro with Values
         let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
@@ -223,9 +237,14 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
             Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)
             .map_err(|e| anyhow!("Attention mask batch shape error: {}", e))?;
 
-        // Use Value::from_array
-        let input_ids_value = Value::from_array(input_ids_array)?;
-        let attention_mask_value = Value::from_array(attention_mask_array)?;
+        // Use Value::from_array with shape and Vec
+        let input_ids_shape = input_ids_array.shape().to_vec();
+        let input_ids_vec = input_ids_array.into_raw_vec_and_offset().0;
+        let input_ids_value = Value::from_array((input_ids_shape, input_ids_vec))?;
+
+        let attention_mask_shape = attention_mask_array.shape().to_vec();
+        let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
+        let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))?;
 
         // Use inputs! macro with Values
         let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
@@ -234,14 +253,13 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
         // Extract pooler output tensor view directly by name
         let pooler_output = outputs.get("pooler_output")
             .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
-        let pooler_view = pooler_output.try_extract_tensor::<f32>()?;
+        let (output_shape, output_data) = pooler_output.try_extract_raw_tensor::<f32>()?;
 
         // Check output shape: [batch_size, embedding_dim]
         let expected_dim = self.dimension;
-        let output_shape = pooler_view.shape();
         if output_shape.len() != 2
-            || output_shape[0] != batch_size
-            || output_shape[1] != expected_dim
+            || output_shape[0] as usize != batch_size
+            || output_shape[1] as usize != expected_dim
         {
             return Err(Error::msg(format!(
                 "Unexpected pooler output shape: got {:?}, expected [{}, {}]",
@@ -252,8 +270,17 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
         // Extract individual embeddings and normalize
         let mut embeddings = Vec::with_capacity(batch_size);
         for i in 0..batch_size {
-            let embedding_view = pooler_view.slice(s![i, ..]);
-            let embedding_vec = embedding_view.to_vec();
+            let start = i * expected_dim;
+            let end = start + expected_dim;
+            // Slice the raw data buffer
+            if end > output_data.len() {
+                 return Err(Error::msg(format!(
+                    "Data slice index out of bounds for batch item {}: start {}, end {}, data len {}",
+                    i, start, end, output_data.len()
+                )));
+            }
+            let embedding_slice = &output_data[start..end];
+            let embedding_vec = embedding_slice.to_vec();
             embeddings.push(Self::normalize_embedding(embedding_vec));
         }
 

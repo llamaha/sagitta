@@ -1,16 +1,18 @@
-pub mod cache;
-// pub mod code_ranking;
-// pub mod code_structure;
 pub mod db;
-pub mod embedding;
 pub mod error;
-pub mod hnsw;
-pub mod onnx;
-// pub mod parsing;
+pub mod embedding;
 pub mod provider;
+pub mod hnsw;
 pub mod search;
-// pub mod search_ranking;
 pub mod snippet_extractor;
-pub mod utils;
+pub mod embedding_logic;
+pub mod indexing;
+mod cache;
 
-pub use db::VectorDB;
+// Re-export key types/structs needed elsewhere
+pub use crate::vectordb::db::{VectorDB, VectorDBConfig};
+pub use crate::vectordb::error::{Result, VectorDBError};
+
+// Optional: Re-export key types if desired at the vectordb level
+// pub use db::VectorDB;
+// pub use error::VectorDBError;

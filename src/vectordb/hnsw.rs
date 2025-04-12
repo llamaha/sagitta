@@ -522,7 +522,7 @@ pub struct HNSWStats {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
-    use rand::distributions::{Distribution, Uniform}; // Added for vector generation
+//    use rand::distributions::Distribution; // Added for vector generation
 
     const TEST_DIM: usize = 4;
 
@@ -605,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn test_search() {
+    fn test_search() -> Result<()> {
         let config = test_config();
         let mut index = HNSWIndex::new(config);
 
@@ -625,10 +625,12 @@ mod tests {
 
         let wrong_dim_query = vec![0.8; TEST_DIM + 1];
         assert!(index.search_parallel(&wrong_dim_query, 2, 10).is_err());
+
+        Ok(())
     }
 
     #[test]
-    fn test_stats() {
+    fn test_stats() -> Result<()> {
         let config = test_config();
         let mut index = HNSWIndex::new(config.clone());
 
@@ -642,6 +644,8 @@ mod tests {
         assert_eq!(stats.layers, config.num_layers);
         assert_eq!(stats.layer_stats.len(), config.num_layers);
         assert_eq!(index.config.dimension, TEST_DIM);
+
+        Ok(())
     }
 
     fn benchmark<F>(name: &str, iterations: u32, mut f: F) -> Duration
@@ -672,7 +676,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn benchmark_linear_vs_hnsw() {
+    fn benchmark_linear_vs_hnsw() -> Result<()> {
         let test_dim = 16;
         let num_vectors = 1000;
         let num_queries = 10;
@@ -727,7 +731,7 @@ mod tests {
         query_idx = 0;
         let hnsw_time = benchmark("HNSW search", num_queries as u32, || {
             let query = &queries[query_idx];
-            let _ = hnsw_index.search_parallel(query, k, 100)?;
+            let _ = hnsw_index.search_parallel(query, k, 100).expect("HNSW search failed in benchmark");
             query_idx = (query_idx + 1) % num_queries;
         });
 
@@ -748,11 +752,13 @@ mod tests {
             println!("Recall@{}: {:.2}", k, recall);
             assert!(recall >= 0.7, "HNSW search quality is too low: {:.2}", recall);
         }
+
+        Ok(())
     }
 
     #[test]
     #[ignore]
-    fn benchmark_insertion() {
+    fn benchmark_insertion() -> Result<()> {
         let config = HNSWConfig {
             dimension: 128, // More realistic dimension
             m: 16,
@@ -772,11 +778,10 @@ mod tests {
         benchmark("HNSW Insertion", 1, || {
             let mut index = HNSWIndex::new(config.clone());
             for vec in vectors.iter() {
-                // Using expect here for benchmark simplicity, relies on tests for correctness
                 index.insert(vec.clone()).expect("Insert failed in benchmark");
             }
-            // Ensure index size is correct after insertion
             assert_eq!(index.len(), num_vectors);
         });
+        Ok(())
     }
 }

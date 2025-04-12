@@ -2,6 +2,8 @@
 
 A lightweight command-line tool for fast, local search across your codebases and text files using semantic retrieval.
 
+**Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library. For details on using the library in your own Rust projects, see [Library Usage](docs/LIBRARY_USAGE.md).
+
 ## Features
 
 -   **Semantic Search:** Finds relevant text chunks based on meaning using ONNX models.

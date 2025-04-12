@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use anyhow::anyhow;
 use std::cmp::Ordering;
 use super::result::SearchResult;
+use serde::{Deserialize, Serialize};
 
 /// Standard search using vector similarity with a limit on the number of results
 pub(crate) fn search_with_limit(
@@ -40,24 +41,30 @@ pub(crate) fn search_with_limit(
     // Process results
     let mut final_results: Vec<SearchResult> = Vec::with_capacity(search_results.len());
     for (node_id, distance) in search_results {
-        let similarity = 1.0 - distance;
-        if similarity < 0.0 { continue; } // Skip highly dissimilar results
+        // Assuming distance is cosine distance (0=identical, 2=opposite)
+        // Convert to similarity score (e.g., 1.0 = identical, 0.0 = orthogonal)
+        let score = 1.0 - (distance / 2.0).max(0.0).min(1.0);
+
+        // Skip low-scoring results if needed (example threshold)
+        if score < 0.1 { continue; }
 
         // Retrieve chunk data using node_id
         if let Some(chunk) = db.indexed_chunks.get(node_id) {
              // Create a SearchResult 
              final_results.push(SearchResult {
                  file_path: chunk.file_path.clone(),
-                 similarity, // Use the HNSW similarity
-                 // Optional: Add chunk info like start/end lines if SearchResult is adapted
+                 start_line: chunk.start_line, // Add line info
+                 end_line: chunk.end_line,     // Add line info
+                 text: chunk.text.clone(),     // Add text (or snippet later)
+                 score, // Use the calculated score
              });
         } else {
              error!("HNSW search returned invalid node ID: {}", node_id);
         }
     }
     
-    // Sort by similarity (descending)
-    final_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(Ordering::Equal));
+    // Sort by score (descending)
+    final_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
 
     // Deduplicate results by file path, keeping the one with the highest similarity
     let mut unique_results = Vec::new();
@@ -100,4 +107,43 @@ pub(crate) fn search_with_limit(
     results.truncate(limit);
     Ok(results)
     */
+}
+
+// Define the Embedding struct at the module level
+#[derive(Debug, Serialize, Deserialize, Clone)] // Add necessary derives
+pub struct Embedding {
+    pub vector: Vec<f32>,
+}
+
+// Implementation block for Embedding
+impl Embedding {
+    pub fn new(vector: Vec<f32>) -> Self {
+        Self { vector }
+    }
+
+    pub fn dim(&self) -> usize {
+        self.vector.len()
+    }
+}
+
+// --- Tests ---
+#[cfg(test)]
+mod tests {
+    use super::Embedding; // Import only what's needed (Embedding)
+
+    #[test]
+    fn test_embedding_creation_and_dim() {
+        let vec = vec![1.0, 2.0, 3.0];
+        let emb = Embedding::new(vec.clone());
+        assert_eq!(emb.vector, vec);
+        assert_eq!(emb.dim(), 3);
+    }
+
+    #[test]
+    fn test_empty_embedding() {
+        let vec: Vec<f32> = vec![];
+        let emb = Embedding::new(vec.clone());
+        assert_eq!(emb.vector, vec);
+        assert_eq!(emb.dim(), 0);
+    }
 } 

@@ -5,7 +5,7 @@ pub mod chunking;
 pub mod query_analysis;
 pub mod result; // Make result public so SearchResult can be used outside
 // pub mod snippet; // Removed unused module
-mod vector;
+pub mod vector; // Make public
 
 // Re-export the necessary public items
 pub use result::SearchResult;
@@ -35,7 +35,8 @@ pub struct Search {
 impl Search {
     /// Creates a new Search instance.
     pub fn new(db: VectorDB) -> Result<Self> {
-        let model = db.create_embedding_model()?;
+        // Use the embedding handler to create the model
+        let model = db.embedding_handler().create_embedding_model()?;
         Ok(Self {
             db,
             model,
@@ -101,81 +102,139 @@ impl Search {
 // --- Tests --- 
 #[cfg(test)]
 mod tests {
-    // Keep imports as they are, they should work with the new structure
-    use super::*; 
+    use super::Search; // Import Search from the parent module
     use crate::vectordb::db::VectorDB;
+    use crate::VectorDBConfig;
     use tempfile::tempdir;
     use std::fs;
-    use std::path::Path;
+    use std::path::PathBuf;
     use log::warn; // Ensure warn is imported for setup_test_env
 
-    // Helper function to set up a test environment with indexed files
-    fn setup_test_env() -> (tempfile::TempDir, VectorDB) {
+    // Helper to setup a test environment
+    // Returns None if required ONNX files are missing
+    fn setup_test_env() -> Option<(tempfile::TempDir, PathBuf, VectorDB)> {
         let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir.path().join("test_db.json");
-        let db_path_str = db_path.to_str().unwrap().to_string();
+        let db_path = temp_dir.path().join("search_test_db.json");
+        let model_path = PathBuf::from("onnx/all-minilm-l12-v2.onnx");
+        let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json");
 
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+        // Return None if files are missing
+        if !model_path.exists() || !tokenizer_path.exists() {
+            warn!("Default ONNX model/tokenizer not found in ./onnx/. Skipping search test.");
+            return None; 
         }
+        
+        let config = VectorDBConfig {
+            db_path: db_path.to_str().unwrap().to_string(),
+            onnx_model_path: model_path,
+            onnx_tokenizer_path: tokenizer_path,
+        };
 
-        let mut db = VectorDB::new(db_path_str.clone()).unwrap();
+        // Use expect here as failure after file check is unexpected
+        let mut db = VectorDB::new(config).expect("Failed to create VectorDB for test after checking files");
 
-        // Attempt to set default ONNX paths
-        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
-        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
-        if default_model_path.exists() && default_tokenizer_path.exists() {
-             if let Err(e) = db.set_onnx_paths(Some(default_model_path.to_path_buf()), Some(default_tokenizer_path.to_path_buf())) {
-                warn!("Setup_test_env: Failed to set default ONNX paths: {}", e);
-             }
-        }
-
-        // Create test files
-        let files_data = vec![
-            ("file1_alpha.txt", "Detailed Rust code snippet regarding alpha topic, contains specific implementation details."),
-            ("file2_bravo.txt", "Python script focusing on the bravo subject matter, includes data processing functions."),
-            ("file3_alpha.txt", "Another Rust example for the alpha problem, showcasing a different approach to the implementation."),
-        ];
-
-        for (filename, content) in files_data {
-            let file_path = temp_dir.path().join(filename);
-            fs::write(&file_path, content).unwrap();
-        }
-
-        // Index the directory containing the test files
-        let file_patterns = vec!["txt".to_string()];
-        db.index_directory(temp_dir.path().to_str().unwrap(), &file_patterns)
+        // Create dummy files for indexing
+        let dir_path = temp_dir.path().join("test_files");
+        fs::create_dir(&dir_path).unwrap();
+        let file1_path = dir_path.join("file_alpha.txt");
+        fs::write(&file1_path, "Alpha Bravo Charlie").unwrap();
+        let file2_path = dir_path.join("file_rust.rs");
+        fs::write(&file2_path, "fn main() { println!(\"bravo\"); }").unwrap();
+        
+        // Index the directory
+        // Use expect here as failure after file check is unexpected
+        db.index_directory(dir_path.to_str().unwrap(), &[])
             .expect("Failed to index test directory in setup_test_env");
 
-        (temp_dir, db)
+        Some((temp_dir, dir_path, db))
     }
 
-    #[test_log::test]
-    fn test_vector_search() {
-        // Restore check for ONNX model files
-        let default_model_path = Path::new("onnx/all-minilm-l12-v2.onnx");
-        let default_tokenizer_path = Path::new("onnx/minilm_tokenizer.json");
-        if !default_model_path.exists() || !default_tokenizer_path.exists() {
-            warn!("Skipping test_vector_search because default ONNX model/tokenizer files are not available in ./onnx/");
-            return; // Skip test if files are missing
+    #[test]
+    fn test_search_struct_new() {
+        let setup = setup_test_env();
+        if setup.is_none() {
+            println!("Skipping test_search_struct_new due to missing ONNX files.");
+            return;
+        }
+        let (_temp_dir, _dir_path, db) = setup.unwrap();
+
+        let search_instance = Search::new(db.clone()); // Clone db for the test
+        assert!(search_instance.is_ok());
+        let search = search_instance.unwrap();
+        // Check if the model was created (basic check) - Need EmbeddingModelType
+        use crate::vectordb::embedding::EmbeddingModelType;
+        assert_eq!(search.model.model_type(), EmbeddingModelType::Onnx);
+    }
+
+    #[test]
+    fn test_list_file_types() {
+        let setup = setup_test_env();
+        if setup.is_none() {
+            println!("Skipping test_list_file_types due to missing ONNX files.");
+            return;
+        }
+        let (_temp_dir, _dir_path, db) = setup.unwrap();
+        let search = Search::new(db).expect("Failed to create Search instance");
+
+        let mut file_types = search.list_file_types();
+        file_types.sort(); // Sort for consistent assertion
+
+        assert_eq!(file_types, vec!["rs", "txt"]);
+    }
+
+    #[test]
+    fn test_list_indexed_dirs() {
+        let setup = setup_test_env();
+        if setup.is_none() {
+            println!("Skipping test_list_indexed_dirs due to missing ONNX files.");
+            return;
+        }
+        let (_temp_dir, dir_path, db) = setup.unwrap(); // Need dir_path
+        let search = Search::new(db).expect("Failed to create Search instance");
+
+        let mut indexed_dirs = search.list_indexed_dirs();
+        indexed_dirs.sort(); // Sort for consistent assertion
+
+        // Expecting the canonicalized path of the indexed directory
+        let expected_dir = fs::canonicalize(&dir_path).unwrap().to_string_lossy().into_owned();
+
+        assert_eq!(indexed_dirs.len(), 1);
+        assert_eq!(indexed_dirs[0], expected_dir);
+    }
+
+    #[test]
+    fn test_vector_db_search() {
+        // Skip test if setup failed (ONNX files missing)
+        let setup_result = setup_test_env();
+        if setup_result.is_none() {
+            println!("Skipping test_vector_db_search due to missing ONNX files.");
+            return;
+        }
+        let (_temp_dir, _dir_path, db) = setup_result.unwrap(); 
+
+        // --- Test cases --- 
+        let query_alpha = "alpha implementation details";
+        let results_alpha = match db.search(query_alpha, 3, None) { // Use db.search directly
+            Ok(results) => results,
+            Err(e) => panic!("Search for alpha failed: {}", e),
+        };
+        assert!(!results_alpha.is_empty(), "Should find results for alpha");
+        // Add more assertions based on expected results
+
+        let query_bravo = "bravo";
+        let results_bravo = db.search(query_bravo, 1, None).expect("Search for bravo failed"); // Limit 1
+        assert_eq!(results_bravo.len(), 1, "Should find exactly one result for bravo");
+        assert!(results_bravo[0].file_path.contains("file_rust.rs"));
+
+        let query_rust = "rust code example";
+        let results_rust_only = db.search(query_rust, 5, Some(vec!["rs".to_string()])).expect("Search for rust with filter failed");
+        assert!(!results_rust_only.is_empty(), "Should find rust results with filter");
+        for result in results_rust_only {
+            assert!(result.file_path.ends_with(".rs"), "Filtered result should be a .rs file");
         }
 
-        let (_temp_dir, db) = setup_test_env();
-        let _model = db.create_embedding_model().expect("Failed to create ONNX model in test_vector_search");
-        let mut search = Search::new(db).expect("Failed to create Search instance in test_vector_search");
-
-        let query_alpha = "alpha problem implementation";
-        let results_alpha = search.search_with_limit(query_alpha, 3).unwrap();
-        println!("Query: '{}', Results: {:?}", query_alpha, results_alpha.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
-
-        assert!(!results_alpha.is_empty(), "Should find results for 'alpha problem'");
-        assert!(results_alpha[0].file_path.contains("_alpha.txt"), "Top result should be alpha");
-        assert!(results_alpha.len() >= 1);
-
-        let query_bravo = "bravo subject data processing";
-        let results_bravo = search.search_with_limit(query_bravo, 1).unwrap();
-        println!("Query: '{}', Results: {:?}", query_bravo, results_bravo.iter().map(|r| (&r.file_path, r.similarity)).collect::<Vec<_>>());
-        assert_eq!(results_bravo.len(), 1, "Should find 1 result for 'bravo subject'");
-        assert!(results_bravo[0].file_path.contains("file2_bravo.txt"));
+        let query_no_match = "nonexistent topic xyz";
+        let results_no_match = db.search(query_no_match, 5, None).expect("Search for no match failed");
+        assert!(results_no_match.is_empty(), "Should find no results for nonexistent topic");
     }
 } 
