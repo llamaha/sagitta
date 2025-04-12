@@ -1,99 +1,156 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{PathBuf};
+// use fs_extra::dir as fs_dir; // Removed unused import
+use fs_extra::file as fs_file;
 // use std::path::Path; // Removed unused import
 // use std::process::Command; // Removed if not needed elsewhere
 
+// Function to find the directory containing ONNX Runtime libraries in the cache
 fn find_onnx_runtime_lib_dir() -> Option<PathBuf> {
-    let home_dir = env::var("HOME").ok()?;
-    let cache_base = PathBuf::from(home_dir).join(".cache/ort.pyke.io/dfbin");
+    let home_dir = dirs::home_dir()?;
+    let cache_base = home_dir.join(".cache/ort.pyke.io/dfbin");
 
     let target_triple = env::var("TARGET").ok()?;
     let target_cache_dir = cache_base.join(&target_triple);
 
     if !target_cache_dir.is_dir() {
-        eprintln!("cargo:warning=ONNX Runtime cache directory not found at {}", target_cache_dir.display());
+        println!("cargo:warning=build.rs: ONNX Runtime cache directory not found for target {} at {}", target_triple, target_cache_dir.display());
         return None;
     }
 
-    let lib_name = if cfg!(target_os = "macos") { "libonnxruntime.dylib" } else { "libonnxruntime.so" };
-
-    if let Ok(entries) = fs::read_dir(&target_cache_dir) {
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_dir() {
-                 let lib_dir = path.join("onnxruntime/lib");
-                 if lib_dir.is_dir() {
-                    // Check if the actual library file exists in this directory
-                    if lib_dir.join(lib_name).exists() {
-                        // Found a directory that contains the library file
-                        return Some(lib_dir);
-                    }
-                 }
+    // Search for a subdirectory within the target cache dir (likely a hash)
+    for entry in fs::read_dir(&target_cache_dir).ok()?.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            let lib_dir = path.join("onnxruntime/lib");
+            if lib_dir.is_dir() {
+                // Basic check: does it contain *any* .so or .dylib file?
+                let has_libs = fs::read_dir(&lib_dir).ok()?.any(|f| {
+                    f.map_or(false, |e| {
+                        let p = e.path();
+                        p.is_file() && (p.extension().map_or(false, |ext| ext == "so" || ext == "dylib"))
+                    })
+                });
+                if has_libs {
+                    println!("cargo:warning=build.rs: Found potential ONNX Runtime library directory: {}", lib_dir.display());
+                    return Some(lib_dir);
+                }
             }
         }
-    } else {
-        eprintln!("cargo:warning=Failed to read ONNX cache directory entries: {}", target_cache_dir.display());
-        return None;
     }
 
-    // If we iterated through all entries and didn't find a valid lib dir
-    eprintln!("cargo:warning=Could not find a valid ONNX Runtime library directory containing {}", lib_name);
+    println!("cargo:warning=build.rs: Could not find a subdirectory containing ONNX Runtime libraries within {}", target_cache_dir.display());
     None
 }
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    // --- Rpath logic for Linux/macOS ---
+    // --- Rpath and Library Copy Logic for Linux/macOS ---
     if cfg!(target_os = "linux") || cfg!(target_os = "macos") {
-        if let Some(lib_dir) = find_onnx_runtime_lib_dir() {
-            let lib_name = if cfg!(target_os = "macos") { "libonnxruntime.dylib" } else { "libonnxruntime.so" };
-            let source_lib_path = lib_dir.join(lib_name);
-
-            // We already confirmed source_lib_path exists in find_onnx_runtime_lib_dir
-            // So, we can proceed directly with copying
-
-            // let profile = env::var("PROFILE").expect("PROFILE not set"); // release or debug - UNUSED
-            
-            // Calculate target directory relative to OUT_DIR
+        if let Some(source_lib_dir) = find_onnx_runtime_lib_dir() {
             let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
-            // Bind the PathBuf to ensure it lives long enough for the borrow
+            
+            // Bind the PathBuf to a variable to ensure it lives long enough
             let out_dir_path = PathBuf::from(&out_dir);
-            let target_dir = out_dir_path
+            
+            // Calculate target directory relative to the longer-lived out_dir_path
+            let target_profile_dir = out_dir_path
                 .parent().expect("OUT_DIR has no parent?") // build/<crate>-<hash>
                 .parent().expect("OUT_DIR has no parent parent?") // build/
                 .parent().expect("OUT_DIR has no parent parent parent?"); // target/<profile>/
+
+            let target_lib_dir = target_profile_dir.join("lib");
+            if let Err(e) = fs::create_dir_all(&target_lib_dir) {
+                 println!("cargo:warning=build.rs: Failed to create target library directory {}: {}. Skipping copy.", target_lib_dir.display(), e);
+                 return;
+            }
+
+            // --- Copy Files Individually --- 
+            let copy_options = fs_file::CopyOptions::new().overwrite(true);
+            let mut files_copied = 0;
+            let mut copy_errors = 0;
+
+            println!(
+                "cargo:warning=build.rs: Attempting to copy library files from {} to {}", 
+                source_lib_dir.display(), 
+                target_lib_dir.display()
+            );
             
-            // Create the lib directory right next to the final executable
-            let dest_lib_dir = target_dir.join("lib");
-            fs::create_dir_all(&dest_lib_dir).expect("Failed to create destination lib directory");
+            match fs::read_dir(&source_lib_dir) {
+                Ok(entries) => {
+                    for entry_result in entries {
+                        if let Ok(entry) = entry_result {
+                            let source_path = entry.path();
+                            if source_path.is_file() {
+                                // Only copy .so or .dylib files
+                                let extension = source_path.extension().and_then(|s| s.to_str());
+                                if extension == Some("so") || extension == Some("dylib") {
+                                    let target_path = target_lib_dir.join(entry.file_name());
+                                    if let Err(e) = fs_file::copy(&source_path, &target_path, &copy_options) {
+                                        println!(
+                                            "cargo:warning=build.rs: Failed to copy {} to {}: {}", 
+                                            source_path.display(), 
+                                            target_path.display(), 
+                                            e
+                                        );
+                                        copy_errors += 1;
+                                    } else {
+                                        files_copied += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-            let dest_lib_path = dest_lib_dir.join(lib_name);
+                    if copy_errors > 0 {
+                        println!(
+                            "cargo:warning=build.rs: Finished copying with {} errors. {} files copied successfully.",
+                            copy_errors,
+                            files_copied
+                        );
+                    } else if files_copied > 0 {
+                         println!(
+                            "cargo:warning=build.rs: Successfully copied {} library files to {}",
+                            files_copied,
+                            target_lib_dir.display()
+                        );
+                    } else {
+                         println!("cargo:warning=build.rs: No library files found to copy in {}.", source_lib_dir.display());
+                    }
 
-            // Copy the library using fs_extra for robustness
-             match fs_extra::file::copy(&source_lib_path, &dest_lib_path, &fs_extra::file::CopyOptions::new().overwrite(true)) {
-                 Ok(_) => {
-                     println!("cargo:warning=Copied {} to {}", source_lib_path.display(), dest_lib_path.display());
-
-                     // Set RPATH relative to the executable in target/<profile>/ (not target/<profile>/deps)
-                     let rpath_value = if cfg!(target_os = "macos") {
-                         "@executable_path/lib" // Relative to binary location
-                     } else {
-                         "$ORIGIN/lib" // Relative to binary location (Linux)
-                     };
-                     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", rpath_value);
-                     println!("cargo:warning=Setting RPATH to: {}", rpath_value);
-                }
+                },
                 Err(e) => {
-                     eprintln!("cargo:warning=Failed to copy ONNX Runtime library: {}", e);
+                     println!(
+                        "cargo:warning=build.rs: Failed to read source library directory {}: {}. Skipping copy.", 
+                        source_lib_dir.display(), 
+                        e
+                    );
+                    return; // Cannot proceed if source dir cannot be read
                 }
-             }
+            }
+
+            // Only set RPATH if we successfully copied some files
+            if files_copied > 0 && copy_errors == 0 {
+                // Set RPATH relative to the executable
+                let rpath_value = if cfg!(target_os = "macos") {
+                    "@executable_path/lib"
+                } else {
+                    "$ORIGIN/lib"
+                };
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", rpath_value);
+                println!("cargo:warning=build.rs: Setting RPATH to: {}", rpath_value);
+            } else {
+                 println!("cargo:warning=build.rs: Skipping RPATH setup due to copy errors or no files copied.");
+            }
+
         } else {
-            // Warning already printed by find_onnx_runtime_lib_dir if it returned None
-            eprintln!("cargo:warning=Skipping RPATH setup because ONNX Runtime library directory was not found or validated.");
+            println!("cargo:warning=build.rs: ONNX Runtime library directory not found in cache. Skipping library copy and RPATH setup.");
         }
     }
 
-    // --- Removed bindgen code block ---
-} 
+    // --- Remove the old Linux-specific block for copying individual provider libs ---
+    // The logic above now handles copying all necessary libraries.
+    
+}

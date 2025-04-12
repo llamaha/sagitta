@@ -117,19 +117,14 @@ impl EmbeddingCache {
             source: e,
         })?;
 
-        let modified = metadata
-            .modified()
-            .map_err(|e| VectorDBError::MetadataError {
-                path: path.to_path_buf(),
-                source: e,
-            })?
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| VectorDBError::CacheError(e.to_string()))?
-            .as_secs();
-
+        let modified_time = metadata.modified().map_err(|e| VectorDBError::MetadataError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        let modified = modified_time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let size = metadata.len();
 
-        Ok(modified.wrapping_mul(31).wrapping_add(size as u64))
+        Ok(modified.wrapping_mul(31).wrapping_add(size))
     }
 
     /// Cleans the cache by removing entries whose model type doesn't match the current one.
@@ -211,7 +206,7 @@ impl EmbeddingCache {
             // embedding, // Removed
             timestamp: now,
             file_hash,
-            model_type: self.current_model_type.clone(),
+            model_type: self.current_model_type,
         };
 
         self.entries.insert(file_path, entry);

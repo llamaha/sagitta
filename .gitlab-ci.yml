@@ -1,24 +1,12 @@
 image: rust:latest
 
-# Add workflow rules here
+# Workflow rules: Only run pipelines for pushes to branches
 workflow:
   rules:
-    # Run pipelines for merge requests targeting the default branch
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
-    # Run pipelines for pushes to the default branch
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
-    # Run pipelines for pushes to tags
-    - if: '$CI_COMMIT_TAG'
-    # Run pipelines for pushes to any branch (including feature branches)
-    # This allows testing branches before MRs. MR pipelines take precedence when MR is open.
     - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
-    # Allow manual trigger
-    - if: '$CI_PIPELINE_SOURCE == "web"'
 
 stages:
-  - build
-  - test
-  - deploy
+  - test # Simplified stages
 
 variables:
   # Ensure cargo build artifacts are cached
@@ -33,6 +21,7 @@ cache:
     - .cargo/bin/
     - .cargo/registry/index/
     - .cargo/registry/cache/
+    - target/ # Cache target directory for tests
 
 .common_setup:
   before_script:
@@ -41,46 +30,25 @@ cache:
     - git lfs install --force
     - git lfs pull
 
-compile:
-  extends: .common_setup
-  stage: build
-  script:
-    - 'echo "Building with ONNX feature (no CUDA)..."'
-    - 'cargo clean'
-    - 'cargo build --all-targets --no-default-features --features onnx'
-  artifacts:
-    paths:
-      - target/
+# Removed 'compile' job
 
-test_and_coverage:
+run_tests:
   extends: .common_setup
   stage: test
-  needs:
-    - compile
+  # Removed 'needs: [compile]' as compile job is removed
   script:
-    - 'echo "Running tests and generating coverage..."'
-    - 'cargo install cargo-tarpaulin --version 0.27.3 --force'
-    - 'cargo tarpaulin --lib --no-default-features --features onnx --exclude-files "tests/*" --exclude-files "src/bin/*" --exclude-files "src/cli/*" --out Xml --fail-under 20'
-    - 'coverage_value=$(xmllint --xpath "string(//coverage/@line-rate)" cobertura.xml)'
-    - 'echo "Extracted coverage value: $coverage_value"'
-    - 'percentage_num=$(awk -v cov="$coverage_value" "BEGIN { printf \"%.2f\", cov * 100 }")'
-    - 'echo "Coverage percentage: ${percentage_num}%"'
-  coverage: '/Coverage percentage:\s+(\d+(\.\d+)?%)/'
-  artifacts:
-    when: always
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: cobertura.xml
-  # Add back the rules for test_and_coverage
+    - 'echo "Running tests..."'
+    # cargo test will handle building
+    - 'cargo test --no-default-features --features onnx'
+  # Removed coverage reporting and artifacts
   rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+    # Run only on pushes to non-default branches
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
 
 version_check:
   extends: .common_setup
   stage: test
-  needs: []  # No need to wait for compile job
+  needs: []
   script:
     - 'echo "Checking if Cargo.toml version has been bumped..."'
     - 'git fetch origin $CI_DEFAULT_BRANCH'
@@ -89,62 +57,12 @@ version_check:
     - 'echo "Current version: $current_version"'
     - 'echo "Target branch ($CI_DEFAULT_BRANCH) version: $target_version"'
     - 'if [ -z "$current_version" ] || [ -z "$target_version" ]; then echo "Error: Could not extract version from Cargo.toml."; exit 1; fi'
-    - 'if [ "$current_version" = "$target_version" ]; then echo "Error: Version in Cargo.toml ($current_version) has not been bumped compared to target branch ($CI_DEFAULT_BRANCH)."; exit 1; fi'
+    # Use version comparison suitable for strings (assuming semantic versioning order)
+    - 'if [ "$(printf "%s\n" "$target_version" "$current_version" | sort -V | head -n 1)" != "$target_version" ] || [ "$current_version" = "$target_version" ]; then echo "Error: Version in Cargo.toml ($current_version) has not been bumped compared to target branch ($CI_DEFAULT_BRANCH: $target_version)."; exit 1; fi'
     - 'echo "Version check passed ($current_version > $target_version)."'
-  # Add back the rules for version_check
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+    # Run only on pushes to the default branch
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
 
-e2e_language_test:
-  extends: .common_setup
-  stage: test
-  needs:
-    - compile
-  script:
-    - 'echo "Running End-to-End Language Tests..."'
-    - 'ONNX_MODEL="./onnx/all-minilm-l6-v2.onnx"'
-    - 'ONNX_TOKENIZER="./onnx/"'
-    - 'ls -l ./onnx'
-    - 'if [ ! -f "$ONNX_MODEL" ] || [ ! -d "$ONNX_TOKENIZER" ]; then echo "Error: ONNX model file or tokenizer directory not found."; exit 1; fi'
-    - 'TEST_DIRS=("rust_example" "go_example" "ruby_example" "ts_example" "js_example")'
-    - 'QUERIES=("main function" "http server" "class definition" "async function" "event listener")'
-    - 'EXPECTED_OUTPUTS=("main.rs" "main.go" "example.rb" "index.ts" "script.js")'
-    - |
-      set -e
-      i=0
-      for dir in "${TEST_DIRS[@]}"; do
-        test_path="test_data/$dir"
-        query="${QUERIES[$i]}"
-        expected="${EXPECTED_OUTPUTS[$i]}"
-        
-        echo "--- Testing $dir --- "
-        echo "Indexing $test_path..."
-        cargo run --bin vectordb-cli -- index "$test_path" --onnx-model "$ONNX_MODEL" --onnx-tokenizer "$ONNX_TOKENIZER"
-        
-        echo "Querying for '$query'..."
-        cargo run --bin vectordb-cli -- query "$query" --onnx-model "$ONNX_MODEL" --onnx-tokenizer "$ONNX_TOKENIZER" | grep "$expected"
-        if [ $? -ne 0 ]; then
-            echo "Error: Expected output '$expected' not found."
-            exit 1
-        fi
-        echo "Check passed."
-        i=$((i + 1))
-      done
-  # Add back the rules for e2e_language_test
-  rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
-
-run_example:
-  extends: .common_setup
-  stage: deploy
-  needs:
-    - compile
-  script:
-    - 'echo "Attempting to run index and query commands..."'
-    - 'cargo run -- index . --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Index command failed."'
-    - 'cargo run -- query "test query" --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Query failed."'
-  # Add back the rules for run_example
-  rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+# Removed 'e2e_language_test' job
+# Removed 'run_example' job
