@@ -1,5 +1,20 @@
 image: rust:latest
 
+# Add workflow rules here
+workflow:
+  rules:
+    # Run pipelines for merge requests targeting the default branch
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
+    # Run pipelines for pushes to the default branch
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+    # Run pipelines for pushes to tags
+    - if: '$CI_COMMIT_TAG'
+    # Run pipelines for pushes to any branch (including feature branches)
+    # This allows testing branches before MRs. MR pipelines take precedence when MR is open.
+    - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+    # Allow manual trigger
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
 stages:
   - build
   - test
@@ -33,17 +48,9 @@ compile:
     - 'echo "Building with ONNX feature (no CUDA)..."'
     - 'cargo clean'
     - 'cargo build --all-targets --no-default-features --features onnx'
-    - 'echo "Configuring ONNX runtime path..."'
-    # Use the wildcard path directly as in your working solution
-    - 'EXACT_ORT_PATH="/root/.cache/ort.pyke.io/dfbin/x86_64-unknown-linux-gnu/*/onnxruntime/lib"'
-    - 'echo "$EXACT_ORT_PATH" > ort_path.txt'
   artifacts:
     paths:
       - target/
-      - ort_path.txt
-  rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
 
 test_and_coverage:
   extends: .common_setup
@@ -51,10 +58,6 @@ test_and_coverage:
   needs:
     - compile
   script:
-    - 'EXACT_ORT_PATH=$(cat ort_path.txt)'
-    - 'echo "Setting LD_LIBRARY_PATH to include ort cache at $EXACT_ORT_PATH"'
-    - 'export LD_LIBRARY_PATH="$EXACT_ORT_PATH:${LD_LIBRARY_PATH}"'
-    - 'echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"'
     - 'echo "Running tests and generating coverage..."'
     - 'cargo install cargo-tarpaulin --version 0.27.3 --force'
     - 'cargo tarpaulin --lib --no-default-features --features onnx --exclude-files "tests/*" --exclude-files "src/bin/*" --exclude-files "src/cli/*" --out Xml --fail-under 20'
@@ -69,8 +72,9 @@ test_and_coverage:
       coverage_report:
         coverage_format: cobertura
         path: cobertura.xml
+  # Add back the rules for test_and_coverage
   rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
 
 version_check:
@@ -87,6 +91,7 @@ version_check:
     - 'if [ -z "$current_version" ] || [ -z "$target_version" ]; then echo "Error: Could not extract version from Cargo.toml."; exit 1; fi'
     - 'if [ "$current_version" = "$target_version" ]; then echo "Error: Version in Cargo.toml ($current_version) has not been bumped compared to target branch ($CI_DEFAULT_BRANCH)."; exit 1; fi'
     - 'echo "Version check passed ($current_version > $target_version)."'
+  # Add back the rules for version_check
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
 
@@ -96,9 +101,6 @@ e2e_language_test:
   needs:
     - compile
   script:
-    - 'EXACT_ORT_DIR=$(cat ort_path.txt)'
-    - 'echo "Setting LD_LIBRARY_PATH to include ort library at $EXACT_ORT_DIR"'
-    - 'export LD_LIBRARY_PATH="$EXACT_ORT_DIR:${LD_LIBRARY_PATH}"'
     - 'echo "Running End-to-End Language Tests..."'
     - 'ONNX_MODEL="./onnx/all-minilm-l6-v2.onnx"'
     - 'ONNX_TOKENIZER="./onnx/"'
@@ -128,8 +130,9 @@ e2e_language_test:
         echo "Check passed."
         i=$((i + 1))
       done
+  # Add back the rules for e2e_language_test
   rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
 
 run_example:
@@ -138,12 +141,10 @@ run_example:
   needs:
     - compile
   script:
-    - 'EXACT_ORT_DIR=$(cat ort_path.txt)'
-    - 'echo "Setting LD_LIBRARY_PATH to include ort library at $EXACT_ORT_DIR"'
-    - 'export LD_LIBRARY_PATH="$EXACT_ORT_DIR:${LD_LIBRARY_PATH}"'
     - 'echo "Attempting to run index and query commands..."'
     - 'cargo run -- index . --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Index command failed."'
     - 'cargo run -- query "test query" --onnx-model ./onnx/all-minilm-l12-v2.onnx --onnx-tokenizer ./onnx/minilm_tokenizer.json || echo "Query failed."'
+  # Add back the rules for run_example
   rules:
-    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'

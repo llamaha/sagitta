@@ -250,3 +250,42 @@ fn test_index_and_query() -> Result<()> {
 }
 
 // ... (other tests like test_stats, test_clear etc. if they exist) ... 
+
+#[test]
+fn test_build_script_copies_library() -> Result<()> {
+    // Get the path to the built executable
+    let bin_path = get_binary_path()?;
+    
+    // Determine the expected parent directory (target/<profile>/)
+    let target_dir = bin_path.parent().ok_or_else(|| anyhow::anyhow!("Binary path has no parent directory"))?;
+    
+    // Determine the expected library name based on OS
+    let lib_name = if cfg!(target_os = "macos") {
+        "libonnxruntime.dylib"
+    } else if cfg!(target_os = "linux") {
+        "libonnxruntime.so"
+    } else {
+        // Rpath logic is only for Linux/macOS, so skip test on other platforms
+        println!("Skipping library copy test on unsupported OS");
+        return Ok(());
+    };
+    
+    // Construct the expected path to the copied library
+    let expected_lib_path = target_dir.join("lib").join(lib_name);
+    
+    println!(
+        "Checking for library ({}) at: {}",
+        std::env::var("PROFILE").unwrap_or_else(|_| "<unknown profile>".to_string()),
+        expected_lib_path.display()
+    );
+
+    // Assert that the library file exists
+    assert!(
+        expected_lib_path.exists(),
+        "Build script did not copy {} to the expected location: {}",
+        lib_name,
+        expected_lib_path.display()
+    );
+    
+    Ok(())
+} 

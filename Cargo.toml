@@ -1,7 +1,7 @@
 [package]
 name = "vectordb-cli"
 description = "A CLI tool for semantic code search."
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 authors = ["Adam Mulvany <amulvany@gitlab.com>"]
 license = "MIT"
@@ -87,4 +87,5 @@ name = "onnx_benchmark"
 path = "src/bin/onnx_benchmark.rs"
 
 [build-dependencies]
-bindgen = "0.69.4"
+fs_extra = "1.3"
+# Add other build dependencies if needed
