@@ -301,10 +301,11 @@ Here is the current status of language support:
 | Rust       | ✅ Supported    | functions, structs, enums, impls, traits, mods, macros, use, extern crates, type aliases, unions, statics, consts |
 | Ruby       | ✅ Supported    | modules, classes, methods, singleton_methods   |
 | Go         | ✅ Supported    | functions, methods, types (struct/interface), consts, vars |
-| JavaScript | ⏳ Planned      | (TBD)                                          |
-| TypeScript | ⏳ Planned      | (TBD)                                          |
-| Markdown   | ⏳ Planned      | (TBD - maybe sections, code blocks?)           |
-| YAML       | ⏳ Planned      | (TBD - maybe top-level keys?)                  |
-| Other      | ✅ Supported    | Line-based chunks (`fallback_chunk`)           |
+| Python     | ✅ Supported    | functions, classes, top-level statements       |
+| JavaScript | ✅ Supported    | functions, classes, methods, assignments       |
+| TypeScript | ✅ Supported    | functions, classes, methods, interfaces, enums, types, assignments |
+| Markdown   | ✅ Supported    | headings, code blocks, list items, paragraphs |
+| YAML       | ✅ Supported    | documents                                      |
+| Other      | ✅ Supported    | Whole file chunk (`fallback_chunk`)            |
 
-Files with unsupported extensions will automatically use the line-based fallback mechanism. 
+Files with unsupported extensions will automatically use the whole-file fallback mechanism. 
