@@ -48,4 +48,18 @@ mod tests {
         // Embeddings for different texts should be different
         assert_ne!(embeddings[0], embeddings[1]);
     }
+
+    // Helper to normalize a vector - useful for testing provider implementations
+    #[allow(dead_code)] // Allow dead code for now, might be used in tests later
+    fn normalize(v: &mut [f32]) {
+        let norm = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
+        if norm > 1e-6 {
+            for x in v {
+                *x /= norm;
+            }
+            // Re-enable the assertion to verify provider normalization
+            let norm_after = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
+            assert!((norm_after - 1.0).abs() < 0.01, "Embedding should be normalized");
+        }
+    }
 }

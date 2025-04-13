@@ -152,26 +152,29 @@ def verify_onnx_model(onnx_path):
         print(f"Error verifying ONNX model: {e}")
 
 def main():
+    # Define output directory name (can be customized via args later if needed)
+    output_directory_name = "codebert_onnx"
+    
     # Download and convert CodeBERT to ONNX
-    onnx_path = download_and_convert_codebert_to_onnx()
+    onnx_path = download_and_convert_codebert_to_onnx(output_dir=output_directory_name)
     
     # Verify the ONNX model
     verify_onnx_model(onnx_path)
     
     print("\nModel conversion complete.")
     print("--------------------------")
-    print("The CodeBERT ONNX model and tokenizer have been saved to the 'codebert_onnx' directory.")
+    print(f"The CodeBERT ONNX model and tokenizer have been saved to the '{output_directory_name}' directory.")
     print("To use this model with vectordb-cli:")
     print("\nMethod 1: Command Line Arguments")
     print("  Provide the paths directly during indexing:")
     print(f"    ./target/debug/vectordb-cli index <your_code_dir> \\")
-    print(f"        --onnx-model {os.path.join(output_dir, 'codebert_model.onnx')} \\" # Adjusted for potential output_dir changes
-          f"        --onnx-tokenizer {os.path.join(output_dir, 'tokenizer')}")
+    print(f"        --onnx-model {os.path.join(output_directory_name, 'codebert_model.onnx')} \\")
+    print(f"        --onnx-tokenizer {os.path.join(output_directory_name, 'tokenizer')}")
     print("\nMethod 2: Environment Variables")
     print("  Set the following environment variables before running vectordb-cli:")
-    # Use absolute paths for env vars to avoid ambiguity
-    abs_model_path = os.path.abspath(os.path.join(output_dir, 'codebert_model.onnx'))
-    abs_tokenizer_path = os.path.abspath(os.path.join(output_dir, 'tokenizer'))
+    # Use absolute paths for env vars based on the output directory name
+    abs_model_path = os.path.abspath(os.path.join(output_directory_name, 'codebert_model.onnx'))
+    abs_tokenizer_path = os.path.abspath(os.path.join(output_directory_name, 'tokenizer'))
     print(f"    export VECTORDB_ONNX_MODEL=\"{abs_model_path}\"")
     print(f"    export VECTORDB_ONNX_TOKENIZER=\"{abs_tokenizer_path}\"")
     print("  Then run indexing normally:")

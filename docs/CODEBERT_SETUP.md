@@ -7,8 +7,8 @@ You can use other sentence-transformer models compatible with ONNX instead of th
 1.  **Generate ONNX Model & Tokenizer:**
     -   Run the provided Python script:
         ```bash
-        # Ensure you have Python and necessary libraries (transformers, torch, onnx, tokenizers)
-        # pip install transformers torch onnx tokenizers
+        # Ensure you have Python and necessary libraries (transformers, torch, onnx, tokenizers, optimum, onnxruntime)
+        # pip install transformers torch onnx tokenizers optimum onnxruntime
         python scripts/codebert.py
         ```
     -   This will download the `microsoft/codebert-base` model, convert it to ONNX format, and save it along with its tokenizer files into the `codebert_onnx/` directory.

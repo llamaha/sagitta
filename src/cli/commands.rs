@@ -73,6 +73,9 @@ pub(crate) const FIELD_DIR_PATH: &str = "dir_path"; // Root directory provided t
 pub(crate) const FIELD_START_LINE: &str = "start_line";
 pub(crate) const FIELD_END_LINE: &str = "end_line";
 pub(crate) const FIELD_FILE_EXTENSION: &str = "file_extension";
+pub(crate) const FIELD_LANGUAGE: &str = "language";
+pub(crate) const FIELD_ELEMENT_TYPE: &str = "element_type";
+pub(crate) const FIELD_CHUNK_CONTENT: &str = "chunk_content";
 
 // --- Main Command Enum ---
 #[derive(Subcommand, Debug)]

@@ -23,3 +23,6 @@ onnx/
 
 # Test/Output files
 vectordb_search_results.txt
+
+# Qdrant
+qdrant_storage/

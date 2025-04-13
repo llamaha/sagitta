@@ -260,4 +260,23 @@ cargo fmt
 
 ## License
 
-MIT License 
+MIT License
+
+## Language Support
+
+The CLI uses `tree-sitter` for Abstract Syntax Tree (AST) parsing to extract meaningful code chunks (like functions, classes, structs) for indexing. This leads to more contextually relevant search results compared to simple line-based splitting.
+
+Here is the current status of language support:
+
+| Language   | Status          | Supported Elements                             |
+| :--------- | :-------------- | :--------------------------------------------- |
+| Rust       | ✅ Supported    | functions, structs, enums, impls, traits, mods, macros, use, extern crates, type aliases, unions, statics, consts |
+| Ruby       | ⏳ Planned      | (TBD)                                          |
+| Go         | ⏳ Planned      | (TBD)                                          |
+| JavaScript | ⏳ Planned      | (TBD)                                          |
+| TypeScript | ⏳ Planned      | (TBD)                                          |
+| Markdown   | ⏳ Planned      | (TBD - maybe sections, code blocks?)           |
+| YAML       | ⏳ Planned      | (TBD - maybe top-level keys?)                  |
+| Other      | ✅ Supported    | Line-based chunks (`fallback_chunk`)           |
+
+Files with unsupported extensions will automatically use the line-based fallback mechanism. 
