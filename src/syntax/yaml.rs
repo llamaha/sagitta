@@ -83,24 +83,26 @@ impl SyntaxParser for YamlParser {
         // Fallback: Only if NO documents were found by the query
         // AND the file is not empty, treat the whole file as one document chunk.
         if chunks.is_empty() && !code.trim().is_empty() {
-            log::debug!(
-                "No YAML documents (---) found in {}, indexing as whole file document.",
-                file_path
-            );
-            chunks.push(CodeChunk {
+            let fallback_chunk = CodeChunk {
                 content: code.to_string(),
                 file_path: file_path.to_string(),
                 start_line: 1,
                 end_line: code.lines().count(),
                 language: "yaml".to_string(),
                 element_type: "document".to_string(), // Treat whole file as a document
-            });
+            };
+            chunks.push(fallback_chunk);
         }
 
-        // Final DEBUG check
-        // if file_path == "test.yaml" && !code.contains("---") && !code.trim().is_empty() {
-        //      println!("DEBUG (YAML Parse): Final chunk count before return: {}", chunks.len());
-        // }
+        // Deduplicate chunks (Workaround for potential grammar/query issues)
+        chunks.dedup_by(|a, b| {
+            a.file_path == b.file_path &&
+            a.start_line == b.start_line &&
+            a.end_line == b.end_line &&
+            a.element_type == b.element_type
+            // Optionally compare content if needed, but range should be sufficient
+            // a.content == b.content
+        });
 
         Ok(chunks)
     }
