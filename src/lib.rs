@@ -9,9 +9,15 @@
 //! The main entry point is the [VectorDB] struct. (Note: VectorDB struct might not exist yet)
 
 // Top-level library modules
+// pub mod commands;
+// pub mod config; // Keep config if it's truly top-level
+// pub mod errors;
+// pub mod llm;
+// pub mod provider;
+pub mod syntax; // Keep syntax module
 pub mod vectordb;
-pub mod cli;
-pub mod config;
+pub mod cli; // Keep cli module
+pub mod config; // Keep config module (appears twice, likely a merge artifact, keep one)
 mod utils; // Keep utils private for now
 
 // Re-export key public types/functions for easier use
