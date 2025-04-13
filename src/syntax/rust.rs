@@ -121,22 +121,34 @@ impl SyntaxParser for RustParser {
             }
         }
 
-        // If no specific items were found (e.g., empty file or only comments),
-        // index the whole file as a single chunk.
+        // Fallback: If no chunks found, split into smaller fixed-size chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Rust items found in {}, indexing as whole file.",
+                "No top-level Rust items found in {}, splitting into smaller chunks.",
                 file_path
             );
-             // Add the whole file as one chunk:
-             chunks.push(CodeChunk {
-                 content: code.to_string(),
-                 file_path: file_path.to_string(),
-                 start_line: 1,
-                 end_line: code.lines().count(),
-                 language: "rust".to_string(),
-                 element_type: "file".to_string(), // Use "file" element type
-             });
+            let lines: Vec<&str> = code.lines().collect();
+            let num_lines = lines.len();
+            const RUST_FALLBACK_CHUNK_SIZE: usize = 200; // Define local constant
+
+            for (i, chunk_lines) in lines.chunks(RUST_FALLBACK_CHUNK_SIZE).enumerate() {
+                 let start_line = i * RUST_FALLBACK_CHUNK_SIZE + 1;
+                 let end_line = std::cmp::min(start_line + RUST_FALLBACK_CHUNK_SIZE - 1, num_lines);
+                 let chunk_content = chunk_lines.join("\n");
+
+                 if chunk_content.trim().is_empty() {
+                     continue;
+                 }
+
+                 chunks.push(CodeChunk {
+                     content: chunk_content,
+                     file_path: file_path.to_string(),
+                     start_line,
+                     end_line,
+                     language: "rust".to_string(),
+                     element_type: "file_chunk".to_string(), // Use file_chunk type
+                 });
+            }
         }
 
         Ok(chunks)

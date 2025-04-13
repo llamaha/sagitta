@@ -271,8 +271,8 @@ Here is the current status of language support:
 | Language   | Status          | Supported Elements                             |
 | :--------- | :-------------- | :--------------------------------------------- |
 | Rust       | ✅ Supported    | functions, structs, enums, impls, traits, mods, macros, use, extern crates, type aliases, unions, statics, consts |
-| Ruby       | ✅ Supported    | modules, classes, methods, singleton_methods, blocks |
-| Go         | ⏳ Planned      | (TBD)                                          |
+| Ruby       | ✅ Supported    | modules, classes, methods, singleton_methods   |
+| Go         | ✅ Supported    | functions, methods, types (struct/interface), consts, vars |
 | JavaScript | ⏳ Planned      | (TBD)                                          |
 | TypeScript | ⏳ Planned      | (TBD)                                          |
 | Markdown   | ⏳ Planned      | (TBD - maybe sections, code blocks?)           |
