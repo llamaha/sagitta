@@ -37,9 +37,8 @@ run_tests:
   stage: test
   # Removed 'needs: [compile]' as compile job is removed
   script:
-    - 'echo "Running tests..."'
-    # cargo test will handle building
-    - 'cargo test --no-default-features --features onnx'
+    - 'echo "Running tests (release mode)..."'
+    - 'cargo test --release --no-default-features --features onnx'
   # Removed coverage reporting and artifacts
   rules:
     # Run only on pushes to non-default branches
