@@ -122,25 +122,22 @@ impl SyntaxParser for RustParser {
         }
 
         // If no specific items were found (e.g., empty file or only comments),
-        // maybe add the whole file as a fallback chunk?
-        // Or rely on the caller to decide?
-        // For now, we only return identified items.
+        // index the whole file as a single chunk.
         if chunks.is_empty() && !code.trim().is_empty() {
-            println!(
-                "Warning: No top-level Rust items found in {}. Consider adding fallback logic here.",
+            log::debug!(
+                "No top-level Rust items found in {}, indexing as whole file.",
                 file_path
             );
-            // Optionally, add the whole file as one chunk:
-            // chunks.push(CodeChunk {
-            //     content: code.to_string(),
-            //     file_path: file_path.to_string(),
-            //     start_line: 1,
-            //     end_line: code.lines().count(),
-            //     language: "rust".to_string(),
-            //     element_type: "file".to_string(), // Or a specific type for whole file
-            // });
+             // Add the whole file as one chunk:
+             chunks.push(CodeChunk {
+                 content: code.to_string(),
+                 file_path: file_path.to_string(),
+                 start_line: 1,
+                 end_line: code.lines().count(),
+                 language: "rust".to_string(),
+                 element_type: "file".to_string(), // Use "file" element type
+             });
         }
-
 
         Ok(chunks)
     }
