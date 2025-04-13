@@ -10,7 +10,7 @@ pub mod python;
 pub mod typescript;
 pub mod yaml;
 
-use anyhow::{Result};
+use anyhow::{Context, Result};
 use std::path::Path;
 // Remove tree-sitter imports added for inlining
 // use tree_sitter::{Node, Parser, Query, QueryCursor};
@@ -21,6 +21,7 @@ use crate::syntax::fallback::FallbackParser;
 use crate::syntax::rust::RustParser;
 use crate::syntax::ruby::RubyParser;
 use crate::syntax::golang::GolangParser;
+use crate::syntax::markdown::MarkdownParser;
 use crate::syntax::python::PythonParser;
 
 // Re-export the CodeChunk type for easier access
@@ -72,6 +73,6 @@ mod yaml_tests;
 #[cfg(test)]
 mod markdown_tests;
 #[cfg(test)]
-mod python_tests; // Ensure python_tests is declared conditionally 
+mod python_tests; // Ensure python_tests is declared conditionally
 #[cfg(test)]
-mod fallback_tests; // Add the new fallback tests module 
+mod fallback_tests; // Keep fallback_tests from HEAD/main
