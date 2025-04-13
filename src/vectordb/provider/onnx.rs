@@ -115,10 +115,36 @@ impl OnnxEmbeddingProvider {
 
         Ok((input_ids, attention_mask))
     }
+}
 
-    /// Convert the ORT output tensor to a Vec<f32>
-    fn extract_embedding(&self, pooler_output_value: &DynValue) -> Result<Vec<f32>> {
-        let (shape, data) = pooler_output_value.try_extract_raw_tensor::<f32>()?;
+impl EmbeddingProvider for OnnxEmbeddingProvider {
+    fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let (input_ids, attention_mask) = self.prepare_inputs(text)?;
+        
+        let input_ids_array = Array2::from_shape_vec((1, input_ids.len()), input_ids)
+            .map_err(|e| anyhow!("Input ID shape error: {}", e))?; 
+        let attention_mask_array =
+            Array2::from_shape_vec((1, attention_mask.len()), attention_mask)
+            .map_err(|e| anyhow!("Attention mask shape error: {}", e))?; 
+
+        // Use Value::from_array with shape and Vec
+        let input_ids_shape = input_ids_array.shape().to_vec();
+        let input_ids_vec = input_ids_array.into_raw_vec_and_offset().0;
+        let input_ids_value = Value::from_array((input_ids_shape, input_ids_vec))?;
+
+        let attention_mask_shape = attention_mask_array.shape().to_vec();
+        let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
+        let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))?;
+
+        // Use inputs! macro with Values
+        let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
+             .map_err(|e| anyhow!("ONNX session run failed: {}", e))?; 
+
+        // Extract pooler output (second output tensor)
+        let pooler_output = outputs.get("pooler_output")
+            .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
+
+        let (shape, data) = pooler_output.try_extract_raw_tensor::<f32>()?;
 
         // Use self.dimension for validation
         let expected_dim = self.dimension;
@@ -174,47 +200,6 @@ impl OnnxEmbeddingProvider {
         Ok(normalized_embedding)
     }
 
-    /// Normalize an embedding to unit length
-    fn normalize_embedding(mut embedding: Vec<f32>) -> Vec<f32> {
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
-            for x in &mut embedding {
-                *x /= norm;
-            }
-        }
-        embedding
-    }
-}
-
-impl EmbeddingProvider for OnnxEmbeddingProvider {
-    fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let (input_ids, attention_mask) = self.prepare_inputs(text)?;
-        
-        let input_ids_array = Array2::from_shape_vec((1, input_ids.len()), input_ids)
-            .map_err(|e| anyhow!("Input ID shape error: {}", e))?; 
-        let attention_mask_array =
-            Array2::from_shape_vec((1, attention_mask.len()), attention_mask)
-            .map_err(|e| anyhow!("Attention mask shape error: {}", e))?; 
-
-        // Use Value::from_array with shape and Vec
-        let input_ids_shape = input_ids_array.shape().to_vec();
-        let input_ids_vec = input_ids_array.into_raw_vec_and_offset().0;
-        let input_ids_value = Value::from_array((input_ids_shape, input_ids_vec))?;
-
-        let attention_mask_shape = attention_mask_array.shape().to_vec();
-        let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
-        let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))?;
-
-        // Use inputs! macro with Values
-        let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
-             .map_err(|e| anyhow!("ONNX session run failed: {}", e))?; 
-
-        // Extract pooler output (second output tensor)
-        let pooler_output = outputs.get("pooler_output")
-            .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
-        self.extract_embedding(pooler_output)
-    }
-
     fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -249,43 +234,43 @@ impl EmbeddingProvider for OnnxEmbeddingProvider {
 
         // Use inputs! macro with Values
         let outputs = self.session.run(ort::inputs![input_ids_value, attention_mask_value]?)
-             .map_err(|e| anyhow!("ONNX session run failed (batch): {}", e))?; 
+            .map_err(|e| anyhow!("ONNX session batch run failed: {}", e))?;
 
-        // Extract pooler output tensor view directly by name
-        let pooler_output = outputs.get("pooler_output")
-            .ok_or_else(|| Error::msg("Model did not return 'pooler_output'"))?;
-        let (output_shape, output_data) = pooler_output.try_extract_raw_tensor::<f32>()?;
+        let pooler_output_value = outputs.get("pooler_output")
+            .ok_or_else(|| Error::msg("Model did not return 'pooler_output' in batch"))?;
 
-        // Check output shape: [batch_size, embedding_dim]
+        // Extract the raw tensor data for the batch
+        let (shape, data) = pooler_output_value.try_extract_raw_tensor::<f32>()?;
+
+        // Validate batch shape
         let expected_dim = self.dimension;
-        if output_shape.len() != 2
-            || output_shape[0] as usize != batch_size
-            || output_shape[1] as usize != expected_dim
-        {
+        if shape.len() != 2 || shape[0] as usize != batch_size || shape[1] as usize != expected_dim {
             return Err(Error::msg(format!(
-                "Unexpected pooler output shape: got {:?}, expected [{}, {}]",
-                output_shape, batch_size, expected_dim
+                "Unexpected batch pooler output shape: got {:?}, expected [{}, {}]",
+                shape, batch_size, expected_dim
             )));
         }
 
-        // Extract individual embeddings and normalize
-        let mut embeddings = Vec::with_capacity(batch_size);
-        for i in 0..batch_size {
-            let start = i * expected_dim;
-            let end = start + expected_dim;
-            // Slice the raw data buffer
-            if end > output_data.len() {
-                 return Err(Error::msg(format!(
-                    "Data slice index out of bounds for batch item {}: start {}, end {}, data len {}",
-                    i, start, end, output_data.len()
-                )));
-            }
-            let embedding_slice = &output_data[start..end];
-            let embedding_vec = embedding_slice.to_vec();
-            embeddings.push(Self::normalize_embedding(embedding_vec));
-        }
+        // Process each embedding in the batch
+        let embeddings: Result<Vec<Vec<f32>>> = data
+            .chunks_exact(expected_dim) // Split the flat data into chunks of size expected_dim
+            .map(|embedding_slice| {
+                // Normalize each individual embedding slice
+                let mut embedding = embedding_slice.to_vec();
+                let norm = embedding.iter().map(|&x| x * x).sum::<f32>().sqrt();
+                if norm > 1e-6 {
+                    for x in &mut embedding {
+                        *x /= norm;
+                    }
+                    // Optional: Verify norm is close to 1
+                    // let norm_after = embedding.iter().map(|&x| x * x).sum::<f32>().sqrt();
+                    // assert!((norm_after - 1.0).abs() < 1e-5);
+                }
+                Ok(embedding)
+            })
+            .collect(); // Collect into Result<Vec<Vec<f32>>>
 
-        Ok(embeddings)
+        embeddings
     }
 
     fn dimension(&self) -> usize {
