@@ -92,16 +92,32 @@ pub async fn handle_query(
         .create_embedding_model()
         .context("Failed to create embedding model for query")?;
     log::info!("Generating embedding for query: \"{}\"", cmd_args.query);
-    let query_embedding = model
+    let mut query_embedding = model
         .embed(&cmd_args.query)
         .context("Failed to generate query embedding")?;
     log::debug!("Generated query embedding dimension: {}", query_embedding.len());
+
+    // --- WORKAROUND: Manually normalize the embedding --- 
+    let norm = query_embedding.iter().map(|&x| x * x).sum::<f32>().sqrt();
+    if norm > 1e-6 { // Avoid division by zero/very small numbers
+        log::debug!("Manually normalizing query embedding (original norm: {})", norm);
+        for x in &mut query_embedding {
+            *x /= norm;
+        }
+        // Optional: verify normalization
+        // let new_norm = query_embedding.iter().map(|&x| x * x).sum::<f32>().sqrt();
+        // log::debug!("New norm after manual normalization: {}", new_norm);
+        // assert!((new_norm - 1.0).abs() < 1e-5);
+    } else {
+        log::warn!("Query embedding norm is near zero ({}), skipping normalization.", norm);
+    }
+    // --- End Workaround ---
 
     // --- Build Search Request ---
     log::info!("Building search request...");
     let mut search_builder = SearchPointsBuilder::new(
         CODE_SEARCH_COLLECTION,
-        query_embedding,
+        query_embedding, // Use the potentially normalized embedding
         cmd_args.limit,
     );
 
