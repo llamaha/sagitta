@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+
 // Remove log imports if env_logger is fully replaced
 // use log::{debug, error, info};
 use std::sync::Arc;
