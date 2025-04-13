@@ -46,7 +46,7 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
         // "md" | "mdx" => Box::new(MarkdownParser::new()), // Ensure this is commented out or removed
         // Add cases for other languages here as they are implemented
         "js" | "jsx" => Box::new(crate::syntax::javascript::JavaScriptParser::new()),
-        // "ts" | "tsx" => Box::new(TypeScriptParser::new()),
+        "ts" | "tsx" => Box::new(crate::syntax::typescript::TypeScriptParser::new()),
         // "yaml" | "yml" => Box::new(YamlParser::new()),
         _ => Box::new(FallbackParser::new()),
     };
@@ -63,5 +63,7 @@ mod ruby_tests;
 mod golang_tests;
 #[cfg(test)]
 mod javascript_tests;
+#[cfg(test)]
+mod typescript_tests;
 // #[cfg(test)]
 // mod markdown_tests; // Ensure this is commented out or removed 

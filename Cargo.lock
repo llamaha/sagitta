@@ -3099,6 +3099,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-typescript"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecb35d98a688378e56c18c9c159824fd16f730ccbea19aacf4f206e5d5438ed9"
+dependencies = [
+ "cc",
+ "tree-sitter 0.22.6",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3270,6 +3280,7 @@ dependencies = [
  "tree-sitter-md",
  "tree-sitter-ruby",
  "tree-sitter-rust",
+ "tree-sitter-typescript",
  "uuid",
  "walkdir",
 ]
