@@ -54,7 +54,7 @@ mod tests {
     fn normalize(v: &mut [f32]) {
         let norm = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
         if norm > 1e-6 {
-            for x in v {
+            for x in v.iter_mut() {
                 *x /= norm;
             }
             // Re-enable the assertion to verify provider normalization

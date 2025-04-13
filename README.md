@@ -12,6 +12,34 @@ A lightweight command-line tool for fast, local code search using semantic retri
 -   **Simple Indexing:** Recursively indexes specified directories.
 -   **Configurable:** Supports custom ONNX embedding models/tokenizers and Qdrant connection details via config file or environment variables.
 
+## Supported Languages
+
+This tool uses tree-sitter for accurate code chunking. The following languages are currently supported for AST-based chunking (falling back to simple paragraph chunking for others):
+
+*   **Rust** (`.rs`)
+*   **Markdown** (`.md`, `.mdx`)
+*   **Go** (`.go`)
+*   **JavaScript** (`.js`, `.jsx`)
+*   **TypeScript** (`.ts`, `.tsx`)
+*   **YAML** (`.yaml`, `.yml`)
+*   **Ruby** (`.rb`)
+*   **Python** (`.py`)
+
+**Planned Languages:**
+
+Support for the following languages is planned for future releases:
+
+*   Java (`.java`)
+*   C# (`.cs`)
+*   C++ (`.cpp`, `.h`, `.hpp`)
+*   C (`.c`, `.h`)
+*   PHP (`.php`)
+*   Swift (`.swift`)
+*   Kotlin (`.kt`, `.kts`)
+*   HTML (`.html`)
+*   CSS (`.css`)
+*   JSON (`.json`)
+
 ## Prerequisites
 
 -   **Rust:** Required for building the project. Install from [rustup.rs](https://rustup.rs/).
@@ -271,8 +299,8 @@ Here is the current status of language support:
 | Language   | Status          | Supported Elements                             |
 | :--------- | :-------------- | :--------------------------------------------- |
 | Rust       | ✅ Supported    | functions, structs, enums, impls, traits, mods, macros, use, extern crates, type aliases, unions, statics, consts |
-| Ruby       | ⏳ Planned      | (TBD)                                          |
-| Go         | ⏳ Planned      | (TBD)                                          |
+| Ruby       | ✅ Supported    | modules, classes, methods, singleton_methods   |
+| Go         | ✅ Supported    | functions, methods, types (struct/interface), consts, vars |
 | JavaScript | ⏳ Planned      | (TBD)                                          |
 | TypeScript | ⏳ Planned      | (TBD)                                          |
 | Markdown   | ⏳ Planned      | (TBD - maybe sections, code blocks?)           |
