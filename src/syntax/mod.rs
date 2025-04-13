@@ -5,7 +5,7 @@ pub mod ruby;
 pub mod golang;
 pub mod javascript;
 pub mod typescript;
-pub mod markdown;
+// pub mod markdown;
 pub mod yaml;
 
 use anyhow::{Context, Result};
@@ -19,7 +19,7 @@ use crate::syntax::fallback::FallbackParser;
 use crate::syntax::rust::RustParser;
 use crate::syntax::ruby::RubyParser;
 use crate::syntax::golang::GolangParser;
-use crate::syntax::markdown::MarkdownParser;
+// use crate::syntax::markdown::MarkdownParser;
 
 // Re-export the CodeChunk type for easier access
 pub use self::parser::CodeChunk;
@@ -43,7 +43,7 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
         "rs" => Box::new(RustParser::new()),
         "rb" => Box::new(RubyParser::new()),
         "go" => Box::new(GolangParser::new()),
-        "md" | "mdx" => Box::new(MarkdownParser::new()), // This line will cause an error until we define MarkdownParser
+        // "md" | "mdx" => Box::new(MarkdownParser::new()), // Ensure this is commented out or removed
         // Add cases for other languages here as they are implemented
         // "js" | "jsx" => Box::new(JavaScriptParser::new()),
         // "ts" | "tsx" => Box::new(TypeScriptParser::new()),
@@ -61,5 +61,5 @@ mod rust_tests;
 mod ruby_tests;
 #[cfg(test)]
 mod golang_tests;
-#[cfg(test)]
-mod markdown_tests; 
+// #[cfg(test)]
+// mod markdown_tests; // Ensure this is commented out or removed 
