@@ -1,18 +1,131 @@
 // Placeholder for JavaScript syntax parsing
-use anyhow::Result;
+use anyhow::{Context, Result};
+use tree_sitter::{Node, Parser, Query, QueryCursor};
+
 use crate::syntax::parser::{CodeChunk, SyntaxParser};
 
-pub struct JavaScriptParser;
+pub struct JavaScriptParser {
+    parser: Parser,
+    query: Query,
+}
 
 impl JavaScriptParser {
     pub fn new() -> Self {
-        JavaScriptParser
+        let mut parser = Parser::new();
+        let language = tree_sitter_javascript::language();
+        parser
+            .set_language(&language)
+            .expect("Error loading JavaScript grammar");
+
+        // Query for functions, classes, methods, arrow functions assigned to vars/consts
+        let query = Query::new(
+            &language,
+            r#"
+            [
+              (function_declaration) @item
+              (class_declaration) @item
+              (method_definition) @item
+              (lexical_declaration (variable_declarator value: (_) @item))
+              (variable_declaration (variable_declarator value: (_) @item))
+              (expression_statement (assignment_expression right: (_) @item))
+            ]
+            "#,
+        )
+        .expect("Error creating JavaScript query");
+
+        JavaScriptParser { parser, query }
+    }
+
+    fn node_to_chunk(
+        &self,
+        node: Node,
+        code: &str,
+        file_path: &str,
+    ) -> Option<CodeChunk> {
+        let start_byte = node.start_byte();
+        let end_byte = node.end_byte();
+        // --- Debug Print ---
+        // if file_path == "test.js" && node.kind() == "function_expression" {
+        //     println!("DEBUG (JS): Kind: {}, Range: {}..{}, Code Len: {}", node.kind(), start_byte, end_byte, code.len());
+        //     println!("DEBUG (JS): Node Text: {:?}", code.get(start_byte..end_byte));
+        // }
+        // --- End Debug ---
+        let content = code.get(start_byte..end_byte)?.to_string();
+        let start_line = node.start_position().row + 1; // tree-sitter is 0-indexed
+        let end_line = node.end_position().row + 1;
+
+        // Determine element type based on the actual node captured as @item
+        let element_type = match node.kind() {
+            "function_declaration" => "function",
+            "class_declaration" => "class",
+            "method_definition" => "method",
+            "arrow_function" => "function",
+            "function_expression" => "function",
+            _ => {
+                // Use the existing debug print
+                // println!("DEBUG node_to_chunk: Unknown @item kind: {}", node_kind);
+                "unknown"
+            }
+        };
+        // println!("DEBUG node_to_chunk: Determined Type: {}", element_type); // Keep type debug
+
+        // Filter out non-function/class/method captures before creating a chunk
+        if !matches!(element_type, "function" | "class" | "method") {
+            // println!("DEBUG node_to_chunk: Skipping non-code element type: {}", element_type);
+            return None;
+        }
+
+        // Filter out potentially small or trivial nodes if necessary (e.g., empty functions)
+        // Example: if content.trim() == "{}" || content.trim() == "=> {}" || content.lines().count() < 2 { return None; }
+
+        Some(CodeChunk {
+            content,
+            file_path: file_path.to_string(),
+            start_line,
+            end_line,
+            language: "javascript".to_string(),
+            element_type: element_type.to_string(),
+        })
     }
 }
 
 impl SyntaxParser for JavaScriptParser {
-    fn parse(&mut self, _code: &str, file_path: &str) -> Result<Vec<CodeChunk>> {
-        println!("Warning: JavaScript parser not yet implemented. Using fallback for {}", file_path);
-        Ok(vec![]) // Placeholder
+    fn parse(&mut self, code: &str, file_path: &str) -> Result<Vec<CodeChunk>> {
+        let tree = self
+            .parser
+            .parse(code, None)
+            .context("Failed to parse JavaScript code")?;
+        let root_node = tree.root_node();
+
+        let mut chunks = Vec::new();
+        let mut cursor = QueryCursor::new();
+        let code_bytes = code.as_bytes();
+        let matches = cursor.matches(&self.query, root_node, code_bytes);
+
+        for mat in matches {
+            for capture in mat.captures {
+                 if let Some(chunk) = self.node_to_chunk(capture.node, code, file_path) {
+                     chunks.push(chunk);
+                 }
+            }
+        }
+
+        // Fallback: If no chunks found in non-empty file, index whole file
+        if chunks.is_empty() && !code.trim().is_empty() {
+            log::debug!(
+                "No top-level JavaScript items found in {}, indexing as whole file.",
+                file_path
+            );
+             chunks.push(CodeChunk {
+                 content: code.to_string(),
+                 file_path: file_path.to_string(),
+                 start_line: 1,
+                 end_line: code.lines().count(),
+                 language: "javascript".to_string(),
+                 element_type: "file".to_string(),
+             });
+        }
+
+        Ok(chunks)
     }
 } 

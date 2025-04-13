@@ -159,14 +159,14 @@ mod tests {
 
     #[test]
     fn test_parse_comments_only() -> Result<()> {
-        let code = r#"
-        // This is a comment
-        /* Another comment */
-        "#;
+        let code = "// This is a comment\n// So is this";
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
-        // Expect empty because comments aren't top-level items we capture
-        assert!(chunks.is_empty());
+        // Should fallback to file chunk(s) as no declarations are found
+        // assert!(chunks.is_empty()); // Old assertion
+        assert!(!chunks.is_empty(), "Fallback should produce at least one chunk");
+        assert_eq!(chunks[0].element_type, "file_chunk", "Chunk type should be file_chunk");
+        assert_eq!(chunks[0].language, "rust", "Language should be rust");
         Ok(())
     }
 
