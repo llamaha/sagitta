@@ -1,0 +1,67 @@
+image: rust:latest
+
+# Workflow rules: Only run pipelines for pushes to branches
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+
+stages:
+  - test # Simplified stages
+
+variables:
+  # Ensure cargo build artifacts are cached
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  # Ensure git fetch works correctly
+  GIT_DEPTH: 0
+  # Attempt to ensure LFS files are downloaded automatically
+  GIT_LFS_SKIP_SMUDGE: "0"
+
+cache:
+  paths:
+    - .cargo/bin/
+    - .cargo/registry/index/
+    - .cargo/registry/cache/
+    - target/ # Cache target directory for tests
+
+.common_setup:
+  before_script:
+    - rustc --version && cargo --version
+    - apt-get update -y && apt-get install -y -qq git git-lfs build-essential libssl-dev pkg-config libxml2-utils grep gawk
+    - git lfs install --force
+    - git lfs pull
+
+# Removed 'compile' job
+
+run_tests:
+  extends: .common_setup
+  stage: test
+  # Removed 'needs: [compile]' as compile job is removed
+  script:
+    - 'echo "Running tests (release mode)..."'
+    - 'cargo test --release --no-default-features --features onnx'
+  # Removed coverage reporting and artifacts
+  rules:
+    # Run only on pushes to non-default branches
+    - if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+
+version_check:
+  extends: .common_setup
+  stage: test
+  needs: []
+  script:
+    - 'echo "Checking if Cargo.toml version has been bumped..."'
+    - 'git fetch origin $CI_DEFAULT_BRANCH'
+    - 'current_version=$(grep -E "^[[:space:]]*version[[:space:]]*=" Cargo.toml | head -n 1 | cut -d\" -f2)'
+    - 'target_version=$(git show origin/$CI_DEFAULT_BRANCH:Cargo.toml | grep -E "^[[:space:]]*version[[:space:]]*=" | head -n 1 | cut -d\" -f2)'
+    - 'echo "Current version: $current_version"'
+    - 'echo "Target branch ($CI_DEFAULT_BRANCH) version: $target_version"'
+    - 'if [ -z "$current_version" ] || [ -z "$target_version" ]; then echo "Error: Could not extract version from Cargo.toml."; exit 1; fi'
+    # Use version comparison suitable for strings (assuming semantic versioning order)
+    - 'if [ "$(printf "%s\n" "$target_version" "$current_version" | sort -V | head -n 1)" != "$target_version" ] || [ "$current_version" = "$target_version" ]; then echo "Error: Version in Cargo.toml ($current_version) has not been bumped compared to target branch ($CI_DEFAULT_BRANCH: $target_version)."; exit 1; fi'
+    - 'echo "Version check passed ($current_version > $target_version)."'
+  rules:
+    # Run only on pushes to the default branch
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+
+# Removed 'e2e_language_test' job
+# Removed 'run_example' job
