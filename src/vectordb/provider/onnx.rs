@@ -3,7 +3,7 @@ use anyhow::{Error, Result, anyhow};
 use log::{debug};
 use ndarray::{Array, Array2};
 use ort::session::{Session, builder::GraphOptimizationLevel};
-use ort::value::{DynValue, Value};
+use ort::value::{Value};
 use ort::execution_providers::{CUDAExecutionProvider};
 use std::path::Path;
 use std::sync::{Arc, Mutex};

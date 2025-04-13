@@ -18,7 +18,7 @@ cuda = ["ort/cuda"]
 [dependencies]
 clap = { version = "4.5.7", features = ["derive", "env"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
-walkdir = "2.3"
+walkdir = "2.5"
 anyhow = "1.0.86"
 thiserror = "1.0.61"
 rayon = "1.7"
@@ -39,7 +39,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Code parsing dependencies
 tree-sitter = "0.22.6"
 tree-sitter-rust = "0.21.0"
-# tree-sitter-ruby = "0.20"
+tree-sitter-ruby = "0.21.0"
 # tree-sitter-go = "0.20"
 # tree-sitter-javascript = "0.20"
 # tree-sitter-typescript = "0.20"

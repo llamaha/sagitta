@@ -15,6 +15,7 @@ use self::parser::SyntaxParser;
 
 use crate::syntax::fallback::FallbackParser;
 use crate::syntax::rust::RustParser;
+use crate::syntax::ruby::RubyParser;
 
 // Re-export the CodeChunk type for easier access
 pub use self::parser::CodeChunk;
@@ -27,8 +28,8 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
 
     let mut parser: Box<dyn SyntaxParser> = match extension {
         "rs" => Box::new(RustParser::new()),
+        "rb" => Box::new(RubyParser::new()),
         // Add cases for other languages here as they are implemented
-        // "rb" => Box::new(RubyParser::new()),
         // "go" => Box::new(GolangParser::new()),
         // "js" | "jsx" => Box::new(JavaScriptParser::new()),
         // "ts" | "tsx" => Box::new(TypeScriptParser::new()),
@@ -42,4 +43,6 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
 
 // Add test module declaration
 #[cfg(test)]
-mod rust_tests; 
+mod rust_tests;
+#[cfg(test)]
+mod ruby_tests; 
