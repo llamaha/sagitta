@@ -14,7 +14,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
 
 ## Supported Languages
 
-This tool uses tree-sitter for accurate code chunking. The following languages are currently supported for AST-based chunking (falling back to line-based chunking for others):
+This tool uses tree-sitter for accurate code chunking. The following languages are currently supported for AST-based chunking (falling back to whole-file chunking for others):
 
 *   **Rust** (`.rs`)
 *   **Markdown** (`.md`, `.mdx`)
