@@ -4,6 +4,8 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 use crate::syntax::parser::{CodeChunk, SyntaxParser};
 
+const FALLBACK_CHUNK_SIZE: usize = 200; // Define chunk size in lines
+
 pub struct GolangParser {
     parser: Parser,
     query: Query,
@@ -92,17 +94,31 @@ impl SyntaxParser for GolangParser {
         // Fallback: If no chunks found in non-empty file, index whole file
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Go items found in {}, indexing as whole file.",
+                "No top-level Go items found in {}, splitting into smaller chunks.",
                 file_path
             );
-             chunks.push(CodeChunk {
-                 content: code.to_string(),
-                 file_path: file_path.to_string(),
-                 start_line: 1,
-                 end_line: code.lines().count(),
-                 language: "go".to_string(),
-                 element_type: "file".to_string(),
-             });
+            let lines: Vec<&str> = code.lines().collect();
+            let num_lines = lines.len();
+            for (i, chunk_lines) in lines.chunks(FALLBACK_CHUNK_SIZE).enumerate() {
+                let start_line = i * FALLBACK_CHUNK_SIZE + 1;
+                // Adjust end_line calculation to prevent going past the actual number of lines
+                let end_line = std::cmp::min(start_line + FALLBACK_CHUNK_SIZE - 1, num_lines);
+                let chunk_content = chunk_lines.join("\n"); // Use \n to simulate newline within the chunk content string
+
+                // Skip empty chunks that might result from trailing newlines etc.
+                if chunk_content.trim().is_empty() {
+                    continue;
+                }
+
+                chunks.push(CodeChunk {
+                    content: chunk_content,
+                    file_path: file_path.to_string(),
+                    start_line,
+                    end_line,
+                    language: "go".to_string(),
+                    element_type: "file_chunk".to_string(), // Indicate it's a fallback chunk
+                });
+            }
         }
 
         Ok(chunks)
