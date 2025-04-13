@@ -10,7 +10,7 @@ pub mod python;
 pub mod typescript;
 pub mod yaml;
 
-use anyhow::{Context, Result};
+use anyhow::{Result};
 use std::path::Path;
 // Remove tree-sitter imports added for inlining
 // use tree_sitter::{Node, Parser, Query, QueryCursor};
@@ -21,7 +21,6 @@ use crate::syntax::fallback::FallbackParser;
 use crate::syntax::rust::RustParser;
 use crate::syntax::ruby::RubyParser;
 use crate::syntax::golang::GolangParser;
-use crate::syntax::markdown::MarkdownParser;
 use crate::syntax::python::PythonParser;
 
 // Re-export the CodeChunk type for easier access
