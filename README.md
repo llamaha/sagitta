@@ -1,16 +1,16 @@
 # vectordb-cli
 
-A lightweight command-line tool for fast, local search across your codebases and text files using semantic retrieval.
+A lightweight command-line tool for fast, local code search using semantic retrieval powered by ONNX models and Qdrant.
 
-**Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library. For details on using the library in your own Rust projects, see [Library Usage](docs/LIBRARY_USAGE.md).
+**Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library.
 
 ## Features
 
--   **Semantic Search:** Finds relevant text chunks based on meaning using ONNX models.
--   **Local First:** Indexes and searches files directly on your machine. No data leaves your system.
+-   **Semantic Search:** Finds relevant code chunks based on meaning using ONNX models.
+-   **Qdrant Backend:** Utilizes a Qdrant vector database instance for scalable storage and efficient search.
+-   **Local or Remote Qdrant:** Can connect to a local Dockerized Qdrant or a remote instance.
 -   **Simple Indexing:** Recursively indexes specified directories.
--   **Configurable:** Supports custom ONNX embedding models and tokenizers.
--   **Cross-Platform:** Runs on Linux and macOS.
+-   **Configurable:** Supports custom ONNX embedding models/tokenizers and Qdrant connection details via config file or environment variables.
 
 ## Prerequisites
 
@@ -27,6 +27,26 @@ A lightweight command-line tool for fast, local search across your codebases and
         ```bash
         xcode-select --install
         ```
+-   **Qdrant:** A Qdrant instance (v1.7.0 or later recommended) must be running and accessible. See [Qdrant Setup](#qdrant-setup).
+-   **ONNX Model Files:** An ONNX embedding model and its corresponding tokenizer files are required. See [Embedding Models](#embedding-models).
+
+## Qdrant Setup
+
+`vectordb-cli` requires a running Qdrant instance.
+
+**Option 1: Docker (Recommended for Local Use)**
+
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant:latest
+```
+
+This starts Qdrant with the default gRPC port (6333) and HTTP/REST port (6334) mapped to your host. Data will be persisted in the `qdrant_storage` directory in your current working directory.
+
+**Option 2: Qdrant Cloud or Other Deployment**
+
+Follow the instructions for your chosen deployment method. You will need the **URL** (including `http://` or `https://` and the port, typically 6333 for gRPC) and potentially an **API Key** if required by your setup.
 
 ## Installation
 
@@ -36,268 +56,208 @@ A lightweight command-line tool for fast, local search across your codebases and
     cd vectordb-cli
     ```
 
-2.  **Download Default Model:** The default model (`all-minilm-l6-v2`) is included via Git LFS. To use it:
-    ```bash
-    # Install Git LFS (if not already installed)
-    # Debian/Ubuntu: sudo apt-get install git-lfs
-    # macOS: brew install git-lfs
-    # Then, install LFS hooks for your user:
-    git lfs install
-    # Pull the LFS files (downloads the model/tokenizer)
-    git lfs pull
-    ```
-    The default model (`onnx/all-minilm-l6-v2.onnx`) and its tokenizer (`onnx/tokenizer.json`) will be downloaded into the `onnx/` directory.
-
-    **Important:** `vectordb-cli` needs access to these files. It will automatically find them if you run the tool from the repository root, or if the `onnx/` directory is present in the current working directory. If running from elsewhere, you **must** specify the paths using environment variables:
-    ```bash
-    # Set these in your shell or .bashrc/.zshrc, replacing /path/to/vectordb-cli appropriately
-    export VECTORDB_ONNX_MODEL="/path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx"
-    export VECTORDB_ONNX_TOKENIZER="/path/to/vectordb-cli/onnx/"
-    ```
-    Failure to configure access to a valid model and tokenizer will result in an error.
+2.  **Prepare ONNX Model & Tokenizer:**
+    Download or obtain your desired ONNX embedding model (`.onnx` file) and its tokenizer configuration (`tokenizer.json` and potentially other files like `vocab.txt`, `merges.txt`, etc., usually in a single directory). Place them in a known location. The repository includes `onnx/all-minilm-l12-v2.onnx` and `onnx/minilm_tokenizer.json` as an example (download via `git lfs pull` if needed).
+    
+    **Note:** The tool dynamically detects the embedding dimension from the provided `.onnx` model. Any dimension model (e.g., 384, 768) can be used.
 
 3.  **Build:**
+    *   **Standard (CPU):**
+        ```bash
+        cargo build --release
+        ```
+    *   **With CUDA GPU Support (Linux):** Ensure you have NVIDIA drivers and the CUDA toolkit installed. Then build with:
+        ```bash
+        cargo build --release --features ort/cuda
+        ```
+
+4.  **Understanding the Build Process (Linux/macOS):**
+    *   The project uses a build script (`build.rs`) to simplify setup.
+    *   During the build, this script automatically finds the necessary ONNX Runtime libraries (downloaded by the `ort` crate to `~/.cache/ort.pyke.io/`) including provider-specific libraries (like CUDA `.so` files or macOS `.dylib` files).
+    *   It copies these libraries into the final build output directory (`target/release/lib/`).
+    *   It sets the necessary RPATH (`$ORIGIN/lib` on Linux, `@executable_path/lib` on macOS) on the `vectordb-cli` executable.
+    *   This means you typically **do not** need to manually set `LD_LIBRARY_PATH` (Linux) or `DYLD_LIBRARY_PATH` (macOS).
+
+5.  **Install Binary (Optional):** Copy the compiled binary to a location in your `PATH`.
     ```bash
-    cargo build --release
+    # Example for Linux/macOS
+    cp target/release/vectordb-cli ~/.local/bin/ 
     ```
 
-4.  **Install Binary:** Copy the compiled binary to a location in your `PATH`.
-    ```bash
-    # Example:
-    cp target/release/vectordb-cli ~/.local/bin/
-    ```
+## Configuration
 
-To enable GPU acceleration (CUDA on Linux, Core ML/Metal on macOS), you will need to compile with specific features. Please read the relevant documentation *before* attempting to build with GPU support:
-- **CUDA (Linux):** See [CUDA Setup](docs/CUDA_SETUP.md). Compile with: `cargo build --release --features ort/cuda`
-- **Core ML / Metal (macOS):** See [macOS GPU Setup](docs/MACOS_GPU_SETUP.md). Compile with: `cargo build --release --features ort/coreml`
+`vectordb-cli` uses a hierarchical configuration system:
 
-**Note on GPU Usage:** While GPU acceleration significantly speeds up the *embedding generation* process during indexing (and for the query itself), the core similarity search uses an efficient CPU-based HNSW index. This means that even without a compatible GPU, indexing will still work (just slower), and querying will remain relatively fast. Don't worry if you don't have a GPU - the tool is still very usable!
+1.  **Command-line Arguments:** Highest priority (e.g., `--onnx-model`, `--onnx-tokenizer-dir`).
+2.  **Environment Variables:** Second priority.
+3.  **Configuration File (`config.toml`):** Lowest priority.
 
-## Embedding Models
+### Environment Variables
 
-`vectordb-cli` uses ONNX embedding models for semantic search. You can use the default model or provide your own.
+-   `QDRANT_URL`: URL of the Qdrant gRPC endpoint (e.g., `http://localhost:6334`). Defaults to `http://localhost:6334` if not set.
+-   `VECTORDB_ONNX_MODEL`: Full path to the `.onnx` model file.
+-   `VECTORDB_ONNX_TOKENIZER_DIR`: Full path to the directory containing the `tokenizer.json` file.
 
-### Default Model (all-MiniLM-L6-v2)
+### Configuration File (`config.toml`)
 
--   **Dimension:** 384
--   **Description:** A fast and effective model suitable for general semantic search.
--   **Setup:** If you followed step 2 of the Installation (using `git lfs pull`), the model and tokenizer are downloaded in the `onnx/` directory. Ensure `vectordb-cli` can find them (see Installation Step 2 notes on environment variables if needed).
+The tool looks for a `config.toml` file in the XDG configuration directory:
 
-### Using Other Embedding Models
+*   **Linux/macOS:** `~/.config/vectordb-cli/config.toml`
 
-Details on using alternative models like CodeBERT, including setup and configuration, can be found here: [Using CodeBERT and Other Models](docs/CODEBERT_SETUP.md).
+**Example `config.toml`:**
+
+```toml
+# URL for the Qdrant gRPC endpoint
+qdrant_url = "http://localhost:6333"
+
+# --- Optional: ONNX Model Configuration ---
+# These are only needed if not provided via args or env vars.
+
+# Path to the ONNX model file
+# onnx_model_path = "/path/to/your/model.onnx"
+
+# Path to the directory containing tokenizer.json
+# Note: Key name is `onnx_tokenizer_path`
+onnx_tokenizer_path = "/path/to/your/tokenizer_directory"
+
+# --- Optional: Qdrant API Key ---
+# api_key = "your_qdrant_api_key"
+```
+
+**Note:** You *must* provide the ONNX model and tokenizer paths via one of these methods (arguments, environment variables, or config file) for commands like `index` and `query` to work.
 
 ## Usage
 
-By default, `vectordb-cli` stores its database (`db.json`), cache (`cache.json`), and vector index (`hnsw_index.json`) in the standard user local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS).
+The tool interacts with a Qdrant collection named `vectordb-code-search` by default.
 
-**Working with Multiple Repositories:**
+### `index`
 
-*   **Combined Index:** You can index multiple repositories into a single database. Subsequent queries will search across all of them. This can be done either by providing multiple paths to a single `index` command or by running `index` multiple times targeting the same database.
-    ```bash
-    # Index two repos into the default database in one command
-    vectordb-cli index /path/to/repoA /path/to/repoB
-
-    # Index two repos into the default database separately
-    vectordb-cli index /path/to/repoA 
-    vectordb-cli index /path/to/repoC
-    ```
-*   **Isolated Indexes:** To keep indexes for different projects or repositories completely separate, use the global `--db-path` flag to specify a different database file location for each one. The cache and vector index files will be stored alongside the specified `db.json`.
-    ```bash
-    # Index repoA into its own database
-    vectordb-cli --db-path /data/databases/repoA_index.json index /path/to/repoA
-
-    # Index repoB into a different database
-    vectordb-cli --db-path /data/databases/repoB_index.json index /path/to/repoB
-
-    # Query a specific isolated database
-    vectordb-cli --db-path /data/databases/repoA_index.json query "search term for repo A"
-    ```
-
-### 1. Indexing Files
-
-Create or update a search index for one or more directories. This process reads files, splits them into text chunks, generates embeddings for each chunk, and builds the search index. You must configure an ONNX model first (see [Embedding Models](#embedding-models)).
+Indexes files from one or more directories into the Qdrant collection.
 
 ```bash
-# Index a single directory using the default MiniLM model
+# Index a single directory (using config/env for Qdrant/ONNX)
 vectordb-cli index /path/to/your/code
 
-# Index multiple directories in one command
-vectordb-cli index /path/to/repoA /path/to/repoB ~/another/project
+# Index multiple directories
+vectordb-cli index /path/to/repoA /path/to/repoB
 
-# Index using CodeBERT via environment variables (assuming they are set)
-# (Ensure CodeBERT model/tokenizer paths are set in env vars)
-vectordb-cli index /path/to/your/code
+# Index specific file types (e.g., Rust and Markdown)
+vectordb-cli index /path/to/project -t rs md
 
-# Index using CodeBERT via command-line flags and specific file types
-vectordb-cli index /path/to/your/code \
-  --onnx-model ./codebert_onnx/codebert_model.onnx \
-  --onnx-tokenizer ./codebert_onnx/tokenizer \
-  --file-types rs,md,py
+# Override ONNX paths via arguments
+vectordb-cli index /path/to/project \
+  --onnx-model /custom/model.onnx \
+  --onnx-tokenizer-dir /custom/tokenizer
 
-# Index multiple directories with more threads
-vectordb-cli index /path/to/repoA /path/to/repoB -j 8
-
-# Index using a custom database location
-vectordb-cli --db-path /data/shared_index.json index /path/to/team/project
+# Set chunking parameters
+vectordb-cli index /path/to/project --chunk-max-length 1024 --chunk-overlap 128
 ```
 
-### 2. Querying Files
+**Arguments:**
+- `dirs`: (Required) One or more directory paths to index.
+- `-t, --type`: Optional file extensions to include (without dots, e.g., `rs py md`).
+- `--chunk-max-length`: Max lines per text chunk (default: 512).
+- `--chunk-overlap`: Lines of overlap between chunks (default: 64).
+- `--onnx-model`: (Global) Override path to ONNX model file.
+- `--onnx-tokenizer-dir`: (Global) Override path to ONNX tokenizer directory.
 
-Search across all indexed text chunks using semantic search.
+### `query`
+
+Performs a semantic search query against the indexed data.
 
 ```bash
-# Basic query - finds relevant chunks
-vectordb-cli query "database connection configuration"
+# Basic query (using config/env for Qdrant/ONNX)
+vectordb-cli query "database connection logic"
 
-# Limit results to 10 chunks
-vectordb-cli query "error handling middleware" -l 10
+# Limit results
+vectordb-cli query "error handling" -l 5
 
-# Filter search by file types (shows chunks only from matching files)
-vectordb-cli query "user schema definition" -t sql,prisma
+# Filter results by file type
+vectordb-cli query "user authentication schema" -t sql yaml
 
-# Query using a custom database location
-vectordb-cli --db-path /data/shared_index.json query "deployment script"
+# Adjust context lines shown in results
+vectordb-cli query "async function example" --context 5
+
+# Override ONNX paths via arguments
+vectordb-cli query "search term" \
+  --onnx-model /custom/model.onnx \
+  --onnx-tokenizer-dir /custom/tokenizer
 ```
 
-**Example Output:**
+**Arguments:**
+- `query`: (Required) The natural language search query.
+- `-l, --limit`: Max number of results (default: 10).
+- `-t, --type`: Optional file extensions to filter results (without dots).
+- `--context`: Number of context lines before/after match (default: 2).
+- `--onnx-model`: (Global) Override path to ONNX model file.
+- `--onnx-tokenizer-dir`: (Global) Override path to ONNX tokenizer directory.
 
-```
-Found 3 relevant chunks (0.12 seconds):
----
-1. src/db/connection.rs (Lines 55-68) (score: 0.8734)
-  // Function to establish database connection
-  pub fn connect(config: &DatabaseConfig) -> Result<PgConnection, ConnectionError> {
-      let database_url = format!(
-          "postgres://{}:{}@{}:{}/{}",
-          config.user,
-          config.password,
-          config.host,
-          config.port,
-          config.name
-      );
-      PgConnection::establish(&database_url)
-          .map_err(|e| ConnectionError::EstablishmentError(e.to_string()))
-  }
----
-2. config/production.yaml (Lines 12-18) (score: 0.8105)
-  database:
-    host: prod-db.example.com
-    port: 5432
-    user: prod_user
-    password: "${PROD_DB_PASSWORD}"
-    name: main_prod_db
----
-3. tests/integration/db_test.rs (Lines 20-35) (score: 0.7950)
-  #[test]
-  fn test_database_connection() {
-      let config = DatabaseConfig {
-          host: "localhost".to_string(),
-          port: 5433, // Test DB port
-          user: "test_user".to_string(),
-          password: "test_password".to_string(),
-          name: "test_db".to_string(),
-      };
-      
-      let connection = connect(&config);
-      assert!(connection.is_ok(), "Failed to connect to test database");
-  }
----
-```
+### `stats`
 
-### 3. Writing Effective Queries
-
-`vectordb-cli` uses semantic (meaning-based) search. Here are tips for getting the best results:
-
-*   **Be Specific but Natural:** Instead of just keywords like "database config", try a more descriptive query like "database connection configuration for production" or "how to handle async errors in Rust middleware". The semantic search understands the intent.
-*   **Include Context:** Add terms related to the language, framework, or feature area. Examples: "python async http request library", "react state management hook example", "kubernetes deployment yaml ingress setup".
-*   **Use Code Snippets (Carefully):** You can paste short code snippets directly into the query. The default model (MiniLM) has some code understanding, but models like CodeBERT (if configured) are better suited for this. Keep snippets concise.
-*   **Filter by File Type:** Use `-t` or `--file-types` (e.g., `-t py,md`) to narrow down results if you know the type of file you're looking for.
-*   **Iterate:** If your first query doesn't yield the desired results, refine it based on the text chunks you see. Add more detail, remove ambiguity, or try different phrasing.
-
-### 4. Database Statistics
-
-Show information about the current database.
+Displays statistics about the Qdrant collection (`vectordb-code-search`).
 
 ```bash
+# Show stats (using config/env for Qdrant)
 vectordb-cli stats
-# Specify db path if not default
-vectordb-cli --db-path /data/shared_index.json stats
 ```
 
-### 5. Clearing the Database
+(No specific arguments)
 
-Remove all indexed data (embeddings, cache, vector index).
+### `list`
 
-```bash
-vectordb-cli clear
-# Specify db path if not default
-vectordb-cli --db-path /data/shared_index.json clear
-```
-
-### 6. Listing Indexed Directories
-
-List the directories that have been explicitly indexed into the database, along with the timestamp of their last successful indexing.
+Lists the unique root directories that have been indexed into the collection.
 
 ```bash
-# List directories in the default database
+# List indexed directories (using config/env for Qdrant)
 vectordb-cli list
-
-# List directories in a custom database
-vectordb-cli --db-path /data/shared_index.json list
 ```
 
-### 7. Backing Up the Database
+(No specific arguments)
 
-The application stores its state in three main files:
+### `clear`
 
-*   `db.json`: Contains the indexed text chunks and their metadata.
-*   `cache.json`: Stores file hashes and timestamps to speed up re-indexing.
-*   `hnsw_index.json`: Holds the HNSW vector index for fast searching.
-
-By default, these files are located in the user's local data directory (e.g., `~/.local/share/vectordb-cli` on Linux, `~/Library/Application Support/vectordb-cli` on macOS). If you use the `--db-path` option, they will be located in the same directory as the specified `.json` file.
-
-To back up your index, simply copy these three files to a safe location. You can also use `tar` to create a compressed archive:
+Removes data from the Qdrant collection.
 
 ```bash
-# Example backup (replace path with your actual data directory)
-DATA_DIR="$HOME/.local/share/vectordb-cli"
-BACKUP_DEST="$HOME/backups/vectordb-cli_backup_$(date +%Y%m%d).tar.gz"
+# Clear ALL data from the collection (requires confirmation)
+vectordb-cli clear --all
 
-tar czvf "$BACKUP_DEST" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
+# Clear all data, skipping confirmation
+vectordb-cli clear --all -y
 
-echo "Backup created at $BACKUP_DEST"
+# Clear data associated with a specific indexed directory (requires confirmation)
+vectordb-cli clear --directory /path/to/indexed/repoA
+
+# Clear directory data, skipping confirmation
+vectordb-cli clear --directory /path/to/indexed/repoA -y
 ```
 
-To restore, simply place the backed-up `db.json`, `cache.json`, and `hnsw_index.json` files back into the expected data directory before running the application.
+**Arguments:**
+- `--all`: Flag to remove all data by deleting the collection.
+- `--directory <PATH>`: Remove indexed points originating from the specified directory.
+- `-y, --yes`: Skip the confirmation prompt.
 
-## How it Works
+**Note:** You must provide either `--all` or `--directory`.
 
-1.  **Indexing:**
-    -   Files in the specified directories are scanned.
-    -   Supported file types are read as plain text.
-    -   Text content is split into chunks (based on paragraphs/double newlines).
-    -   An ONNX embedding model generates vector representations for each chunk.
-    -   Chunk metadata (file path, lines, text) and embeddings are stored in `db.json` (or the file specified by `--db-path`).
-    -   File metadata (hash, timestamp) is stored in `cache.json` to avoid re-processing unchanged files on subsequent runs.
-    -   An HNSW (Hierarchical Navigable Small World) index is built from the chunk embeddings and saved to `hnsw_index.json` for fast approximate nearest neighbor search.
+## Development
 
-2.  **Querying:**
-    -   The search query is embedded using the same ONNX model.
-    -   **Vector Search:** The HNSW index is used to find text chunks with embeddings semantically similar to the query embedding.
-    -   The most relevant chunks are retrieved along with their file path, line numbers, and text, then displayed ranked by similarity score.
+(Include instructions for setting up the dev environment, running tests, etc.)
 
-## Performance Notes
+```bash
+# Run tests
+cargo test
 
-*   **Indexing:** Indexing large codebases or using a high number of threads (`-j` option) can consume significant RAM and CPU resources, especially during embedding generation and HNSW index construction.
-*   **Querying:** Query performance is generally fast due to the HNSW index. Using CodeBERT instead of the default MiniLM model will typically result in slower query times due to the larger model size and higher embedding dimension.
+# Run clippy
+cargo clippy --all-targets -- -D warnings
 
-## Known Issues / Future Work
+# Format code
+cargo fmt
+```
 
-*   The HNSW index is rebuilt entirely on every `index` command if *any* files were re-indexed, which can be slow if the total number of indexed chunks across all repositories is very large. Future versions could explore incremental index updates.
-*   Consider adding more sophisticated chunking strategies (e.g., code-aware chunking).
-*   Consider adding a mechanism to automatically remove deleted files from the index.
+## Contributing
+
+(Contribution guidelines)
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). 
+MIT License 

@@ -5,14 +5,16 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use crate::vectordb::error::VectorDBError;
+use std::fmt;
 
 // Use the embedding dimensions from the providers
 // use crate::vectordb::provider::fast::FAST_EMBEDDING_DIM;
 
 /// Supported embedding models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash, Default)]
 pub enum EmbeddingModelType {
     /// Use the ONNX model for embeddings.
+    #[default]
     Onnx,
     // No specific CodeBert type needed if we handle dimensions dynamically
 }
@@ -29,17 +31,11 @@ impl EmbeddingModelType {
     }
 }
 
-impl std::fmt::Display for EmbeddingModelType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for EmbeddingModelType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EmbeddingModelType::Onnx => write!(f, "ONNX"),
         }
-    }
-}
-
-impl Default for EmbeddingModelType {
-    fn default() -> Self {
-        EmbeddingModelType::Onnx
     }
 }
 

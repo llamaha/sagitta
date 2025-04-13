@@ -183,12 +183,12 @@ pub fn chunk_by_indentation(content: &str) -> Vec<ChunkInfo> {
         }
     }
 
-    // Add the last chunk if it exists
-    if current_chunk_start_line.is_some() {
+    // Add the last chunk if it exists (using if let)
+    if let Some(start_line) = current_chunk_start_line {
         finalize_chunk(
             &mut chunks,
             &mut current_chunk_lines, // Pass mutable ref
-            current_chunk_start_line.unwrap(),
+            start_line,
             all_lines.len(), // Potential end line is the last line of the file
         );
     }

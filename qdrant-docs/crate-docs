@@ -1,0 +1,234 @@
+
+crates.io
+Browse All Crates
+|
+qdrant-client
+v1.13.0
+Rust client for Qdrant Vector Search Engine
+
+    #client #grpc #search-engine #vector-search #qdrant 
+
+    Readme
+    46 Versions
+    Dependencies
+    Dependents
+
+Qdrant Rust client
+
+The Qdrant - High-Performance Vector Search at Scale - client for Rust.
+
+Crates.io docs.rs Apache 2.0 licensed
+
+Documentation:
+
+    Qdrant documentation: https://qdrant.tech/documentation/
+    Crate documentation: https://docs.rs/qdrant-client
+
+Installation
+
+cargo add qdrant-client
+
+Package is available in crates.io
+Examples
+
+A list of example snippets can be found here
+
+More examples can be found in the examples folder
+Dependencies
+
+The client uses gRPC via the Tonic library.
+
+To change anything in the protocol buffer definitions, you need the protoc Protocol Buffers compiler, along with Protocol Buffers resource files.
+
+Refer to the Tonic installation guide for more details.
+Usage
+
+Run Qdrant with enabled gRPC interface:
+
+# With env variable
+docker run -p 6333:6333 -p 6334:6334 \
+    -e QDRANT__SERVICE__GRPC_PORT="6334" \
+    qdrant/qdrant
+
+Or by updating the configuration file:
+
+service:
+  grpc_port: 6334
+
+More info about gRPC in documentation.
+Making requests
+
+Add necessary dependencies:
+
+cargo add qdrant-client anyhow tonic tokio serde-json --features tokio/rt-multi-thread
+
+Add search example from examples/search.rs to your src/main.rs:
+
+use qdrant_client::qdrant::{
+    Condition, CreateCollectionBuilder, Distance, Filter, PointStruct, ScalarQuantizationBuilder,
+    SearchParamsBuilder, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+};
+use qdrant_client::{Payload, Qdrant, QdrantError};
+
+#[tokio::main]
+async fn main() -> Result<(), QdrantError> {
+    // Example of top level client
+    // You may also use tonic-generated client from `src/qdrant.rs`
+    let client = Qdrant::from_url("http://localhost:6334").build()?;
+
+    let collections_list = client.list_collections().await?;
+    dbg!(collections_list);
+    // collections_list = {
+    //   "collections": [
+    //     {
+    //       "name": "test"
+    //     }
+    //   ]
+    // }
+
+    let collection_name = "test";
+    client.delete_collection(collection_name).await?;
+
+    client
+        .create_collection(
+            CreateCollectionBuilder::new(collection_name)
+                .vectors_config(VectorParamsBuilder::new(10, Distance::Cosine))
+                .quantization_config(ScalarQuantizationBuilder::default()),
+        )
+        .await?;
+
+    let collection_info = client.collection_info(collection_name).await?;
+    dbg!(collection_info);
+
+    let payload: Payload = serde_json::json!(
+        {
+            "foo": "Bar",
+            "bar": 12,
+            "baz": {
+                "qux": "quux"
+            }
+        }
+    )
+    .try_into()
+    .unwrap();
+
+    let points = vec![PointStruct::new(0, vec![12.; 10], payload)];
+    client
+        .upsert_points(UpsertPointsBuilder::new(collection_name, points))
+        .await?;
+
+    let search_result = client
+        .search_points(
+            SearchPointsBuilder::new(collection_name, [11.; 10], 10)
+                .filter(Filter::all([Condition::matches("bar", 12)]))
+                .with_payload(true)
+                .params(SearchParamsBuilder::default().exact(true)),
+        )
+        .await?;
+    dbg!(&search_result);
+    // search_result = [
+    //   {
+    //     "id": 0,
+    //     "version": 0,
+    //     "score": 1.0000001,
+    //     "payload": {
+    //       "bar": 12,
+    //       "baz": {
+    //         "qux": "quux"
+    //       },
+    //       "foo": "Bar"
+    //     }
+    //   }
+    // ]
+
+    let found_point = search_result.result.into_iter().next().unwrap();
+    let mut payload = found_point.payload;
+    let baz_payload = payload.remove("baz").unwrap().into_json();
+    println!("baz: {}", baz_payload);
+    // baz: {"qux":"quux"}
+
+    Ok(())
+}
+
+Or run the example from this project directly:
+
+cargo run --example search
+
+Qdrant Cloud
+
+Qdrant Cloud is a managed service for Qdrant.
+
+The client needs to be configured properly to access the service.
+
+    make sure to use the correct port (6334)
+    make sure to pass your API KEY
+
+use qdrant_client::Qdrant;
+
+let client = Qdrant::from_url("http://xxxxxxxxxx.eu-central.aws.cloud.qdrant.io:6334")
+    // Use an environment variable for the API KEY for example
+    .api_key(std::env::var("QDRANT_API_KEY"))
+    .build()?;
+
+Metadata
+3 months ago
+2021 edition
+Apache-2.0
+156 KiB
+Install
+
+Run the following Cargo command in your project directory:
+cargo add qdrant-client
+
+Or add the following line to your Cargo.toml:
+qdrant-client = "1.13.0"
+Homepage
+qdrant.tech
+Documentation
+docs.rs/qdrant-client/1.13.0
+Repository
+github.com/qdrant/rust-client
+Owners
+
+    Andrey Vasnetsov (generall) Andrey Vasnetsov
+
+Categories
+
+    API bindings
+    Database interfaces
+
+Report crate
+Stats Overview
+732,747 Downloads all time
+46 Versions published
+Downloads over the last 90 days
+Display as
+Rust
+
+    rust-lang.org
+    Rust Foundation
+    The crates.io team
+
+Get Help
+
+    The Cargo Book
+    Support
+    System Status
+    Report a bug
+
+Policies
+
+    Usage Policy
+    Security
+    Privacy Policy
+    Code of Conduct
+    Data Access
+
+Social
+
+rust-lang/crates.io
+#t-crates-io
+
+    @cratesiostatus
+
+

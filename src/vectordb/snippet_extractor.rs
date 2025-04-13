@@ -40,17 +40,16 @@ pub fn extract_snippet(file_path: &str, chunk_start_line: usize, chunk_end_line:
     let mut snippet = String::new();
 
     // Add lines with numbers (use 1-based indexing for display)
-    for i in context_start_idx..context_end_idx {
+    for (i, line) in lines.iter().enumerate().take(context_end_idx).skip(context_start_idx) {
         // Maybe highlight the core chunk lines?
         let line_prefix = if i >= core_start_idx && i <= core_end_idx {
             // Indicate core chunk lines (optional)
-            format!("{:>4} | ", i + 1) // Line number for core line
+            format!("\n{:>4} | ", i + 1) // Line number for core line
         } else {
-            format!("{:>4} : ", i + 1) // Line number for context line
+            format!("\n{:>4} : ", i + 1) // Line number for context line
         };
         snippet.push_str(&line_prefix);
-        snippet.push_str(lines[i]);
-        snippet.push('\n');
+        snippet.push_str(line);
     }
 
     // Add truncation markers if necessary

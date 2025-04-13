@@ -1,115 +1,83 @@
 #![allow(dead_code)]
 
-use vectordb_lib::vectordb::VectorDB;
 use anyhow::Result;
 use clap::Parser;
-use log::{debug, error};
-use std::path::PathBuf;
-use std::fs;
-use dirs::data_local_dir;
-use tracing_subscriber;
+// Remove log imports if env_logger is fully replaced
+// use log::{debug, error, info};
+use std::sync::Arc;
+use std::process::exit;
+use tracing::{info, debug, error};
 
-use vectordb_lib::cli;
-use vectordb_lib::VectorDBConfig;
+// Import library modules
+use vectordb_lib::cli::{self, CliArgs}; // Import CliArgs from lib, Commands not needed here
+use vectordb_lib::config::{self}; // Import config
+use qdrant_client::Qdrant;
+// Comment out missing setup_logging import
+// use vectordb_lib::setup_logging;
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: cli::commands::Command,
+// CliArgs struct moved to src/cli/commands.rs
+// #[derive(Parser, Debug)]
+// #[command(author, version, about, long_about = None)]
+// struct CliArgs {
+//     #[command(subcommand)]
+//     command: Commands,
 
-    /// Optional path to the database file (defaults to system's local data dir)
-    // #[arg(long = "db-path", global = true)]
-    // db_path: Option<PathBuf>,
+//     // Arguments for ONNX paths (these might be moved to config later, but keep for now)
+//     /// Path to ONNX model file (overrides config & env var)
+//     #[arg(long = "onnx-model", global = true)]
+//     onnx_model_path_arg: Option<String>,
 
-    // Add global args for ONNX paths, mirroring the Index command args
-    /// Path to ONNX model file (can also be set via VECTORDB_ONNX_MODEL env var)
-    #[arg(long = "onnx-model", global = true)]
-    onnx_model_path_arg: Option<String>,
-
-    /// Path to ONNX tokenizer file (can also be set via VECTORDB_ONNX_TOKENIZER env var)
-    #[arg(long = "onnx-tokenizer", global = true)]
-    onnx_tokenizer_path_arg: Option<String>,
-}
+//     /// Path to ONNX tokenizer config directory (overrides config & env var)
+//     #[arg(long = "onnx-tokenizer-dir", global = true)] // Changed name for clarity
+//     onnx_tokenizer_dir_arg: Option<String>,
+// }
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
-    let cli = Cli::parse();
-    debug!("Initializing vectordb-cli with command: {:?}", cli.command);
+    // --- Setup Logging using tracing_subscriber ---
+    tracing_subscriber::fmt::init(); // Initialize tracing subscriber
+    // Remove: env_logger::init();
 
-    // --- Determine Database Path (Always use default) ---
-    let default_dir = data_local_dir()
-        .unwrap_or_else(|| PathBuf::from(".")) // Fallback to current dir
-        .join("vectordb-cli");
-    // Ensure the default directory exists (create_dir_all is idempotent)
-    fs::create_dir_all(&default_dir)?;
-    let db_file_path_str = default_dir.join("db.json").to_string_lossy().into_owned();
+    let args = CliArgs::parse();
 
-    debug!("Using database path: {}", db_file_path_str);
+    // --- Load Configuration --- 
+    // Use tracing::info, debug, error instead of log::*
+    let config = config::load_config()
+        .inspect_err(|e| tracing::error!("Configuration loading failed: {:?}", e))
+        .unwrap_or_default(); // Use default config if loading fails
+    
+    tracing::info!("Using Qdrant URL from config: {}", config.qdrant_url);
 
-    // --- Determine ONNX Model and Tokenizer Paths ---
-    // Priority: CLI arg > Env Var > Default (if applicable, none here)
-    let onnx_model_path_str = cli.onnx_model_path_arg
-        .or_else(|| std::env::var("VECTORDB_ONNX_MODEL").ok())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "ONNX model path must be provided via --onnx-model argument or VECTORDB_ONNX_MODEL env var"
-            )
-        })?;
+    // --- Initialize Qdrant Client (using config URL) ---
+    tracing::debug!("Initializing Qdrant Client...");
+    let qdrant_client_result = qdrant_client::Qdrant::from_url(&config.qdrant_url).build();
 
-    let onnx_tokenizer_path_str = cli.onnx_tokenizer_path_arg
-        .or_else(|| std::env::var("VECTORDB_ONNX_TOKENIZER").ok())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "ONNX tokenizer path must be provided via --onnx-tokenizer argument or VECTORDB_ONNX_TOKENIZER env var"
-            )
-        })?;
-
-    let onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_path_str);
-    debug!("Using ONNX model: {}", onnx_model_path.display());
-    debug!("Using ONNX tokenizer: {}", onnx_tokenizer_path.display());
-
-    // --- Create VectorDB Config ---
-    let db_config = VectorDBConfig {
-        db_path: db_file_path_str,
-        onnx_model_path,
-        onnx_tokenizer_path,
-    };
-
-    // --- Initialize VectorDB ---
-    debug!("Initializing VectorDB...");
-    let db_result = VectorDB::new(db_config);
-
-    let db = match db_result {
-         Ok(db_instance) => {
-             debug!("VectorDB initialized successfully.");
-             db_instance
+    let _client: Arc<Qdrant> = match qdrant_client_result {
+         Ok(client_instance) => {
+             tracing::debug!("Qdrant client initialized successfully.");
+             Arc::new(client_instance)
          },
          Err(e) => {
-             error!("Failed to initialize VectorDB: {}", e);
-             // Print user-friendly error message
-             eprintln!("Error initializing database: {}", e);
-             eprintln!("Please check configuration (db path, model paths) and file permissions.");
-             // Exit gracefully
-             return Err(e.into());
+             tracing::error!("Failed to initialize Qdrant client: {}", e);
+             eprintln!("Error initializing Qdrant client: {}", e);
+             eprintln!("Please check Qdrant URL in config ({}) and ensure the server is running.", config.qdrant_url);
+             exit(1);
          }
     };
 
-    // --- Execute Command ---
-    debug!("Executing command: {:?}", cli.command);
-    let result = cli::commands::execute_command(cli.command, db.clone());
+    // --- Execute Command --- 
+    tracing::info!("Executing command: {:?}", args.command);
+
+    // Pass CliArgs and config down
+    let result = cli::handle_command(args, config).await;
 
     // --- Handle Result ---
     if let Err(e) = result {
-        error!("Command execution failed: {}", e);
-        // Print user-friendly error message (execute_command should ideally return specific errors)
+        tracing::error!("Command execution failed: {:?}", e);
         eprintln!("Error: {}", e);
-        // Propagate error for non-zero exit code
-        return Err(e);
+        exit(1);
     } else {
-         debug!("Command executed successfully.");
+         tracing::debug!("Command executed successfully.");
     }
 
     Ok(())

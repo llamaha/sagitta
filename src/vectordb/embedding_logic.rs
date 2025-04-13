@@ -116,6 +116,13 @@ impl EmbeddingHandler {
     pub fn onnx_tokenizer_path(&self) -> Option<&PathBuf> {
         self.onnx_tokenizer_path.as_ref()
     }
+
+    /// Gets the embedding dimension by creating the underlying model.
+    /// Returns an error if the model cannot be created (e.g., missing paths).
+    pub fn dimension(&self) -> Result<usize> {
+        let model = self.create_embedding_model()?;
+        Ok(model.dim())
+    }
 }
 
 #[cfg(test)]
@@ -124,6 +131,15 @@ mod tests {
     use crate::vectordb::embedding::EmbeddingModelType;
     use std::fs::File;
     use tempfile::tempdir;
+
+    // Helper to create dummy files
+    fn create_dummy_file(path: &PathBuf) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        File::create(path)?;
+        Ok(())
+    }
 
     #[test]
     fn test_embedding_handler_new_onnx_valid_paths() -> Result<()> {
@@ -245,12 +261,12 @@ mod tests {
         File::create(&model_path)?;
         File::create(&tokenizer_path)?;
 
-        let mut handler = EmbeddingHandler::new(EmbeddingModelType::Onnx, None, None).unwrap_or_else(|_| 
-            // Provide dummy initial paths if needed for constructor, although set_onnx_paths should overwrite
+        #[allow(clippy::unnecessary_lazy_evaluations)]
+        let mut handler = EmbeddingHandler::new(EmbeddingModelType::Onnx, None, None).unwrap_or_else(|_|
             EmbeddingHandler { 
-                embedding_model_type: EmbeddingModelType::Onnx, // Start as Onnx but paths are None 
-                onnx_model_path: None, 
-                onnx_tokenizer_path: None 
+                embedding_model_type: EmbeddingModelType::Onnx,
+                onnx_model_path: None,
+                onnx_tokenizer_path: None
             }
         );
         // Assert initial state (or skip if constructor guarantees None)
@@ -403,4 +419,69 @@ mod tests {
     // 1. A real (or minimal mock) ONNX model and tokenizer available during tests.
     // 2. Mocking the `EmbeddingModel::new_onnx` function itself (e.g., using a mocking library like `mockall`).
     // For now, we only test the error paths related to missing configuration within the handler.
+
+    #[test]
+    fn test_embedding_handler_dimension_onnx_success() -> Result<()> {
+        // This test requires actual ONNX model files or a mock provider.
+        // For now, let's assume the model files exist at standard paths
+        // and skip if they don't.
+        let model_path = PathBuf::from("onnx/all-minilm-l12-v2.onnx");
+        let tokenizer_path = PathBuf::from("onnx/minilm_tokenizer.json"); // Assumes tokenizer.json is in the same dir
+
+        if !model_path.exists() || !tokenizer_path.exists() {
+             println!("Skipping test_embedding_handler_dimension_onnx_success: ONNX files not found at expected paths.");
+             return Ok(());
+        }
+
+
+        let handler = EmbeddingHandler::new(
+            EmbeddingModelType::Onnx,
+            Some(model_path.clone()),
+            Some(tokenizer_path.clone()),
+        )?;
+
+        let dim = handler.dimension()?;
+        // The dimension depends on the actual model, but MiniLM is typically 384
+        assert_eq!(dim, 384, "Expected dimension for MiniLM L12 v2"); 
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_embedding_handler_dimension_onnx_fail_missing_path() {
+        // Test getting dimension when paths are missing
+        let handler_no_paths = EmbeddingHandler {
+            embedding_model_type: EmbeddingModelType::Onnx,
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+        };
+        let result = handler_no_paths.dimension();
+        assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
+         if let Err(VectorDBError::EmbeddingError(msg)) = result {
+            assert!(msg.contains("ONNX model paths not set in handler"));
+        }
+
+        // Test with invalid (non-existent) paths provided during construction
+        let dir = tempdir().unwrap();
+        let invalid_model_path = dir.path().join("invalid_model.onnx");
+        let invalid_tokenizer_path = dir.path().join("invalid_tokenizer.json");
+        // We need to create the files for EmbeddingHandler::new to succeed,
+        // but the underlying EmbeddingModel::new_onnx will fail.
+        create_dummy_file(&invalid_model_path).unwrap();
+        create_dummy_file(&invalid_tokenizer_path).unwrap();
+
+        // Use a real path that points to invalid file contents for the provider to fail
+        let handler_invalid_files = EmbeddingHandler::new(
+             EmbeddingModelType::Onnx,
+             Some(invalid_model_path),
+             Some(invalid_tokenizer_path),
+        ).expect("Handler creation should succeed with existing (but invalid) files");
+
+        let result_invalid = handler_invalid_files.dimension();
+        assert!(matches!(result_invalid, Err(VectorDBError::EmbeddingError(_))), "Expected EmbeddingError for invalid ONNX model/tokenizer files");
+        // Check if the error message indicates a provider creation failure
+         if let Err(VectorDBError::EmbeddingError(msg)) = result_invalid {
+            assert!(msg.contains("Failed to create ONNX provider"), "Error message mismatch: {}", msg);
+        }
+    }
 } 

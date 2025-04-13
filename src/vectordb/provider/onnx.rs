@@ -100,7 +100,8 @@ impl OnnxEmbeddingProvider {
             .map(|&mask| mask as i64)
             .collect();
 
-        // Truncate or pad to the maximum sequence length
+        // Pad or truncate the input IDs and attention mask
+        #[allow(clippy::comparison_chain)] // Keep if/else if for readability
         if input_ids.len() > self.max_seq_length {
             // Truncate
             input_ids.truncate(self.max_seq_length);

@@ -1,13 +1,10 @@
-use crate::vectordb::db::VectorDB;
-use crate::vectordb::embedding::EmbeddingModel;
-use log::{debug, warn, error};
-use std::collections::HashSet;
-use anyhow::anyhow;
-use std::cmp::Ordering;
-use super::result::SearchResult;
+// use crate::vectordb::db::VectorDB; // Removed
 use serde::{Deserialize, Serialize};
 
-/// Standard search using vector similarity with a limit on the number of results
+// Define placeholder structs or comment out usage
+// struct VectorDB { /* ... */ }
+
+/* // Comment out the entire search_with_limit function
 pub(crate) fn search_with_limit(
     db: &VectorDB, // Pass db as reference
     model: &mut EmbeddingModel, // Pass model as mutable reference
@@ -108,6 +105,7 @@ pub(crate) fn search_with_limit(
     Ok(results)
     */
 }
+*/
 
 // Define the Embedding struct at the module level
 #[derive(Debug, Serialize, Deserialize, Clone)] // Add necessary derives
