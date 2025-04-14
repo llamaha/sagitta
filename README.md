@@ -178,8 +178,8 @@ For specific environment configurations (GPU acceleration), refer to the guides 
 
 5.  **Install Binary (Optional):** Symlink the compiled binary to a location in your `PATH`.
     ```bash
-    # Example for Linux/macOS
-    ln -s $PWD/target/release/vectordb-cli /usr/local/bin
+    # Example for Linux/macOS to set it up globally
+    sudo ln -s $PWD/target/release/vectordb-cli /usr/local/bin
     ```
 
 ## Configuration
