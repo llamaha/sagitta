@@ -1,19 +1,19 @@
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
-use qdrant_client::{qdrant::{PointStruct, VectorParamsBuilder, CreateCollectionBuilder, Distance, FieldType}, Payload, Qdrant};
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
+use qdrant_client::{
+    qdrant::{ CreateCollectionBuilder, Distance, FieldType, VectorParamsBuilder, PointStruct },
+    Payload,
+    Qdrant,
 };
-use uuid::Uuid;
+use std::{
+    path::PathBuf, sync::Arc, time::Duration, collections::HashSet,
+};
 use walkdir::WalkDir;
-use git2::Repository;
+use uuid::Uuid;
 
 use crate::{
-    config::AppConfig,
+    config::{AppConfig},
     syntax,
     vectordb::{embedding, embedding_logic::EmbeddingHandler},
 };
@@ -23,7 +23,7 @@ use super::commands::{
     FIELD_END_LINE, FIELD_FILE_EXTENSION, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
     ensure_payload_index,
 };
-use super::repo_commands::{get_collection_name, FIELD_BRANCH, FIELD_COMMIT_HASH, DEFAULT_VECTOR_DIMENSION};
+use super::repo_commands::{DEFAULT_VECTOR_DIMENSION};
 
 const LEGACY_INDEX_COLLECTION: &str = "vectordb-code-search"; // Default collection for legacy index
 

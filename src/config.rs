@@ -142,8 +142,21 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
     fs::create_dir_all(app_config_dir)
         .with_context(|| format!("Failed to create config directory: {}", app_config_dir.display()))?;
 
-    let config_content = toml::to_string_pretty(config)
+    let mut config_content = toml::to_string_pretty(config)
         .with_context(|| "Failed to serialize configuration to TOML")?;
+
+    // Add commented-out examples for ONNX paths if they are not set
+    if config.onnx_model_path.is_none() {
+        config_content.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
+        config_content.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
+        config_content.push_str("\n# Example: /path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx");
+
+    }
+    if config.onnx_tokenizer_path.is_none() {
+        config_content.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
+        config_content.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
+        config_content.push_str("\n# Example: /path/to/vectordb-cli/onnx/");
+    }
 
     fs::write(&config_file_path, config_content)
         .with_context(|| format!("Failed to write config file to '{}'", config_file_path.display()))?;
