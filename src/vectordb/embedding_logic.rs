@@ -1,7 +1,15 @@
+//!
+//! Manages the configuration and instantiation of embedding models.
+//! Currently focuses on ONNX models but designed to be extensible.
+
 use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
 use crate::vectordb::error::{Result, VectorDBError};
 use std::path::PathBuf;
 
+/// Handles the configuration and creation of embedding models.
+///
+/// Stores the type of model and necessary paths (e.g., for ONNX models).
+/// Use `create_embedding_model` to get an instance of the actual model.
 #[derive(Clone, Debug)]
 pub struct EmbeddingHandler {
     embedding_model_type: EmbeddingModelType,
@@ -10,7 +18,11 @@ pub struct EmbeddingHandler {
 }
 
 impl EmbeddingHandler {
-    /// Creates a new EmbeddingHandler, validating paths if provided.
+    /// Creates a new `EmbeddingHandler`.
+    ///
+    /// For `EmbeddingModelType::Onnx`, paths to both the model and tokenizer
+    /// must be provided and valid, otherwise a `ConfigurationError` or `FileNotFound`
+    /// error is returned.
     pub fn new(
         embedding_model_type: EmbeddingModelType,
         onnx_model_path: Option<PathBuf>,
@@ -48,7 +60,10 @@ impl EmbeddingHandler {
         })
     }
 
-    /// Attempts to create an EmbeddingModel instance based on the handler's configuration.
+    /// Attempts to create an [`EmbeddingModel`] instance based on the handler's configuration.
+    ///
+    /// Returns an error if the required configuration (e.g., ONNX paths) is missing
+    /// or if the model instantiation fails.
     pub fn create_embedding_model(&self) -> Result<EmbeddingModel> {
         match self.embedding_model_type {
             EmbeddingModelType::Onnx => {
@@ -69,7 +84,10 @@ impl EmbeddingHandler {
     }
 
     /// Sets or clears the ONNX model and tokenizer paths.
-    /// Performs validation checks if paths are provided.
+    ///
+    /// If paths are provided, they are validated for existence.
+    /// If any ONNX path is set, the handler's model type is automatically
+    /// set to `EmbeddingModelType::Onnx`.
     pub fn set_onnx_paths(
         &mut self,
         model_path: Option<PathBuf>,
@@ -104,20 +122,23 @@ impl EmbeddingHandler {
         Ok(())
     }
 
-    // --- Getters ---
+    /// Returns the configured embedding model type.
     pub fn embedding_model_type(&self) -> EmbeddingModelType {
         self.embedding_model_type
     }
 
+    /// Returns the configured path to the ONNX model file, if set.
     pub fn onnx_model_path(&self) -> Option<&PathBuf> {
         self.onnx_model_path.as_ref()
     }
 
+    /// Returns the configured path to the ONNX tokenizer file/directory, if set.
     pub fn onnx_tokenizer_path(&self) -> Option<&PathBuf> {
         self.onnx_tokenizer_path.as_ref()
     }
 
     /// Gets the embedding dimension by creating the underlying model.
+    ///
     /// Returns an error if the model cannot be created (e.g., missing paths).
     pub fn dimension(&self) -> Result<usize> {
         let model = self.create_embedding_model()?;

@@ -19,24 +19,28 @@ use anyhow::Result;
 // Import Qdrant client types
 // use qdrant_client::client::QdrantClient; // Old import
 use qdrant_client::Qdrant; // Import the Qdrant struct
-// Removed: use std::sync::Arc;
+use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use qdrant_client::{
     // Removed: client::QdrantClient,
     qdrant::{
+        // Removed unused: CollectionStatus,
         FieldType, PointStruct, TextIndexParams, KeywordIndexParams, IntegerIndexParams, 
         FloatIndexParams, GeoIndexParams, BoolIndexParams, DatetimeIndexParams, 
         UuidIndexParams, TokenizerType, UpdateStatus, 
-        CreateFieldIndexCollectionBuilder,
         UpsertPointsBuilder,
-        // Removed unused: CreateFieldIndexCollection,
         UpsertPoints,
+        CreateFieldIndexCollectionBuilder,
     },
+    // Payload, // Removed unused Payload
 };
 use indicatif;
 
 // Import config
 use crate::config::AppConfig;
+
+// Moved from index.rs
+pub(crate) const BATCH_SIZE: usize = 128;
 
 // CliArgs struct definition moved here from main binary
 #[derive(Parser, Debug)]
@@ -46,11 +50,11 @@ pub struct CliArgs {
     pub command: Commands,
 
     /// Path to ONNX model file (overrides config & env var)
-    #[arg(long = "onnx-model", global = true, env = "VECTORDB_ONNX_MODEL")]
+    #[arg(short = 'm', long = "onnx-model", global = true, env = "VECTORDB_ONNX_MODEL")]
     pub onnx_model_path_arg: Option<String>,
 
     /// Path to ONNX tokenizer config directory (overrides config & env var)
-    #[arg(long = "onnx-tokenizer-dir", global = true, env = "VECTORDB_ONNX_TOKENIZER_DIR")]
+    #[arg(short = 't', long = "onnx-tokenizer-dir", global = true, env = "VECTORDB_ONNX_TOKENIZER_DIR")]
     pub onnx_tokenizer_dir_arg: Option<String>,
 }
 
@@ -67,15 +71,19 @@ pub struct CliArgs {
 // No need for `pub use super::...` if modules are declared here and handlers are called directly.
 
 // --- Constants ---
-pub(crate) const CODE_SEARCH_COLLECTION: &str = "vectordb-code-search";
-pub(crate) const FIELD_FILE_PATH: &str = "file_path";
-pub(crate) const FIELD_DIR_PATH: &str = "dir_path"; // Root directory provided to index command
-pub(crate) const FIELD_START_LINE: &str = "start_line";
-pub(crate) const FIELD_END_LINE: &str = "end_line";
-pub(crate) const FIELD_FILE_EXTENSION: &str = "file_extension";
-pub(crate) const FIELD_LANGUAGE: &str = "language";
-pub(crate) const FIELD_ELEMENT_TYPE: &str = "element_type";
-pub(crate) const FIELD_CHUNK_CONTENT: &str = "chunk_content";
+// pub(crate) const CODE_SEARCH_COLLECTION: &str = "vectordb-code-search"; // REMOVED
+pub const FIELD_FILE_PATH: &str = "file_path";
+// pub(crate) const FIELD_DIR_PATH: &str = "dir_path"; // REMOVED
+pub const FIELD_START_LINE: &str = "start_line";
+pub const FIELD_END_LINE: &str = "end_line";
+pub const FIELD_FILE_EXTENSION: &str = "file_extension";
+pub const FIELD_LANGUAGE: &str = "language";
+pub const FIELD_ELEMENT_TYPE: &str = "element_type";
+pub const FIELD_CHUNK_CONTENT: &str = "chunk_content";
+
+// Fields specific to repository indexing
+pub const FIELD_BRANCH: &str = "branch";
+pub const FIELD_COMMIT_HASH: &str = "commit_hash";
 
 // --- Main Command Enum ---
 #[derive(Subcommand, Debug)]
@@ -95,6 +103,9 @@ pub enum Commands {
     /// Clear all data or data for a specific directory
     #[command(subcommand_negates_reqs = true)]
     Clear(super::clear::ClearArgs), // Add Clear command
+    /// Manage repositories (add, list, use, remove)
+    #[command(subcommand_negates_reqs = true)]
+    Repo(super::repo_commands::RepoArgs),
 }
 
 // --- Main Command Handler Function ---
@@ -103,25 +114,27 @@ pub enum Commands {
 /// # Arguments
 /// * `args` - The parsed top-level command line arguments ([`CliArgs`]).
 /// * `config` - The loaded application configuration ([`AppConfig`]).
+/// * `client` - An Arc-wrapped Qdrant client instance.
 pub async fn handle_command(
     args: CliArgs, 
     config: AppConfig, 
+    client: Arc<Qdrant>,
 ) -> Result<()> { 
     match args.command {
-        // Pass args struct and config to handlers
-        Commands::Index(ref cmd_args) => super::index::handle_index(cmd_args, &args, &config).await,
-        Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, &config).await,
-        // These commands don't need args or config beyond their specific Args and the qdrant_url
-        Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, &config.qdrant_url).await, 
-        Commands::List(cmd_args) => super::list::handle_list(cmd_args, &config.qdrant_url).await, 
-        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, &config.qdrant_url).await, 
+        // Pass args, config, and client to handlers that need them
+        Commands::Index(ref cmd_args) => super::index::handle_index(cmd_args, &args, config, client).await,
+        Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config, client).await,
+        Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config, client).await, 
+        Commands::List(cmd_args) => super::list::handle_list(cmd_args, config, client).await, 
+        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, config, client).await, 
+        Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client).await,
     }
 }
 
 // --- Helper Functions ---
 
 // Helper function to create payload indices, ignoring errors if index already exists
-pub(crate) async fn ensure_payload_index(
+pub async fn ensure_payload_index(
     client: &Qdrant,
     collection_name: &str,
     field_name: &str,
@@ -166,7 +179,9 @@ pub(crate) async fn ensure_payload_index(
     }
 }
 
-// Helper to upsert a batch of points
+// --- Moved from index.rs ---
+
+// Helper function to upsert points in batches with progress updates.
 pub(crate) async fn upsert_batch(
     client: &Qdrant,
     collection_name: &str,
@@ -177,8 +192,12 @@ pub(crate) async fn upsert_batch(
         return Ok(());
     }
     let count = points.len();
+    log::debug!("Upserting batch of {} points to {}", count, collection_name);
+    pb.set_message(format!("Upserting {} points...", count));
+    
+    // Use UpsertPointsBuilder as required by the API
     let request: UpsertPoints = UpsertPointsBuilder::new(collection_name, points)
-        .wait(true)
+        .wait(true) // Wait for the operation to complete
         .build();
 
     match client.upsert_points(request).await {
@@ -186,33 +205,35 @@ pub(crate) async fn upsert_batch(
             if let Some(result) = response.result {
                 match UpdateStatus::try_from(result.status) {
                     Ok(UpdateStatus::Completed) => {
-                        pb.inc(count as u64);
+                        // pb.inc handled in calling loop
+                        log::debug!("Upsert batch successful.");
                         Ok(())
                     },
                     Ok(status) => {
                         let msg = format!("Qdrant upsert batch completed with status: {:?}", status);
-                        pb.println(&msg);
+                        pb.println(format!("Warning: {}", msg));
                         log::warn!("{}", msg);
-                        Ok(())
+                        Ok(()) // Still Ok, but log warning
                     },
                     Err(_) => {
                         let msg = format!("Qdrant upsert batch completed with unknown status code: {}", result.status);
-                        pb.println(&msg);
+                        pb.println(format!("Error: {}", msg));
                         log::error!("{}", msg);
                         Err(anyhow::anyhow!(msg))
                     }
                 }
             } else {
                 let msg = "Qdrant upsert response missing result status";
-                pb.println(msg);
+                pb.println(format!("Error: {}", msg));
                 log::error!("{}", msg);
                 Err(anyhow::anyhow!(msg))
             }
         }
         Err(e) => {
-            let msg = format!("Failed to upsert batch: {}", e);
-            pb.println(&msg);
+            let msg = format!("Failed to upsert batch to {}: {}", collection_name, e);
+            pb.println(format!("Error: {}", msg));
             log::error!("{}", msg);
+            // Use anyhow::Context for better error reporting
             Err(anyhow::anyhow!(msg).context(e))
         }
     }

@@ -1,11 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
+use futures::future::join_all;
 use qdrant_client::{
-    qdrant::{
-        r#match::MatchValue, Condition, Filter, PayloadIncludeSelector,
-        ReadConsistencyType, SearchPoints, SearchPointsBuilder,
-        read_consistency::Value as ReadConsistencyValue,
-    },
+    qdrant::{SearchPointsBuilder, Filter, Condition, PointStruct, ScoredPoint},
     Qdrant,
 };
 use std::{
@@ -14,17 +11,11 @@ use std::{
 };
 
 use crate::{
-    cli::commands::{
-        CODE_SEARCH_COLLECTION,
-        FIELD_CHUNK_CONTENT,
-        FIELD_ELEMENT_TYPE,
-        FIELD_FILE_PATH,
-        FIELD_LANGUAGE,
-        FIELD_START_LINE,
-        // FIELD_END_LINE is not strictly needed for display here but good to have if needed later
-    },
     config::AppConfig,
     vectordb::{embedding, embedding_logic::EmbeddingHandler},
+    cli::repo_commands::get_collection_name,
+    cli::formatters::print_search_results,
+    cli::commands::{FIELD_LANGUAGE, FIELD_ELEMENT_TYPE, FIELD_BRANCH},
 };
 use super::commands::CliArgs;
 
@@ -38,6 +29,21 @@ pub struct QueryArgs {
     /// Maximum number of results to return
     #[arg(short, long, default_value_t = 10)]
     pub limit: u64,
+
+    /// Optional repository name(s) to search within. Can be specified multiple times.
+    /// If omitted, searches the active repository.
+    /// Conflicts with --all-repos.
+    #[arg(short, long, conflicts_with = "all_repos")]
+    pub repo: Option<Vec<String>>,
+
+    /// Search across all configured repositories.
+    /// Conflicts with --repo.
+    #[arg(long)]
+    pub all_repos: bool,
+
+    /// Optional branch name to filter results within the specified repository/repositories.
+    #[arg(short, long)]
+    pub branch: Option<String>,
 
     /// Optional: Filter by specific language (e.g., "rust", "python")
     #[arg(long)]
@@ -53,164 +59,148 @@ pub struct QueryArgs {
     // pub context: usize,
 }
 
-/// Handles the `query` command, generating embeddings and searching Qdrant.
+/// Handles the `query` command.
 pub async fn handle_query(
-    cmd_args: &QueryArgs,
+    args: &QueryArgs,
     cli_args: &CliArgs,
-    config: &AppConfig,
+    config: AppConfig,
+    client: Arc<Qdrant>,
 ) -> Result<()> {
     log::info!("Starting query process...");
-    log::debug!("QueryArgs: {:?}, CliArgs: {:?}, Config: {:?}", cmd_args, cli_args, config);
-    log::info!("Using Qdrant URL: {}", config.qdrant_url);
 
-    // --- Resolve ONNX Paths (Keep existing logic) ---
-    let model_path_str = cli_args.onnx_model_path_arg.as_ref().or(config.onnx_model_path.as_ref());
-    let tokenizer_path_str = cli_args.onnx_tokenizer_dir_arg.as_ref().or(config.onnx_tokenizer_path.as_ref());
-    let model_path_buf: Option<PathBuf> = model_path_str.map(PathBuf::from);
-    let tokenizer_path_buf: Option<PathBuf> = tokenizer_path_str.map(PathBuf::from);
-    log::debug!("Resolved model path for handler: {:?}", model_path_buf);
-    log::debug!("Resolved tokenizer path for handler: {:?}", tokenizer_path_buf);
+    // --- 1. Determine Target Repositories/Collections --- 
+    let target_repos: Vec<String> = match (&args.repo, args.all_repos) {
+        (Some(repo_names), _) => { // Specific repos requested
+            // Validate that requested repos exist in config
+            for name in repo_names {
+                if !config.repositories.iter().any(|r| r.name == *name) {
+                    bail!("Repository '{}' not found in configuration.", name);
+                }
+            }
+            repo_names.clone()
+        }
+        (None, true) => { // All repos requested
+            config.repositories.iter().map(|r| r.name.clone()).collect()
+        }
+        (None, false) => { // Default: use active repo
+            vec![config.active_repository.clone().ok_or_else(|| {
+                 anyhow!("No active repository set and no specific repository requested via --repo or --all-repos. Use 'repo use <name>' first.")
+             })?]
+        }
+    };
 
-    // --- Initialize Embedding Handler ---
-    log::info!("Initializing embedding handler...");
-    let embedding_handler = Arc::new(
-        EmbeddingHandler::new(
-            embedding::EmbeddingModelType::Onnx,
-            model_path_buf,
-            tokenizer_path_buf,
-        )
-        .context("Failed to initialize embedding handler")?,
-    );
-
-    // --- Initialize Qdrant Client ---
-    log::info!("Connecting to Qdrant...");
-    let client = Qdrant::from_url(&config.qdrant_url).build()?;
-    log::info!("Qdrant client connected.");
-
-    // --- Generate Query Embedding ---
-    let model = embedding_handler
-        .create_embedding_model()
-        .context("Failed to create embedding model for query")?;
-    log::info!("Generating embedding for query: \"{}\"", cmd_args.query);
-    let query_embedding = model
-        .embed(&cmd_args.query)
-        .context("Failed to generate query embedding")?;
-    log::debug!("Generated query embedding dimension: {}", query_embedding.len());
-
-    // --- Build Search Request ---
-    log::info!("Building search request...");
-    let mut search_builder = SearchPointsBuilder::new(
-        CODE_SEARCH_COLLECTION,
-        query_embedding, // Use the embedding directly from the provider
-        cmd_args.limit,
-    );
-
-    // Select necessary payload fields
-    search_builder = search_builder.with_payload(PayloadIncludeSelector {
-        fields: vec![
-            FIELD_FILE_PATH.to_string(),
-            FIELD_START_LINE.to_string(),
-            // FIELD_END_LINE.to_string(), // Optional for display
-            FIELD_LANGUAGE.to_string(),
-            FIELD_ELEMENT_TYPE.to_string(),
-            FIELD_CHUNK_CONTENT.to_string(), // Crucial for displaying snippet
-        ],
-    });
-
-    search_builder = search_builder.with_vectors(false); // Don't need vectors in response
-
-    // Set read consistency (optional, adjust as needed)
-    let consistency_value = ReadConsistencyValue::Type(ReadConsistencyType::Majority as i32);
-    search_builder = search_builder.read_consistency(consistency_value);
-
-    // --- Build Filter based on CLI args ---
-    let mut filters = Vec::new();
-
-    if let Some(lang) = &cmd_args.lang {
-        log::info!("Adding language filter: {}", lang);
-        filters.push(Condition::matches(
-            FIELD_LANGUAGE,
-            MatchValue::from(lang.to_lowercase()),
-        ));
-    }
-
-    if let Some(element_type) = &cmd_args.element_type {
-        log::info!("Adding element type filter: {}", element_type);
-        filters.push(Condition::matches(
-            FIELD_ELEMENT_TYPE,
-            MatchValue::from(element_type.to_lowercase()),
-        ));
-    }
-
-    // Combine filters if multiple are present
-    if !filters.is_empty() {
-        let filter = Filter::must(filters); // Use MUST for multiple filters
-        search_builder = search_builder.filter(filter);
-        log::info!("Applied filter(s).");
-    }
-
-    let search_request: SearchPoints = search_builder.build();
-    log::debug!("Final Search Request: {:?}", search_request); // Log the built request
-
-    // --- Execute Search ---
-    log::info!("Executing search against Qdrant...");
-    let search_result = client
-        .search_points(search_request)
-        .await
-        .context("Failed to execute search query")?;
-    log::info!("Search returned {} results.", search_result.result.len());
-
-    if search_result.result.is_empty() {
-        println!("No results found.");
+    if target_repos.is_empty() {
+        println!("No repositories configured or specified to search.");
         return Ok(());
     }
 
-    // --- Display Results ---
-    for (idx, point) in search_result.result.into_iter().enumerate() {
-        let payload = point.payload;
+    log::info!("Target repositories: {:?}", target_repos);
+    let collection_names: Vec<String> = target_repos.iter().map(|name| get_collection_name(name)).collect();
 
-        let file_path = payload
-            .get(FIELD_FILE_PATH)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<unknown_file>".to_string());
-        let start_line = payload
-            .get(FIELD_START_LINE)
-            .and_then(|v| v.as_integer())
-            .map(|l| l as usize)
-            .unwrap_or(0);
-        let language = payload
-            .get(FIELD_LANGUAGE)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string());
-        let element_type = payload
-            .get(FIELD_ELEMENT_TYPE)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string());
-        let snippet = payload
-            .get(FIELD_CHUNK_CONTENT)
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "[Error: Snippet content missing from payload]".to_string());
+    // --- 2. Initialize Embedding Handler (Same as before) --- 
+    let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
+    let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
+    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_ref()
+        .or(model_env_var.as_ref())
+        .or(config.onnx_model_path.as_ref())
+        .ok_or_else(|| anyhow!("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config"))?;
+    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_ref()
+        .or(tokenizer_env_var.as_ref())
+        .or(config.onnx_tokenizer_path.as_ref())
+        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
+    let onnx_model_path = PathBuf::from(onnx_model_path_str);
+    let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
+    let embedding_handler = EmbeddingHandler::new(
+        embedding::EmbeddingModelType::Onnx,
+        Some(onnx_model_path),
+        Some(onnx_tokenizer_path),
+    )
+    .context("Failed to initialize embedding handler")?;
 
-        println!(
-            "Result {}: Score: {:.4} | File: {} | Line: {} | Lang: {} | Type: {}",
-            idx + 1,
-            point.score,
-            file_path,
-            start_line, // Display the actual start line from the chunk
-            language,
-            element_type
-        );
+    // --- 3. Generate Query Embedding --- 
+    let query_embedding = embedding_handler.create_embedding_model()?
+        .embed(&args.query)?;
+    log::info!("Query embedding generated.");
 
-        // Print the full chunk content as the snippet
-        println!("\n{}", snippet);
+    // --- 4. Build Search Filter --- 
+    let mut filter_conditions = Vec::new();
+    if let Some(branch_name) = &args.branch {
+        // Add branch condition only if querying repo collections (implied by target_repos having entries)
+        if !target_repos.is_empty() {
+            filter_conditions.push(Condition::matches(FIELD_BRANCH, branch_name.clone()));
+            log::info!("Filtering by branch: {}", branch_name);
+        } else {
+             log::warn!("Branch filter specified but no repository target found (this shouldn't happen). Ignoring filter.");
+        }
+    }
+    if let Some(lang_name) = &args.lang {
+        filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang_name.clone()));
+        log::info!("Filtering by language: {}", lang_name);
+    }
+    if let Some(element_type) = &args.element_type {
+        filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type.clone()));
+        log::info!("Filtering by element type: {}", element_type);
+    }
+    let search_filter = if filter_conditions.is_empty() { None } else { Some(Filter::must(filter_conditions)) };
 
-        println!("---------------");
+    // --- 5. Execute Searches in Parallel --- 
+    log::info!("Executing search against collections: {:?}...", collection_names);
+    let search_futures: Vec<_> = collection_names.into_iter().map(|collection_name| {
+        let client = Arc::clone(&client);
+        let query_embedding_clone = query_embedding.clone();
+        let search_filter_clone = search_filter.clone();
+        let limit = args.limit;
+        
+        tokio::spawn(async move {
+            let mut builder = SearchPointsBuilder::new(&collection_name, query_embedding_clone, limit)
+                .with_payload(true);
+            if let Some(filter) = search_filter_clone {
+                 builder = builder.filter(filter);
+            }
+            let search_request = builder.build();
+            client.search_points(search_request).await
+        })
+    }).collect();
+
+    let search_results = join_all(search_futures).await;
+
+    // --- 6. Aggregate and Sort Results --- 
+    let mut all_scored_points = Vec::new();
+    let mut errors = Vec::new();
+
+    for (i, result) in search_results.into_iter().enumerate() {
+        match result {
+            Ok(Ok(search_response)) => {
+                log::debug!("Search returned {} results from collection {}", search_response.result.len(), target_repos[i]);
+                all_scored_points.extend(search_response.result);
+            }
+            Ok(Err(e)) => {
+                let err_msg = format!("Qdrant search failed for repo '{}': {}", target_repos[i], e);
+                log::error!("{}", err_msg);
+                errors.push(err_msg);
+            }
+            Err(e) => { // JoinError
+                let err_msg = format!("Task panicked for repo '{}': {}", target_repos[i], e);
+                log::error!("{}", err_msg);
+                errors.push(err_msg);
+            }
+        }
     }
 
-    log::info!("Query process finished successfully.");
+    if !errors.is_empty() {
+         eprintln!("Warning: Some searches failed:\n - {}", errors.join("\n - "));
+    }
+
+    // Sort by score (descending)
+    all_scored_points.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Limit results
+    all_scored_points.truncate(args.limit as usize);
+
+    log::info!("Total unique results after aggregation: {}", all_scored_points.len());
+
+    // --- 7. Format and Print Results --- 
+    print_search_results(&all_scored_points, &args.query)?;
+
     Ok(())
 }

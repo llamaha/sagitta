@@ -1,15 +1,13 @@
 use anyhow::{Context, Result};
 use clap::Args;
-use qdrant_client::{
-    Qdrant,
-    qdrant::{
-        ScrollPointsBuilder,
-        ScrollPoints, PayloadIncludeSelector,
-    },
-};
+use colored::*;
+use qdrant_client::{ Qdrant, qdrant::{ScrollPointsBuilder, PayloadIncludeSelector, PointId} }; // Removed with_payload_selector
 use std::collections::HashSet;
+use std::sync::Arc;
+use crate::config::AppConfig;
+use crate::cli::repo_commands::get_collection_name;
 
-use super::commands::{CODE_SEARCH_COLLECTION, FIELD_DIR_PATH};
+// use super::commands::{CODE_SEARCH_COLLECTION, FIELD_DIR_PATH}; // REMOVED
 
 #[derive(Args, Debug)]
 pub struct ListArgs {
@@ -17,81 +15,74 @@ pub struct ListArgs {
 }
 
 /// Handles the `list` command, retrieving and displaying unique indexed directories from Qdrant.
-pub async fn handle_list(args: ListArgs, qdrant_url: &str) -> Result<()> {
-    log::info!("Starting list process...");
-    log::debug!("ListArgs: {:?}", args);
+pub async fn handle_list(
+    _args: ListArgs, // Args unused for now
+    config: AppConfig, // Take ownership
+    client: Arc<Qdrant>, // Accept client
+) -> Result<()> {
+    // --- Get Active Repository and Collection --- 
+    let active_repo_name = config.active_repository.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No active repository set. Use 'repo use <repo_name>' first.")
+    })?;
+    let collection_name = get_collection_name(active_repo_name);
+    log::info!("Listing indexed items for repository: '{}', collection: '{}'", active_repo_name, collection_name);
 
-    log::info!("Connecting to Qdrant at {}", qdrant_url);
-    let client = Qdrant::from_url(qdrant_url).build()
-        .context("Failed to connect to Qdrant")?;
-    log::info!("Qdrant client connected.");
+    // --- Check if Collection Exists --- 
+    if !client.collection_exists(&collection_name).await? {
+        println!("Repository '{}' (collection '{}') has not been indexed yet.", active_repo_name, collection_name);
+        return Ok(());
+    }
 
-    log::info!("Fetching distinct indexed directories from '{}'...", CODE_SEARCH_COLLECTION);
+    // --- Scroll Points to Get Unique FIELD_FILE_PATH --- 
+    // (This replaces the old FIELD_DIR_PATH logic)
+    let mut unique_files = HashSet::new();
+    let mut next_offset: Option<PointId> = None;
+    const SCROLL_LIMIT: u32 = 256;
 
-    let mut distinct_dirs = HashSet::new();
-    let mut offset: Option<qdrant_client::qdrant::PointId> = None;
-    let batch_size: u32 = 100; // Process in batches
-    let payload_selector = PayloadIncludeSelector {
-        fields: vec![FIELD_DIR_PATH.to_string()],
-    };
+    println!("Indexed files in repository '{}':", active_repo_name.cyan());
 
     loop {
-        let mut scroll_builder = ScrollPointsBuilder::new(CODE_SEARCH_COLLECTION)
-            .limit(batch_size)
-            // Correct way to select specific payload fields
-            .with_payload(payload_selector.clone()); 
-            
-        // Only add offset if it's Some
-        if let Some(current_offset) = offset {
-            scroll_builder = scroll_builder.offset(current_offset);
-        }
+        // Define the PayloadIncludeSelector directly
+        let payload_selector = PayloadIncludeSelector {
+            fields: vec![super::commands::FIELD_FILE_PATH.to_string()],
+        };
+
+        let mut builder = ScrollPointsBuilder::new(&collection_name)
+            .limit(SCROLL_LIMIT)
+            .with_payload(payload_selector) // Pass PayloadIncludeSelector
+            .with_vectors(false);
         
-        let scroll_request: ScrollPoints = scroll_builder.build();
-
-        log::trace!("Scrolling points with offset: {:?}", scroll_request.offset);
-        let scroll_response = client.scroll(scroll_request).await
-            .context("Failed to scroll points for listing directories")?;
-
-        let points = scroll_response.result;
-        let next_page_offset = scroll_response.next_page_offset;
-
-        if points.is_empty() {
-            log::debug!("Scroll returned empty result, finishing list.");
-            break; // No more points
+        if let Some(offset_value) = next_offset.clone() {
+            builder = builder.offset(offset_value);
         }
 
-        log::debug!("Processing batch of {} points.", points.len());
-        for point in points {
-            if let Some(dir_path_value) = point.payload.get(FIELD_DIR_PATH) {
-                if let Some(dir_path_str) = dir_path_value.as_str() {
-                    distinct_dirs.insert(dir_path_str.to_string());
-                } else {
-                    log::warn!("Found point ID {} with non-string dir_path payload: {:?}", point.id.map(|id| format!("{:?}", id)).unwrap_or_else(|| "N/A".into()), dir_path_value);
+        let scroll_request = builder.build();
+        
+        let scroll_response = client.scroll(scroll_request).await
+            .with_context(|| format!("Failed to scroll points in collection '{}'", collection_name))?;
+
+        for point in scroll_response.result {
+            // Access payload map directly (it's not Option)
+            let payload_map = point.payload; 
+            if let Some(file_path_value) = payload_map.get(super::commands::FIELD_FILE_PATH) {
+                if let Some(file_path) = file_path_value.as_str() {
+                    if unique_files.insert(file_path.to_string()) {
+                        println!("  - {}", file_path);
+                    }
                 }
-            } else {
-                 log::warn!("Found point ID {} without dir_path payload.", point.id.map(|id| format!("{:?}", id)).unwrap_or_else(|| "N/A".into()));
             }
         }
 
-        offset = next_page_offset;
-        if offset.is_none() {
-            log::debug!("Scroll returned no next page offset, finishing list.");
-            break; // Reached the end
+        if let Some(next_page_offset) = scroll_response.next_page_offset {
+            next_offset = Some(next_page_offset);
+        } else {
+            break; // No more pages
         }
     }
 
-    if distinct_dirs.is_empty() {
-        println!("No indexed directories found in collection '{}'.", CODE_SEARCH_COLLECTION);
-    } else {
-        println!("Indexed Directories:");
-        // Sort for consistent output
-        let mut sorted_dirs: Vec<String> = distinct_dirs.into_iter().collect();
-        sorted_dirs.sort(); 
-        for dir in sorted_dirs {
-            println!("- {}", dir);
-        }
-    }
+     if unique_files.is_empty() {
+         println!("  (No files found in index for this repository)");
+     }
 
-    log::info!("List process finished successfully.");
     Ok(())
 } 

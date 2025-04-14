@@ -9,6 +9,7 @@ pub mod query;
 pub mod stats;
 pub mod list;
 pub mod clear;
+pub mod repo_commands;
 // Add mods for stats, clear, list, remove when created
 
 // Re-export the main handler and the command enum
@@ -20,6 +21,7 @@ pub use query::QueryArgs;
 pub use stats::StatsArgs;
 pub use list::ListArgs;
 pub use clear::ClearArgs;
+pub use repo_commands::RepoArgs;
 pub use commands::CliArgs;
 
 // Potentially re-export other args structs here later...
