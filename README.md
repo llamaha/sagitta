@@ -176,10 +176,10 @@ For specific environment configurations (GPU acceleration), refer to the guides 
     *   It sets the necessary RPATH (`$ORIGIN/lib` on Linux, `@executable_path/lib` on macOS) on the `vectordb-cli` executable.
     *   This means you typically **do not** need to manually set `LD_LIBRARY_PATH` (Linux) or `DYLD_LIBRARY_PATH` (macOS).
 
-5.  **Install Binary (Optional):** Copy the compiled binary to a location in your `PATH`.
+5.  **Install Binary (Optional):** Symlink the compiled binary to a location in your `PATH`.
     ```bash
     # Example for Linux/macOS
-    cp target/release/vectordb-cli ~/.local/bin/
+    ln -s $PWD/target/release/vectordb-cli /usr/local/bin
     ```
 
 ## Configuration
