@@ -7,7 +7,8 @@ use clap::Parser;
 // use log::{debug, error, info};
 use std::sync::Arc;
 use std::process::exit;
-use tracing::{info, debug, error};
+// Remove unused tracing imports
+// use tracing::{info, debug, error};
 
 // Import library modules
 use vectordb_lib::cli::{self, CliArgs}; // Import CliArgs from lib, Commands not needed here
@@ -53,7 +54,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::debug!("Initializing Qdrant Client...");
     let qdrant_client_result = qdrant_client::Qdrant::from_url(&config.qdrant_url).build();
 
-    let _client: Arc<Qdrant> = match qdrant_client_result {
+    let client: Arc<Qdrant> = match qdrant_client_result {
          Ok(client_instance) => {
              tracing::debug!("Qdrant client initialized successfully.");
              Arc::new(client_instance)
@@ -69,8 +70,8 @@ async fn main() -> Result<(), anyhow::Error> {
     // --- Execute Command --- 
     tracing::info!("Executing command: {:?}", args.command);
 
-    // Pass CliArgs and config down
-    let result = cli::handle_command(args, config).await;
+    // Pass CliArgs, config, and client down
+    let result = cli::handle_command(args, config, client).await;
 
     // --- Handle Result ---
     if let Err(e) = result {

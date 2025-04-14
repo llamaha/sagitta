@@ -1,3 +1,6 @@
+//!
+//! Core vector database operations, including embedding handling, indexing, and search structures.
+
 pub mod error;
 pub mod embedding;
 pub mod provider;

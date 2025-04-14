@@ -1,8 +1,12 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use qdrant_client::Qdrant;
+use std::sync::Arc;
+use crate::config::AppConfig;
+use crate::cli::repo_commands::get_collection_name;
+use colored::Colorize;
 
-use super::commands::CODE_SEARCH_COLLECTION;
+// use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
 
 #[derive(Args, Debug)]
 pub struct StatsArgs {
@@ -18,69 +22,79 @@ pub struct StatsArgs {
 
 // Accept qdrant_url as parameter
 /// Handles the `stats` command, fetching and displaying collection statistics from Qdrant.
-pub async fn handle_stats(args: StatsArgs, qdrant_url: &str) -> Result<()> {
-    log::info!("Starting stats process...");
-    log::debug!("StatsArgs: {:?}", args);
+pub async fn handle_stats(
+    _args: StatsArgs, // Args currently unused
+    config: AppConfig, // Take ownership
+    client: Arc<Qdrant>, // Accept client
+) -> Result<()> {
+    // --- Get Active Repository and Collection --- 
+    let active_repo_name = config.active_repository.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("No active repository set. Use 'repo use <repo_name>' first.")
+    })?;
+    // No need to find repo_config unless we need specific details from it later
+    let collection_name = get_collection_name(active_repo_name);
+    log::info!("Getting stats for repository: '{}', collection: '{}'", active_repo_name, collection_name);
 
-    log::info!("Connecting to Qdrant at {}", qdrant_url);
-    let client = Qdrant::from_url(qdrant_url).build()
-        .context("Failed to connect to Qdrant")?;
-    log::info!("Qdrant client connected.");
+    // --- Get Collection Info --- 
+    let collection_info = client
+        .collection_info(&collection_name)
+        .await
+        .with_context(|| format!("Failed to get collection info for '{}'", collection_name))?;
 
-    log::info!("Fetching collection info for '{}'...", CODE_SEARCH_COLLECTION);
+    if let Some(info) = collection_info.result {
+        println!("Collection: {}", collection_name.bold());
+        println!("  Status: {:?}", info.status());
+        println!("  Points Count: {}", info.points_count.unwrap_or(0));
+        println!("  Segments Count: {}", info.segments_count);
+        println!("  Vectors Count: {}", info.vectors_count.unwrap_or(0));
+        println!("  Indexed Vectors Count: {}", info.indexed_vectors_count.unwrap_or(0));
 
-    match client.collection_info(CODE_SEARCH_COLLECTION).await {
-        Ok(info_response) => {
-            let info = info_response.result.context("Collection info result was empty")?;
-            println!("Collection Status: {:?}", info.status);
-            println!("Points Count: {}", info.points_count.unwrap_or(0));
-            println!("Vectors Count: {}", info.vectors_count.unwrap_or(0));
-            println!("Segments Count: {}", info.segments_count);
-            
-            if let Some(config) = info.config {
-                if let Some(params) = config.params {
-                     if let Some(vector_params) = params.vectors_config.and_then(|vc| vc.config) {
-                        match vector_params {
-                           qdrant_client::qdrant::vectors_config::Config::Params(p) => {
-                               println!("Vector Dimension: {}", p.size);
-                               println!("Vector Distance Metric: {:?}", qdrant_client::qdrant::Distance::try_from(p.distance).unwrap_or(qdrant_client::qdrant::Distance::UnknownDistance));
-                           },
-                           qdrant_client::qdrant::vectors_config::Config::ParamsMap(map_config) => {
-                                // Handle map config if necessary, print basic info for now
-                                println!("Vector Config: Using named vectors");
-                                for (name, params) in map_config.map {
-                                    println!("  - Name: {}, Dimension: {}, Distance: {:?}", 
-                                        name, 
-                                        params.size, 
-                                        qdrant_client::qdrant::Distance::try_from(params.distance).unwrap_or(qdrant_client::qdrant::Distance::UnknownDistance)
-                                    );
+        if let Some(config) = info.config {
+            println!("  Configuration:");
+            if let Some(params) = config.params {
+                if let Some(vectors_config) = params.vectors_config {
+                    if let Some(vector_params_map) = vectors_config.config {
+                        match vector_params_map {
+                            qdrant_client::qdrant::vectors_config::Config::Params(p) => {
+                                println!("    Vector Params:");
+                                println!("      Size: {}", p.size);
+                                println!("      Distance: {:?}", p.distance());
+                            }
+                            qdrant_client::qdrant::vectors_config::Config::ParamsMap(map) => {
+                                println!("    Vector Params Map:");
+                                for (name, p) in map.map {
+                                     println!("      - Name: {}, Size: {}, Distance: {:?}", name, p.size, p.distance());
                                 }
                             }
                         }
                     }
-                    // Optionally print HNSW, Quantization configs if needed
-                    // println!("HNSW Config: {:?}", params.hnsw_config);
-                    // println!("Quantization Config: {:?}", params.quantization_config);
-                    // println!("Optimizer Config: {:?}", config.optimizer_config);
                 }
             }
-             println!("Payload Schema: {:?}", info.payload_schema);
-        }
-        Err(e) => {
-            // Check if the error indicates the collection doesn't exist
-            if e.to_string().contains("Not found") { // Basic check, might need refinement
-                log::warn!("Collection '{}' not found.", CODE_SEARCH_COLLECTION);
-                println!("Collection '{}' does not exist.", CODE_SEARCH_COLLECTION);
-                // Return Ok, as the command succeeded in determining the state (non-existent)
-                return Ok(()); 
-            } else {
-                 log::error!("Failed to get collection info: {}", e);
-                 // Propagate other errors
-                 return Err(e).context(format!("Failed to get info for collection '{}'", CODE_SEARCH_COLLECTION)); 
+            if let Some(hnsw_config) = config.hnsw_config {
+                println!("    HNSW Config:");
+                println!("      m: {:?}", hnsw_config.m);
+                println!("      ef_construct: {:?}", hnsw_config.ef_construct);
             }
+             if let Some(optimizer_config) = config.optimizer_config {
+                println!("    Optimizer Config:");
+                 println!("      deleted_threshold: {:?}", optimizer_config.deleted_threshold);
+                 // Add other optimizer params if needed
+             }
         }
+
+        // Iterate directly over payload_schema (it's HashMap, not Option<HashMap>)
+        println!("  Payload Schema:");
+        // Check if the schema map exists and is not empty
+        if !info.payload_schema.is_empty() { 
+             for (field, schema) in info.payload_schema {
+                 println!("    - {}: {:?}", field, schema.data_type());
+             }
+        } else {
+            println!("    (Schema not defined or empty)");
+        }
+    } else {
+        println!("Collection '{}' not found or info unavailable.", collection_name);
     }
 
-    log::info!("Stats process finished successfully.");
     Ok(())
 } 

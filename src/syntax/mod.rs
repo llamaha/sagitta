@@ -1,3 +1,7 @@
+//!
+//! Handles language-specific parsing using `tree-sitter` to extract
+//! meaningful code chunks from source files.
+
 pub mod parser;
 pub mod rust;
 pub mod fallback;
@@ -32,7 +36,20 @@ pub use self::parser::CodeChunk;
 // --- END Inlined Markdown Parser --- END --- //
 
 
-/// Determines the appropriate parser based on file extension and returns code chunks.
+/// Determines the appropriate parser based on file extension, reads the file,
+/// and returns a vector of `CodeChunk`s.
+///
+/// Files with unrecognized or unsupported extensions will be processed using
+/// a fallback parser that treats the entire file content as a single chunk.
+///
+/// # Arguments
+///
+/// * `file_path` - The path to the source file to parse.
+///
+/// # Returns
+///
+/// A `Result` containing a vector of `CodeChunk`s on success, or an error
+/// (e.g., if the file cannot be read).
 pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
     let extension = file_path
         .extension()
