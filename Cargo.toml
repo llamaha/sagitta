@@ -11,6 +11,19 @@ keywords = ["cli", "search", "semantic", "code", "vector", "onnx", "developer-to
 categories = ["command-line-utilities", "development-tools"]
 homepage = "https://gitlab.com/amulvany/vectordb-cli"
 documentation = "https://docs.rs/vectordb-cli"
+# Exclude large files and directories not needed for the crate build
+exclude = [
+    "onnx/",
+    "repo-collection/",
+    "test_data/",
+    "qdrant_storage/",
+    "scripts/",
+    "examples/",
+    "docs/",
+    "tests/",
+    ".env",
+    # Add other specific file patterns if needed, e.g., "*.onnx"
+]
 
 [features]
 default = ["onnx"]
