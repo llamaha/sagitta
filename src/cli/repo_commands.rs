@@ -1,18 +1,18 @@
 // src/cli/repo_commands.rs
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use colored::*;
 use git2::{Repository, DiffOptions, DiffFindOptions, Delta, Cred, RemoteCallbacks, FetchOptions, CredentialType};
 use qdrant_client::{
-    qdrant::{ CollectionStatus, CreateCollectionBuilder, Distance, FieldType, VectorParamsBuilder, Filter, Condition, DeletePointsBuilder, PointStruct, CollectionInfo },
+    qdrant::{ CollectionStatus, CreateCollectionBuilder, Distance, FieldType, VectorParamsBuilder, Filter, Condition, DeletePointsBuilder, PointStruct },
     Payload,
     Qdrant,
 };
-use std::{fs, path::PathBuf, sync::Arc, time::Duration, collections::HashSet};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration, collections::HashSet, collections::HashMap};
 use uuid::Uuid;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::config::{self, AppConfig, RepositoryConfig};
+use crate::config::{self, AppConfig};
 use crate::cli::commands::{
     ensure_payload_index, upsert_batch, CliArgs, FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, 
     FIELD_LANGUAGE, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_EXTENSION, BATCH_SIZE
@@ -219,7 +219,7 @@ pub async fn handle_repo_command(
 }
 
 async fn add_repository(
-    args: AddRepoArgs, 
+    args: AddRepoArgs,
     mut config: AppConfig,
     client: Arc<Qdrant>
 ) -> Result<()> {
@@ -241,7 +241,7 @@ async fn add_repository(
         .with_context(|| format!("Failed to create repository base directory at {}", repo_base_path.display()))?;
     let local_path = args.local_path.unwrap_or(repo_base_path.join(&repo_name));
 
-    if local_path.exists() {
+    let repo = if local_path.exists() {
          println!(
             "{}",
             format!(
@@ -250,55 +250,67 @@ async fn add_repository(
             ).yellow()
         );
         // We could potentially validate if it's a git repo and matches the URL, but let's keep it simple for now.
+        // Need to open the existing repo to get its details
+        Repository::open(&local_path)
+            .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?
     } else {
         println!("Cloning repository '{}' from {}...", repo_name.cyan(), args.url.cyan());
-        let _repo = Repository::clone(&args.url, &local_path)
+        // Define FetchOptions and RemoteCallbacks for potential authentication
+        let fetch_opts = create_fetch_options(&config, &args.url)?; // Assuming create_fetch_options exists and is suitable
+
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_opts);
+
+        let repo = builder.clone(&args.url, &local_path)
             .with_context(|| format!("Failed to clone repository from {}", args.url))?;
         println!("Repository cloned successfully to {}", local_path.display());
-    }
+        repo
+    };
 
-    let default_branch_name = match args.branch {
-         Some(b) => b,
-         None => {
-             let cloned_repo = Repository::open(&local_path)?;
-             let head = cloned_repo.head()?;
-             head.shorthand()
-                 .ok_or_else(|| anyhow::anyhow!("Could not determine default branch name"))?
-                 .to_string()
-         }
-     };
+    // --- Determine and set the default/initial branch ---
+    let initial_branch_name = match args.branch {
+        Some(branch_name) => branch_name,
+        None => {
+            // Find the symbolic reference HEAD usually points to (e.g., refs/heads/main)
+            let head_ref = repo.find_reference("HEAD")?;
+            let head_ref_resolved = head_ref.resolve()?; // Resolve symbolic ref to direct ref
+            head_ref_resolved.shorthand()
+                .ok_or_else(|| anyhow!("Could not determine default branch name from HEAD"))?
+                .to_string()
+        }
+    };
+    println!("Default/Initial branch detected: {}", initial_branch_name.cyan());
+
 
     let collection_name = get_collection_name(&repo_name);
     println!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
     ensure_repository_collection_exists(&client, &collection_name).await?;
     println!("Qdrant collection ensured.");
 
-    let repo_config = RepositoryConfig {
+    let new_repo_config = config::RepositoryConfig {
         name: repo_name.clone(),
         url: args.url.clone(),
-        local_path,
-        default_branch: default_branch_name.clone(),
-        tracked_branches: vec![default_branch_name],
-        remote_name: args.remote,
-        last_synced_commits: Default::default(),
-        active_branch: None,
-        ssh_key_path: args.ssh_key,
-        ssh_key_passphrase: args.ssh_passphrase,
+        local_path: local_path.clone(),
+        default_branch: initial_branch_name.clone(),
+        tracked_branches: vec![initial_branch_name.clone()], // Start tracking the initial branch
+        active_branch: Some(initial_branch_name.clone()), // Set the initial branch as active
+        remote_name: Some(args.remote.unwrap_or_else(|| "origin".to_string())),
+        ssh_key_path: args.ssh_key.clone(),
+        ssh_key_passphrase: args.ssh_passphrase.clone(),
+        last_synced_commits: HashMap::new(), // Initialize empty commit map
         indexed_languages: None,
     };
 
-    config.repositories.push(repo_config);
-    if config.active_repository.is_none() {
-        config.active_repository = Some(repo_name.clone());
-         println!("Set '{}' as the active repository.", repo_name.cyan());
-    }
+    config.repositories.push(new_repo_config);
+    config.active_repository = Some(repo_name.clone()); // Set the new repo as active
     config::save_config(&config)?;
 
-    println!(
-        "{}",
-        format!("Successfully added repository '{}'.", repo_name).green()
-    );
-    println!("{}", "Run 'index' command to populate the repository.".yellow());
+    println!("Set '{}' as the active repository.", repo_name.cyan());
+    println!("{}", "Successfully added repository configuration.".green());
+    println!("Run '{}' to fetch and index the '{}' branch.",
+             format!("vectordb-cli repo sync {}", repo_name).cyan(),
+             initial_branch_name.cyan());
+
 
     Ok(())
 }
@@ -581,8 +593,7 @@ async fn sync_repository(
         .with_context(|| format!("Failed to find remote '{}' in repository", remote_name))?;
 
     // Setup fetch options with credential handling
-    // Clone config here so fetch_opts doesn't borrow the original config needed later
-    let cloned_config = config.clone(); // Clone into a longer-lived binding
+    let cloned_config = config.clone(); 
     let mut fetch_opts = create_fetch_options(&cloned_config, &repo_config.url)?;
     
     // Construct refspec for the active branch
@@ -591,184 +602,322 @@ async fn sync_repository(
         .with_context(|| format!("Failed to fetch updates for branch '{}' from remote '{}'", active_branch_name, remote_name))?;
     println!("Fetch completed.");
 
-    // Get local and remote commit OIDs for the active branch
-    let local_branch_ref_name = format!("refs/heads/{}", active_branch_name);
-    let local_commit = repo.find_reference(&local_branch_ref_name)?.peel_to_commit()?;
+    // Get remote commit OID for the active branch
     let remote_branch_ref_name = format!("refs/remotes/{}/{}", remote_name, active_branch_name);
-    let remote_commit = repo.find_reference(&remote_branch_ref_name)?.peel_to_commit()?;
+    let remote_commit_ref = repo.find_reference(&remote_branch_ref_name)
+        .with_context(|| format!("Remote branch reference '{}' not found after fetch. Has the branch been pushed?", remote_branch_ref_name))?;
+    let remote_commit = remote_commit_ref.peel_to_commit()?;
+    let remote_commit_oid = remote_commit.id();
+    let remote_commit_oid_str = remote_commit_oid.to_string();
 
-    if local_commit.id() == remote_commit.id() {
-        println!(
-            "{}",
-            format!("Branch '{}' is already up-to-date.", active_branch_name).green()
-        );
+    // Check last synced commit for this branch
+    let last_synced_commit_oid_str = repo_config.last_synced_commits.get(&active_branch_name);
+
+    let collection_name = get_collection_name(&repo_name);
+
+    // Determine sync type: Initial, Update, or Already Synced
+    match last_synced_commit_oid_str {
+        None => {
+            // --- Initial Sync ---
+            println!("Performing initial sync and index for branch '{}'...", active_branch_name.cyan());
+            
+            // Fast-forward local branch to remote commit
+            merge_local_branch(&repo, &active_branch_name, &remote_commit)?;
+
+            // Index all files in the current tree
+            println!("Indexing all relevant files in the repository...");
+            let tree = remote_commit.tree()?;
+            let mut all_files = Vec::new();
+            collect_files_from_tree(&repo, &tree, &mut all_files, &PathBuf::new())?;
+            
+            println!("Found {} total files in the branch tree.", all_files.len());
+            let relevant_files: Vec<PathBuf> = all_files.into_iter()
+                .filter(|path| {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    is_supported_extension(ext)
+                })
+                .collect();
+
+            if relevant_files.is_empty() {
+                println!("{}", "No relevant files found to index in this branch.".yellow());
+            } else {
+                println!("Found {} relevant files to index.", relevant_files.len());
+                 index_files(
+                     client.as_ref(),
+                     cli_args,
+                     &config, 
+                     &repo_config.local_path,
+                     &relevant_files,
+                     &collection_name,
+                     &active_branch_name,
+                     &remote_commit_oid_str,
+                 ).await.context("Failed to index files during initial sync")?;
+            }
+
+            // Update config with sync status
+            update_sync_status_and_languages(
+                config, // Move config ownership here
+                repo_config_index,
+                &active_branch_name,
+                &remote_commit_oid_str,
+                client.as_ref(),
+                &collection_name
+            ).await?;
+            println!(
+                "{}",
+                format!(
+                    "Repository '{}', branch '{}' initial sync complete to commit {}.",
+                    repo_name.cyan(),
+                    active_branch_name.cyan(),
+                    &remote_commit_oid_str[..8].cyan()
+                ).green()
+            );
+        }
+        Some(last_sync_str) => {
+            // --- Subsequent Sync ---
+            if last_sync_str == &remote_commit_oid_str {
+                 println!(
+                     "{}",
+                     format!("Branch '{}' is already up-to-date (commit {}).", active_branch_name.cyan(), &last_sync_str[..8].cyan()).green()
+                 );
+                // No indexing needed, just print query suggestion below
+            } else {
+                 println!(
+                    "Branch '{}' has updates ({} -> {}). Analyzing changes...",
+                    active_branch_name.cyan(),
+                    &last_sync_str[..8].cyan(),
+                    &remote_commit_oid_str[..8].cyan()
+                );
+
+                let last_synced_oid = git2::Oid::from_str(last_sync_str)?;
+                let last_synced_commit = repo.find_commit(last_synced_oid)?;
+                let last_synced_tree = last_synced_commit.tree()?;
+                let current_tree = remote_commit.tree()?;
+
+                // --- Diff and Process Changes ---
+                let mut diff_opts = DiffOptions::new();
+                diff_opts.include_untracked(false);
+                diff_opts.ignore_submodules(true);
+                // diff_opts.pathspec(&repo_config.local_path); // Unnecessary?
+
+                let mut diff = repo.diff_tree_to_tree(Some(&last_synced_tree), Some(&current_tree), Some(&mut diff_opts))?;
+
+                let mut find_opts = DiffFindOptions::new();
+                find_opts.renames(true);
+                find_opts.copies(true);
+                diff.find_similar(Some(&mut find_opts))?;
+
+                let mut added_or_modified_files = Vec::new();
+                let mut deleted_files = Vec::new();
+                let mut renamed_files_count = 0; // Just count for info
+
+                let pb_diff = ProgressBar::new(diff.deltas().len() as u64);
+                pb_diff.set_style(ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
+                    .progress_chars("#>- "));
+                pb_diff.set_message("Analyzing deltas");
+
+                for delta in diff.deltas() {
+                     match delta.status() {
+                        Delta::Added | Delta::Modified | Delta::Copied => {
+                            if let Some(new_file) = delta.new_file().path() {
+                                let extension = new_file.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                if is_supported_extension(extension) {
+                                    added_or_modified_files.push(new_file.to_path_buf());
+                                }
+                            }
+                        }
+                        Delta::Deleted => {
+                            if let Some(old_file) = delta.old_file().path() {
+                                let extension = old_file.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                if is_supported_extension(extension) {
+                                    deleted_files.push(old_file.to_path_buf());
+                                }
+                            }
+                        }
+                        Delta::Renamed => {
+                             if let (Some(old_file), Some(new_file)) = (delta.old_file().path(), delta.new_file().path()) {
+                                let old_ext = old_file.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                let new_ext = new_file.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                if is_supported_extension(old_ext) || is_supported_extension(new_ext) {
+                                    renamed_files_count += 1;
+                                     if is_supported_extension(old_ext) { deleted_files.push(old_file.to_path_buf()); }
+                                     if is_supported_extension(new_ext) { added_or_modified_files.push(new_file.to_path_buf()); }
+                                }
+                            }
+                        }
+                        _ => {} 
+                    }
+                    pb_diff.inc(1);
+                }
+                 pb_diff.finish_with_message("Delta analysis complete");
+
+                 println!(
+                    "Detected changes (relevant files only): {} added/modified, {} deleted, {} renamed.",
+                    added_or_modified_files.len().to_string().green(),
+                    deleted_files.len().to_string().red(),
+                    renamed_files_count.to_string().yellow()
+                );
+                
+                // Perform Deletions
+                if !deleted_files.is_empty() {
+                    println!(
+                        "Deleting {} removed files from collection '{}'...",
+                        deleted_files.len(), collection_name.cyan()
+                    );
+                    delete_points_for_files(
+                        client.as_ref(), 
+                        &collection_name, 
+                        &active_branch_name, 
+                        &deleted_files
+                    ).await.context("Failed to delete points for removed files")?;
+                    println!("Deletion complete.");
+                }
+
+                // Merge remote changes into local branch
+                merge_local_branch(&repo, &active_branch_name, &remote_commit)?;
+
+                // Index Added/Modified Files
+                 if !added_or_modified_files.is_empty() {
+                    println!(
+                        "Attempting to index {} added/modified files for branch '{}'...",
+                        added_or_modified_files.len(), active_branch_name.cyan()
+                    );
+                    index_files(
+                        client.as_ref(),
+                        cli_args,
+                        &config, // Pass borrow of original config
+                        &repo_config.local_path,
+                        &added_or_modified_files,
+                        &collection_name,
+                        &active_branch_name,
+                        &remote_commit_oid_str,
+                    ).await.context("Failed to index added/modified files")?;
+                    println!("Indexing complete.");
+                }
+
+                // Update config with sync status
+                update_sync_status_and_languages(
+                    config, // Move config ownership here
+                    repo_config_index,
+                    &active_branch_name,
+                    &remote_commit_oid_str,
+                    client.as_ref(),
+                    &collection_name
+                ).await?;
+                println!(
+                    "{}",
+                    format!(
+                        "Repository '{}', branch '{}' synced successfully to commit {}.",
+                        repo_name.cyan(),
+                        active_branch_name.cyan(),
+                        &remote_commit_oid_str[..8].cyan()
+                    ).green()
+                );
+            }
+        }
+    }
+
+    // --- Final Query Suggestion ---
+    println!(
+        "\nRepository '{}' is synced and ready. Try:\n  {}",
+        repo_name.cyan(),
+        format!("vectordb-cli query -r {} \"your query\"", repo_name).white().bold()
+    );
+
+    Ok(())
+}
+
+// Helper function to update local branch (fast-forward or error)
+fn merge_local_branch<'repo>(
+    repo: &'repo Repository,
+    branch_name: &str,
+    target_commit: &git2::Commit<'repo>,
+) -> Result<()> {
+    println!("Updating local branch '{}'...", branch_name.cyan());
+    let local_ref_name = format!("refs/heads/{}", branch_name);
+    
+    // Get the OID of the commit the local ref *currently* points to
+    let local_ref_oid_opt = repo.find_reference(&local_ref_name).ok().and_then(|r| r.target());
+
+    // Check if the local ref already points to the target commit
+    if local_ref_oid_opt == Some(target_commit.id()) {
+        println!("Local branch already points to target commit {}. No merge needed.", &target_commit.id().to_string()[..8]);
+        // Ensure HEAD is pointing to the branch and checkout
+        repo.set_head(&local_ref_name)?;
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
         return Ok(());
     }
 
-    println!(
-        "Branch '{}' has updates ({} -> {}). Analyzing changes...",
-        active_branch_name.cyan(),
-        &local_commit.id().to_string()[..8].cyan(),
-        &remote_commit.id().to_string()[..8].cyan()
-    );
+    let annotated_commit = repo.find_annotated_commit(target_commit.id())?;
+    let merge_analysis = repo.merge_analysis(&[&annotated_commit])?;
 
-    // Get the tree objects for diffing
-    let local_tree = local_commit.tree()?;
-    let remote_tree = remote_commit.tree()?;
-
-    let mut diff_opts = DiffOptions::new();
-    diff_opts.include_untracked(false);
-    diff_opts.ignore_submodules(true);
-    diff_opts.pathspec(&repo_config.local_path); // Ensure diff is within the repo path? Needs verification.
-
-    let mut diff = repo.diff_tree_to_tree(Some(&local_tree), Some(&remote_tree), Some(&mut diff_opts))?;
-
-    let mut find_opts = DiffFindOptions::new();
-    find_opts.renames(true);
-    find_opts.copies(true);
-    // find_opts.for_untracked(true); // Might be needed if we handle untracked files later
-
-    diff.find_similar(Some(&mut find_opts))?;
-
-    let mut added_or_modified_files = Vec::new();
-    let mut deleted_files = Vec::new();
-    let mut renamed_files = Vec::new(); // Store as (old_path, new_path)
-
-    let pb_diff = ProgressBar::new(diff.deltas().len() as u64);
-    pb_diff.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta}) {msg}")?
-        .progress_chars("#>- "));
-    pb_diff.set_message("Analyzing deltas");
-
-    for delta in diff.deltas() {
-        match delta.status() {
-            Delta::Added | Delta::Modified | Delta::Copied => {
-                if let Some(new_file) = delta.new_file().path() {
-                    let extension = new_file.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if is_supported_extension(extension) {
-                        added_or_modified_files.push(new_file.to_path_buf());
-                    }
-                }
-            }
-            Delta::Deleted => {
-                if let Some(old_file) = delta.old_file().path() {
-                    let extension = old_file.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if is_supported_extension(extension) {
-                        deleted_files.push(old_file.to_path_buf());
-                    }
-                }
-            }
-            Delta::Renamed => {
-                if let (Some(old_file), Some(new_file)) = (delta.old_file().path(), delta.new_file().path()) {
-                    let old_ext = old_file.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    let new_ext = new_file.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    
-                    // Check if either old or new is supported
-                    if is_supported_extension(old_ext) || is_supported_extension(new_ext) {
-                        // Treat rename as delete + add for simplicity in indexing
-                         if is_supported_extension(old_ext) {
-                             deleted_files.push(old_file.to_path_buf());
-                         }
-                         if is_supported_extension(new_ext) {
-                             added_or_modified_files.push(new_file.to_path_buf());
-                             renamed_files.push((old_file.to_path_buf(), new_file.to_path_buf())); // Keep track for info
-                         }
-                    }
-                }
-            }
-            _ => { /* TypeChanged, Unmodified, Ignored, Untracked, Unreadable - skip */ }
-        }
-        pb_diff.inc(1);
-    }
-    pb_diff.finish_with_message("Delta analysis complete");
-
-    println!(
-        "Detected changes: {} added/modified, {} deleted, {} renamed (relevant files only)",
-        added_or_modified_files.len().to_string().green(),
-        deleted_files.len().to_string().red(),
-        renamed_files.len().to_string().yellow()
-    );
-
-    // Update Qdrant Index based on diff
-    let collection_name = get_collection_name(&repo_name);
-
-    // --- Perform Deletions ---
-    if !deleted_files.is_empty() {
-        println!(
-            "Deleting {} removed files from collection '{}'...",
-            deleted_files.len(), collection_name.cyan()
-        );
-        delete_points_for_files(
-            client.as_ref(), 
-            &collection_name, 
-            &active_branch_name, 
-            &deleted_files
-        ).await.context("Failed to delete points for removed files")?;
-        println!("Deletion complete.");
-    }
-
-    // --- Merge remote changes into local branch ---
-    println!("Merging remote changes into local branch '{}'...", active_branch_name.cyan());
-    let remote_ref = repo.find_reference(&remote_branch_ref_name)?;
-    let annotated_commit = repo.find_annotated_commit(remote_ref.target().unwrap())?;
-    let (merge_analysis, _) = repo.merge_analysis(&[&annotated_commit])?;
-
-    if merge_analysis.is_fast_forward() {
+    if merge_analysis.0.is_fast_forward() || merge_analysis.0.is_up_to_date() {
         println!("Performing fast-forward merge...");
-        let mut local_ref = repo.find_reference(&local_branch_ref_name)?;
+        let mut local_ref = repo.find_reference(&local_ref_name)?;
         local_ref.set_target(
             annotated_commit.id(),
-            &format!("Fast-forward {} to remote {}", local_branch_ref_name, remote_branch_ref_name)
+            &format!("Fast-forward {} to commit {}", local_ref_name, target_commit.id())
         )?;
-        repo.set_head(&local_branch_ref_name)?;
+        repo.set_head(&local_ref_name)?;
         repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
         println!("Fast-forward merge successful.");
-    } else if merge_analysis.is_up_to_date() {
-         println!("Branch already up-to-date (should have been caught earlier, but handling).", );
-         // This case should ideally not happen if we checked commit IDs earlier, but good to handle
+        Ok(())
     } else {
-         bail!(
+        bail!(
              "Merge required, but automatic non-fast-forward merges are not supported yet. 
-             Please resolve conflicts manually in '{}' for branch '{}' and then run sync again.",
-             repo_config.local_path.display(), active_branch_name
+             Please resolve conflicts manually in the repository for branch '{}' and then run sync again.",
+             branch_name
          );
-        // Later, we might implement a merge strategy or provide better instructions
     }
+}
 
-    // --- Index Added/Modified Files ---
-    if !added_or_modified_files.is_empty() {
-        println!(
-            "Indexing {} added/modified files for branch '{}'...",
-            added_or_modified_files.len(), active_branch_name.cyan()
-        );
-        index_files(
-            client.as_ref(),
-            cli_args,
-            &config, // Pass borrow of original config
-            &repo_config.local_path,
-            &added_or_modified_files,
-            &collection_name,
-            &active_branch_name,
-            &remote_commit.id().to_string(),
-        ).await.context("Failed to index added/modified files")?;
-        println!("Indexing complete.");
+// Helper to recursively collect files from a tree
+fn collect_files_from_tree(
+    repo: &Repository,
+    tree: &git2::Tree,
+    file_list: &mut Vec<PathBuf>,
+    current_path: &PathBuf,
+) -> Result<()> {
+    for entry in tree.iter() {
+        let entry_path = current_path.join(entry.name().unwrap_or_default());
+        match entry.kind() {
+            Some(git2::ObjectType::Blob) => {
+                file_list.push(entry_path);
+            }
+            Some(git2::ObjectType::Tree) => {
+                let subtree = repo.find_tree(entry.id())?;
+                collect_files_from_tree(repo, &subtree, file_list, &entry_path)?;
+            }
+            _ => {} // Ignore commits, tags, etc.
+        }
     }
+    Ok(())
+}
 
+
+// Helper function to update config with sync status and detected languages
+async fn update_sync_status_and_languages(
+    mut config: AppConfig, // Take ownership
+    repo_config_index: usize,
+    branch_name: &str,
+    commit_oid_str: &str,
+    client: &Qdrant, // Borrow client
+    collection_name: &str,
+) -> Result<()> {
+    println!("Updating sync status and checking indexed languages...");
+    
     // --- Collect indexed languages/extensions --- 
     let mut current_languages = HashSet::new();
     match client.collection_info(collection_name.to_string()).await {
         Ok(info) => {
-             // This might be inefficient if there are many points.
-             // A better approach might involve storing indexed languages directly in config during index/sync.
-             // For now, we query the collection's payload index info if available or scan points.
-            if let Some(payload_schema) = info.result.and_then(|i| Some(i.payload_schema)) {
-                if payload_schema.contains_key(FIELD_LANGUAGE) {
-                    // If FIELD_LANGUAGE index exists, we *assume* languages were indexed.
-                    // This is an approximation. We don't know *which* languages without querying points.
-                    // We'll refine this if needed. For now, let's try querying a small sample.
+             if let Some(payload_schema) = info.result.and_then(|i| Some(i.payload_schema)) {
+                 if payload_schema.contains_key(FIELD_LANGUAGE) {
                     log::debug!("Attempting to query distinct languages from collection '{}'", collection_name);
+                    // Use scroll with filter for the current branch
                     let scroll_request = qdrant_client::qdrant::ScrollPointsBuilder::new(collection_name.to_string())
-                        .limit(1000) // Limit sample size
+                        .limit(10000) // Increase sample size maybe? Or make it optional?
+                        .filter(Filter::must([Condition::matches(FIELD_BRANCH, branch_name.to_string())]))
                         .with_payload(qdrant_client::qdrant::with_payload_selector::SelectorOptions::Include( 
                             qdrant_client::qdrant::PayloadIncludeSelector { fields: vec![FIELD_LANGUAGE.to_string()] }
                         ))
@@ -784,45 +933,48 @@ async fn sync_repository(
                                      }
                                  }
                              }
-                             log::info!("Found indexed languages from sample: {:?}", current_languages);
+                             if !current_languages.is_empty() {
+                                 log::info!("Found indexed languages for branch '{}': {:?}", branch_name, current_languages);
+                             } else {
+                                 log::debug!("No specific languages found in payload sample for branch '{}'.", branch_name);
+                             }
                          }
-                         Err(e) => log::warn!("Could not scroll points to determine languages: {}", e),
+                         Err(e) => log::warn!("Could not scroll points to determine languages for branch '{}': {}", branch_name, e),
                      }
-                }
+                 } else {
+                    log::debug!("Payload index for '{}' does not exist on collection '{}'. Cannot determine indexed languages.", FIELD_LANGUAGE, collection_name);
+                 }
+            } else {
+                log::warn!("Could not access payload schema for collection '{}'", collection_name);
             }
         }
         Err(e) => log::warn!("Could not get collection info to determine languages: {}", e),
     }
     let languages_vec: Vec<String> = current_languages.into_iter().collect();
 
-    // --- Update config with the new sync status AND languages ---
-    println!("Updating sync status...");
-    let mut mutable_config = config; // Move the original config now, it's no longer borrowed by fetch_opts
-    let repo_config_mut = mutable_config
+    // --- Update config ---
+    let repo_config_mut = config
         .repositories
         .get_mut(repo_config_index)
         .unwrap(); // Should always exist
 
     repo_config_mut.last_synced_commits.insert(
-        active_branch_name.clone(),
-        remote_commit.id().to_string()
+        branch_name.to_string(), // Use to_string here
+        commit_oid_str.to_string() // Use to_string here
     );
-    // Update indexed languages
-    repo_config_mut.indexed_languages = if languages_vec.is_empty() { None } else { Some(languages_vec) };
+    // Update indexed languages (only if non-empty, otherwise keep existing None)
+    if !languages_vec.is_empty() {
+        repo_config_mut.indexed_languages = Some(languages_vec);
+    } else if repo_config_mut.indexed_languages.is_none() {
+         // If languages were not found AND there was no previous language data, set to empty vec
+         repo_config_mut.indexed_languages = Some(vec![]); // Explicitly empty means we checked
+    }
+    // If languages_vec is empty but repo_config_mut.indexed_languages was Some(..), we keep the old data
 
-    config::save_config(&mutable_config)?;
-    println!(
-        "{}",
-        format!(
-            "Repository '{}', branch '{}' synced successfully to commit {}.",
-            repo_name.cyan(),
-            active_branch_name.cyan(),
-            &remote_commit.id().to_string()[..8].cyan()
-        ).green()
-    );
-
+    config::save_config(&config)?; // Save the modified config
     Ok(())
 }
+
 
 async fn delete_points_for_files(
     client: &Qdrant,
@@ -894,41 +1046,51 @@ async fn index_files(
     commit_hash: &str,
 ) -> Result<()> {
     if relative_paths.is_empty() {
+        log::info!("No files provided to index_files.");
         return Ok(());
     }
-    log::info!("Indexing {} files for branch '{}' commit '{}'...", relative_paths.len(), branch_name, commit_hash);
-    println!("Indexing {} files for branch '{}' (commit {})...", relative_paths.len(), branch_name.cyan(), &commit_hash[..7].cyan());
 
-    // --- Initialize Embedding Handler --- 
-    let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
-    let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
-
-    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_ref()
-        .or(model_env_var.as_ref())
+    // --- Resolve ONNX paths (priority: args -> env -> config) --- 
+    let onnx_model_path_str = cli_args
+        .onnx_model_path_arg
+        .as_ref()
         .or(config.onnx_model_path.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config"))?;
-    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_ref()
-        .or(tokenizer_env_var.as_ref())
-        .or(config.onnx_tokenizer_path.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
+        .ok_or_else(|| anyhow!("ONNX model path not specified via args, env, or config"))?;
 
+    let onnx_tokenizer_dir_str = cli_args
+        .onnx_tokenizer_dir_arg
+        .as_ref()
+        .or(config.onnx_tokenizer_path.as_ref()) 
+        .ok_or_else(|| anyhow!("ONNX tokenizer directory not specified via args, env, or config"))?;
+
+    // Convert to PathBuf for display and use
     let onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
+    let onnx_tokenizer_dir = PathBuf::from(onnx_tokenizer_dir_str);
 
-    if !onnx_model_path.exists() { return Err(anyhow::anyhow!("Resolved ONNX model path does not exist: {}", onnx_model_path.display())); }
-    if !onnx_tokenizer_path.is_dir() { return Err(anyhow::anyhow!("Resolved ONNX tokenizer path is not a directory: {}", onnx_tokenizer_path.display())); }
-    let tokenizer_file = onnx_tokenizer_path.join("tokenizer.json");
-    if !tokenizer_file.exists() { return Err(anyhow::anyhow!("tokenizer.json not found in the ONNX tokenizer directory: {}", onnx_tokenizer_path.display())); }
-
-    log::info!("Initializing embedding handler for indexing...");
-    let embedding_handler = Arc::new(
-        EmbeddingHandler::new(
-            embedding::EmbeddingModelType::Onnx,
-            Some(onnx_model_path),
-            Some(onnx_tokenizer_path),
-        )
-        .context("Failed to initialize embedding handler")?,
+    println!(
+        "Using ONNX model: {}\nUsing ONNX tokenizer dir: {}",
+        onnx_model_path.display(),
+        onnx_tokenizer_dir.display()
     );
+
+    // --- Initialize Embedding Handler ---
+    println!("Initializing embedding handler...");
+    let embedding_handler = match EmbeddingHandler::new(
+        embedding::EmbeddingModelType::Onnx,
+        Some(onnx_model_path.clone()), // Pass cloned PathBuf
+        Some(onnx_tokenizer_dir.clone()) // Pass cloned PathBuf
+    ) {
+        Ok(handler) => {
+            println!("Embedding handler initialized successfully.");
+            handler
+        }
+        Err(e) => {
+            log::error!("Failed to initialize Embedding Handler: {}", e);
+            bail!("Failed to initialize embedding handler: {}", e);
+        }
+    };
+    let batch_size = 32; // TODO: Make configurable?
+    let mut points_to_upsert: Vec<PointStruct> = Vec::new();
 
     // --- Progress Bar --- 
     let pb_style = ProgressStyle::with_template(
@@ -1030,7 +1192,7 @@ async fn index_files(
         total_points_processed += final_batch_size;
     }
 
-    pb.finish_with_message("File processing complete!"); // Different message for sync
+    pb.finish_with_message("File processing complete");
 
     log::info!("Indexing for sync finished. Processed: {}, Skipped: {}, Points: {}", total_files_processed, total_files_skipped, total_points_processed);
     println!("  (Processed {} files, skipped {}, upserted {} points)", total_files_processed, total_files_skipped, total_points_processed);

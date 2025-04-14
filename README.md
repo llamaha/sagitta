@@ -94,16 +94,22 @@ Support for the following languages is planned for future releases:
 -   **Rust:** Required for building the project. Install from [rustup.rs](https://rustup.rs/).
     ```bash
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    # After installing rustup, source the Cargo environment script or restart your terminal
+    source "$HOME/.cargo/env"
     ```
 -   **Git:** Required for repository management features (`repo add`, `repo sync`, etc.).
 -   **Build Tools:** Rust often requires a C linker and build tools.
     -   **Linux (Debian/Ubuntu):**
         ```bash
-        sudo apt-get update && sudo apt-get install build-essential
+        sudo apt-get update && sudo apt-get install build-essential git-lfs libssl-dev pkg-config
         ```
     -   **macOS:** Install the Xcode Command Line Tools. If you don't have Xcode installed, running the following command in your terminal will prompt you to install them:
         ```bash
         xcode-select --install
+        ```
+        Install required packages using Homebrew:
+        ```bash
+        brew install git-lfs pkg-config
         ```
 -   **Qdrant:** A Qdrant instance (v1.7.0 or later recommended) must be running and accessible. See [Qdrant Setup](#qdrant-setup).
 -   **ONNX Model Files:** An ONNX embedding model and its corresponding tokenizer files are required. See [Installation](#installation) and [Configuration](#configuration).
@@ -145,11 +151,7 @@ For specific environment configurations (GPU acceleration), refer to the guides 
 2.  **Prepare ONNX Model & Tokenizer:**
     Download or obtain your desired ONNX embedding model (`.onnx` file) and its tokenizer configuration (`tokenizer.json` and potentially other files like `vocab.txt`, `merges.txt`, etc., usually in a single directory). Place them in a known location. See [Configuration](#configuration) for how to tell the tool where these are.
 
-    **Using the Example Model:** This repository includes an example `all-MiniLM-L6-v2` model in the `onnx/` directory, managed via Git LFS. If you want to use this example model, ensure you have Git LFS installed ([download & install](https://git-lfs.com/)) and run the following command inside the cloned repository directory:
-    ```bash
-    git lfs pull
-    ```
-    This will download the actual `.onnx` file.
+    **Using the Example Model:** This repository includes an example `all-MiniLM-L6-v2` model in the `onnx/` directory, managed via Git LFS. If you followed the prerequisites and installed Git LFS, Git should handle pulling the model files automatically when you clone or pull updates. If the `.onnx` file in `onnx/model/` is small (a pointer file), you might need to run `git lfs pull` manually.
 
     **Note:** The tool dynamically detects the embedding dimension from the provided `.onnx` model.
 
@@ -200,13 +202,12 @@ For specific environment configurations (GPU acceleration), refer to the guides 
 The tool looks for a `config.toml` file in the XDG configuration directory:
 
 *   **Linux/macOS:** `~/.config/vectordb-cli/config.toml`
-*   **Windows:** `{FOLDERID_RoamingAppData}\\vectordb-cli\\config.toml` (e.g., `C:\\Users\\Alice\\AppData\\Roaming\\vectordb-cli\\config.toml`)
 
 **Example `config.toml`:**
 
 ```toml
 # URL for the Qdrant gRPC endpoint
-qdrant_url = "http://localhost:6333"
+qdrant_url = "http://localhost:6334"
 
 # --- Optional: Qdrant API Key ---
 # api_key = "your_qdrant_api_key"
@@ -287,6 +288,10 @@ vectordb-cli repo add <url> [--name <name>] [--branch <branch>] [--remote <remot
 -   `--ssh-passphrase <passphrase>` (Optional): Passphrase for the SSH private key, if it is encrypted. Requires `--ssh-key`.
 
 The command creates a Qdrant collection named `repo_<name>` for this repository.
+It automatically determines the default branch (or uses the one provided via `--branch`), sets it as the `active_branch`, and adds it to the `tracked_branches` list.
+The new repository is set as the active repository.
+
+After adding, run `vectordb-cli repo sync <name>` to fetch the initial branch contents and index them.
 
 #### `repo list`
 
@@ -508,23 +513,3 @@ cargo fmt
 ## License
 
 MIT License
-
-## Language Support
-
-The CLI uses `tree-sitter` for Abstract Syntax Tree (AST) parsing to extract meaningful code chunks (like functions, classes, structs) for indexing. This leads to more contextually relevant search results compared to simple line-based splitting.
-
-Here is the current status of language support:
-
-| Language   | Status          | Supported Elements                             |
-| :--------- | :-------------- | :--------------------------------------------- |
-| Rust       | ✅ Supported    | functions, structs, enums, impls, traits, mods, macros, use, extern crates, type aliases, unions, statics, consts |
-| Ruby       | ✅ Supported    | modules, classes, methods, singleton_methods   |
-| Go         | ✅ Supported    | functions, methods, types (struct/interface), consts, vars |
-| Python     | ✅ Supported    | functions, classes, top-level statements       |
-| JavaScript | ✅ Supported    | functions, classes, methods, assignments       |
-| TypeScript | ✅ Supported    | functions, classes, methods, interfaces, enums, types, assignments |
-| Markdown   | ✅ Supported    | headings, code blocks, list items, paragraphs |
-| YAML       | ✅ Supported    | documents                                      |
-| Other      | ✅ Supported    | Whole file chunk (`fallback_chunk`)            |
-
-Files with unsupported extensions will automatically use the whole-file fallback mechanism. 

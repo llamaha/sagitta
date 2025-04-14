@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use futures::future::join_all;
 use qdrant_client::{
-    qdrant::{SearchPointsBuilder, Filter, Condition, PointStruct, ScoredPoint},
+    qdrant::{SearchPointsBuilder, Filter, Condition},
     Qdrant,
 };
 use std::{
