@@ -19,6 +19,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
     -   [Configuration File (`config.toml`)](#configuration-file-configtoml)
 -   [Usage (CLI)](#usage-cli)
     -   [Global Options](#global-options)
+    -   [Simple Indexing (`index`)](#simple-indexing-index)
     -   [Repository Management (`repo`)](#repository-management-repo)
         -   [`repo add`](#repo-add)
         -   [`repo list`](#repo-list)
@@ -40,7 +41,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
 -   **Branch-Aware Indexing:** Track and sync specific branches within repositories.
 -   **Qdrant Backend:** Utilizes a Qdrant vector database instance for scalable storage and efficient search.
 -   **Local or Remote Qdrant:** Can connect to a local Dockerized Qdrant or a remote instance.
--   **Simple Indexing (Legacy):** Recursively indexes specified directories (can be used alongside repository management).
+-   **Simple Indexing (Default):** Recursively indexes specified directories (can be used alongside repository management).
 -   **Configurable:** Supports custom ONNX embedding models/tokenizers and Qdrant connection details via config file or environment variables.
 
 ## Use Cases
@@ -126,7 +127,7 @@ docker run -p 6333:6333 -p 6334:6334 \
     qdrant/qdrant:latest
 ```
 
-This starts Qdrant with the default gRPC port (6333) and HTTP/REST port (6334) mapped to your host. Data will be persisted in the `qdrant_storage` directory in your current working directory.
+This starts Qdrant with the default gRPC port (6333, used by `vectordb-cli`) and HTTP/REST port (6334, typically for the web UI) mapped to your host. Data will be persisted in the `qdrant_storage` directory in your current working directory.
 
 **Option 2: Qdrant Cloud or Other Deployment**
 
@@ -268,30 +269,44 @@ These can be used with most commands:
 -   `--onnx-model-path-arg`: Override path to ONNX model file.
 -   `--onnx-tokenizer-dir-arg`: Override path to ONNX tokenizer directory.
 
+### Simple Indexing (`index`)
+
+This command indexes code based on directories specified directly, without linking to a specific managed repository. This is the simpler, older method ("default").
+
+```bash
+vectordb-cli index /path/to/your/code [--recursive] [--include-ext <ext>] [--exclude-dir <dir>]
+```
+
+-   `/path/to/your/code`: The root directory to start indexing from.
+-   `--recursive` or `-r`: Index subdirectories recursively.
+-   `--include-ext` or `-i`: Comma-separated list of file extensions to include (e.g., `rs,py,md`). Defaults to common code extensions.
+-   `--exclude-dir` or `-e`: Comma-separated list of directory names to exclude (e.g., `target,.git`). Defaults to common build/metadata directories.
+
+This uses a default collection name in Qdrant (usually "code-index", configurable via environment or config file).
+
 ### Repository Management (`repo`)
 
-Manages the Git repositories known to `vectordb-cli`.
+This subcommand group manages configurations for Git repositories, allowing you to index and query specific branches.
+
+**Important:** Repository management uses *separate* Qdrant collections for each repository (`repo_<repository_name>`), distinct from the collection used by the simple `index` command.
+
+**Common Options:**
+
+-   `--repo-name <name>`: Specifies the repository configuration to use (defaults to the `active_repository` in the config).
 
 #### `repo add`
 
-Adds a new repository to the configuration and clones it locally.
+Clones a Git repository locally (if not already present) and adds it to the managed list.
 
 ```bash
-vectordb-cli repo add <url> [--name <name>] [--branch <branch>] [--remote <remote_name>] [--ssh-key <path>] [--ssh-passphrase <passphrase>]
+vectordb-cli repo add <repo-url> [--name <repo-name>] [--branch <branch-name>] [--ssh-key <path>] [--ssh-passphrase <passphrase>]
 ```
 
--   `<url>`: The Git URL of the repository (e.g., `https://github.com/user/repo.git` or `git@github.com:user/repo.git`).
--   `--name <name>` (Optional): A short name to refer to this repository. If omitted, it's derived from the URL (e.g., `repo` from `repo.git`).
--   `--branch <branch>` (Optional): The specific branch to track initially. If omitted, the repository's default branch is used.
--   `--remote <remote_name>` (Optional): The name of the Git remote to use for fetching updates (e.g., `upstream`). Defaults to `origin`.
--   `--ssh-key <path>` (Optional): Path to the SSH private key file (e.g., `~/.ssh/id_rsa`) to use for authentication with this repository.
--   `--ssh-passphrase <passphrase>` (Optional): Passphrase for the SSH private key, if it is encrypted. Requires `--ssh-key`.
-
-The command creates a Qdrant collection named `repo_<name>` for this repository.
-It automatically determines the default branch (or uses the one provided via `--branch`), sets it as the `active_branch`, and adds it to the `tracked_branches` list.
-The new repository is set as the active repository.
-
-After adding, run `vectordb-cli repo sync <name>` to fetch the initial branch contents and index them.
+-   `<repo-url>`: The URL of the Git repository (HTTPS or SSH).
+-   `--name`: Optional name for the repository configuration (defaults to the repository name extracted from the URL).
+-   `--branch`: Optional initial branch to track (defaults to the repository's default branch).
+-   `--ssh-key`: Path to the SSH private key file for authentication (if using SSH URL).
+-   `--ssh-passphrase`: Passphrase for the SSH key (if needed).
 
 #### `repo list`
 
@@ -377,27 +392,6 @@ vectordb-cli repo sync my-cool-project
 
 **Manual Testing for SSH:** To test SSH key authentication, try adding a private repository using its SSH URL (`git@...`) and provide the path to your corresponding private key using `--ssh-key`. Ensure your key doesn't require a passphrase for automated testing, or provide it with `--ssh-passphrase` (not recommended for security). Running `repo sync` should then succeed if authentication works.
 
-### `index` (Legacy Directory Indexing)
-
-Indexes files directly from specified directories into a *single, shared* Qdrant collection (`vectordb-code-search` by default - this is separate from repository collections). This is useful for indexing codebases not managed as Git repositories.
-
-```bash
-# Index a single directory
-vectordb-cli index /path/to/your/code
-
-# Index multiple directories
-vectordb-cli index /path/to/projectA /path/to/projectB
-
-# Index specific file types (e.g., Rust and Markdown)
-vectordb-cli index /path/to/project -t rs md
-```
-
-**Arguments:**
--   `dirs`: (Required) One or more directory paths to index.
--   `-t, --type`: Optional file extensions to include (without dots).
--   `--chunk-max-length`: Max lines per text chunk (default: 512).
--   `--chunk-overlap`: Lines of overlap between chunks (default: 64).
-
 ### `query`
 
 Performs a semantic search across the indexed data for the active repository, specified repositories, or all repositories.
@@ -420,59 +414,32 @@ Results are displayed with file paths (relative to the repository root for repo 
 
 ### `stats`
 
-Displays statistics about a specific Qdrant collection. Defaults to the active repository's collection.
+Displays statistics about the Qdrant collections.
 
 ```bash
-# Show stats for the active repository's collection
-vectordb-cli stats
-
-# Show stats for a specific repository collection
-vectordb-cli stats --collection repo_my-cool-project
-
-# Show stats for the legacy collection
-vectordb-cli stats --collection vectordb-code-search
+vectordb-cli stats [--repo-name <name>]
 ```
 
-**Arguments:**
--   `--collection`: Optional collection name. Defaults to the active repository's collection or `vectordb-code-search`.
+-   `--repo-name`: If provided, shows stats only for the specified repository's collection. Otherwise, shows stats for all repository collections and the default index collection.
 
 ### `list`
 
-Lists unique root directories indexed *within a specific collection*. Defaults to the active repository's collection.
+Lists the available Qdrant collections.
 
 ```bash
-# List indexed roots for the active repository (should be just the repo root)
 vectordb-cli list
-
-# List indexed roots for a specific repository collection
-vectordb-cli list --collection repo_my-cool-project
-
-# List indexed roots for the legacy collection
-vectordb-cli list --collection vectordb-code-search
 ```
-
-**Arguments:**
--   `--collection`: Optional collection name. Defaults to the active repository's collection or `vectordb-code-search`.
 
 ### `clear`
 
-Removes data from a specific Qdrant collection based on indexed directory paths. Defaults to the active repository's collection.
+Deletes all data points within a specific Qdrant collection. **Use with caution!**
 
 ```bash
-# Clear data originating from a specific path within the active repo collection (requires confirmation)
-# (Note: `repo sync` is the preferred way to manage repo data)
-vectordb-cli clear /path/to/active/repo/subdirectory
-
-# Clear data for a path within the legacy collection (requires confirmation)
-vectordb-cli clear /path/to/indexed/dir --collection vectordb-code-search
-
-# Clear ALL data from a specific collection (requires confirmation)
-vectordb-cli clear --all --collection repo_my-cool-project
+vectordb-cli clear [--repo-name <name>] [--collection-name <name>]
 ```
 
-**Arguments:**
--   `dirs`: Optional directory paths whose indexed data should be removed.
--   `--all`: Remove all data from the specified collection.
+-   `--repo-name`: Specifies the repository whose collection should be cleared.
+-   `--collection-name`: Specifies the exact name of a collection to clear (use this for the default index or if `--repo-name` doesn't work). **You must specify either `--repo-name` or `--collection-name`.**
 
 ## Library (`vectordb_lib`)
 
