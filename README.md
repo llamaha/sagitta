@@ -4,6 +4,8 @@ A lightweight command-line tool for fast, local code search using semantic retri
 
 **Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library.
 
+**Note:** This is currently not a stable product.  It works but has bugs.  I am working hard to fix these bugs and increase test coverage (current coverage ~28%).
+
 ## Table of Contents
 
 -   [Features](#features)
