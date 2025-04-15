@@ -8,19 +8,20 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::cli::repo_commands::helpers::get_collection_name;
 use colored::Colorize;
+use std::path::PathBuf;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
 
 #[derive(Args, Debug)]
+#[derive(Clone)]
 pub struct StatsArgs {
-    // Removed Qdrant URL arg
-    // /// Qdrant instance URL
-    // #[arg(
-    //     long,
-    //     env = "QDRANT_URL",
-    //     default_value = "http://localhost:6334"
-    // )]
-    // pub qdrant_url: String,
+    /// Optional: Path to the configuration file.
+    #[arg(short, long, value_parser = clap::value_parser!(PathBuf))]
+    pub config_file: Option<PathBuf>,
+    // Removed unused optional repo name
+    // /// Optional: Name of the repository to show stats for (defaults to active repository).
+    // #[arg(long)]
+    // pub repo_name: Option<String>,
 }
 
 // Accept qdrant_url as parameter

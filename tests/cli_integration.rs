@@ -185,27 +185,29 @@ fn test_cli_clear_failures() -> Result<()> {
     // Clear any existing config just in case
     let _ = fs::remove_dir_all(config_dir.join("vectordb-cli"));
 
-    // === Test `clear` (Repository Clear) failures ===
+    // === Test `repo clear` failures ===
 
     // 1. Fail when no repo specified and no active repo is set
     println!("Testing repo clear without active repo/specifier...");
     Command::new(&bin_path)
+        .arg("repo")
         .arg("clear")
         .arg("-y")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("No repository specified with --repo-name and no active repository set"));
+        .stderr(predicate::str::contains("No active repository set and no repository name provided."));
 
     // 2. Fail when specified repo does not exist
     println!("Testing repo clear with non-existent repo...");
     Command::new(&bin_path)
+        .arg("repo")
         .arg("clear")
-        .arg("--repo-name")
+        .arg("--name")
         .arg("non-existent-repo-for-clear")
         .arg("-y")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Repository 'non-existent-repo-for-clear' not found"));
+        .stderr(predicate::str::contains("Configuration for repository 'non-existent-repo-for-clear' not found."));
 
     // 3. Setup a repo to test cancellation
     println!("Setting up dummy repo for cancellation test...");
@@ -222,6 +224,7 @@ fn test_cli_clear_failures() -> Result<()> {
     // 4. Test repo clear cancellation (missing -y)
     println!("Testing repo clear without -y (expect cancellation)...");
     Command::new(&bin_path)
+        .arg("repo")
         .arg("clear") // Should default to active repo 'dummy-for-clear'
         .assert()
         .success() // Should exit successfully after cancellation

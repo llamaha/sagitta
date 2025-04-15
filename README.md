@@ -21,7 +21,10 @@ A lightweight command-line tool for fast, local code search using semantic retri
     -   [Configuration File (`config.toml`)](#configuration-file-configtoml)
 -   [Usage (CLI)](#usage-cli)
     -   [Global Options](#global-options)
-    -   [Simple Indexing (index)](#simple-indexing-index)
+    -   [Simple Commands (`simple`)](#simple-commands-simple)
+        -   [`simple index`](#simple-index)
+        -   [`simple query`](#simple-query)
+        -   [`simple clear`](#simple-clear)
     -   [Repository Management (`repo`)](#repository-management-repo)
         -   [`repo add`](#repo-add)
         -   [`repo list`](#repo-list)
@@ -30,10 +33,8 @@ A lightweight command-line tool for fast, local code search using semantic retri
         -   [`repo use-branch`](#repo-use-branch)
         -   [`repo sync`](#repo-sync)
         -   [`repo clear`](#repo-clear)
-    -   [`query`](#query)
-    -   [`stats`](#stats)
-    -   [`list`](#list)
-    -   [`clear`](#clear)
+        -   [`repo query`](#repo-query)
+        -   [`repo stats`](#repo-stats)
 -   [Library (`vectordb_lib`)](#library-vectordb_lib)
 
 ## Features
@@ -269,199 +270,160 @@ These options can be used with most commands:
 -   `-m, --onnx-model <PATH>`: Path to the ONNX model file (overrides config & env var).
 -   `-t, --onnx-tokenizer-dir <PATH>`: Path to the ONNX tokenizer directory (overrides config & env var).
 
-### Simple Indexing (index)
+### Simple Commands (`simple`)
 
-This command indexes code based on directories specified directly, without linking to a specific managed repository. This is the simpler, older method ("default").
+These commands operate on a default, non-repository-specific Qdrant collection (`vectordb-code-search`).
+
+#### `simple index`
+
+Recursively indexes files in specified directories or specific files into the default collection.
 
 ```bash
-vectordb-cli index <PATHS>... [-e <ext>] [--extension <ext>]
+vectordb-cli simple index <PATHS>... [-e <ext>] [--extension <ext>]
 ```
 
 -   `<PATHS>...`: One or more file or directory paths to index.
-    -   If a directory is provided, it will be indexed recursively.
--   `-e <ext>`, `--extension <ext>`: Optional list of file extensions (without the dot) to include (e.g., `-e rs -e py -e md` or `--extension rs --extension py`). If omitted, common code extensions are attempted.
+-   `-e <ext>`, `--extension <ext>`: Optional: Filter by specific file extensions (without the dot, e.g., `-e rs`, `-e py`). If omitted, attempts to parse based on known extensions.
+
+#### `simple query`
+
+Performs a semantic search against the default collection.
+
+```bash
+vectordb-cli simple query "<query text>" [-l <limit>] [--lang <language>] [--type <element_type>]
+```
+
+-   `<query text>`: The natural language query.
+-   `-l <limit>`, `--limit <limit>` (Optional): Max number of results (default: 10).
+-   `--lang <language>` (Optional): Filter by language (e.g., `rust`, `python`).
+-   `--type <element_type>` (Optional): Filter by code element type (e.g., `function`).
+
+#### `simple clear`
+
+Deletes the entire simple index collection (`vectordb-code-search`). This does **not** affect repository indices. Requires confirmation unless `-y` is provided.
+
+```bash
+vectordb-cli simple clear [-y]
+```
+-   `-y`: Confirm deletion without prompting.
 
 ### Repository Management (`repo`)
 
-This subcommand group manages configurations for Git repositories, allowing you to index and query specific branches.
-
-**Important:** Repository management uses *separate* Qdrant collections for each repository (`repo_<repository_name>`), distinct from the collection used by the simple `index` command.
-
-**Common Options:**
-
--   `--repo-name <name>`: Specifies the repository configuration to use (defaults to the `active_repository` in the config).
+This subcommand group manages configurations for Git repositories, allowing you to index and query specific branches within dedicated Qdrant collections (`repo_<repository_name>`).
 
 #### `repo add`
 
 Clones a Git repository locally (if not already present) and adds it to the managed list.
 
 ```bash
-vectordb-cli repo add <repo-url> [--name <repo-name>] [--branch <branch-name>] [--ssh-key <path>] [--ssh-passphrase <passphrase>]
+vectordb-cli repo add --url <repo-url> [--local-path <path>] [--name <repo-name>] [--branch <branch-name>] [--remote <remote_name>] [--ssh-key <path>] [--ssh-passphrase <passphrase>]
 ```
 
--   `<repo-url>`: The URL of the Git repository (HTTPS or SSH).
--   `--name`: Optional name for the repository configuration (defaults to the repository name extracted from the URL).
--   `--branch`: Optional initial branch to track (defaults to the repository's default branch).
--   `--ssh-key`: Path to the SSH private key file for authentication (if using SSH URL).
--   `--ssh-passphrase`: Passphrase for the SSH key (if needed).
+-   `--url <repo-url>`: The URL of the Git repository (HTTPS or SSH).
+-   `--local-path <path>` (Optional): Local directory to clone into (defaults to `<config_dir>/repos/<repo_name>`).
+-   `--name <repo-name>` (Optional): Name for the repository configuration (defaults to deriving from URL).
+-   `--branch <branch-name>` (Optional): Initial branch to track (defaults to the repo's default).
+-   `--remote <remote_name>` (Optional): Name for the Git remote (defaults to "origin").
+-   `--ssh-key <path>` (Optional): Path to the SSH private key file for authentication.
+-   `--ssh-passphrase <passphrase>` (Optional): Passphrase for the SSH key.
 
 #### `repo list`
 
-Lists all configured repositories, their URLs, local paths, tracked branches, and detected indexed languages.
+Lists all configured repositories, their URLs, local paths, tracked branches, and detected indexed languages. Indicates the active repository with a `*`.
 
 ```bash
 vectordb-cli repo list
 ```
 
-Output indicates the active repository with a `*`.
-
+Example Output:
 ```
 Managed Repositories:
- * my-project (https://github.com/user/my-project.git) -> /home/user/dev/my-project
+ * my-project (https://github.com/user/my-project.git) -> /home/user/.config/vectordb-cli/repos/my-project
      Default Branch: main
-     Tracked Branches: ["develop", "main"]
+     Active Branch: main
+     Tracked Branches: ["main", "develop"]
      Indexed Languages: rust, markdown
-   another-repo (https://github.com/user/another.git) -> /home/user/dev/another-repo
+   another-repo (https://github.com/user/another.git) -> /home/user/.config/vectordb-cli/repos/another-repo
      Default Branch: main
+     Active Branch: main
      Tracked Branches: ["main"]
      Indexed Languages: python
 ```
 
 #### `repo use`
 
-Sets a repository as the active one, used by default for commands like `query`, `sync`, `use-branch`.
+Sets a repository as the active one, used by default for other `repo` subcommands like `query`, `sync`, `use-branch`, `clear`, `stats`.
 
 ```bash
-vectordb-cli repo use my-cool-project
+vectordb-cli repo use <name>
 ```
-
-**Arguments:**
--   `name`: (Required) The name of the repository configuration to activate.
+-   `<name>`: (Required) The name of the repository configuration to activate.
 
 #### `repo remove`
 
-Removes a repository configuration and optionally deletes its corresponding Qdrant collection.
+Removes a repository configuration and its corresponding Qdrant collection (`repo_<name>`). This also removes the local clone by default.
 
 ```bash
-# Remove configuration only
-vectordb-cli repo remove another
-
-# Remove configuration AND delete Qdrant collection (requires confirmation)
-vectordb-cli repo remove another --delete-collection
+vectordb-cli repo remove <name> [-y]
 ```
+-   `<name>`: (Required) The name of the repository configuration to remove.
+-   `-y`: Skip confirmation prompt.
 
-**Arguments:**
--   `name`: (Required) The name of the repository configuration to remove.
--   `--delete-collection`: If set, deletes the `repo_<name>` collection from Qdrant.
+**This operation is irreversible and deletes the Qdrant data and local clone.**
 
 #### `repo use-branch`
 
 Checks out a specific branch in the active repository locally and adds it to the list of tracked branches for syncing.
 
 ```bash
-# Assuming 'my-cool-project' is the active repo:
-# Checkout 'develop' branch and track it
-vectordb-cli repo use-branch develop
-
-# Checkout and track a feature branch
-vectordb-cli repo use-branch feature/new-thing
+vectordb-cli repo use-branch <branch_name>
 ```
-
-**Arguments:**
--   `name`: (Required) The name of the branch to check out and track. Fetches from `origin` if the branch isn't available locally.
+-   `<branch_name>`: (Required) The name of the branch to check out and track. Fetches from the configured remote if the branch isn't available locally.
 
 #### `repo sync`
 
-Fetches updates from the `origin` remote for the currently checked-out, tracked branch of the active repository (or specified repository). It calculates the changes since the last sync and updates the Qdrant index accordingly (adding new/modified files, deleting removed/renamed files).
+Fetches updates from the configured remote for the *currently checked-out, tracked branch* of the active repository (or specified repository). It calculates changes since the last sync and updates the Qdrant index accordingly (adding/modifying/deleting points).
 
 ```bash
-# Sync the active repository's current branch
-vectordb-cli repo sync
-
-# Sync a specific repository (uses its currently checked-out tracked branch)
-vectordb-cli repo sync my-cool-project
-
-# Sync only specific file types in the active repository
-vectordb-cli repo sync -e rs -e toml
-
-# Force a full re-index of specified file types for the active repository
-vectordb-cli repo sync --force -e py
-
-# Sync a specific repo with specific extensions
-vectordb-cli repo sync my-cool-project -e go
+vectordb-cli repo sync [-n <name>] [--name <name>] [-e <ext>,...] [--extensions <ext>,...] [--force]
 ```
-
-**Arguments:**
--   `name` (Optional, Positional): Name of the repository to sync. Defaults to the active repository.
--   `-e <ext>`, `--extensions <ext>` (Optional): Specify one or more file extensions (without the dot, comma-separated or multiple flags) to include (e.g., `-e rs,py` or `-e rs -e py`). If omitted, defaults to syncing only extensions with dedicated parsers (see [Supported Languages](#supported-languages)).
+-   `-n <name>`, `--name <name>` (Optional): Name of the repository to sync. Defaults to the active repository.
+-   `-e <ext>,...`, `--extensions <ext>,...` (Optional): Specify file extensions to sync (without the dot, comma-separated or multiple flags: `-e rs,py` or `-e rs -e py`). If omitted, syncs files matching known parsers.
 -   `--force` (Optional): Force a full re-index of the specified files for the branch, ignoring the last synced commit state.
-
-**Note:** Currently only fetches from the configured remote (`origin` by default) and primarily supports SSH key authentication (via `--ssh-key` in `repo add` or system defaults like `ssh-agent`). Support for other credential types (HTTPS tokens, etc.) is planned.
-
-**Manual Testing for SSH:** To test SSH key authentication, try adding a private repository using its SSH URL (`git@...`) and provide the path to your corresponding private key using `--ssh-key`. Ensure your key doesn't require a passphrase for automated testing, or provide it with `--ssh-passphrase` (not recommended for security). Running `repo sync` should then succeed if authentication works.
 
 #### `repo clear`
 
-Clears the index (Qdrant collection `repo_<repo_name>`) for a specific repository without removing the repository configuration or local clone.
+Clears the index (Qdrant collection `repo_<repo_name>`) for a specific repository without removing the repository configuration or local clone. Requires confirmation unless `-y` is provided.
 
 ```bash
-vectordb-cli repo clear [<repo_name>] [-y]
+vectordb-cli repo clear [-n <name>] [--name <name>] [-y]
 ```
-
--   `repo_name` (Optional): The name of the repository index to clear. If omitted, the *active* repository is used.
+-   `-n <name>`, `--name <name>` (Optional): The name of the repository index to clear. Defaults to the *active* repository.
 -   `-y`: Confirm deletion without prompting.
 
 **This operation is irreversible.**
 
-### `query`
+#### `repo query`
 
-Performs a semantic search across the indexed data for the active repository, specified repositories, or all repositories.
-
-**Note:** This command is deprecated and may be removed in the future. Use the `simple query` command for the simple index or rely on external tools to query repository-specific Qdrant collections (`repo_<repo_name>`).
+Performs a semantic search across the indexed data for the *active repository*.
 
 ```bash
-vectordb-cli query "<query text>" [-r <repo_name>...] [--all-repos] [-b <branch>] [-l <limit>] [--lang <language>] [--type <element_type>]
+vectordb-cli repo query "<query text>" [-l <limit>] [--lang <language>] [--type <element_type>]
 ```
+-   `<query text>`: The natural language query.
+-   `-l <limit>`, `--limit <limit>` (Optional): Max number of results (default: 10).
+-   `--lang <language>` (Optional): Filter by language (e.g., `rust`, `python`).
+-   `--type <element_type>` (Optional): Filter by code element type (e.g., `function`).
 
--   `<query text>`: The natural language query to search for.
--   `-r <repo_name>`, `--repo <repo_name>` (Optional): Specify one or more repository names to search within. Conflicts with `--all-repos`.
--   `--all-repos` (Optional): Search across all configured repositories. Conflicts with `--repo`.
--   `-b <branch>`, `--branch <branch>` (Optional): Filter results by a specific branch name within the target repository/repositories.
--   `-l <limit>`, `--limit <limit>` (Optional): Maximum number of results to return (default: 10).
--   `--lang <language>` (Optional): Filter results by programming language (e.g., `rust`, `python`).
--   `--type <element_type>` (Optional): Filter results by code element type (e.g., `function`, `struct`).
+Results display file paths (relative to the repository root), line numbers, scores, and the relevant code chunk.
 
-If neither `--repo` nor `--all-repos` is provided, the search defaults to the currently active repository.
+#### `repo stats`
 
-Results are displayed with file paths (relative to the repository root for repo searches, absolute for legacy index searches), line numbers, scores, and the relevant code chunk.
-
-### `stats`
-
-Displays statistics about the Qdrant collections.
+Displays statistics (like point count) about the Qdrant collection for the *active repository*.
 
 ```bash
-vectordb-cli stats [--repo-name <name>]
+vectordb-cli repo stats
 ```
-
--   `--repo-name`: If provided, shows stats only for the specified repository's collection. Otherwise, shows stats for all repository collections and the default index collection.
-
-### `list`
-
-Lists the unique files that have been indexed for the *active repository*.
-
-```bash
-vectordb-cli list
-```
-
-### `clear`
-
-Deletes the entire simple index collection (`vectordb-code-search`). This does **not** affect repository indices.
-
-```bash
-vectordb-cli clear [-y]
-```
-
--   `-y`: Confirm deletion without prompting.
 
 ## Library (`vectordb_lib`)
 

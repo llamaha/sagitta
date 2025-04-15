@@ -46,6 +46,8 @@ enum RepoCommand {
     Query(query::RepoQueryArgs),
     /// Fetch updates and sync the index for the current/specified repository.
     Sync(SyncRepoArgs),
+    /// Show statistics about the vector database collection for a repository.
+    Stats(super::stats::StatsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -129,6 +131,7 @@ pub async fn handle_repo_command(
         RepoCommand::UseBranch(branch_args) => use_branch(branch_args, config, override_path).await,
         RepoCommand::Query(query_args) => query::handle_repo_query(query_args, config, client, cli_args).await,
         RepoCommand::Sync(sync_args) => sync_repository(sync_args, cli_args, config, client, override_path).await,
+        RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), client).await,
     }
 }
 

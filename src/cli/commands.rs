@@ -95,12 +95,6 @@ pub const SIMPLE_INDEX_COLLECTION: &str = "vectordb-code-search";
 // --- Main Command Enum ---
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Show statistics about the vector database collections
-    #[command(subcommand_negates_reqs = true)]
-    Stats(super::stats::StatsArgs), // Use super:: path
-    /// Clear data for a specific repository OR the simple index
-    #[command(subcommand_negates_reqs = true)]
-    Clear(super::clear::ClearArgs), // Clear might handle both repo and simple based on args?
     /// Manage repositories (add, list, use, remove, sync)
     #[command(subcommand_negates_reqs = true)]
     Repo(super::repo_commands::RepoArgs),
@@ -122,8 +116,6 @@ pub async fn handle_command(
     client: Arc<Qdrant>,
 ) -> Result<()> {
     match args.command {
-        Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config.clone(), client).await,
-        Commands::Clear(ref cmd_args) => super::clear::handle_clear(cmd_args, config.clone(), client).await,
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client, None).await,
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
     }
