@@ -4,19 +4,18 @@ pub mod commands;
 pub mod formatters;
 
 // New module declarations for command handlers
-pub mod index;
 pub mod query;
 pub mod stats;
 pub mod list;
 pub mod clear;
 pub mod repo_commands;
+pub mod simple;
 // Add mods for stats, clear, list, remove when created
 
 // Re-export the main handler and the command enum
 pub use commands::{handle_command, Commands};
 
 // Re-export the Args structs for use in the main binary
-pub use index::IndexArgs;
 pub use query::QueryArgs;
 pub use stats::StatsArgs;
 pub use list::ListArgs;

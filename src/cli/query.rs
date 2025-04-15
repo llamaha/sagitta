@@ -66,7 +66,7 @@ pub async fn handle_query(
     config: AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
-    log::info!("Starting query process...");
+    log::info!("Starting repository query process..."); // Clarify it's for repos
 
     // --- 1. Determine Target Repositories/Collections --- 
     let target_repos: Vec<String> = match (&args.repo, args.all_repos) {
@@ -80,17 +80,22 @@ pub async fn handle_query(
             repo_names.clone()
         }
         (None, true) => { // All repos requested
+            if config.repositories.is_empty() {
+                 println!("No repositories configured. Use 'repo add' first.");
+                 return Ok(());
+            }
             config.repositories.iter().map(|r| r.name.clone()).collect()
         }
         (None, false) => { // Default: use active repo
             vec![config.active_repository.clone().ok_or_else(|| {
-                 anyhow!("No active repository set and no specific repository requested via --repo or --all-repos. Use 'repo use <name>' first.")
+                 anyhow!("No active repository set and no specific repository requested via --repo or --all-repos. Use 'repo use <name>' or specify target.")
              })?]
         }
     };
 
+    // This check should be redundant now due to the logic above, but keep for safety
     if target_repos.is_empty() {
-        println!("No repositories configured or specified to search.");
+        println!("No repositories specified or active to search.");
         return Ok(());
     }
 
@@ -122,16 +127,12 @@ pub async fn handle_query(
         .embed(&args.query)?;
     log::info!("Query embedding generated.");
 
-    // --- 4. Build Search Filter --- 
+    // --- 4. Build Search Filter (Includes Branch) --- 
     let mut filter_conditions = Vec::new();
+    // Branch filter only makes sense for repo queries
     if let Some(branch_name) = &args.branch {
-        // Add branch condition only if querying repo collections (implied by target_repos having entries)
-        if !target_repos.is_empty() {
-            filter_conditions.push(Condition::matches(FIELD_BRANCH, branch_name.clone()));
-            log::info!("Filtering by branch: {}", branch_name);
-        } else {
-             log::warn!("Branch filter specified but no repository target found (this shouldn't happen). Ignoring filter.");
-        }
+        filter_conditions.push(Condition::matches(FIELD_BRANCH, branch_name.clone()));
+        log::info!("Filtering by branch: {}", branch_name);
     }
     if let Some(lang_name) = &args.lang {
         filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang_name.clone()));
@@ -144,7 +145,7 @@ pub async fn handle_query(
     let search_filter = if filter_conditions.is_empty() { None } else { Some(Filter::must(filter_conditions)) };
 
     // --- 5. Execute Searches in Parallel --- 
-    log::info!("Executing search against collections: {:?}...", collection_names);
+    log::info!("Executing search against repository collections: {:?}...", collection_names);
     let search_futures: Vec<_> = collection_names.into_iter().map(|collection_name| {
         let client = Arc::clone(&client);
         let query_embedding_clone = query_embedding.clone();
@@ -152,13 +153,24 @@ pub async fn handle_query(
         let limit = args.limit;
         
         tokio::spawn(async move {
+            // Check if collection exists before searching
+            if !client.collection_exists(&collection_name).await.unwrap_or(false) {
+                // Return an empty result or specific error if collection doesn't exist
+                 return Ok(qdrant_client::qdrant::SearchResponse { 
+                     result: vec![], 
+                     time: 0.0, 
+                     // Add missing `usage` field - assume 0 if collection doesn't exist
+                     usage: None, // Or Some(SearchUsage { total: 0, successful: 0 }) if that's more appropriate
+                 }); // Return empty response
+            }
             let mut builder = SearchPointsBuilder::new(&collection_name, query_embedding_clone, limit)
                 .with_payload(true);
             if let Some(filter) = search_filter_clone {
                  builder = builder.filter(filter);
             }
             let search_request = builder.build();
-            client.search_points(search_request).await
+            // Wrap the Qdrant error in a Result compatible with the join_all structure
+             client.search_points(search_request).await.map_err(|e| anyhow!(e))
         })
     }).collect();
 
@@ -169,18 +181,19 @@ pub async fn handle_query(
     let mut errors = Vec::new();
 
     for (i, result) in search_results.into_iter().enumerate() {
+        let repo_name = target_repos.get(i).map_or("<unknown>", |s| s.as_str()); // Get repo name for logging
         match result {
             Ok(Ok(search_response)) => {
-                log::debug!("Search returned {} results from collection {}", search_response.result.len(), target_repos[i]);
+                log::debug!("Search returned {} results from collection for repo '{}'", search_response.result.len(), repo_name);
                 all_scored_points.extend(search_response.result);
             }
-            Ok(Err(e)) => {
-                let err_msg = format!("Qdrant search failed for repo '{}': {}", target_repos[i], e);
+            Ok(Err(e)) => { // Error from Qdrant client.search_points
+                let err_msg = format!("Qdrant search failed for repo '{}': {}", repo_name, e);
                 log::error!("{}", err_msg);
                 errors.push(err_msg);
             }
-            Err(e) => { // JoinError
-                let err_msg = format!("Task panicked for repo '{}': {}", target_repos[i], e);
+            Err(e) => { // JoinError (task panicked)
+                let err_msg = format!("Search task failed for repo '{}': {}", repo_name, e);
                 log::error!("{}", err_msg);
                 errors.push(err_msg);
             }
