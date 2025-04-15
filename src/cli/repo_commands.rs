@@ -1119,6 +1119,10 @@ async fn index_files(
     let mut total_points_processed = 0;
     let mut total_files_processed = 0;
     let mut total_files_skipped = 0;
+    // Define batching variables here
+    let mut batch_num = 1;
+    let total_batches_estimate = (relative_paths.len() / BATCH_SIZE).max(1); // Estimate batches
+    
     let model = embedding_handler
         .create_embedding_model()
         .context("Failed to create embedding model")?;
@@ -1188,20 +1192,25 @@ async fn index_files(
             );
             points_batch.push(point);
 
+            // Upsert batch if full
             if points_batch.len() >= BATCH_SIZE {
                 let batch_to_upsert = std::mem::take(&mut points_batch);
-                upsert_batch(client, collection_name, batch_to_upsert, &pb).await?;
-                total_points_processed += BATCH_SIZE;
+                let current_batch_size = batch_to_upsert.len();
+                // Pass batch_num and total_batches_estimate, and borrow pb
+                upsert_batch(client, collection_name, batch_to_upsert, batch_num, total_batches_estimate, &pb).await?;
+                total_points_processed += current_batch_size;
+                batch_num += 1; 
             }
         }
         total_files_processed += 1;
         pb.inc(1);
     }
 
-    // Upsert remaining points
+    // Upsert any remaining points
     if !points_batch.is_empty() {
         let final_batch_size = points_batch.len();
-        upsert_batch(client, collection_name, points_batch, &pb).await?;
+        // Pass the final batch_num and total_batches_estimate, and borrow pb
+        upsert_batch(client, collection_name, points_batch, batch_num, total_batches_estimate, &pb).await?;
         total_points_processed += final_batch_size;
     }
 
@@ -1249,12 +1258,13 @@ async fn ensure_repository_collection_exists(
 
     }
 
-    ensure_payload_index(client, collection_name, FIELD_FILE_PATH, FieldType::Keyword).await?;
-    ensure_payload_index(client, collection_name, FIELD_START_LINE, FieldType::Integer).await?;
-    ensure_payload_index(client, collection_name, FIELD_END_LINE, FieldType::Integer).await?;
-    ensure_payload_index(client, collection_name, FIELD_LANGUAGE, FieldType::Keyword).await?;
-    ensure_payload_index(client, collection_name, FIELD_BRANCH, FieldType::Keyword).await?;
-    ensure_payload_index(client, collection_name, FIELD_COMMIT_HASH, FieldType::Keyword).await?;
+    ensure_payload_index(client, collection_name, FIELD_FILE_PATH, FieldType::Keyword, true, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_START_LINE, FieldType::Integer, false, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_END_LINE, FieldType::Integer, false, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_LANGUAGE, FieldType::Keyword, true, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_BRANCH, FieldType::Keyword, true, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_COMMIT_HASH, FieldType::Keyword, true, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_ELEMENT_TYPE, FieldType::Keyword, true, None).await?;
 
     Ok(())
 }
