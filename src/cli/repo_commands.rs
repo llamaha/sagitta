@@ -11,6 +11,7 @@ use qdrant_client::{
 use std::{fs, path::PathBuf, sync::Arc, time::Duration, collections::HashSet, collections::HashMap};
 use uuid::Uuid;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::io::{self, Write};
 
 use crate::config::{self, AppConfig};
 use crate::cli::commands::{
@@ -120,8 +121,10 @@ enum RepoCommand {
     List,
     /// Set the active repository for commands.
     Use(UseRepoArgs),
-    /// Remove a managed repository.
+    /// Remove a managed repository (config and index).
     Remove(RemoveRepoArgs),
+    /// Clear the index for a repository.
+    Clear(ClearRepoArgs),
     /// Checkout a branch and set it as active for the current repository.
     UseBranch(UseBranchArgs),
     /// Fetch updates and sync the index for the current/specified repository.
@@ -198,6 +201,17 @@ struct SyncRepoArgs {
     // onnx_tokenizer_dir: Option<String>,
 }
 
+#[derive(Args, Debug)]
+#[derive(Clone)]
+struct ClearRepoArgs {
+    /// Optional name of the repository index to clear (defaults to active repository).
+    name: Option<String>,
+
+    /// Confirm deletion without prompting.
+    #[arg(short, long)]
+    yes: bool,
+}
+
 pub(crate) fn get_collection_name(repo_name: &str) -> String {
     format!("{}{}", COLLECTION_NAME_PREFIX, repo_name)
 }
@@ -213,6 +227,7 @@ pub async fn handle_repo_command(
         RepoCommand::List => list_repositories(config),
         RepoCommand::Use(use_args) => use_repository(use_args, config),
         RepoCommand::Remove(remove_args) => remove_repository(remove_args, config, client).await,
+        RepoCommand::Clear(clear_args) => handle_repo_clear(clear_args, config, client).await,
         RepoCommand::UseBranch(branch_args) => use_branch(branch_args, config).await,
         RepoCommand::Sync(sync_args) => sync_repository(sync_args, cli_args, config, client).await,
     }
@@ -1242,4 +1257,216 @@ async fn ensure_repository_collection_exists(
     ensure_payload_index(client, collection_name, FIELD_COMMIT_HASH, FieldType::Keyword).await?;
 
     Ok(())
+}
+
+async fn handle_repo_clear(
+    args: ClearRepoArgs,
+    config: &AppConfig, // Borrow config to find active/specified repo
+    client: Arc<Qdrant>,
+) -> Result<()> {
+    let repo_name = match args.name {
+        Some(name) => name,
+        None => config.active_repository.clone().ok_or_else(|| {
+            anyhow!("No active repository set and no repository specified. Use 'repo use <name>' or 'repo clear <name>'.")
+        })?,
+    };
+
+    // Verify the repository exists in the config
+    if !config.repositories.iter().any(|r| r.name == repo_name) {
+        bail!("Repository '{}' not found in configuration.", repo_name);
+    }
+
+    let collection_name = get_collection_name(&repo_name);
+    log::info!("Preparing to clear index for repository: '{}', collection: '{}'", repo_name, collection_name);
+
+    // Confirmation
+    if !args.yes {
+        print!(
+            "{}",
+            format!(
+                "Are you sure you want to delete the index for repository '{}' (collection '{}')? [y/N]: ",
+                repo_name.yellow().bold(),
+                collection_name.yellow().bold()
+            )
+            .red()
+        );
+        io::stdout().flush().context("Failed to flush stdout")?;
+
+        let mut confirmation = String::new();
+        io::stdin()
+            .read_line(&mut confirmation)
+            .context("Failed to read confirmation line")?;
+
+        if confirmation.trim().to_lowercase() != "y" {
+            println!("Operation cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Delete Collection
+    log::info!("Attempting to delete collection '{}'...", collection_name);
+    println!("Deleting collection '{}'...", collection_name);
+
+    match client.delete_collection(collection_name.clone()).await {
+        Ok(op_result) => {
+            if op_result.result {
+                println!(
+                    "{}",
+                    format!("Successfully deleted collection '{}'.", collection_name).green()
+                );
+                 log::info!("Collection '{}' deleted successfully.", collection_name);
+            } else {
+                 println!(
+                     "{}",
+                     format!("Collection '{}' might not have existed or deletion failed server-side.", collection_name).yellow()
+                 );
+                 log::warn!("Delete operation for collection '{}' returned false.", collection_name);
+            }
+        }
+        Err(e) => {
+             // Check if it's a "not found" type error - treat as success in clearing
+             if e.to_string().contains("Not found") || e.to_string().contains("doesn't exist") {
+                 println!(
+                     "{}",
+                     format!("Collection '{}' did not exist.", collection_name).yellow()
+                 );
+                 log::warn!("Collection '{}' not found during delete attempt.", collection_name);
+             } else {
+                 // For other errors, report them
+                 eprintln!(
+                     "{}",
+                     format!("Failed to delete collection '{}': {}", collection_name, e).red()
+                 );
+                 return Err(e).context(format!("Failed to delete collection '{}'", collection_name));
+             }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RepositoryConfig; // Import RepositoryConfig
+    use qdrant_client::Qdrant;
+    use std::sync::Arc;
+    use tokio::runtime::Runtime;
+    use std::collections::HashMap; // Import HashMap
+    use std::path::PathBuf; // Import PathBuf
+    // Mock Qdrant client and AppConfig setup needed here
+
+    #[test]
+    #[ignore] // Ignored because it requires a running Qdrant instance and config setup
+    fn test_handle_repo_clear_specific_repo() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            // --- Setup Mock Client & Config ---
+            // let mock_client = Qdrant::from_url("http://localhost:6334").build().unwrap(); // Replace with mock
+            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Placeholder
+            let test_repo_name = "my-test-repo";
+            let config = AppConfig {
+                repositories: vec![RepositoryConfig {
+                    name: test_repo_name.to_string(),
+                    url: "dummy_url".to_string(),
+                    local_path: PathBuf::from("/tmp/dummy"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    active_branch: Some("main".to_string()),
+                    remote_name: Some("origin".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: HashMap::new(),
+                    indexed_languages: None,
+                }],
+                active_repository: Some(test_repo_name.to_string()),
+                qdrant_url: "http://localhost:6334".to_string(), // Must be String, not Option<String>
+                onnx_model_path: None,
+                onnx_tokenizer_path: None,
+            };
+
+            // --- Prepare Args ---
+            let args = ClearRepoArgs { name: Some(test_repo_name.to_string()), yes: true };
+            let expected_collection_name = get_collection_name(test_repo_name);
+
+            // --- Expected Call ---
+            // Mock expectation: client.delete_collection(expected_collection_name) called once
+            // For simplicity, run and check Ok result
+
+            // --- Execute ---
+            let result = handle_repo_clear(args, &config, client).await;
+
+            // --- Assert ---
+            assert!(result.is_ok());
+            // In a real test, verify delete_collection was called with expected_collection_name
+        });
+    }
+
+    #[test]
+    #[ignore] // Ignored because it requires a running Qdrant instance and config setup
+    fn test_handle_repo_clear_active_repo() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+             // --- Setup Mock Client & Config ---
+            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Placeholder
+            let active_repo_name = "active-repo";
+            let config = AppConfig {
+                repositories: vec![RepositoryConfig {
+                    name: active_repo_name.to_string(),
+                    url: "dummy_url".to_string(),
+                    local_path: PathBuf::from("/tmp/dummy"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    active_branch: Some("main".to_string()),
+                    remote_name: Some("origin".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: HashMap::new(),
+                    indexed_languages: None,
+                }],
+                active_repository: Some(active_repo_name.to_string()),
+                qdrant_url: "http://localhost:6334".to_string(), // Must be String, not Option<String>
+                onnx_model_path: None,
+                onnx_tokenizer_path: None,
+            };
+
+            // --- Prepare Args ---
+            let args = ClearRepoArgs { name: None, yes: true }; // No name specified, should use active
+            let expected_collection_name = get_collection_name(active_repo_name);
+
+            // --- Execute ---
+            let result = handle_repo_clear(args, &config, client).await;
+
+            // --- Assert ---
+            assert!(result.is_ok());
+            // In a real test, verify delete_collection was called with expected_collection_name
+        });
+    }
+
+    #[test]
+    #[ignore] // Ignored because it requires config setup
+    fn test_handle_repo_clear_no_active_or_specified_fails() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+             // --- Setup Mock Client & Config ---
+            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Placeholder
+            let config = AppConfig {
+                repositories: vec![], // No repos
+                active_repository: None, // No active repo
+                qdrant_url: "http://localhost:6334".to_string(), // Must be String, not Option<String>
+                onnx_model_path: None,
+                onnx_tokenizer_path: None,
+            };
+
+            // --- Prepare Args ---
+            let args = ClearRepoArgs { name: None, yes: true };
+
+            // --- Execute ---
+            let result = handle_repo_clear(args, &config, client).await;
+
+            // --- Assert ---
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("No active repository set"));
+        });
+    }
 } 

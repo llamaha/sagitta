@@ -172,19 +172,17 @@ fn test_cli_clear_failures() -> Result<()> {
     std::env::set_var("XDG_CONFIG_HOME", config_dir.to_str().unwrap());
     std::env::set_var("XDG_DATA_HOME", data_dir.to_str().unwrap());
 
-    // Ensure no config exists initially
-    // fs::remove_dir_all(config_dir.join("vectordb-cli")).ok();
-
-    // 1. Fail when no active repo is set
-    println!("Testing clear without active repo...");
+    // Test that clear works without active repo now (clears simple index)
+    println!("Testing clear -y without active repo (should succeed for simple index)...");
     Command::new(&bin_path)
         .arg("clear")
         .arg("-y")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("No active repository set"));
+        .success() // Should now succeed
+        .stdout(predicate::str::contains("Deleting collection 'vectordb-code-search'")); // Check it targets the correct collection
+        // .stderr(...); // No specific error expected
 
-    // 2. Setup a repo to test cancellation
+    // Test cancellation prompt
     println!("Setting up dummy repo for cancellation test...");
     let dummy_repo_url = "https://github.com/git-fixtures/basic.git"; // Use a known small public repo
     Command::new(&bin_path)
@@ -197,8 +195,7 @@ fn test_cli_clear_failures() -> Result<()> {
         .assert()
         .success();
 
-    // 3. Test cancellation (missing -y)
-    println!("Testing clear without -y (expect cancellation)...");
+    println!("Testing clear without -y (expect cancellation prompt)...");
     Command::new(&bin_path)
         .arg("clear") // No -y
         .assert()

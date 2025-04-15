@@ -21,7 +21,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
     -   [Configuration File (`config.toml`)](#configuration-file-configtoml)
 -   [Usage (CLI)](#usage-cli)
     -   [Global Options](#global-options)
-    -   [Simple Indexing (`index`)](#simple-indexing-index)
+    -   [Simple Indexing (index)](#simple-indexing-index)
     -   [Repository Management (`repo`)](#repository-management-repo)
         -   [`repo add`](#repo-add)
         -   [`repo list`](#repo-list)
@@ -29,7 +29,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
         -   [`repo remove`](#repo-remove)
         -   [`repo use-branch`](#repo-use-branch)
         -   [`repo sync`](#repo-sync)
-    -   [`index`](#index)
+        -   [`repo clear`](#repo-clear)
     -   [`query`](#query)
     -   [`stats`](#stats)
     -   [`list`](#list)
@@ -264,27 +264,22 @@ This section focuses on the `vectordb-cli` command-line tool.
 
 ### Global Options
 
-These can be used with most commands:
+These options can be used with most commands:
 
--   `--qdrant-url`: Override Qdrant URL.
--   `--qdrant-api-key`: Provide Qdrant API key.
--   `--onnx-model-path-arg`: Override path to ONNX model file.
--   `--onnx-tokenizer-dir-arg`: Override path to ONNX tokenizer directory.
+-   `-m, --onnx-model <PATH>`: Path to the ONNX model file (overrides config & env var).
+-   `-t, --onnx-tokenizer-dir <PATH>`: Path to the ONNX tokenizer directory (overrides config & env var).
 
-### Simple Indexing (`index`)
+### Simple Indexing (index)
 
 This command indexes code based on directories specified directly, without linking to a specific managed repository. This is the simpler, older method ("default").
 
 ```bash
-vectordb-cli index /path/to/your/code [--recursive] [--include-ext <ext>] [--exclude-dir <dir>]
+vectordb-cli index <PATHS>... [-e <ext>] [--extension <ext>]
 ```
 
--   `/path/to/your/code`: The root directory to start indexing from.
--   `--recursive` or `-r`: Index subdirectories recursively.
--   `--include-ext` or `-i`: Comma-separated list of file extensions to include (e.g., `rs,py,md`). Defaults to common code extensions.
--   `--exclude-dir` or `-e`: Comma-separated list of directory names to exclude (e.g., `target,.git`). Defaults to common build/metadata directories.
-
-This uses a default collection name in Qdrant (usually "code-index", configurable via environment or config file).
+-   `<PATHS>...`: One or more file or directory paths to index.
+    -   If a directory is provided, it will be indexed recursively.
+-   `-e <ext>`, `--extension <ext>`: Optional list of file extensions (without the dot) to include (e.g., `-e rs -e py -e md` or `--extension rs --extension py`). If omitted, common code extensions are attempted.
 
 ### Repository Management (`repo`)
 
@@ -394,6 +389,19 @@ vectordb-cli repo sync my-cool-project
 
 **Manual Testing for SSH:** To test SSH key authentication, try adding a private repository using its SSH URL (`git@...`) and provide the path to your corresponding private key using `--ssh-key`. Ensure your key doesn't require a passphrase for automated testing, or provide it with `--ssh-passphrase` (not recommended for security). Running `repo sync` should then succeed if authentication works.
 
+#### `repo clear`
+
+Clears the index (Qdrant collection `repo_<repo_name>`) for a specific repository without removing the repository configuration or local clone.
+
+```bash
+vectordb-cli repo clear [<repo_name>] [-y]
+```
+
+-   `repo_name` (Optional): The name of the repository index to clear. If omitted, the *active* repository is used.
+-   `-y`: Confirm deletion without prompting.
+
+**This operation is irreversible.**
+
 ### `query`
 
 Performs a semantic search across the indexed data for the active repository, specified repositories, or all repositories.
@@ -426,7 +434,7 @@ vectordb-cli stats [--repo-name <name>]
 
 ### `list`
 
-Lists the available Qdrant collections.
+Lists the unique files that have been indexed for the *active repository*.
 
 ```bash
 vectordb-cli list
@@ -434,14 +442,13 @@ vectordb-cli list
 
 ### `clear`
 
-Deletes all data points within a specific Qdrant collection. **Use with caution!**
+Deletes the entire simple index collection (`vectordb-code-search`). This does **not** affect repository indices.
 
 ```bash
-vectordb-cli clear [--repo-name <name>] [--collection-name <name>]
+vectordb-cli clear [-y]
 ```
 
--   `--repo-name`: Specifies the repository whose collection should be cleared.
--   `--collection-name`: Specifies the exact name of a collection to clear (use this for the default index or if `--repo-name` doesn't work). **You must specify either `--repo-name` or `--collection-name`.**
+-   `-y`: Confirm deletion without prompting.
 
 ## Library (`vectordb_lib`)
 

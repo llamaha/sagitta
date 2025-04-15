@@ -85,6 +85,9 @@ pub const FIELD_CHUNK_CONTENT: &str = "chunk_content";
 pub const FIELD_BRANCH: &str = "branch";
 pub const FIELD_COMMIT_HASH: &str = "commit_hash";
 
+// Collection name for the simple/legacy index command
+pub const SIMPLE_INDEX_COLLECTION: &str = "vectordb-code-search";
+
 // --- Main Command Enum ---
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -126,7 +129,7 @@ pub async fn handle_command(
         Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config.clone(), client).await,
         Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config.clone(), client).await,
         Commands::List(cmd_args) => super::list::handle_list(cmd_args, config.clone(), client).await,
-        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, config.clone(), client).await,
+        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, client).await,
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client).await,
     }
 }

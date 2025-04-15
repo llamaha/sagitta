@@ -21,11 +21,11 @@ use crate::{
 use super::commands::{
     upsert_batch, BATCH_SIZE, CliArgs, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE,
     FIELD_END_LINE, FIELD_FILE_EXTENSION, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
-    ensure_payload_index,
+    ensure_payload_index, SIMPLE_INDEX_COLLECTION,
 };
 use super::repo_commands::{DEFAULT_VECTOR_DIMENSION};
 
-const LEGACY_INDEX_COLLECTION: &str = "vectordb-code-search"; // Default collection for legacy index
+// const LEGACY_INDEX_COLLECTION: &str = "vectordb-code-search"; // Removed: Now defined in commands.rs
 
 #[derive(Args, Debug)]
 pub struct IndexArgs {
@@ -49,11 +49,11 @@ pub async fn handle_index(
     log::info!("Starting legacy indexing process...");
 
     // --- 1. Use Dedicated Collection Name --- 
-    let collection_name = LEGACY_INDEX_COLLECTION;
+    let collection_name = SIMPLE_INDEX_COLLECTION;
     log::info!("Indexing into default collection: '{}'", collection_name);
 
     // Ensure the legacy collection exists and has basic indices
-    ensure_legacy_collection_exists(&client, collection_name).await?;
+    ensure_simple_collection_exists(&client, collection_name).await?;
 
     // --- 2. Validate Input Paths --- 
     for path in &cmd_args.paths {
@@ -295,15 +295,15 @@ pub async fn handle_index(
     Ok(())
 }
 
-// Helper function to ensure the legacy collection exists
-async fn ensure_legacy_collection_exists(
+// Helper function to ensure the simple collection exists
+async fn ensure_simple_collection_exists(
     client: &Qdrant,
     collection_name: &str,
 ) -> Result<()> {
     // Similar logic to ensure_repository_collection_exists, but without repo-specific fields
     let exists = client.collection_exists(collection_name.to_string()).await?; // Pass String
     if !exists {
-        log::info!("Default collection '{}' does not exist. Creating...", collection_name);
+        log::info!("Simple index collection '{}' does not exist. Creating...", collection_name);
         // Determine embedding dimension (need EmbeddingHandler or pass dimension)
         // For simplicity, hardcode or get from a global config/default for now.
         // Ideally, the first index run defines dimension, or it's pre-configured.
@@ -312,7 +312,7 @@ async fn ensure_legacy_collection_exists(
              .vectors_config(vector_params)
              .build();
         client.create_collection(create_request).await?;
-        log::info!("Default collection '{}' created.", collection_name);
+        log::info!("Simple index collection '{}' created.", collection_name);
          // Add wait loop like in ensure_repository_collection_exists
         tokio::time::sleep(Duration::from_millis(100)).await;
         let mut attempts = 0;
