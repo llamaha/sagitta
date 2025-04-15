@@ -89,26 +89,44 @@ pub fn get_repo_base_path() -> Result<PathBuf> {
         .map(|data_dir| data_dir.join(APP_NAME).join(REPO_DIR_NAME))
 }
 
-/// Loads the application configuration from the standard config location.
+/// Gets the configuration path by checking ENV, override, or default XDG.
+pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<PathBuf> {
+    // Check for test environment variable first
+    if let Ok(test_path_str) = std::env::var("VECTORDB_TEST_CONFIG_PATH") {
+        log::debug!("Using test config path from ENV: {}", test_path_str);
+        return Ok(PathBuf::from(test_path_str));
+    }
+    // Then check for direct override path
+    if let Some(path) = override_path {
+        log::debug!("Using override config path: {}", path.display());
+        return Ok(path.clone());
+    }
+    // Otherwise, use default XDG path
+    get_config_path()
+}
+
+/// Loads the application configuration from ENV, a specified path, or the default location.
 ///
-/// If the configuration file or directory does not exist, it creates
-/// them with default settings.
+/// If the configuration file or directory does not exist at the target path,
+/// it creates them with default settings.
 /// Returns an error if the file exists but cannot be read or parsed.
-pub fn load_config() -> Result<AppConfig> {
-    let config_file_path = get_config_path()?;
+pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
+    let config_file_path = get_config_path_or_default(override_path)?;
     let app_config_dir = config_file_path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("Invalid config file path"))?;
+        .ok_or_else(|| anyhow::anyhow!("Invalid config file path provided or determined"))?;
 
     if !config_file_path.exists() {
         log::info!(
             "Config file not found at '{}'. Creating default.",
             config_file_path.display()
         );
+        // Use the determined parent dir, whether from default or override
         fs::create_dir_all(app_config_dir)
             .with_context(|| format!("Failed to create config directory: {}", app_config_dir.display()))?;
         let default_config = AppConfig::default();
-        save_config(&default_config)?;
+        // Save the new default config to the specified/determined path
+        save_config(&default_config, override_path)?;
         Ok(default_config)
     } else {
         log::info!("Loading config from '{}'", config_file_path.display());
@@ -119,26 +137,29 @@ pub fn load_config() -> Result<AppConfig> {
             Ok(config) => Ok(config),
             Err(e) => {
                 log::error!(
-                    "Failed to parse config file at '{}': {}. Using default settings.",
+                    "Failed to parse config file at '{}': {}. Ensure it is valid TOML.",
                     config_file_path.display(),
                     e
                 );
+                // Consider returning default or erroring based on policy
+                // For now, we error out if parsing fails.
                 anyhow::bail!("Failed to parse configuration file: {}", e)
             }
         }
     }
 }
 
-/// Saves the provided application configuration to the standard config location.
+/// Saves the provided application configuration to ENV, a specified path, or the default location.
 ///
 /// Creates the configuration directory if it doesn't exist.
-/// Overwrites the existing configuration file.
-pub fn save_config(config: &AppConfig) -> Result<()> {
-    let config_file_path = get_config_path()?;
+/// Overwrites the existing configuration file at the target path.
+pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Result<()> {
+    let config_file_path = get_config_path_or_default(override_path)?;
     let app_config_dir = config_file_path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("Invalid config file path"))?;
+        .ok_or_else(|| anyhow::anyhow!("Invalid config file path provided or determined"))?;
 
+    // Ensure parent dir exists
     fs::create_dir_all(app_config_dir)
         .with_context(|| format!("Failed to create config directory: {}", app_config_dir.display()))?;
 

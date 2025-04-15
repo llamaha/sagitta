@@ -158,10 +158,16 @@ End paragraph.
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.md")?;
-        // Expect fallback to file chunk as comments aren't captured
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "file");
-        assert_eq!(chunks[0].language, "markdown");
+        
+        // Expect the new line-based fallback chunking behavior
+        assert_eq!(chunks.len(), 1, "Should produce one chunk via fallback.");
+        let chunk = &chunks[0];
+        assert_eq!(chunk.element_type, "fallback_line_chunk_0", "Element type should indicate line-based fallback.");
+        assert_eq!(chunk.language, "markdown", "Language should still be markdown.");
+        // Optionally, check content if necessary, but type and count are primary here.
+        assert!(chunk.content.contains("<!-- HTML Comment -->")); 
+        assert!(chunk.content.contains("[//]: # (Markdown Comment)"));
+
         Ok(())
     }
 } 

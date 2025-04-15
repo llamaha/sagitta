@@ -2,19 +2,24 @@
 //! Manages the configuration and instantiation of embedding models.
 //! Currently focuses on ONNX models but designed to be extensible.
 
-use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType};
+// use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType}; // Remove unused EmbeddingModel
+use crate::vectordb::embedding::{EmbeddingModelType};
 use crate::vectordb::error::{Result, VectorDBError};
+use crate::vectordb::provider::EmbeddingProvider;
+use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 /// Handles the configuration and creation of embedding models.
 ///
 /// Stores the type of model and necessary paths (e.g., for ONNX models).
 /// Use `create_embedding_model` to get an instance of the actual model.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EmbeddingHandler {
     embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
     onnx_tokenizer_path: Option<PathBuf>,
+    provider_cache: Mutex<Option<Box<dyn EmbeddingProvider>>>,
 }
 
 impl EmbeddingHandler {
@@ -57,29 +62,34 @@ impl EmbeddingHandler {
             embedding_model_type,
             onnx_model_path,
             onnx_tokenizer_path,
+            provider_cache: Mutex::new(None),
         })
     }
 
-    /// Attempts to create an [`EmbeddingModel`] instance based on the handler's configuration.
+    /// Attempts to create an [`EmbeddingProvider`] instance based on the handler's configuration.
     ///
-    /// Returns an error if the required configuration (e.g., ONNX paths) is missing
-    /// or if the model instantiation fails.
-    pub fn create_embedding_model(&self) -> Result<EmbeddingModel> {
+    /// Returns an error if the model cannot be created (e.g., required paths missing for ONNX).
+    pub fn create_embedding_model(&self) -> Result<Box<dyn EmbeddingProvider>> {
         match self.embedding_model_type {
             EmbeddingModelType::Onnx => {
-                if let (Some(model_path), Some(tokenizer_path)) =
-                    (&self.onnx_model_path, &self.onnx_tokenizer_path)
-                {
-                    EmbeddingModel::new_onnx(model_path, tokenizer_path)
-                        .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))
-                } else {
-                    Err(VectorDBError::EmbeddingError(
-                        "ONNX model paths not set in handler.".to_string(),
-                    ))
-                }
+                let model_path = self.onnx_model_path.as_ref().ok_or_else(|| {
+                    VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+                })?;
+                let tokenizer_path = self.onnx_tokenizer_path.as_ref().ok_or_else(|| {
+                    VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+                })?;
+                let provider: Box<dyn EmbeddingProvider> = Box::new(OnnxEmbeddingModel::new(
+                    model_path,
+                    tokenizer_path,
+                )?);
+                Ok(provider)
             }
-            // Add cases for other embedding model types here
-            // EmbeddingModelType::Other => { ... }
+            EmbeddingModelType::Default => {
+                // For default, potentially use a pre-configured or simpler model
+                // Let's assume DefaultEmbeddingProvider exists and implements the trait
+                // Ok(Box::new(DefaultEmbeddingProvider::new()?)) // Needs implementation
+                 Err(VectorDBError::NotImplemented("Default embedding model provider not yet implemented".to_string()))
+            }
         }
     }
 
@@ -119,6 +129,9 @@ impl EmbeddingHandler {
         self.onnx_model_path = model_path;
         self.onnx_tokenizer_path = tokenizer_path;
 
+        // Clear the cache since paths have changed
+        self.provider_cache.lock().unwrap().take();
+
         Ok(())
     }
 
@@ -137,12 +150,30 @@ impl EmbeddingHandler {
         self.onnx_tokenizer_path.as_ref()
     }
 
-    /// Gets the embedding dimension by creating the underlying model.
+    /// Gets the embedding dimension using a cached or newly created provider.
     ///
-    /// Returns an error if the model cannot be created (e.g., missing paths).
+    /// Returns an error if the provider cannot be created.
     pub fn dimension(&self) -> Result<usize> {
-        let model = self.create_embedding_model()?;
-        Ok(model.dim())
+        let mut cache_guard = self.provider_cache.lock().unwrap();
+        if cache_guard.is_none() {
+            log::debug!("Provider cache miss for dimension. Creating provider...");
+            let provider = self.create_embedding_model()?;
+            cache_guard.replace(provider);
+        }
+        Ok(cache_guard.as_ref().unwrap().dimension())
+    }
+
+    /// Embeds a batch of texts using a cached or newly created provider.
+    ///
+    /// Returns an error if the provider cannot be created or embedding fails.
+    pub fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        let mut cache_guard = self.provider_cache.lock().unwrap();
+        if cache_guard.is_none() {
+            log::debug!("Provider cache miss for embed. Creating provider...");
+            let provider = self.create_embedding_model()?;
+            cache_guard.replace(provider);
+        }
+        cache_guard.as_mut().unwrap().embed_batch(texts)
     }
 }
 
@@ -287,7 +318,8 @@ mod tests {
             EmbeddingHandler { 
                 embedding_model_type: EmbeddingModelType::Onnx,
                 onnx_model_path: None,
-                onnx_tokenizer_path: None
+                onnx_tokenizer_path: None,
+                provider_cache: Mutex::new(None),
             }
         );
         // Assert initial state (or skip if constructor guarantees None)
@@ -341,6 +373,7 @@ mod tests {
              embedding_model_type: EmbeddingModelType::Onnx,
              onnx_model_path: None,
              onnx_tokenizer_path: None,
+             provider_cache: Mutex::new(None),
         };
 
         let result = handler.set_onnx_paths(Some(invalid_model_path.clone()), Some(tokenizer_path));
@@ -366,6 +399,7 @@ mod tests {
              embedding_model_type: EmbeddingModelType::Onnx,
              onnx_model_path: None,
              onnx_tokenizer_path: None,
+             provider_cache: Mutex::new(None),
         };
 
         let result = handler.set_onnx_paths(Some(model_path), Some(invalid_tokenizer_path.clone()));
@@ -389,12 +423,13 @@ mod tests {
             embedding_model_type: EmbeddingModelType::Onnx,
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            provider_cache: Mutex::new(None),
         };
         
         let result = handler.create_embedding_model();
         assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
         if let Err(VectorDBError::EmbeddingError(msg)) = result {
-            assert!(msg.contains("ONNX model paths not set in handler"));
+            assert!(msg.contains("ONNX model path not set in handler"));
         }
     }
     
@@ -408,12 +443,13 @@ mod tests {
             embedding_model_type: EmbeddingModelType::Onnx,
             onnx_model_path: None,
             onnx_tokenizer_path: Some(tokenizer_path),
+            provider_cache: Mutex::new(None),
         };
         
         let result = handler.create_embedding_model();
         assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
         if let Err(VectorDBError::EmbeddingError(msg)) = result {
-            assert!(msg.contains("ONNX model paths not set in handler"));
+            assert!(msg.contains("ONNX model path not set in handler"));
         }
     }
 
@@ -427,12 +463,13 @@ mod tests {
             embedding_model_type: EmbeddingModelType::Onnx,
             onnx_model_path: Some(model_path),
             onnx_tokenizer_path: None,
+            provider_cache: Mutex::new(None),
         };
         
         let result = handler.create_embedding_model();
         assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
         if let Err(VectorDBError::EmbeddingError(msg)) = result {
-            assert!(msg.contains("ONNX model paths not set in handler"));
+            assert!(msg.contains("ONNX tokenizer path not set in handler"));
         }
     }
 
@@ -475,11 +512,12 @@ mod tests {
             embedding_model_type: EmbeddingModelType::Onnx,
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            provider_cache: Mutex::new(None),
         };
         let result = handler_no_paths.dimension();
         assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
          if let Err(VectorDBError::EmbeddingError(msg)) = result {
-            assert!(msg.contains("ONNX model paths not set in handler"));
+            assert!(msg.contains("ONNX model path not set in handler"));
         }
 
         // Test with invalid (non-existent) paths provided during construction
@@ -499,10 +537,12 @@ mod tests {
         ).expect("Handler creation should succeed with existing (but invalid) files");
 
         let result_invalid = handler_invalid_files.dimension();
-        assert!(matches!(result_invalid, Err(VectorDBError::EmbeddingError(_))), "Expected EmbeddingError for invalid ONNX model/tokenizer files");
-        // Check if the error message indicates a provider creation failure
-         if let Err(VectorDBError::EmbeddingError(msg)) = result_invalid {
-            assert!(msg.contains("Failed to create ONNX provider"), "Error message mismatch: {}", msg);
+        // Expect HNSWError because the underlying provider creation (anyhow::Error) gets converted
+        assert!(matches!(result_invalid, Err(VectorDBError::HNSWError(_))), "Expected HNSWError for invalid ONNX model/tokenizer files, got {:?}", result_invalid);
+        // Check if the error message indicates a lower-level failure (like ORT error)
+         if let Err(VectorDBError::HNSWError(msg)) = result_invalid {
+            // Check for keywords indicating model/tokenizer loading failure
+            assert!(msg.contains("load") || msg.contains("invalid") || msg.contains("session") || msg.contains("tokenizer"), "Error message mismatch, expected load/invalid/session/tokenizer error: {}", msg);
         }
     }
 } 

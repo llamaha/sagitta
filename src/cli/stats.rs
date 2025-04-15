@@ -1,9 +1,12 @@
+//!
+//! Top-level commands for the CLI application.
+
 use anyhow::{Context, Result};
 use clap::Args;
 use qdrant_client::Qdrant;
 use std::sync::Arc;
 use crate::config::AppConfig;
-use crate::cli::repo_commands::get_collection_name;
+use crate::cli::repo_commands::helpers::get_collection_name;
 use colored::Colorize;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
