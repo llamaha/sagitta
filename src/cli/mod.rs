@@ -6,7 +6,6 @@ pub mod formatters;
 // New module declarations for command handlers
 pub mod query;
 pub mod stats;
-pub mod list;
 pub mod clear;
 pub mod repo_commands;
 pub mod simple;
@@ -18,7 +17,6 @@ pub use commands::{handle_command, Commands};
 // Re-export the Args structs for use in the main binary
 pub use query::QueryArgs;
 pub use stats::StatsArgs;
-pub use list::ListArgs;
 pub use clear::ClearArgs;
 pub use repo_commands::RepoArgs;
 pub use commands::CliArgs;
