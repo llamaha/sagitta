@@ -2,7 +2,9 @@ use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 // use syn;
-use anyhow;
+use ort;
+// use serde::ser::Error as SerError;
+// use serde::de::Error as DeError;
 
 /// Result type for VectorDB operations
 pub type Result<T> = std::result::Result<T, VectorDBError>;
@@ -26,7 +28,7 @@ pub enum VectorDBError {
     MetadataError { path: PathBuf, source: io::Error },
 
     #[error("Error serializing or deserializing data: {0}")]
-    SerializationError(#[from] serde_json::Error),
+    SerializationError(String),
 
     #[error("Error generating embedding: {0}")]
     EmbeddingError(String),
@@ -102,14 +104,32 @@ pub enum VectorDBError {
 
     #[error("Mutex lock error: {0}")]
     MutexLockError(String),
+
+    /// Error originating from the Qdrant client
+    #[error("Qdrant client error: {0}")]
+    QdrantError(#[from] qdrant_client::QdrantError),
+
+    /// Error related to Git operations
+    #[error("Git error: {0}")]
+    GitError(#[from] git2::Error),
+
+    /// Error when a required feature is not yet implemented
+    #[error("Feature not implemented: {0}")]
+    NotImplemented(String),
+
+    /// Error for ONNX Runtime
+    #[error("ONNX Runtime error: {0}")]
+    OrtError(#[from] ort::Error),
 }
 
-/// Conversion from anyhow::Error
+// Implement conversion from anyhow::Error
 impl From<anyhow::Error> for VectorDBError {
-    fn from(error: anyhow::Error) -> Self {
-        // Revert to previous behavior, or perhaps GeneralError?
-        // Let's stick to the original HNSWError to pass the existing test.
-        VectorDBError::HNSWError(error.to_string())
+    fn from(err: anyhow::Error) -> Self {
+        // This is a simplified conversion. In a real application, you might
+        // want to inspect the anyhow::Error further (e.g., using downcasting)
+        // to map it to more specific VectorDBError variants if possible.
+        // For now, mapping to HNSWError based on the existing test expectation.
+        VectorDBError::HNSWError(err.to_string())
     }
 }
 
@@ -134,10 +154,7 @@ impl Clone for VectorDBError {
                 path: path.clone(),
                 source: io::Error::new(source.kind(), source.to_string()),
             },
-            // Create new serialization error with the string representation
-            Self::SerializationError(e) => Self::SerializationError(
-                serde_json::from_str::<serde_json::Value>(&format!("\"{}\"", e)).unwrap_err(),
-            ),
+            Self::SerializationError(s) => Self::SerializationError(s.clone()),
             Self::EmbeddingError(s) => Self::EmbeddingError(s.clone()),
             Self::DatabaseError(s) => Self::DatabaseError(s.clone()),
             Self::ASTTraversalError(s) => Self::ASTTraversalError(s.clone()),
@@ -166,6 +183,10 @@ impl Clone for VectorDBError {
             Self::IndexNotFound => Self::IndexNotFound,
             Self::OperationCancelled => Self::OperationCancelled,
             Self::MutexLockError(s) => Self::MutexLockError(s.clone()),
+            Self::QdrantError(e) => Self::GeneralError(format!("Cannot clone QdrantError: {}", e)),
+            Self::GitError(_) => Self::GeneralError("Cannot clone git2::Error".to_string()),
+            Self::NotImplemented(s) => Self::NotImplemented(s.clone()),
+            Self::OrtError(_) => Self::GeneralError("Cannot clone ort::Error".to_string()),
         }
     }
 }
@@ -226,7 +247,7 @@ mod tests {
         }
         // This should now correctly generate a serde_json::Error
         let serialization_err = serde_json::to_string(&Unserializable {}).unwrap_err();
-        let err = VectorDBError::SerializationError(serialization_err);
+        let err = VectorDBError::SerializationError(serialization_err.to_string());
         // Check the Display output using contains, as the exact serde_json error might vary slightly
         assert!(err.to_string().contains("cannot serialize Unserializable"));
         // Also check the error type prefix is correct

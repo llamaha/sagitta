@@ -27,7 +27,7 @@ use crate::cli::commands::{
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION,
     FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, ensure_payload_index,
 };
-use crate::cli::repo_commands::{DEFAULT_VECTOR_DIMENSION}; // Keep using repo's default dim for now
+use crate::cli::repo_commands::helpers::DEFAULT_VECTOR_DIMENSION; // Update import
 
 // Arguments for the main 'simple' command group
 #[derive(Args, Debug, Clone)] 
@@ -275,8 +275,8 @@ async fn handle_simple_index(
         let chunks = match syntax::get_chunks(&file_path) {
             Ok(chunks) => chunks,
             Err(e) => {
-                log::warn!("Failed to parse file {}: {}. Skipping.", file_path.display(), e);
-                pb.println(format!("Warning: Failed to parse {}, skipping.", file_path.display()));
+                log::warn!("Failed to get chunks for file {}: {}. Skipping.", file_path.display(), e);
+                pb.println(format!("Warning: Failed to get chunks for {}, skipping.", file_path.display()));
                 total_files_skipped += 1;
                 pb.inc(1);
                 continue;
@@ -309,9 +309,9 @@ async fn handle_simple_index(
             payload.insert(FIELD_FILE_PATH, absolute_path_str.clone()); 
             payload.insert(FIELD_START_LINE, chunk.start_line as i64);
             payload.insert(FIELD_END_LINE, chunk.end_line as i64);
-            payload.insert(FIELD_LANGUAGE, chunk.language.to_string());
+            payload.insert(FIELD_LANGUAGE, chunk.language.clone());
             payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
-            payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.clone());
+            payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.to_string());
             payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
 
             let point = PointStruct::new(
@@ -330,6 +330,7 @@ async fn handle_simple_index(
             }
         }
         total_files_processed += 1;
+        pb.inc(1);
     }
 
     if !points_batch.is_empty() {
@@ -387,8 +388,9 @@ async fn handle_simple_query(
     )
     .context("Failed to initialize embedding handler")?;
 
-    let query_embedding = embedding_handler.create_embedding_model()?
-        .embed(&args.query)?;
+    let embedding_results = embedding_handler.create_embedding_model()?.embed_batch(&[&args.query])?;
+    let query_embedding = embedding_results.into_iter().next()
+        .ok_or_else(|| anyhow!("Failed to generate embedding for query"))?;
     log::info!("Query embedding generated.");
 
     let mut filter_conditions = Vec::new();
@@ -495,15 +497,20 @@ async fn ensure_legacy_collection_exists(
         log::info!("Collection '{}' not found. Creating...", collection_name);
         let vector_dim = DEFAULT_VECTOR_DIMENSION; 
         let create_request = CreateCollectionBuilder::new(collection_name)
-            .vectors_config(VectorParamsBuilder::new(vector_dim, Distance::Cosine)); 
+            .vectors_config(VectorParamsBuilder::new(vector_dim, Distance::Cosine));
         
         client.create_collection(create_request).await?;
         log::info!("Collection '{}' created successfully.", collection_name);
+        
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     ensure_payload_index(client, collection_name, FIELD_FILE_PATH, FieldType::Keyword, true, None).await?;
     ensure_payload_index(client, collection_name, FIELD_LANGUAGE, FieldType::Keyword, true, None).await?;
     ensure_payload_index(client, collection_name, FIELD_ELEMENT_TYPE, FieldType::Keyword, true, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_START_LINE, FieldType::Integer, false, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_END_LINE, FieldType::Integer, false, None).await?;
+    ensure_payload_index(client, collection_name, FIELD_FILE_EXTENSION, FieldType::Keyword, true, None).await?;
 
     Ok(())
 } 

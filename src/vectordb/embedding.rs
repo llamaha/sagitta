@@ -10,23 +10,25 @@ use std::fmt;
 // Use the embedding dimensions from the providers
 // use crate::vectordb::provider::fast::FAST_EMBEDDING_DIM;
 
-/// Supported embedding models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash, Default)]
+/// Type alias for embeddings (vectors of f32).
+// pub type Embedding = Vec<f32>; // Keep commented out or remove if confirmed unused
+
+/// Enum representing the type of embedding model to use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EmbeddingModelType {
-    /// Use the ONNX model for embeddings.
     #[default]
+    Default, // Represents the default model
     Onnx,
-    // No specific CodeBert type needed if we handle dimensions dynamically
+    // Add other model types here in the future (e.g., SentenceTransformers)
 }
 
 impl EmbeddingModelType {
-    /// Returns the default embedding dimension for this model type.
-    /// Used as a fallback when loading an index without an explicit dimension stored.
-    pub fn default_dimension(&self) -> usize {
+    /// Get the expected dimension for the model type.
+    pub fn dimension(&self) -> usize {
         match self {
-            // TODO: Make this dynamically configurable or read from a default ONNX model?
-            // For now, assume the default ONNX is MiniLM with 384 dims.
             EmbeddingModelType::Onnx => 384,
+            EmbeddingModelType::Default => 384, // Use default dimension for now
+            // Add other model types here
         }
     }
 }
@@ -35,6 +37,7 @@ impl fmt::Display for EmbeddingModelType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EmbeddingModelType::Onnx => write!(f, "ONNX"),
+            EmbeddingModelType::Default => write!(f, "Default"),
         }
     }
 }
@@ -52,7 +55,7 @@ impl EmbeddingModel {
     /// Creates a new ONNX-based EmbeddingModel.
     pub fn new_onnx<P: AsRef<Path>>(model_path: P, tokenizer_path: P) -> Result<Self> {
         // Use full path for the provider constructor
-        let onnx_provider = crate::vectordb::provider::onnx::OnnxEmbeddingProvider::new(
+        let onnx_provider = crate::vectordb::provider::onnx::OnnxEmbeddingModel::new(
             model_path.as_ref(), 
             tokenizer_path.as_ref()
         ).map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX provider: {}", e)))?; // Explicitly map error
@@ -74,12 +77,6 @@ impl EmbeddingModel {
     pub fn dim(&self) -> usize {
         let provider_ref: &dyn EmbeddingProvider = self.provider.as_ref();
         provider_ref.dimension()
-    }
-
-    /// Generates an embedding for the given text.
-    pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let provider_ref: &dyn EmbeddingProvider = self.provider.as_ref();
-        provider_ref.embed(text).map_err(Into::into)
     }
 
     /// Generates embeddings for a batch of texts.
@@ -124,7 +121,7 @@ mod tests {
 
         // Test embedding
         let text = "fn main() { let x = 42; }";
-        let embedding = model.embed(text).unwrap();
+        let embedding = model.embed_batch(&[text]).unwrap().into_iter().next().unwrap();
 
         assert_eq!(embedding.len(), expected_dim); // Check against model's dimension
         assert!(!embedding.iter().all(|&x| x == 0.0));
@@ -132,7 +129,7 @@ mod tests {
         // Test cloning
         let cloned_model = model.clone();
         assert_eq!(cloned_model.dim(), expected_dim);
-        let cloned_embedding = cloned_model.embed(text).unwrap();
+        let cloned_embedding = cloned_model.embed_batch(&[text]).unwrap().into_iter().next().unwrap();
         assert_eq!(embedding, cloned_embedding);
     }
 

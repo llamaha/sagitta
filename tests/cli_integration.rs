@@ -36,6 +36,24 @@ fn get_binary_path() -> Result<PathBuf> {
     Ok(path)
 }
 
+// Helper function to set up test repositories
+fn setup_test_repos(temp_dir: &TempDir) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    let base_path = temp_dir.path();
+    let repo_a = base_path.join("repo_a");
+    let repo_b = base_path.join("repo_b");
+    let repo_c = base_path.join("repo_c");
+
+    fs::create_dir_all(&repo_a)?;
+    fs::create_dir_all(&repo_b)?;
+    fs::create_dir_all(&repo_c)?;
+
+    fs::write(repo_a.join("file_a.txt"), "Content A")?;
+    fs::write(repo_b.join("file_b.txt"), "Content B")?;
+    fs::write(repo_c.join("file_c.rs"), "fn main() {}\n")?; // Added newline for consistency
+
+    Ok((repo_a, repo_b, repo_c))
+}
+
 // Helper to get default ONNX paths (assuming they exist)
 // Define this outside the test functions
 fn get_default_onnx_paths() -> Option<(PathBuf, PathBuf)> {
@@ -62,19 +80,10 @@ async fn test_cli_index_list_remove() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let bin_path = get_binary_path()?;
 
-    let repo_a = temp_dir.path().join("repo_a");
-    let repo_b = temp_dir.path().join("repo_b");
-    let repo_c = temp_dir.path().join("repo_c");
-    fs::create_dir_all(&repo_a)?;
-    fs::create_dir_all(&repo_b)?;
-    fs::create_dir_all(&repo_c)?;
-    fs::write(repo_a.join("file_a.txt"), "Content A")?;
-    fs::write(repo_b.join("file_b.txt"), "Content B")?;
-    fs::write(repo_c.join("file_c.rs"), "fn main() {}")?;
-
-    let repo_a_canon = repo_a.canonicalize()?.to_string_lossy().to_string();
-    let repo_b_canon = repo_b.canonicalize()?.to_string_lossy().to_string();
-    let repo_c_canon = repo_c.canonicalize()?.to_string_lossy().to_string();
+    let (repo_a, repo_b, repo_c) = setup_test_repos(&temp_dir)?;
+    let _repo_a_canon = repo_a.canonicalize()?.to_string_lossy().to_string();
+    let _repo_b_canon = repo_b.canonicalize()?.to_string_lossy().to_string();
+    let _repo_c_canon = repo_c.canonicalize()?.to_string_lossy().to_string();
 
     // --- Clear collection before test --- 
     // Use the new `simple clear` command

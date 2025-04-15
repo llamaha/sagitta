@@ -1,52 +1,29 @@
 #![allow(dead_code)]
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use clap::Parser;
-
-// Remove log imports if env_logger is fully replaced
-// use log::{debug, error, info};
 use std::sync::Arc;
 use std::process::exit;
-// Remove unused tracing imports
-// use tracing::{info, debug, error};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 // Import library modules
-use vectordb_lib::cli::{self, CliArgs}; // Import CliArgs from lib, Commands not needed here
-use vectordb_lib::config::{self}; // Import config
+use vectordb_lib::{
+    config,
+    cli::commands::handle_command,
+    cli::commands::CliArgs,
+};
 use qdrant_client::Qdrant;
-// Comment out missing setup_logging import
-// use vectordb_lib::setup_logging;
-
-// CliArgs struct moved to src/cli/commands.rs
-// #[derive(Parser, Debug)]
-// #[command(author, version, about, long_about = None)]
-// struct CliArgs {
-//     #[command(subcommand)]
-//     command: Commands,
-
-//     // Arguments for ONNX paths (these might be moved to config later, but keep for now)
-//     /// Path to ONNX model file (overrides config & env var)
-//     #[arg(long = "onnx-model", global = true)]
-//     onnx_model_path_arg: Option<String>,
-
-//     /// Path to ONNX tokenizer config directory (overrides config & env var)
-//     #[arg(long = "onnx-tokenizer-dir", global = true)] // Changed name for clarity
-//     onnx_tokenizer_dir_arg: Option<String>,
-// }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    // --- Setup Logging using tracing_subscriber ---
-    tracing_subscriber::fmt::init(); // Initialize tracing subscriber
-    // Remove: env_logger::init();
+async fn main() -> Result<()> {
+    // --- Setup Tracing --- 
+    fmt::init(); // Initialize tracing subscriber
 
+    // --- Parse Args --- 
     let args = CliArgs::parse();
 
     // --- Load Configuration --- 
-    // Use tracing::info, debug, error instead of log::*
-    let mut config = config::load_config()
-        .inspect_err(|e| tracing::error!("Configuration loading failed: {:?}", e))
-        .unwrap_or_default(); // Use default config if loading fails
+    let mut config = config::load_config(None).context("Failed to load configuration")?;
     
     tracing::info!("Using Qdrant URL from config: {}", config.qdrant_url);
 
@@ -71,7 +48,7 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("Executing command: {:?}", args.command);
 
     // Pass mutable reference to config
-    let result = cli::handle_command(args, &mut config, client).await;
+    let result = handle_command(args, &mut config, client).await;
 
     // --- Handle Result ---
     if let Err(e) = result {

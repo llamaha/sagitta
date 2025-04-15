@@ -4,6 +4,9 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 use crate::syntax::parser::{CodeChunk, SyntaxParser};
 
+// Reuse the constant from the fallback parser or define locally if preferred
+const MAX_CHUNK_LINES: usize = 500; 
+
 pub struct MarkdownParser {
     parser: Parser,
     query: Query,
@@ -141,20 +144,30 @@ impl SyntaxParser for MarkdownParser {
             })
             .collect();
 
-        // Fallback logic remains the same
+        // If no chunks were extracted by tree-sitter OR if the code is just whitespace,
+        // apply line-based chunking as a fallback.
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No Markdown block elements found in {}, indexing as whole file.",
+                "No specific Markdown elements found or only whitespace in {}. Applying line-based fallback chunking.",
                 file_path
             );
-            chunks.push(CodeChunk {
-                content: code.to_string(),
-                file_path: file_path.to_string(),
-                start_line: 1,
-                end_line: code.lines().count(),
-                language: "markdown".to_string(),
-                element_type: "file".to_string(),
-            });
+            let lines: Vec<&str> = code.lines().collect();
+            let mut current_line_start = 1;
+            for (i, line_chunk) in lines.chunks(MAX_CHUNK_LINES).enumerate() {
+                let content = line_chunk.join("\n");
+                let start_line = current_line_start;
+                let end_line = start_line + line_chunk.len() - 1;
+
+                chunks.push(CodeChunk {
+                    content,
+                    file_path: file_path.to_string(),
+                    start_line,
+                    end_line,
+                    language: "markdown".to_string(), // Keep language as markdown
+                    element_type: format!("fallback_line_chunk_{}", i), // Indicate it's a fallback chunk
+                });
+                current_line_start = end_line + 1;
+            }
         }
 
         Ok(chunks)

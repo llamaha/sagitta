@@ -94,7 +94,8 @@ impl EmbeddingCache {
 
         // Write to temporary file first
         let contents =
-            serde_json::to_string_pretty(&cache_file).map_err(VectorDBError::SerializationError)?;
+            serde_json::to_string_pretty(&cache_file)
+                .map_err(|e| VectorDBError::SerializationError(e.to_string()))?;
         std::fs::write(&temp_path, contents).map_err(|e| VectorDBError::FileWriteError {
             path: Path::new(&temp_path).to_path_buf(),
             source: e,

@@ -5,7 +5,7 @@ use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
 use crate::config::{AppConfig, RepositoryConfig}; // Import RepositoryConfig
-use crate::cli::repo_commands::get_collection_name;
+use crate::cli::repo_commands::helpers::get_collection_name;
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {

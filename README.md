@@ -380,10 +380,21 @@ vectordb-cli repo sync
 
 # Sync a specific repository (uses its currently checked-out tracked branch)
 vectordb-cli repo sync my-cool-project
+
+# Sync only specific file types in the active repository
+vectordb-cli repo sync -e rs -e toml
+
+# Force a full re-index of specified file types for the active repository
+vectordb-cli repo sync --force -e py
+
+# Sync a specific repo with specific extensions
+vectordb-cli repo sync my-cool-project -e go
 ```
 
 **Arguments:**
--   `name`: Optional name of the repository to sync. Defaults to the active repository.
+-   `name` (Optional, Positional): Name of the repository to sync. Defaults to the active repository.
+-   `-e <ext>`, `--extensions <ext>` (Optional): Specify one or more file extensions (without the dot, comma-separated or multiple flags) to include (e.g., `-e rs,py` or `-e rs -e py`). If omitted, defaults to syncing only extensions with dedicated parsers (see [Supported Languages](#supported-languages)).
+-   `--force` (Optional): Force a full re-index of the specified files for the branch, ignoring the last synced commit state.
 
 **Note:** Currently only fetches from the configured remote (`origin` by default) and primarily supports SSH key authentication (via `--ssh-key` in `repo add` or system defaults like `ssh-agent`). Support for other credential types (HTTPS tokens, etc.) is planned.
 
@@ -405,6 +416,8 @@ vectordb-cli repo clear [<repo_name>] [-y]
 ### `query`
 
 Performs a semantic search across the indexed data for the active repository, specified repositories, or all repositories.
+
+**Note:** This command is deprecated and may be removed in the future. Use the `simple query` command for the simple index or rely on external tools to query repository-specific Qdrant collections (`repo_<repo_name>`).
 
 ```bash
 vectordb-cli query "<query text>" [-r <repo_name>...] [--all-repos] [-b <branch>] [-l <limit>] [--lang <language>] [--type <element_type>]

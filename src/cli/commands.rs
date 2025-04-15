@@ -2,7 +2,7 @@
 // use crate::vectordb::search::Search; // Removed
 // use crate::vectordb::cache::CacheCheckResult; // Removed
 use anyhow::{bail, Result};
-// Removed: use clap::Parser;
+use clap::Parser;
 // Removed: use log::{debug, warn};
 // Removed: use num_cpus;
 // Removed: use rayon;
@@ -20,21 +20,24 @@ use anyhow::{bail, Result};
 // use qdrant_client::client::QdrantClient; // Old import
 use qdrant_client::Qdrant; // Import the Qdrant struct
 use std::sync::Arc;
-use clap::{Parser, Subcommand};
+use clap::{Subcommand};
 use qdrant_client::qdrant::{
         // Removed unused: CollectionStatus,
-        FieldType, PointStruct, TextIndexParams, KeywordIndexParams, TokenizerType, UpdateStatus, 
+        payload_index_params::IndexParams, // Keep this one
+        FieldType, IntegerIndexParams, KeywordIndexParams, TextIndexParams, TokenizerType, UpdateStatus, 
         UpsertPointsBuilder,
         UpsertPoints,
         CreateFieldIndexCollectionBuilder,
-        GetCollectionInfoResponse, // Add this import
-        payload_index_params::IndexParams, // Keep only used imports
+        GetCollectionInfoResponse, 
+        PointStruct, 
+        // REMOVED incorrect imports: field_type, field_index_params
     };
 use indicatif::ProgressBar;
 use log;
 
 // Import config
 use crate::config::AppConfig;
+// Removed: use crate::config;
 
 // Moved from index.rs
 pub(crate) const BATCH_SIZE: usize = 128;
@@ -92,15 +95,12 @@ pub const SIMPLE_INDEX_COLLECTION: &str = "vectordb-code-search";
 // --- Main Command Enum ---
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Query the active or specified repository's vector database
-    #[command(subcommand_negates_reqs = true)]
-    Query(super::query::QueryArgs), // Use super:: path
     /// Show statistics about the vector database collections
     #[command(subcommand_negates_reqs = true)]
     Stats(super::stats::StatsArgs), // Use super:: path
-    /// Clear data for a specific repository
+    /// Clear data for a specific repository OR the simple index
     #[command(subcommand_negates_reqs = true)]
-    Clear(super::clear::ClearArgs), // Add Clear command
+    Clear(super::clear::ClearArgs), // Clear might handle both repo and simple based on args?
     /// Manage repositories (add, list, use, remove, sync)
     #[command(subcommand_negates_reqs = true)]
     Repo(super::repo_commands::RepoArgs),
@@ -122,12 +122,10 @@ pub async fn handle_command(
     client: Arc<Qdrant>,
 ) -> Result<()> {
     match args.command {
-        // Pass args, config, and client to handlers that need them
-        Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config.clone(), client).await,
         Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config.clone(), client).await,
         Commands::Clear(ref cmd_args) => super::clear::handle_clear(cmd_args, config.clone(), client).await,
-        Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client).await,
-        Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await, // Add handler for Simple
+        Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client, None).await,
+        Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
     }
 }
 
@@ -139,8 +137,8 @@ pub async fn ensure_payload_index(
     collection_name: &str,
     field_name: &str,
     field_type: FieldType,
-    keyword: bool, // Flag to create keyword index instead of text
-    tokenizer: Option<TokenizerType>, // Optional tokenizer for text index
+    _is_keyword: bool, // Renamed for clarity and marked as unused
+    tokenizer: Option<TokenizerType>,
 ) -> Result<()> {
     let info: GetCollectionInfoResponse = client.collection_info(collection_name).await?;
     if let Some(config) = info.result {
@@ -154,24 +152,38 @@ pub async fn ensure_payload_index(
 
     log::info!("Creating payload index for '{}' on field '{}'...", collection_name, field_name);
 
-    // Create the inner IndexParams enum variant
-    let inner_index_params = if keyword {
-        IndexParams::KeywordIndexParams(KeywordIndexParams {
+    // Explicitly define index parameters based on type
+    let index_params = match field_type {
+        FieldType::Keyword => Some(IndexParams::KeywordIndexParams(KeywordIndexParams {
             on_disk: None,
-            is_tenant: Some(false),
-        })
-    } else {
-        IndexParams::TextIndexParams(TextIndexParams {
+            // Note: is_tenant might also not be valid here depending on qdrant version,
+            // keeping for now unless it causes errors. Adjust if needed.
+            is_tenant: Some(false), 
+        })),
+        FieldType::Integer => Some(IndexParams::IntegerIndexParams(IntegerIndexParams {
+            // Provide default values wrapped in Some()
+            lookup: Some(false), 
+            range: Some(false),
+            is_principal: Some(false),
+            on_disk: None, // Keep as None if optional, or set default bool if required
+        })),
+        FieldType::Text => Some(IndexParams::TextIndexParams(TextIndexParams {
             tokenizer: tokenizer.map(|t| t.into()).unwrap_or(TokenizerType::Word.into()),
             lowercase: Some(true),
             min_token_len: None,
             max_token_len: None,
             on_disk: None,
-        })
+        })),
+        // Add other types as needed, potentially with None if no params required
+        _ => None,
     };
 
-    let builder = CreateFieldIndexCollectionBuilder::new(collection_name, field_name, field_type)
-        .field_index_params(inner_index_params);
+    let mut builder = CreateFieldIndexCollectionBuilder::new(collection_name, field_name, field_type);
+
+    // Only add field_index_params if we defined some
+    if let Some(params) = index_params {
+        builder = builder.field_index_params(params);
+    }
 
     match client.create_field_index(builder).await {
         Ok(response) => {
@@ -179,18 +191,21 @@ pub async fn ensure_payload_index(
                  match UpdateStatus::try_from(result.status) {
                      Ok(UpdateStatus::Completed) => {
                          log::info!("Payload index created successfully for field '{}'.", field_name);
+                         Ok(())
                      }
                      Ok(status) => {
                          log::warn!("Payload index creation for field '{}' resulted in status: {:?}", field_name, status);
+                         Ok(())
                      }
                      Err(_) => {
                          log::warn!("Payload index creation for field '{}' returned unknown status: {}", field_name, result.status);
+                         Ok(())
                      }
                  }
              } else {
                  log::warn!("Payload index creation response for field '{}' did not contain a result.", field_name);
+                 Ok(())
              }
-            Ok(())
         }
         Err(e) => {
             log::error!("Failed to create payload index for field '{}': {}. Ignoring error, assuming index might exist.", field_name, e);
@@ -204,24 +219,17 @@ pub(crate) async fn upsert_batch(
     client: &Qdrant,
     collection_name: &str,
     points: Vec<PointStruct>,
-    batch_num: usize,
-    total_batches: usize,
+    _batch_num: usize,
+    _total_batches: usize,
     progress_bar: &ProgressBar,
 ) -> Result<()> {
     if points.is_empty() {
         return Ok(());
     }
     let num_points = points.len();
-    progress_bar.set_message(format!(
-        "Upserting batch {}/{} ({} points) to collection '{}'...",
-        batch_num,
-        total_batches,
-        num_points,
-        collection_name
-    ));
     
     let request: UpsertPoints = UpsertPointsBuilder::new(collection_name, points)
-        .wait(false) 
+        .wait(false)
         .build();
 
     match client.upsert_points(request).await {
@@ -235,8 +243,7 @@ pub(crate) async fn upsert_batch(
                      },
                      Ok(status) => {
                          let msg = format!("Qdrant upsert batch completed with status: {:?}", status);
-                         progress_bar.println(format!("Warning: {}", msg));
-                         log::warn!("{}", msg);
+                         log::debug!("{}", msg);
                          Ok(()) 
                      },
                      Err(_) => {

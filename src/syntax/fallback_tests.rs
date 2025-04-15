@@ -20,16 +20,17 @@ mod fallback_tests {
         let chunks = get_chunks(&new_path).unwrap();
 
         // Assertions
-        assert_eq!(chunks.len(), 1, "Fallback parser should return exactly one chunk.");
+        assert_eq!(chunks.len(), 1, "Fallback parser should return exactly one chunk for this small input.");
 
         let chunk = &chunks[0];
-        // Need to read the content again as writeln adds a newline
-        let expected_content = format!("{}\n", content);
-        assert_eq!(chunk.content, expected_content, "Chunk content should match file content.");
+        // Adjust expected content: No trailing newline from parser logic
+        let expected_content = content; // Original content without added newline
+        assert_eq!(chunk.content, expected_content, "Chunk content should match file content (without trailing newline).");
         assert_eq!(chunk.start_line, 1, "Chunk should start at line 1.");
         assert_eq!(chunk.end_line, 3, "Chunk should end at the last line.");
         assert_eq!(chunk.language, "fallback", "Chunk language should be fallback.");
-        assert_eq!(chunk.element_type, "fallback_chunk", "Chunk element_type should be fallback_chunk.");
+        // Adjust expected element type: Now includes index
+        assert_eq!(chunk.element_type, "fallback_chunk_0", "Chunk element_type should be fallback_chunk_0.");
 
         // Clean up the renamed file
         std::fs::remove_file(&new_path).unwrap();
