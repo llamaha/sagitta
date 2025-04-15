@@ -98,9 +98,6 @@ pub enum Commands {
     /// Show statistics about the vector database collections
     #[command(subcommand_negates_reqs = true)]
     Stats(super::stats::StatsArgs), // Use super:: path
-    /// List indexed files in the active repository
-    #[command(subcommand_negates_reqs = true)]
-    List(super::list::ListArgs), // Use super:: path
     /// Clear data for a specific repository
     #[command(subcommand_negates_reqs = true)]
     Clear(super::clear::ClearArgs), // Add Clear command
@@ -128,7 +125,6 @@ pub async fn handle_command(
         // Pass args, config, and client to handlers that need them
         Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config.clone(), client).await,
         Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config.clone(), client).await,
-        Commands::List(cmd_args) => super::list::handle_list(cmd_args, config.clone(), client).await,
         Commands::Clear(ref cmd_args) => super::clear::handle_clear(cmd_args, config.clone(), client).await,
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client).await,
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await, // Add handler for Simple
