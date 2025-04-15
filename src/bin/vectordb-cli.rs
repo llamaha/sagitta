@@ -44,7 +44,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // --- Load Configuration --- 
     // Use tracing::info, debug, error instead of log::*
-    let config = config::load_config()
+    let mut config = config::load_config()
         .inspect_err(|e| tracing::error!("Configuration loading failed: {:?}", e))
         .unwrap_or_default(); // Use default config if loading fails
     
@@ -70,8 +70,8 @@ async fn main() -> Result<(), anyhow::Error> {
     // --- Execute Command --- 
     tracing::info!("Executing command: {:?}", args.command);
 
-    // Pass CliArgs, config, and client down
-    let result = cli::handle_command(args, config, client).await;
+    // Pass mutable reference to config
+    let result = cli::handle_command(args, &mut config, client).await;
 
     // --- Handle Result ---
     if let Err(e) = result {

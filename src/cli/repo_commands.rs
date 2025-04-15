@@ -203,10 +203,10 @@ pub(crate) fn get_collection_name(repo_name: &str) -> String {
 }
 
 pub async fn handle_repo_command(
-    args: RepoArgs, 
+    args: RepoArgs,
     cli_args: &CliArgs,
-    config: AppConfig, 
-    client: Arc<Qdrant>
+    config: &mut AppConfig,
+    client: Arc<Qdrant>,
 ) -> Result<()> {
     match args.command {
         RepoCommand::Add(add_args) => add_repository(add_args, config, client).await,
@@ -220,7 +220,7 @@ pub async fn handle_repo_command(
 
 async fn add_repository(
     args: AddRepoArgs,
-    mut config: AppConfig,
+    config: &mut AppConfig,
     client: Arc<Qdrant>
 ) -> Result<()> {
     let repo_name = match args.name {
@@ -229,7 +229,7 @@ async fn add_repository(
             .file_stem()
             .and_then(|s| s.to_str())
             .map(|s| s.trim_end_matches(".git").to_string())
-            .ok_or_else(|| anyhow::anyhow!("Could not derive repository name from URL"))?,
+            .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?,
     };
 
     if config.repositories.iter().any(|r| r.name == repo_name) {
@@ -315,14 +315,14 @@ async fn add_repository(
     Ok(())
 }
 
-fn list_repositories(config: AppConfig) -> Result<()> {
+fn list_repositories(config: &AppConfig) -> Result<()> {
     if config.repositories.is_empty() {
         println!("No repositories configured yet. Use 'repo add <url>' to add one.");
         return Ok(());
     }
 
     println!("{}", "Managed Repositories:".bold());
-    for repo in config.repositories {
+    for repo in &config.repositories {
         let active_marker = if config.active_repository.as_ref() == Some(&repo.name) {
              "*".green().bold()
         } else {
@@ -351,7 +351,7 @@ fn list_repositories(config: AppConfig) -> Result<()> {
     Ok(())
 }
 
-fn use_repository(args: UseRepoArgs, mut config: AppConfig) -> Result<()> {
+fn use_repository(args: UseRepoArgs, config: &mut AppConfig) -> Result<()> {
     if !config.repositories.iter().any(|r| r.name == args.name) {
         bail!(
             "Repository '{}' not found. Use 'repo list' to see available repositories.",
@@ -372,7 +372,7 @@ fn use_repository(args: UseRepoArgs, mut config: AppConfig) -> Result<()> {
 
 async fn remove_repository(
     args: RemoveRepoArgs, 
-    mut config: AppConfig,
+    config: &mut AppConfig,
     client: Arc<Qdrant>
 ) -> Result<()> {
     let repo_name = args.name;
@@ -452,10 +452,11 @@ async fn remove_repository(
     Ok(())
 }
 
-async fn use_branch(args: UseBranchArgs, mut config: AppConfig) -> Result<()> {
-    let repo_name = config.active_repository.clone().ok_or_else(|| {
-        anyhow::anyhow!("No active repository set. Use 'repo use <name>' first.")
-    })?;
+async fn use_branch(args: UseBranchArgs, config: &mut AppConfig) -> Result<()> {
+    let repo_name = match config.active_repository.clone() {
+        Some(name) => name,
+        None => bail!("No active repository set. Use 'repo use <name>' first."),
+    };
 
     // Find the index immutably first
     let repo_config_index = config
@@ -547,13 +548,13 @@ async fn use_branch(args: UseBranchArgs, mut config: AppConfig) -> Result<()> {
 async fn sync_repository(
     args: SyncRepoArgs, 
     cli_args: &CliArgs,
-    config: AppConfig,
+    config: &mut AppConfig,
     client: Arc<Qdrant>
 ) -> Result<()> {
     let repo_name = match args.name {
         Some(name) => name,
         None => config.active_repository.clone().ok_or_else(|| {
-            anyhow::anyhow!("No active repository set and no repository specified. Use 'repo use <name>' or 'repo sync <name>'.")
+            anyhow!("No active repository set and no repository specified. Use 'repo use <name>' or 'repo sync <name>'.")
         })?,
     };
 
@@ -561,10 +562,17 @@ async fn sync_repository(
         .repositories
         .iter()
         .position(|r| r.name == repo_name)
-        .ok_or_else(|| anyhow::anyhow!("Repository '{}' not found in config.", repo_name))?;
+        .ok_or_else(|| anyhow!("Repository '{}' not found in config.", repo_name))?;
 
-    // Clone config for immutable use in processing, mutable borrow later for updates
-    let repo_config = config.repositories[repo_config_index].clone(); 
+    // Clone repo_config for immutable use within this scope, but pass mutable config down
+    let repo_config = config.repositories[repo_config_index].clone();
+    let active_branch_name = repo_config.active_branch.clone().ok_or_else(|| {
+        anyhow!(
+            "No active branch set for repository '{}'. Use 'repo use-branch <branch_name>' first.",
+            repo_name
+        )
+    })?;
+    let last_synced_commit_oid_str = repo_config.last_synced_commits.get(&active_branch_name);
 
     println!(
         "Syncing repository '{}' at {}...",
@@ -575,22 +583,12 @@ async fn sync_repository(
     let repo = Repository::open(&repo_config.local_path)
         .with_context(|| format!("Failed to open repository at {}", repo_config.local_path.display()))?;
 
-    let active_branch_name = repo_config.active_branch.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "No active branch set for repository '{}'. Use 'repo use-branch <branch_name>' first.",
-            repo_name
-        )
-    })?;
-    
-    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin"); // Use configured remote or default
-
     println!(
         "Fetching updates for branch '{}' from remote '{}'...",
-        active_branch_name.cyan(), remote_name.cyan()
+        active_branch_name.cyan(), repo_config.remote_name.as_deref().unwrap_or("origin").cyan()
     );
 
-    let mut remote = repo.find_remote(remote_name)
-        .with_context(|| format!("Failed to find remote '{}' in repository", remote_name))?;
+    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin"); // Use configured remote or default
 
     // Setup fetch options with credential handling
     let cloned_config = config.clone(); 
@@ -598,6 +596,8 @@ async fn sync_repository(
     
     // Construct refspec for the active branch
     let refspec = format!("refs/heads/{}:refs/remotes/{}/{}", active_branch_name, remote_name, active_branch_name);
+    let mut remote = repo.find_remote(remote_name)
+        .with_context(|| format!("Failed to find remote '{}' in repository", remote_name))?;
     remote.fetch(&[refspec], Some(&mut fetch_opts), None)
         .with_context(|| format!("Failed to fetch updates for branch '{}' from remote '{}'", active_branch_name, remote_name))?;
     println!("Fetch completed.");
@@ -609,9 +609,6 @@ async fn sync_repository(
     let remote_commit = remote_commit_ref.peel_to_commit()?;
     let remote_commit_oid = remote_commit.id();
     let remote_commit_oid_str = remote_commit_oid.to_string();
-
-    // Check last synced commit for this branch
-    let last_synced_commit_oid_str = repo_config.last_synced_commits.get(&active_branch_name);
 
     let collection_name = get_collection_name(&repo_name);
 
@@ -654,9 +651,9 @@ async fn sync_repository(
                  ).await.context("Failed to index files during initial sync")?;
             }
 
-            // Update config with sync status
+            // Pass mutable config to update function
             update_sync_status_and_languages(
-                config, // Move config ownership here
+                config, // Pass mutable reference
                 repo_config_index,
                 &active_branch_name,
                 &remote_commit_oid_str,
@@ -796,9 +793,9 @@ async fn sync_repository(
                     println!("Indexing complete.");
                 }
 
-                // Update config with sync status
+                // Pass mutable config to update function
                 update_sync_status_and_languages(
-                    config, // Move config ownership here
+                    config, // Pass mutable reference
                     repo_config_index,
                     &active_branch_name,
                     &remote_commit_oid_str,
@@ -898,7 +895,7 @@ fn collect_files_from_tree(
 
 // Helper function to update config with sync status and detected languages
 async fn update_sync_status_and_languages(
-    mut config: AppConfig, // Take ownership
+    config: &mut AppConfig, // Changed to mutable reference
     repo_config_index: usize,
     branch_name: &str,
     commit_oid_str: &str,
@@ -952,7 +949,7 @@ async fn update_sync_status_and_languages(
     }
     let languages_vec: Vec<String> = current_languages.into_iter().collect();
 
-    // --- Update config ---
+    // --- Update config (directly mutate the passed reference) ---
     let repo_config_mut = config
         .repositories
         .get_mut(repo_config_index)
@@ -971,7 +968,7 @@ async fn update_sync_status_and_languages(
     }
     // If languages_vec is empty but repo_config_mut.indexed_languages was Some(..), we keep the old data
 
-    config::save_config(&config)?; // Save the modified config
+    config::save_config(&config)?; // Save the modified config (pass immutable reference to save_config)
     Ok(())
 }
 
@@ -1089,8 +1086,9 @@ async fn index_files(
             bail!("Failed to initialize embedding handler: {}", e);
         }
     };
-    let batch_size = 32; // TODO: Make configurable?
-    let mut points_to_upsert: Vec<PointStruct> = Vec::new();
+    // Remove unused variables
+    // let batch_size = 32; // TODO: Make configurable?
+    // let mut points_to_upsert: Vec<PointStruct> = Vec::new();
 
     // --- Progress Bar --- 
     let pb_style = ProgressStyle::with_template(

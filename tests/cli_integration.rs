@@ -616,7 +616,11 @@ async fn test_repo_sync_scenarios() -> Result<()> {
         .arg("sync")
         .assert()
         .success()
-        .stdout(predicate::str::contains("already up-to-date"));
+        .stdout(predicate::str::contains("already up-to-date"))
+        // Add assertion: Ensure no indexing happens when already up-to-date
+        .stdout(predicate::str::contains("Indexing all relevant files").not())
+        .stdout(predicate::str::contains("Indexing 1 added/renamed files").not())
+        .stdout(predicate::str::contains("Indexing 1 modified files").not());
 
     // 4. Add File
     println!("Adding new file and syncing...");

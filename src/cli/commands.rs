@@ -116,17 +116,17 @@ pub enum Commands {
 /// * `config` - The loaded application configuration ([`AppConfig`]).
 /// * `client` - An Arc-wrapped Qdrant client instance.
 pub async fn handle_command(
-    args: CliArgs, 
-    config: AppConfig, 
+    args: CliArgs,
+    config: &mut AppConfig,
     client: Arc<Qdrant>,
-) -> Result<()> { 
+) -> Result<()> {
     match args.command {
         // Pass args, config, and client to handlers that need them
-        Commands::Index(ref cmd_args) => super::index::handle_index(cmd_args, &args, config, client).await,
-        Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config, client).await,
-        Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config, client).await, 
-        Commands::List(cmd_args) => super::list::handle_list(cmd_args, config, client).await, 
-        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, config, client).await, 
+        Commands::Index(ref cmd_args) => super::index::handle_index(cmd_args, &args, config.clone(), client).await,
+        Commands::Query(ref cmd_args) => super::query::handle_query(cmd_args, &args, config.clone(), client).await,
+        Commands::Stats(cmd_args) => super::stats::handle_stats(cmd_args, config.clone(), client).await,
+        Commands::List(cmd_args) => super::list::handle_list(cmd_args, config.clone(), client).await,
+        Commands::Clear(cmd_args) => super::clear::handle_clear(cmd_args, config.clone(), client).await,
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client).await,
     }
 }
