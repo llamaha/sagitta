@@ -4,8 +4,7 @@ use colored::*;
 use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
-use crate::config::AppConfig;
-use crate::cli::repo_commands::get_collection_name;
+use crate::cli::commands::SIMPLE_INDEX_COLLECTION; // Import the renamed constant
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {
@@ -18,23 +17,19 @@ pub struct ClearArgs {
 
 pub async fn handle_clear(
     args: ClearArgs,
-    config: AppConfig, // Take ownership
+    // config: AppConfig, // No longer needed
     client: Arc<Qdrant>, // Accept client
 ) -> Result<()> {
-    // --- Get Active Repository and Collection --- 
-    let active_repo_name = config.active_repository.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("No active repository set. Use 'repo use <repo_name>' first.")
-    })?;
-    let collection_name = get_collection_name(active_repo_name);
-    log::info!("Preparing to clear data for repository: '{}', collection: '{}'", active_repo_name, collection_name);
+    // --- Target the Simple Collection Directly --- 
+    let collection_name = SIMPLE_INDEX_COLLECTION;
+    log::info!("Preparing to clear the simple index collection: '{}'", collection_name);
 
     // --- Confirmation --- 
     if !args.yes {
         print!(
             "{}",
             format!(
-                "Are you sure you want to delete ALL indexed data for repository '{}' (collection '{}')? [y/N]: ",
-                active_repo_name.yellow().bold(),
+                "Are you sure you want to delete the simple index (collection '{}')? [y/N]: ",
                 collection_name.yellow().bold()
             )
             .red()
@@ -56,7 +51,7 @@ pub async fn handle_clear(
     log::info!("Attempting to delete collection '{}'...", collection_name);
     println!("Deleting collection '{}'...", collection_name);
 
-    match client.delete_collection(&collection_name).await {
+    match client.delete_collection(collection_name).await {
         Ok(op_result) => {
             if op_result.result {
                 println!(
@@ -92,4 +87,39 @@ pub async fn handle_clear(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qdrant_client::Qdrant;
+    use std::sync::Arc;
+    use tokio::runtime::Runtime;
+    // Mock Qdrant client setup would be needed here
+
+    #[test]
+    #[ignore] // Ignored because it requires a running Qdrant instance
+    fn test_handle_clear_simple_index() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            // --- Setup Mock Client ---
+            // let mock_client = Qdrant::from_url("http://localhost:6334").build().unwrap(); // Replace with actual mock setup
+            // For now, assume a dummy client that succeeds
+            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Placeholder
+
+            // --- Prepare Args ---
+            let args = ClearArgs { yes: true };
+
+            // --- Expected Call --- 
+            // Mock expectation: client.delete_collection(SIMPLE_INDEX_COLLECTION) called once
+            // For simplicity, just run the handler and check Ok result
+
+            // --- Execute --- 
+            let result = handle_clear(args, client).await;
+
+            // --- Assert --- 
+            assert!(result.is_ok());
+            // In a real test with mocks, verify delete_collection was called with SIMPLE_INDEX_COLLECTION
+        });
+    }
 } 
