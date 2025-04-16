@@ -1,6 +1,6 @@
 // src/cli/repo_commands.rs
-mod list;
-mod r#use;
+pub mod list; // Make public for testing
+pub mod r#use; // Make public for testing
 mod clear;
 mod query;
 mod sync;
@@ -69,6 +69,12 @@ pub async fn handle_repo_command(
         RepoCommand::Sync(sync_args) => sync::handle_repo_sync(sync_args, cli_args, config, client, override_path).await,
         RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), client).await,
     }
+}
+
+// Helper function for tests - allows access to the list_repositories function
+#[cfg(test)]
+pub fn handle_repo_command_test(config: &AppConfig) -> Result<()> {
+    list::list_repositories(config)
 }
 
 #[cfg(test)]

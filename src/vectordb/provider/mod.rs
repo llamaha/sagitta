@@ -46,4 +46,36 @@ impl EmbeddingModelConfig {
             onnx_tokenizer_path: None,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_embedding_model_config_new() {
+        // Test the new() constructor
+        let config = EmbeddingModelConfig::new(EmbeddingModelType::Onnx);
+        
+        assert_eq!(config.model_type, EmbeddingModelType::Onnx);
+        assert!(config.onnx_model_path.is_none());
+        assert!(config.onnx_tokenizer_path.is_none());
+    }
+
+    #[test]
+    fn test_embedding_model_config_with_paths() {
+        // Create a config with paths
+        let mut config = EmbeddingModelConfig::new(EmbeddingModelType::Default);
+        
+        let model_path = PathBuf::from("/path/to/model.onnx");
+        let tokenizer_path = PathBuf::from("/path/to/tokenizer.json");
+        
+        config.onnx_model_path = Some(model_path.clone());
+        config.onnx_tokenizer_path = Some(tokenizer_path.clone());
+        
+        assert_eq!(config.model_type, EmbeddingModelType::Default);
+        assert_eq!(config.onnx_model_path, Some(model_path));
+        assert_eq!(config.onnx_tokenizer_path, Some(tokenizer_path));
+    }
 } 

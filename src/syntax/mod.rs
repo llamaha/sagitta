@@ -134,6 +134,8 @@ mod markdown_tests;
 mod python_tests; // Ensure python_tests is declared conditionally
 #[cfg(test)]
 mod fallback_tests; // Keep fallback_tests from HEAD/main
+#[cfg(test)]
+mod languages_tests; // Add tests for language detection
 
 #[cfg(test)]
 mod tests {
@@ -174,6 +176,35 @@ mod tests {
         // Expecting the fallback parser to be used, returning an empty result
         assert_eq!(result, AnalysisResult {});
 
+        Ok(())
+    }
+    
+    #[test]
+    fn test_get_chunks_for_multiple_languages() -> Result<()> {
+        // Test multiple file extensions to ensure parser selection works
+        let dir = tempdir()?;
+        
+        // Test Rust
+        let rust_path = dir.path().join("test.rs");
+        let mut rust_file = File::create(&rust_path)?;
+        writeln!(rust_file, "fn main() {{\n    println!(\"Hello\");\n}}")?;
+        let rust_chunks = get_chunks(&rust_path)?;
+        assert!(!rust_chunks.is_empty());
+        
+        // Test Python
+        let py_path = dir.path().join("test.py");
+        let mut py_file = File::create(&py_path)?;
+        writeln!(py_file, "def main():\n    print('Hello')")?;
+        let py_chunks = get_chunks(&py_path)?;
+        assert!(!py_chunks.is_empty());
+        
+        // Test unknown extension (fallback)
+        let unknown_path = dir.path().join("test.xyz");
+        let mut unknown_file = File::create(&unknown_path)?;
+        writeln!(unknown_file, "Some random content")?;
+        let unknown_chunks = get_chunks(&unknown_path)?;
+        assert!(!unknown_chunks.is_empty());
+        
         Ok(())
     }
 }

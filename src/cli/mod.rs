@@ -2,9 +2,9 @@
 
 pub mod commands;
 pub mod formatters;
+pub mod stats;
 
 // New module declarations for command handlers
-pub mod stats;
 pub mod clear;
 pub mod repo_commands;
 pub mod simple;

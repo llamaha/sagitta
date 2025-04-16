@@ -3,7 +3,7 @@ use colored::*;
 
 use crate::config::AppConfig;
 
-pub(crate) fn list_repositories(config: &AppConfig) -> Result<()> {
+pub fn list_repositories(config: &AppConfig) -> Result<()> {
     if config.repositories.is_empty() {
         println!("No repositories configured yet. Use 'repo add <url>' to add one.");
         return Ok(());
