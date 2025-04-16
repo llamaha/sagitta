@@ -1,5 +1,45 @@
 # vectordb-cli Release Notes
 
+## v1.4.3 - CLI Restructuring and Markdown Improvements
+
+This release enhances the CLI structure, significantly improves markdown parsing, and includes various fixes and optimizations.
+
+### Features and Improvements
+- Improved markdown parser with section-based chunking to provide better document context
+- Separated clear commands for simple index and repositories
+- Moved simple commands into dedicated CLI subcommand
+- Modularized repository commands for better maintainability
+- Implemented progress bar for repository add operations
+- Added dynamic embedding size support for CodeBERT models
+- Replaced public API with a network layer
+
+### Bug Fixes
+- Fixed repository sync to prevent full reindex by passing config mutably
+- Fixed SSH authentication issues
+- Various minor fixes and improvements
+
+### Documentation and Other Changes
+- Increased test coverage from 38.52% to 42.27%
+- Updated README with stability status information
+- Reorganized CLI command structure for better usability
+- Removed ambiguous top-level 'list' command
+
+### Commits
+- `21205cd` - Improve markdown parser with section-based chunking to provide better document context
+- `c35af44` - Replace the public API with a network layer
+- `269ca94` - Dynamic embedding size for CodeBERT
+- `29859e9` - Fix SSH authentication
+- `1903e80` - Increase test coverage to 42.27%
+- `02878e8` - Implement progress bar for repo add
+- `eb6f756` - Put sync command in own file
+- `5fbf82a` - Minor fixes
+- `781bf74` - Modularize repo commands
+- `9db1e44` - Remove ambiguous top-level 'list' command
+- `f2a669c` - Move simple commands into simple CLI subcommand
+- `5e27149` - Separate clear commands for simple index and repositories
+- `1a566f3` - Prevent full reindex on sync by passing config mutably
+- `2ede043` - Add note to README.md about stability status
+
 ## v1.2.1 - Improved Repository Management and Binary Setup (2025-04-14)
 
 This release enhances robustness around configuration and repository handling, and improves binary location setup.
