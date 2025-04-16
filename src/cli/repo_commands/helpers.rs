@@ -37,8 +37,25 @@ pub(crate) fn create_fetch_options<'a>(
     let relevant_repo_config = repo_configs.iter()
         .find(|r| r.url == repo_url)
         .cloned();
+        
+    // Check if running in server mode (no interactive prompts allowed)
+    #[cfg(feature = "server")]
+    let is_server_mode = true;
+    #[cfg(not(feature = "server"))]
+    let is_server_mode = false;
+    
+    // Is this an SSH URL? (starts with git@ or ssh://)
+    let is_ssh_url = repo_url.starts_with("git@") || repo_url.starts_with("ssh://");
+    
     callbacks.credentials(move |_url, username_from_git, allowed_types| {
         log::debug!("Credential callback triggered. URL: {}, Username: {:?}, Allowed: {:?}", _url, username_from_git, allowed_types);
+        
+        // In server mode, immediately fail for SSH URLs without explicit credentials
+        if is_server_mode && is_ssh_url && ssh_key_path.is_none() && 
+           !relevant_repo_config.as_ref().and_then(|r| r.ssh_key_path.as_ref()).is_some() {
+            log::error!("Server mode detected with SSH URL '{}' but no SSH key configured. Use HTTPS URLs or configure SSH keys explicitly.", _url);
+            return Err(git2::Error::from_str("Server mode cannot use interactive authentication. Use HTTPS URLs or configure SSH keys explicitly."));
+        }
         
         // First check direct SSH key parameters (for new repositories)
         if allowed_types.contains(CredentialType::SSH_KEY) && ssh_key_path.is_some() {
@@ -77,6 +94,12 @@ pub(crate) fn create_fetch_options<'a>(
             }
         } else {
             log::debug!("No repository configuration found for URL '{}' in credential callback.", _url);
+        }
+        
+        // In server mode, don't try to use default credentials which might prompt for a password
+        if is_server_mode && is_ssh_url {
+            log::error!("No configured SSH credentials found for URL '{}' in server mode. Unable to authenticate.", _url);
+            return Err(git2::Error::from_str("Server mode cannot use interactive authentication. Configure SSH keys explicitly."));
         }
         
         // Finally try default
@@ -590,5 +613,26 @@ mod tests {
         // Just verify that it builds the options without errors
         assert!(result.is_ok());
         // We can't easily test the callbacks directly in a unit test
+    }
+    
+    #[test]
+    fn test_is_ssh_url_detection() {
+        // Test SSH URL detection for git@ format
+        let repo_url = "git@github.com:user/repo.git";
+        assert!(repo_url.starts_with("git@") || repo_url.starts_with("ssh://"));
+        
+        // Test SSH URL detection for ssh:// format
+        let repo_url = "ssh://git@example.com/user/repo.git";
+        assert!(repo_url.starts_with("git@") || repo_url.starts_with("ssh://"));
+        
+        // Test non-SSH URL
+        let repo_url = "https://github.com/user/repo.git";
+        assert!(!(repo_url.starts_with("git@") || repo_url.starts_with("ssh://")));
+    }
+    
+    #[test]
+    fn test_get_collection_name() {
+        assert_eq!(get_collection_name("test-repo"), "repo_test-repo");
+        assert_eq!(get_collection_name("my_project"), "repo_my_project");
     }
 }

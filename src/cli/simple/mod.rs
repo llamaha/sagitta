@@ -1,3 +1,6 @@
+// Add the index module
+pub mod index;
+
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use qdrant_client::{
@@ -35,6 +38,15 @@ pub struct SimpleArgs {
     pub command: SimpleCommand,
 }
 
+// Implement Default for SimpleArgs
+impl Default for SimpleArgs {
+    fn default() -> Self {
+        Self {
+            command: SimpleCommand::default(),
+        }
+    }
+}
+
 // Enum for the subcommands within 'simple'
 #[derive(Subcommand, Debug, Clone)] 
 pub enum SimpleCommand {
@@ -44,6 +56,18 @@ pub enum SimpleCommand {
     Query(SimpleQueryArgs),
     /// Clear the default collection used by 'simple index'.
     Clear(SimpleClearArgs),
+}
+
+// Implement Default for SimpleCommand
+impl Default for SimpleCommand {
+    fn default() -> Self {
+        Self::Query(SimpleQueryArgs {
+            query: String::new(),
+            limit: 10,
+            lang: None,
+            element_type: None,
+        })
+    }
 }
 
 // Args structs for subcommands

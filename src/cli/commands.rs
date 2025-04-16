@@ -58,6 +58,31 @@ pub struct CliArgs {
     pub onnx_tokenizer_dir_arg: Option<String>,
 }
 
+// Implement Default for CliArgs for use in server code
+impl Default for CliArgs {
+    fn default() -> Self {
+        Self {
+            command: Commands::Simple(super::simple::SimpleArgs {
+                command: super::simple::SimpleCommand::Query(super::simple::SimpleQueryArgs {
+                    query: String::new(),
+                    limit: 10,
+                    lang: None,
+                    element_type: None,
+                }),
+            }),
+            onnx_model_path_arg: None,
+            onnx_tokenizer_dir_arg: None,
+        }
+    }
+}
+
+// Implementation for Commands enum needed for Default implementation
+impl Default for Commands {
+    fn default() -> Self {
+        Commands::Simple(super::simple::SimpleArgs::default())
+    }
+}
+
 // Global flag for handling interrupts
 // pub static mut INTERRUPT_RECEIVED: bool = false; // Commented out as unused for now
 
@@ -101,6 +126,10 @@ pub enum Commands {
     /// Manage the simple, non-repository index (index, query, clear)
     #[command(subcommand_negates_reqs = true)]
     Simple(super::simple::SimpleArgs), // Add Simple command group
+    /// Start the VectorDB server with gRPC API
+    #[command(subcommand_negates_reqs = true)]
+    #[cfg(feature = "server")]
+    Server(super::server::ServerArgs), // Add Server command
 }
 
 // --- Main Command Handler Function ---
@@ -118,6 +147,8 @@ pub async fn handle_command(
     match args.command {
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client, None).await,
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
+        #[cfg(feature = "server")]
+        Commands::Server(ref cmd_args) => super::server::handle_server_command(cmd_args.clone(), &args, config.clone(), client).await,
     }
 }
 
