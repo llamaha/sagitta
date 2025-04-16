@@ -4,8 +4,6 @@ A lightweight command-line tool for fast, local code search using semantic retri
 
 **Note:** This repository contains both the `vectordb-cli` command-line tool and the underlying `vectordb_lib` library.
 
-**Note:** This is currently not a stable product.  It works but has bugs.  I am working hard to fix these bugs and increase test coverage (current coverage ~28%).
-
 ## Table of Contents
 
 -   [Features](#features)
@@ -444,7 +442,7 @@ Refer to the [ONNX Runtime installation guide](https://onnxruntime.ai/docs/insta
 
 ## Development
 
-(Include instructions for setting up the dev environment, running tests, etc.)
+The project has 42% unit test coverage and thorough end-to-end testing for key features.
 
 ```bash
 # Run tests

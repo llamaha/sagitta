@@ -32,7 +32,7 @@ pub async fn handle_use_branch(args: UseBranchArgs, config: &mut AppConfig, over
         .with_context(|| format!("Failed to open repository at {}", repo_config.local_path.display()))?;
 
     let target_branch_name = &args.name;
-    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin");
+    let remote_name = repo_config.remote_name.clone().unwrap_or_else(|| "origin".to_string());
     let repo_url = repo_config.url.clone();
 
     if repo.find_branch(target_branch_name, git2::BranchType::Local).is_err() {
@@ -42,9 +42,14 @@ pub async fn handle_use_branch(args: UseBranchArgs, config: &mut AppConfig, over
         );
         
         println!("Fetching from remote '{}' to update refs...", remote_name);
-        let mut remote = repo.find_remote(remote_name)?;
+        let mut remote = repo.find_remote(&remote_name)?;
         let repo_configs_clone = config.repositories.clone();
-        let mut fetch_opts = helpers::create_fetch_options(repo_configs_clone, &repo_url)?;
+        let mut fetch_opts = helpers::create_fetch_options(
+            repo_configs_clone, 
+            &repo_url,
+            repo_config.ssh_key_path.as_ref(),
+            repo_config.ssh_key_passphrase.as_deref()
+        )?;
         remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)
             .with_context(|| format!("Failed initial fetch from remote '{}' before branch check", remote_name))?;
         println!("Fetch for refs update complete.");

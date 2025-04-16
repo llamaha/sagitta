@@ -4,7 +4,7 @@ use anyhow::{Result, Context};
 use clap::Parser;
 use std::sync::Arc;
 use std::process::exit;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::fmt;
 
 // Import library modules
 use vectordb_lib::{

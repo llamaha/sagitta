@@ -1,16 +1,9 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use colored::*;
-use git2::{Repository, RemoteCallbacks};
+use git2::Repository;
 use qdrant_client::Qdrant;
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
-use std::time::Duration;
-use std::io::{self, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc as StdArc;
-use regex::Regex;
-use std::sync::Mutex;
 
 use crate::config::{self, AppConfig};
 use crate::cli::repo_commands::helpers;
@@ -86,239 +79,42 @@ pub async fn handle_repo_add(
             format!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, args.url).bold().cyan()
         );
         
-        let repo_configs_clone = config.repositories.clone();
+        // Create the directory if it doesn't exist
+        fs::create_dir_all(&local_path)
+            .with_context(|| format!("Failed to create directory at {}", local_path.display()))?;
         
-        // Setup progress display with shared multi-progress
-        let multi_progress = MultiProgress::new();
+        // Use direct git command instead of git2-rs for SSH authentication
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("clone")
+           .arg(&args.url)
+           .arg(&local_path);
         
-        // Create progress bar templates without adding them to the display yet
-        let transfer_pb_template = ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] Downloading & Indexing: {pos}/{len} objects ({per_sec}, {eta}) {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("#>-");
-            
-        let compression_pb_template = ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.green/blue}] Compressing: {pos}% ({msg})")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("#>-");
-            
-        let checkout_pb_template = ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.magenta/blue}] Checking out: {pos}/{len} files ({per_sec}, {eta}) {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_bar())
-            .progress_chars("#>-");
-        
-        // Shared progress bars that will only be displayed when needed
-        let transfer_pb = StdArc::new(Mutex::new(None::<ProgressBar>));
-        let compression_pb = StdArc::new(Mutex::new(None::<ProgressBar>));
-        let checkout_pb = StdArc::new(Mutex::new(None::<ProgressBar>));
-        
-        // Create the fetch options with callbacks
-        let mut fetch_opts = helpers::create_fetch_options(repo_configs_clone, &args.url)?;
-        
-        // Create new callbacks with progress reporting
-        let mut callbacks = RemoteCallbacks::new();
-        
-        // Add direct transfer progress callback with lazy creation of progress bar
-        let transfer_pb_clone = transfer_pb.clone();
-        let multi_progress_clone = multi_progress.clone();
-        let transfer_template = transfer_pb_template.clone();
-        
-        callbacks.transfer_progress(move |stats| {
-            let total_objects = stats.total_objects();
-            let indexed_objects = stats.indexed_objects();
-            let received_objects = stats.received_objects();
-            
-            // Only create and update progress bar if we have actual work to do
-            if total_objects > 0 && (received_objects > 0 || indexed_objects > 0) {
-                // Create progress bar if it doesn't exist
-                let mut pb_guard = transfer_pb_clone.lock().unwrap();
-                if pb_guard.is_none() {
-                    let pb = multi_progress_clone.add(ProgressBar::new(total_objects as u64));
-                    pb.set_style(transfer_template.clone());
-                    pb.enable_steady_tick(Duration::from_millis(100));
-                    *pb_guard = Some(pb);
-                }
-                
-                // Update the progress bar
-                if let Some(pb) = pb_guard.as_ref() {
-                    // Calculate overall progress considering both receiving and indexing
-                    // We use the minimum of received and indexed to show accurate overall progress
-                    // This will prevent the progress bar from reaching 100% until both are complete
-                    let progress = indexed_objects.min(received_objects) as u64;
-                    pb.set_position(progress);
-                    
-                    pb.set_message(format!(
-                        "{}/{} received, {}/{} indexed", 
-                        received_objects, total_objects,
-                        indexed_objects, total_objects
-                    ));
-                }
-            }
-            
-            // Always continue
-            true
-        });
-        
-        // Track compression progress with lazy creation of progress bar
-        let compression_pb_clone = compression_pb.clone();
-        let multi_progress_clone = multi_progress.clone();
-        let compression_template = compression_pb_template.clone();
-        
-        // Regular expressions for detecting different types of messages
-        let compressing_re = Regex::new(r"Compressing objects:\s+(\d+)%\s*\((\d+)/(\d+)\)").unwrap_or_else(|_| Regex::new(r"").unwrap());
-        let counting_re = Regex::new(r"Counting objects:\s+(\d+)%").unwrap_or_else(|_| Regex::new(r"").unwrap());
-        
-        // Add progress printing for sideband messages with direct updates and lazy progress bar creation
-        callbacks.sideband_progress(move |data| {
-            if let Ok(text) = std::str::from_utf8(data) {
-                let text = text.trim();
-                if !text.is_empty() {
-                    // Check for compression progress
-                    if let Some(captures) = compressing_re.captures(text) {
-                        if let (Some(percent_str), Some(current_str), Some(total_str)) = 
-                            (captures.get(1), captures.get(2), captures.get(3)) {
-                            if let (Ok(percent), Ok(current), Ok(total)) = 
-                                (percent_str.as_str().parse::<u64>(), 
-                                 current_str.as_str().parse::<u64>(), 
-                                 total_str.as_str().parse::<u64>()) {
-                                
-                                // Only create and update if we have real progress (percent > 0)
-                                if percent > 0 {
-                                    // Create progress bar if it doesn't exist
-                                    let mut pb_guard = compression_pb_clone.lock().unwrap();
-                                    if pb_guard.is_none() {
-                                        let pb = multi_progress_clone.add(ProgressBar::new(100));
-                                        pb.set_style(compression_template.clone());
-                                        pb.enable_steady_tick(Duration::from_millis(100));
-                                        *pb_guard = Some(pb);
-                                    }
-                                    
-                                    // Update the progress bar
-                                    if let Some(pb) = pb_guard.as_ref() {
-                                        pb.set_position(percent);
-                                        pb.set_message(format!("{}/{} objects", current, total));
-                                    }
-                                }
-                                
-                                // Don't print compression percentage updates
-                                return true;
-                            }
-                        }
-                    }
-                    
-                    // Filter out all Git progress messages that we're already displaying with our own progress bars
-                    if counting_re.is_match(text) ||                           // Counting objects
-                       text.contains("Receiving objects:") ||                   // Receiving objects
-                       text.contains("Resolving deltas:") ||                    // Resolving deltas
-                       text.contains("Compressing objects:") ||                 // Compressing objects
-                       text.contains("Writing objects:") ||                     // Writing objects
-                       text.contains("Total") && text.contains("delta") ||      // Delta stats
-                       text.contains("remote:") && text.contains("Enumerating objects") { // Remote enumerating
-                        return true;
-                    }
-                    
-                    // Print truly informative messages
-                    // Keep informative ones like "Enumerating objects: 278808, done"
-                    if text.contains("done") || (!text.contains("remote:") && !text.contains("%")) {
-                        let _ = writeln!(io::stderr(), "Remote: {}", text);
-                    }
-                }
-            }
-            true
-        });
-        
-        // Update fetch options with our callbacks
-        fetch_opts.remote_callbacks(callbacks);
-        
-        // Set up builder and checkout
-        let mut builder = git2::build::RepoBuilder::new();
-        builder.fetch_options(fetch_opts);
-        
-        // Create checkout options with lazy progress creation
-        let mut checkout_builder = git2::build::CheckoutBuilder::new();
-        
-        // Add a counter to track checkout progress
-        let total_files = StdArc::new(AtomicU64::new(0));
-        let checkout_pb_clone = checkout_pb.clone();
-        let multi_progress_clone = multi_progress.clone();
-        let checkout_template = checkout_pb_template.clone();
-        
-        // Set up checkout progress monitoring with lazy creation
-        checkout_builder.progress(move |path, cur, total| {
-            if total > 0 {
-                // Create progress bar if it doesn't exist
-                let mut pb_guard = checkout_pb_clone.lock().unwrap();
-                if pb_guard.is_none() {
-                    let pb = multi_progress_clone.add(ProgressBar::new(total as u64));
-                    pb.set_style(checkout_template.clone());
-                    pb.enable_steady_tick(Duration::from_millis(100));
-                    *pb_guard = Some(pb);
-                }
-                
-                // Update total if needed
-                if total_files.load(Ordering::Relaxed) != total as u64 {
-                    total_files.store(total as u64, Ordering::Relaxed);
-                }
-                
-                // Update the progress bar
-                if let Some(pb) = pb_guard.as_ref() {
-                    pb.set_position(cur as u64);
-                    
-                    // Update file path if available
-                    if let Some(path) = path {
-                        if let Some(path_str) = path.to_str() {
-                            // Truncate long paths to avoid excessive output
-                            let display_path = if path_str.len() > 40 {
-                                let shortened = &path_str[path_str.len().saturating_sub(40)..];
-                                format!("...{}", shortened)
-                            } else {
-                                path_str.to_string()
-                            };
-                            pb.set_message(format!("Checking out: {}", display_path));
-                        }
-                    }
-                }
-            }
-        });
-        
-        builder.with_checkout(checkout_builder);
-        
-        // Clone the repository
-        match builder.clone(&args.url, &local_path) {
-            Ok(repo) => {
-                // Finish progress bars if they exist
-                if let Some(pb) = transfer_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Download & indexing complete");
-                }
-                
-                if let Some(pb) = compression_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Compression complete");
-                }
-                
-                if let Some(pb) = checkout_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Checkout complete");
-                }
-                
-                println!("\nRepository cloned successfully to {}", local_path.display());
-                repo
-            },
-            Err(e) => {
-                // Finish progress bars if they exist
-                if let Some(pb) = transfer_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Download & indexing failed");
-                }
-                
-                if let Some(pb) = compression_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Compression failed");
-                }
-                
-                if let Some(pb) = checkout_pb.lock().unwrap().take() {
-                    pb.finish_with_message("Checkout failed");
-                }
-                
-                return Err(anyhow::anyhow!("Failed to clone repository: {}", e));
-            }
+        // If SSH key is provided, use GIT_SSH_COMMAND to specify the key
+        if let Some(ssh_key) = &args.ssh_key {
+            let ssh_cmd = if let Some(_passphrase) = &args.ssh_passphrase {
+                // With passphrase - note: for SSH keys with passphrase, the SSH agent should be running
+                // and should have the key loaded, as Git can't handle passphrase input non-interactively
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            } else {
+                // Without passphrase
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            };
+            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+            println!("Using SSH key: {}", ssh_key.display());
         }
+            
+        let status = cmd.status()
+            .with_context(|| format!("Failed to execute git clone command"))?;
+        
+        if !status.success() {
+            return Err(anyhow!("Git clone command failed with exit code: {}", status));
+        }
+        
+        println!("\nRepository cloned successfully to {}", local_path.display());
+        
+        // Open the repository after cloning
+        Repository::open(&local_path)
+            .with_context(|| format!("Failed to open newly cloned repository at {}", local_path.display()))?
     };
 
     let initial_branch_name = match args.branch {
