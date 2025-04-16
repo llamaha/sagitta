@@ -8,7 +8,7 @@ use tracing_subscriber::fmt;
 
 // Import library modules
 use vectordb_lib::{
-    config,
+    config::{self, AppConfig},
     cli::commands::handle_command,
     cli::commands::CliArgs,
 };

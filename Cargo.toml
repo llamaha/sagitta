@@ -1,7 +1,7 @@
 [package]
 name = "vectordb-cli"
 description = "A CLI tool for semantic code search."
-version = "1.3.3-stable"
+version = "1.4.3-stable"
 edition = "2021"
 authors = ["Adam Mulvany <amulvany@gitlab.com>"]
 license = "MIT"
@@ -25,10 +25,18 @@ exclude = [
     # Add other specific file patterns if needed, e.g., "*.onnx"
 ]
 
+[workspace]
+members = [
+    "crates/vectordb-client",
+    "proto/rust",
+]
+
 [features]
 default = ["onnx"]
 onnx = ["ort"]
 cuda = ["ort/cuda"]
+# Add server feature
+server = ["tonic/tls", "prost", "tonic-reflection", "tower", "vectordb-proto"]
 
 [dependencies]
 clap = { version = "4.5.7", features = ["derive", "env"] }
@@ -86,6 +94,15 @@ env_logger = "0.11.3"
 toml = "0.8.20"
 futures = "0.3.31"
 git2 = "0.18.3"
+# Add gRPC dependencies
+tonic = { version = "0.10", optional = true, features = ["tls"] }
+prost = { version = "0.12", optional = true }
+tonic-reflection = { version = "0.10", optional = true }
+tower = { version = "0.4", optional = true, features = ["limit"] }
+# Add this for code generation
+vectordb-proto = { path = "proto/rust", optional = true }
+# Add new client dependency
+vectordb-client = { path = "crates/vectordb-client" }
 
 [dev-dependencies]
 tempfile = "3"
@@ -113,4 +130,8 @@ path = "src/bin/vectordb-cli.rs"
 [build-dependencies]
 fs_extra = "1.3"
 dirs = "5.0"
+# Add build dependencies for proto compilation
+# Note: These will be used in a later step when we update build.rs
+tonic-build = { version = "0.10", optional = true }
+prost-build = { version = "0.12", optional = true }
 # Add other build dependencies if needed

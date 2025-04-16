@@ -1,0 +1,16 @@
+[package]
+name = "vectordb-proto"
+version = "0.1.0"
+edition = "2021"
+authors = ["Adam Mulvany <amulvany@gitlab.com>"]
+description = "Protocol buffer definitions for vectordb-cli"
+license = "MIT"
+
+[dependencies]
+tonic = "0.10.2"
+prost = "0.12.3"
+prost-types = "0.12.3"
+
+[build-dependencies]
+tonic-build = "0.10.2"
+prost-build = "0.12.3" 

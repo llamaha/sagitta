@@ -211,6 +211,14 @@ fn test_cli_clear_failures() -> Result<()> {
 
     // 3. Setup a repo to test cancellation
     println!("Setting up dummy repo for cancellation test...");
+    let onnx_paths_opt = get_default_onnx_paths();
+    if onnx_paths_opt.is_none() {
+        println!("Skipping test_cli_clear_failures: Default ONNX files not found.");
+        return Ok(());
+    }
+    let (model_path, tokenizer_path) = onnx_paths_opt.unwrap();
+    let tokenizer_dir = tokenizer_path.parent().ok_or(anyhow::anyhow!("Tokenizer path has no parent"))?;
+    
     let dummy_repo_url = "https://github.com/git-fixtures/basic.git"; // Use a known small public repo
     Command::new(&bin_path)
         .arg("repo")
@@ -218,6 +226,8 @@ fn test_cli_clear_failures() -> Result<()> {
         .arg("--url").arg(dummy_repo_url) // Use the --url flag
         .arg("--name")
         .arg("dummy-for-clear")
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
         .assert()
         .success();
 
@@ -226,6 +236,8 @@ fn test_cli_clear_failures() -> Result<()> {
     Command::new(&bin_path)
         .arg("repo")
         .arg("clear") // Should default to active repo 'dummy-for-clear'
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
         .assert()
         .success() // Should exit successfully after cancellation
         .stdout(predicate::str::contains("Operation cancelled"));
@@ -235,6 +247,8 @@ fn test_cli_clear_failures() -> Result<()> {
         .arg("repo")
         .arg("remove")
         .arg("dummy-for-clear")
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
         .assert()
         .success();
     
@@ -245,6 +259,8 @@ fn test_cli_clear_failures() -> Result<()> {
     Command::new(&bin_path)
         .arg("simple")
         .arg("clear")
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
         .assert()
         .success();
 

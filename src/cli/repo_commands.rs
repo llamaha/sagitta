@@ -1,12 +1,12 @@
 // src/cli/repo_commands.rs
 pub mod list; // Make public for testing
 pub mod r#use; // Make public for testing
-mod clear;
-mod query;
-mod sync;
-mod use_branch;
-mod add;
-mod remove;
+pub mod clear;
+pub mod query;
+pub mod sync;
+pub mod use_branch;
+pub mod add;
+pub mod remove;
 pub mod helpers; // Make public
 
 use anyhow::Result;
@@ -20,6 +20,14 @@ use crate::cli::commands::CliArgs;
 const COLLECTION_NAME_PREFIX: &str = "repo_";
 pub(crate) const FIELD_BRANCH: &str = "branch";
 pub(crate) const FIELD_COMMIT_HASH: &str = "commit_hash";
+
+// Public functions for server use
+pub use add::handle_repo_add as add_repository;
+pub use r#use::use_repository as set_active_repo;
+pub use remove::handle_repo_remove as remove_repository;
+pub use sync::handle_repo_sync as sync_repository;
+pub use use_branch::handle_use_branch as use_branch;
+pub use list::get_managed_repos;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]

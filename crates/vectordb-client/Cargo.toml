@@ -1,0 +1,32 @@
+[package]
+name = "vectordb-client"
+description = "Client library for interacting with the VectorDB semantic code search service."
+version = "0.1.0"
+edition = "2021"
+authors = ["Adam Mulvany <amulvany@gitlab.com>"]
+license = "MIT"
+repository = "https://gitlab.com/amulvany/vectordb-cli"
+keywords = ["search", "semantic", "code", "vector", "onnx"]
+categories = ["development-tools"]
+homepage = "https://gitlab.com/amulvany/vectordb-cli"
+documentation = "https://docs.rs/vectordb-client"
+
+[features]
+default = []
+# Server feature - enables tests that require a running server
+server = []
+
+[dependencies]
+thiserror = "1.0.61"
+tokio = { version = "1.38.0", features = ["full"] }
+tonic = { version = "0.10", features = ["tls"] }
+prost = "0.12"
+# The proto crate will be available as a path dependency
+vectordb-proto = { path = "../../proto/rust" }
+serde = { version = "1.0.203", features = ["derive"] }
+toml = "0.8.20"
+async-trait = "0.1.77"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+anyhow = "1.0.86" 

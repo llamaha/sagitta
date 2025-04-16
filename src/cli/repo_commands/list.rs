@@ -3,6 +3,21 @@ use colored::*;
 
 use crate::config::AppConfig;
 
+// Define a struct to hold managed repository information
+pub struct ManagedRepositories {
+    pub repositories: Vec<crate::config::RepositoryConfig>,
+    pub active_repository: Option<String>,
+}
+
+// Function to get managed repositories information
+pub fn get_managed_repos(config: &AppConfig) -> Result<ManagedRepositories> {
+    // Return repository data from config
+    Ok(ManagedRepositories {
+        repositories: config.repositories.clone(),
+        active_repository: config.active_repository.clone(),
+    })
+}
+
 pub fn list_repositories(config: &AppConfig) -> Result<()> {
     if config.repositories.is_empty() {
         println!("No repositories configured yet. Use 'repo add <url>' to add one.");

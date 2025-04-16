@@ -1,59 +1,46 @@
-// examples/basic_usage.rs
+// This example demonstrates how to use the vectordb-cli and vectordb-client crates
 
-/* // Comment out the entire example for now
-use anyhow::Result;
-use std::path::PathBuf;
-use vectordb_lib::{VectorDB, VectorDBConfig};
+use std::error::Error;
+// When using the client, it's recommended to use the dedicated crate
+use vectordb_client::VectorDBClient;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    // Setup configuration (replace with your actual paths)
-    let config = VectorDBConfig {
-        db_path: "./my_vectordb.json".to_string(), // Path to store database state
-        onnx_model_path: PathBuf::from("onnx/all-minilm-l12-v2.onnx"),
-        onnx_tokenizer_path: PathBuf::from("onnx/minilm_tokenizer.json"),
-    };
-
-    // Initialize the database
-    let mut db = VectorDB::new(config)?;
-
-    // --- Indexing ---
-    let dir_to_index = "./src"; // Directory you want to index
-    let file_types_to_index = vec!["rs".to_string()]; // Only index Rust files
-
-    println!("Indexing directory: {}", dir_to_index);
-    db.index_directory(dir_to_index, &file_types_to_index)?;
-    println!("Indexing complete.");
-
-    // --- Searching ---
-    let query = "function to handle errors";
-    let limit = 5; // Number of results to return
-
-    println!("\nSearching for: '{}'", query);
-    let results = db.search(query, limit, None)?; // No file type filter for search
-
-    if results.is_empty() {
-        println!("No results found.");
-    } else {
-        println!("Found {} results:", results.len());
-        for (i, result) in results.iter().enumerate() {
-            println!(
-                " {}. {} (Lines {}-{}) Score: {:.4}",
-                i + 1,
-                result.file_path,
-                result.start_line,
-                result.end_line,
-                result.score
-            );
-            println!("   ```\n{}
-   ```", result.text);
-        }
+async fn main() -> Result<(), Box<dyn Error>> {
+    // Create a client with default configuration (localhost:50051)
+    let mut client = VectorDBClient::default().await?;
+    
+    // Get server info
+    let server_info = client.get_server_info().await?;
+    println!("Connected to server version: {}", server_info.version);
+    
+    // List collections
+    let collections = client.list_collections().await?;
+    println!("Available collections:");
+    for collection in collections.collections {
+        println!("  - {}", collection);
     }
-
+    
+    // Create a test collection
+    let result = client.create_collection(
+        "test_collection".to_string(),
+        384,
+        "cosine".to_string()
+    ).await?;
+    
+    if result.success {
+        println!("Collection created successfully: {}", result.message);
+    } else {
+        println!("Failed to create collection: {}", result.message);
+    }
+    
+    // Clean up: delete the test collection
+    let result = client.delete_collection("test_collection".to_string()).await?;
+    
+    if result.success {
+        println!("Collection deleted successfully: {}", result.message);
+    } else {
+        println!("Failed to delete collection: {}", result.message);
+    }
+    
     Ok(())
 }
-*/
-
-fn main() {
-    println!("Example commented out pending Qdrant migration.");
-} 
