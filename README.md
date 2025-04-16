@@ -10,6 +10,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
 -   [Use Cases](#use-cases)
 -   [Supported Languages](#supported-languages)
 -   [Setup](#setup)
+    -   [Local Quickstart Guide](./docs/local_quickstart.md)
     -   [Prerequisites](#prerequisites)
     -   [Qdrant Setup](#qdrant-setup)
     -   [Environment Setup Guides](#environment-setup-guides)
@@ -91,6 +92,8 @@ Support for the following languages is planned for future releases:
 *   JSON (`.json`)
 
 ## Setup
+
+For new users, the [Local Quickstart Guide](./docs/local_quickstart.md) provides minimal steps to get up and running quickly.
 
 ### Prerequisites
 
