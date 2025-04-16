@@ -135,7 +135,29 @@ pub async fn handle_repo_add(
     
     let collection_name = helpers::get_collection_name(&repo_name);
     println!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
-    helpers::ensure_repository_collection_exists(&client, &collection_name).await?;
+    
+    // Determine model and tokenizer paths from the config
+    let onnx_model_path_str = config.onnx_model_path.as_deref()
+        .ok_or_else(|| anyhow!("ONNX model path must be provided in config"))?;
+    
+    let onnx_tokenizer_dir_str = config.onnx_tokenizer_path.as_deref()
+        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided in config"))?;
+    
+    // Initialize embedding handler to get actual model dimension
+    let embedding_handler = crate::vectordb::embedding_logic::EmbeddingHandler::new(
+        crate::vectordb::embedding::EmbeddingModelType::Onnx,
+        Some(PathBuf::from(onnx_model_path_str)),
+        Some(PathBuf::from(onnx_tokenizer_dir_str)),
+    )
+    .context("Failed to initialize embedding handler for collection creation")?;
+    
+    // Get actual embedding dimension from the model
+    let embedding_dim = embedding_handler.dimension()
+        .context("Failed to determine embedding dimension")?;
+    
+    println!("Using embedding dimension from model: {}", embedding_dim);
+    
+    helpers::ensure_repository_collection_exists(&client, &collection_name, embedding_dim as u64).await?;
     println!("Qdrant collection ensured.");
 
     let new_repo_config = config::RepositoryConfig {
