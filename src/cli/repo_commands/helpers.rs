@@ -30,6 +30,8 @@ pub(crate) fn is_supported_extension(extension: &str) -> bool {
 pub(crate) fn create_fetch_options<'a>(
     repo_configs: Vec<RepositoryConfig>,
     repo_url: &'a str,
+    ssh_key_path: Option<&'a PathBuf>,
+    ssh_key_passphrase: Option<&'a str>,
 ) -> Result<FetchOptions<'a>> {
     let mut callbacks = RemoteCallbacks::new();
     let relevant_repo_config = repo_configs.iter()
@@ -37,30 +39,47 @@ pub(crate) fn create_fetch_options<'a>(
         .cloned();
     callbacks.credentials(move |_url, username_from_git, allowed_types| {
         log::debug!("Credential callback triggered. URL: {}, Username: {:?}, Allowed: {:?}", _url, username_from_git, allowed_types);
-        let repo_config = match &relevant_repo_config {
-            Some(conf) => conf,
-            None => {
-                log::error!("Could not find repository config for URL '{}' in credential callback.", _url);
-                 return Err(git2::Error::from_str("Repository config not found for credential callback"));
+        
+        // First check direct SSH key parameters (for new repositories)
+        if allowed_types.contains(CredentialType::SSH_KEY) && ssh_key_path.is_some() {
+            let user = username_from_git.unwrap_or("git");
+            let key_path = ssh_key_path.unwrap();
+            log::debug!("Attempting SSH key authentication from direct parameters. User: '{}', Key Path: {}", user, key_path.display());
+            match Cred::ssh_key(user, None, key_path, ssh_key_passphrase) {
+                Ok(cred) => {
+                    log::info!("SSH key credential created successfully from direct parameters for user '{}'.", user);
+                    return Ok(cred);
+                }
+                Err(e) => {
+                    log::error!("Failed to create SSH key credential from direct parameter path {}: {}", key_path.display(), e);
+                }
             }
-        };
-        if allowed_types.contains(CredentialType::SSH_KEY) {
-             if let Some(key_path) = &repo_config.ssh_key_path {
-                 let user = username_from_git.unwrap_or("git");
-                 log::debug!("Attempting SSH key authentication. User: '{}', Key Path: {}", user, key_path.display());
-                 match Cred::ssh_key(user, None, key_path, repo_config.ssh_key_passphrase.as_deref()) {
-                     Ok(cred) => {
-                         log::info!("SSH key credential created successfully for user '{}'.", user);
-                         return Ok(cred);
-                     }
-                     Err(e) => {
-                         log::error!("Failed to create SSH key credential from path {}: {}", key_path.display(), e);
-                     }
-                 }
-             } else {
-                log::debug!("SSH key requested, but no ssh_key_path configured for repo '{}'", repo_config.name);
-             }
         }
+        
+        // Then check repository config (for existing repositories)
+        if let Some(repo_config) = &relevant_repo_config {
+            if allowed_types.contains(CredentialType::SSH_KEY) {
+                if let Some(key_path) = &repo_config.ssh_key_path {
+                    let user = username_from_git.unwrap_or("git");
+                    log::debug!("Attempting SSH key authentication from repo config. User: '{}', Key Path: {}", user, key_path.display());
+                    match Cred::ssh_key(user, None, key_path, repo_config.ssh_key_passphrase.as_deref()) {
+                        Ok(cred) => {
+                            log::info!("SSH key credential created successfully from repo config for user '{}'.", user);
+                            return Ok(cred);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to create SSH key credential from repo config path {}: {}", key_path.display(), e);
+                        }
+                    }
+                } else {
+                    log::debug!("SSH key requested, but no ssh_key_path configured for repo '{}'", repo_config.name);
+                }
+            }
+        } else {
+            log::debug!("No repository configuration found for URL '{}' in credential callback.", _url);
+        }
+        
+        // Finally try default
         if allowed_types.contains(CredentialType::DEFAULT) {
             log::debug!("Attempting default system credentials.");
             match Cred::default() {
@@ -485,5 +504,87 @@ pub(crate) async fn ensure_repository_collection_exists(
                 Err(e).context(format!("Failed to check collection info for '{}'", collection_name))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RepositoryConfig;
+    use std::path::PathBuf;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_create_fetch_options_direct_ssh_params() {
+        // Set up test data
+        let repo_configs = vec![];
+        let repo_url = "git@example.com:user/repo.git";
+        let key_path = PathBuf::from("/path/to/key");
+        let ssh_key_path = Some(&key_path);
+        let ssh_key_passphrase = Some("passphrase");
+
+        // Call the function
+        let result = create_fetch_options(
+            repo_configs,
+            repo_url,
+            ssh_key_path,
+            ssh_key_passphrase
+        );
+
+        // Just verify that it builds the options without errors
+        assert!(result.is_ok());
+        // We can't easily test the callbacks directly in a unit test
+    }
+
+    #[test]
+    fn test_create_fetch_options_repo_config_ssh() {
+        // Set up test data
+        let repo_url = "git@example.com:user/repo.git";
+        let repo_configs = vec![
+            RepositoryConfig {
+                name: "repo".to_string(),
+                url: repo_url.to_string(),
+                local_path: PathBuf::from("/tmp/repo"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                active_branch: Some("main".to_string()),
+                remote_name: Some("origin".to_string()),
+                ssh_key_path: Some(PathBuf::from("/path/to/key")),
+                ssh_key_passphrase: Some("passphrase".to_string()),
+                last_synced_commits: HashMap::new(),
+                indexed_languages: None,
+            }
+        ];
+
+        // Call the function
+        let result = create_fetch_options(
+            repo_configs,
+            repo_url,
+            None,
+            None
+        );
+
+        // Just verify that it builds the options without errors
+        assert!(result.is_ok());
+        // We can't easily test the callbacks directly in a unit test
+    }
+
+    #[test]
+    fn test_create_fetch_options_default_credentials() {
+        // Set up test data with no SSH keys configured
+        let repo_configs = vec![];
+        let repo_url = "https://example.com/user/repo.git";
+
+        // Call the function
+        let result = create_fetch_options(
+            repo_configs,
+            repo_url,
+            None,
+            None
+        );
+
+        // Just verify that it builds the options without errors
+        assert!(result.is_ok());
+        // We can't easily test the callbacks directly in a unit test
     }
 }

@@ -1,4 +1,3 @@
-use anyhow::Result;
 use vectordb_lib::config::{AppConfig, RepositoryConfig};
 use vectordb_lib::cli::stats::{StatsArgs, handle_stats};
 use qdrant_client::Qdrant;

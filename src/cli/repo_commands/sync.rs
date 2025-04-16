@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Args;
 use colored::*;
 use git2::{Repository, DiffOptions, DiffFindOptions, Delta, DiffDelta};
@@ -56,23 +56,35 @@ pub async fn handle_repo_sync(
         .with_context(|| format!("Failed to open repository at {}", repo_config.local_path.display()))?;
 
     // --- Fetch updates --- 
-    println!("Fetching updates from remote '{}'...", repo_config.remote_name.as_deref().unwrap_or("origin").cyan());
-    let remote = repo.find_remote(repo_config.remote_name.as_deref().unwrap_or("origin"))
-        .with_context(|| format!("Failed to find remote '{}'", repo_config.remote_name.as_deref().unwrap_or("origin"))) ;
+    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin");
+    println!("Fetching updates from remote '{}'...", remote_name.cyan());
     
-    let mut remote = match remote {
-        Ok(r) => r,
-        Err(e) => {
-            bail!("Error finding remote: {}. Ensure the remote name ('{}') is correct in the config or the repository.", e, repo_config.remote_name.as_deref().unwrap_or("origin"));
-        }
-    };
-
-    // Clone repositories from config BEFORE calling create_fetch_options
-    let repo_configs_clone = config.repositories.clone();
-    let mut fetch_opts = helpers::create_fetch_options(repo_configs_clone, &repo_config.url)?;
-    // Pass fetch_opts mutably without cloning
-    remote.fetch(&[active_branch], Some(&mut fetch_opts), None)
-         .context("Failed to fetch updates from remote repository")?;
+    // Use direct Git command for fetch with SSH authentication
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(&repo_config.local_path)
+       .arg("fetch")
+       .arg(remote_name)
+       .arg(active_branch);
+       
+    // If SSH key is provided, use GIT_SSH_COMMAND to specify the key
+    if let Some(ssh_key) = &repo_config.ssh_key_path {
+        let ssh_cmd = if let Some(_passphrase) = &repo_config.ssh_key_passphrase {
+            // With passphrase - note: for SSH keys with passphrase, the SSH agent should be running
+            format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+        } else {
+            // Without passphrase
+            format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+        };
+        cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+        println!("Using SSH key: {}", ssh_key.display());
+    }
+    
+    let status = cmd.status()
+        .with_context(|| format!("Failed to execute git fetch command"))?;
+    
+    if !status.success() {
+        return Err(anyhow!("Git fetch command failed with exit code: {}", status));
+    }
     println!("Fetch complete.");
 
     // --- Get Local and Remote Commit OIDs --- 
@@ -100,7 +112,21 @@ pub async fn handle_repo_sync(
     // Skip check if --force is used
     if !args.force && last_synced_commit.as_deref() == Some(&remote_commit_oid_str) {
         println!("Repository branch is already up-to-date and synced.");
-        helpers::merge_local_branch(&repo, active_branch, &remote_commit)?;
+        // Use Git command for merge
+        let merge_result = std::process::Command::new("git")
+            .current_dir(&repo_config.local_path)
+            .arg("merge")
+            .arg("--ff-only")
+            .arg(format!("{}/{}", remote_name, active_branch))
+            .status();
+            
+        if let Ok(status) = merge_result {
+            if status.success() {
+                println!("Local branch updated to match remote.");
+            } else {
+                println!("Note: Could not fast-forward local branch. You may want to merge manually.");
+            }
+        }
         return Ok(());
     }
     
@@ -109,12 +135,20 @@ pub async fn handle_repo_sync(
     }
 
     // --- Perform Merge (Fast-forward if possible) --- 
-    helpers::merge_local_branch(&repo, active_branch, &remote_commit)?;
-    repo.set_head(&local_branch_ref_name)
-         .with_context(|| format!("Failed to set HEAD to '{}' after potential merge", local_branch_ref_name))?;
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-         .context("Failed checkout head after setting HEAD")?;
-    log::debug!("HEAD reset to {} after merge attempt.", local_branch_ref_name);
+    let merge_result = std::process::Command::new("git")
+        .current_dir(&repo_config.local_path)
+        .arg("merge")
+        .arg("--ff-only")
+        .arg(format!("{}/{}", remote_name, active_branch))
+        .status();
+        
+    if let Ok(status) = merge_result {
+        if status.success() {
+            println!("Local branch updated to match remote.");
+        } else {
+            println!("Note: Could not fast-forward local branch. You may need to merge manually.");
+        }
+    }
 
     // --- Calculate Diff --- 
     let old_tree = match last_synced_commit {
