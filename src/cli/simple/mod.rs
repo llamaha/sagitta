@@ -27,7 +27,6 @@ use crate::cli::commands::{
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION,
     FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, ensure_payload_index,
 };
-use crate::cli::repo_commands::helpers::DEFAULT_VECTOR_DIMENSION; // Update import
 
 // Arguments for the main 'simple' command group
 #[derive(Args, Debug, Clone)] 
@@ -112,8 +111,6 @@ async fn handle_simple_index(
     let collection_name = LEGACY_INDEX_COLLECTION;
     log::info!("Indexing into default collection: '{}'", collection_name);
 
-    ensure_legacy_collection_exists(&client, collection_name).await?;
-
     for path in &cmd_args.paths {
         if !path.exists() {
              bail!("Input path does not exist: {}", path.display());
@@ -156,7 +153,7 @@ async fn handle_simple_index(
     log::info!("Using resolved ONNX model: {}", onnx_model_path.display());
     log::info!("Using resolved ONNX tokenizer directory: {}", onnx_tokenizer_path.display());
 
-    log::info!("Initializing embedding handler...");
+    log::info!("Using embedding handler for indexing...");
     let embedding_handler = Arc::new(
         EmbeddingHandler::new(
             embedding::EmbeddingModelType::Onnx,
@@ -165,10 +162,13 @@ async fn handle_simple_index(
         )
         .context("Failed to initialize embedding handler")?,
     );
-    let _embedding_dim = embedding_handler // Use _ to avoid warning
+    let embedding_dim = embedding_handler // Use _ to avoid warning
         .dimension()
         .context("Failed to get embedding dimension")?;
-    log::info!("Embedding dimension: {}", _embedding_dim);
+    log::info!("Embedding dimension: {}", embedding_dim);
+
+    // Ensure collection exists with the correct embedding dimension
+    ensure_legacy_collection_exists(&client, collection_name, embedding_dim as u64).await?;
 
     if !client.collection_exists(collection_name.to_string()).await? {
         bail!("Collection '{}' check failed after creation attempt.", collection_name);
@@ -490,14 +490,14 @@ async fn handle_simple_clear(
 async fn ensure_legacy_collection_exists(
     client: &Qdrant,
     collection_name: &str,
+    embedding_dimension: u64,
 ) -> Result<()> {
     if client.collection_exists(collection_name).await? {
         log::info!("Collection '{}' already exists.", collection_name);
     } else {
         log::info!("Collection '{}' not found. Creating...", collection_name);
-        let vector_dim = DEFAULT_VECTOR_DIMENSION; 
         let create_request = CreateCollectionBuilder::new(collection_name)
-            .vectors_config(VectorParamsBuilder::new(vector_dim, Distance::Cosine));
+            .vectors_config(VectorParamsBuilder::new(embedding_dimension, Distance::Cosine));
         
         client.create_collection(create_request).await?;
         log::info!("Collection '{}' created successfully.", collection_name);

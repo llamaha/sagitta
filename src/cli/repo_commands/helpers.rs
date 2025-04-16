@@ -348,8 +348,11 @@ pub(crate) async fn index_files(
     
     // Pre-warm the embedding provider cache to load the model upfront
     log::debug!("Pre-warming embedding provider cache...");
-    let _embedding_dim = embedding_handler.dimension()? as u64; // Call works with &self
-    log::debug!("Embedding provider cache warmed.");
+    let embedding_dim = embedding_handler.dimension()? as u64;
+    log::debug!("Embedding provider cache warmed. Detected dimension: {}", embedding_dim);
+    
+    // Ensure collection exists with the correct embedding dimension
+    ensure_repository_collection_exists(client, collection_name, embedding_dim).await?;
 
     let pb = ProgressBar::new(relative_paths.len() as u64);
     pb.set_style(ProgressStyle::default_bar()
@@ -473,6 +476,7 @@ pub(crate) async fn index_files(
 pub(crate) async fn ensure_repository_collection_exists(
     client: &Qdrant,
     collection_name: &str,
+    embedding_dimension: u64,
 ) -> Result<()> {
     log::debug!("Checking existence of collection: {}", collection_name);
     match client.collection_info(collection_name).await {
@@ -485,7 +489,7 @@ pub(crate) async fn ensure_repository_collection_exists(
                  log::info!("Collection '{}' not found. Creating...", collection_name);
                 println!("Creating Qdrant collection '{}'...", collection_name);
                 let create_request = CreateCollectionBuilder::new(collection_name)
-                        .vectors_config(VectorParamsBuilder::new(DEFAULT_VECTOR_DIMENSION, Distance::Cosine));
+                        .vectors_config(VectorParamsBuilder::new(embedding_dimension, Distance::Cosine));
                 client
                     .create_collection(create_request)
                     .await
@@ -501,7 +505,7 @@ pub(crate) async fn ensure_repository_collection_exists(
                  log::info!("Payload indexes ensured for collection '{}'.", collection_name);
                 Ok(())
             } else {
-                Err(e).context(format!("Failed to check collection info for '{}'", collection_name))
+                Err(anyhow!("Failed to check collection '{}': {}", collection_name, e))
             }
         }
     }
