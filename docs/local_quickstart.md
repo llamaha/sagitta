@@ -36,7 +36,37 @@ This guide provides the minimal steps to get `vectordb-cli` running locally for 
 
    The built binary will be at `target/release/vectordb-cli`
 
-3. **Optional: Add to PATH**:
+3. **Pull the ONNX model files from Git LFS**:
+   ```bash
+   # Make sure Git LFS is installed
+   git lfs install
+
+   # Pull the model files
+   git lfs pull
+   ```
+
+   This will download the default ONNX model (`all-minilm-l6-v2.onnx`) and tokenizer files in the `onnx/` directory.
+
+4. **Configure the model paths**:
+
+   Either set environment variables:
+   ```bash
+   export VECTORDB_ONNX_MODEL="$PWD/onnx/all-minilm-l6-v2.onnx"
+   export VECTORDB_ONNX_TOKENIZER_DIR="$PWD/onnx"
+   ```
+
+   Or specify the paths when running commands:
+   ```bash
+   vectordb-cli --onnx-model="$PWD/onnx/all-minilm-l6-v2.onnx" --onnx-tokenizer-dir="$PWD/onnx" [commands...]
+   ```
+
+   Or create a config file at `~/.config/vectordb-cli/config.toml`:
+   ```toml
+   onnx_model_path = "/absolute/path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx"
+   onnx_tokenizer_path = "/absolute/path/to/vectordb-cli/onnx"
+   ```
+
+5. **Optional: Add to PATH**:
    ```bash
    sudo ln -s $PWD/target/release/vectordb-cli /usr/local/bin
    ```
@@ -47,6 +77,10 @@ This guide provides the minimal steps to get `vectordb-cli` running locally for 
 
 1. **Index a directory**:
    ```bash
+   # If you haven't set environment variables or config file:
+   vectordb-cli --onnx-model="$PWD/onnx/all-minilm-l6-v2.onnx" --onnx-tokenizer-dir="$PWD/onnx" simple index /path/to/your/code
+   
+   # Or if you've set the environment variables or config file:
    vectordb-cli simple index /path/to/your/code
    ```
 

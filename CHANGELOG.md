@@ -182,8 +182,14 @@ First release of vectordb-cli with basic functionality.
 
 ### Added
 
+## [1.5.0] - 2024-04-18
+
+### Added
+
 - Add support for configuring the repository storage location using `repo config set-repo-base-path` command.
 - Add `repositories_base_path` configuration setting to specify the global repository storage location.
+- Fix Qdrant port documentation to correctly identify 6333 as HTTP/REST (web UI) and 6334 as gRPC.
+- Improve quickstart guide to clearly explain how to use the default ONNX model provided via Git LFS.
 
 ## [1.4.5] - 2024-04-15
 
