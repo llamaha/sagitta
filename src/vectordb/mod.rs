@@ -10,6 +10,9 @@ pub mod embedding_logic;
 pub mod indexing;
 mod cache;
 
+// Add the new trait module
+pub mod qdrant_client_trait;
+
 // Re-export key types/structs needed elsewhere
 pub use crate::vectordb::error::{Result, VectorDBError};
 

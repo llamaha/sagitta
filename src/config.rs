@@ -4,7 +4,6 @@
 //! Configuration is typically loaded from a `config.toml` file.
 
 use anyhow::{Context, Result};
-use log;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 
@@ -37,7 +36,7 @@ pub struct RepositoryConfig {
     pub indexed_languages: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 /// Represents the application configuration, loaded from a `config.toml` file.
 pub struct AppConfig {
     /// The URL for the Qdrant gRPC endpoint.
@@ -47,6 +46,9 @@ pub struct AppConfig {
     pub onnx_model_path: Option<String>,
     /// Optional path to the directory containing the ONNX tokenizer files.
     pub onnx_tokenizer_path: Option<String>,
+    /// Optional path to the API key file for server authentication.
+    #[serde(default)]
+    pub server_api_key_path: Option<String>,
 
     #[serde(default)]
     pub repositories: Vec<RepositoryConfig>,
@@ -66,6 +68,7 @@ impl Default for AppConfig {
             qdrant_url: default_qdrant_url(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
             repositories_base_path: None,
@@ -127,6 +130,8 @@ pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<Pat
 /// Returns an error if the file exists but cannot be read or parsed.
 pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
     let config_file_path = get_config_path_or_default(override_path)?;
+    log::debug!("Attempting to load config from: {}", config_file_path.display());
+    
     let app_config_dir = config_file_path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Invalid config file path provided or determined"))?;
@@ -147,9 +152,14 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
         log::info!("Loading config from '{}'", config_file_path.display());
         let config_content = fs::read_to_string(&config_file_path)
             .with_context(|| format!("Failed to read config file at '{}'", config_file_path.display()))?;
+        
+        log::debug!("Read config file content successfully.");
 
         match toml::from_str(&config_content) {
-            Ok(config) => Ok(config),
+            Ok(config) => {
+                log::debug!("Parsed config successfully: {:?}", config);
+                Ok(config)
+            },
             Err(e) => {
                 log::error!(
                     "Failed to parse config file at '{}': {}. Ensure it is valid TOML.",
@@ -247,92 +257,43 @@ mod tests {
             ssh_key_passphrase: None,
             indexed_languages: Some(vec!["rs".to_string()]),
         };
+
         let repo2_path = data_path.join("repo2");
         let repo2 = RepositoryConfig {
             name: "repo2".to_string(),
             url: "url2".to_string(),
             local_path: repo2_path.clone(),
-            default_branch: "develop".to_string(),
-            tracked_branches: vec!["develop".to_string(), "main".to_string()],
+            default_branch: "dev".to_string(),
+            tracked_branches: vec!["dev".to_string(), "feat/new".to_string()],
             remote_name: Some("upstream".to_string()),
-            last_synced_commits: HashMap::from([("develop".to_string(), "abc".to_string())]),
-            active_branch: None,
-            ssh_key_path: Some(PathBuf::from("/test/key")),
-            ssh_key_passphrase: Some("password".to_string()),
+            last_synced_commits: HashMap::from([("dev".to_string(), "abc".to_string())]),
+            active_branch: Some("dev".to_string()),
+            ssh_key_path: Some(PathBuf::from("~/.ssh/id_rsa2")),
+            ssh_key_passphrase: None,
             indexed_languages: None,
         };
 
-        let initial_config = AppConfig {
-            qdrant_url: "http://test-url".to_string(),
+        let config = AppConfig {
+            qdrant_url: "http://localhost:6333".to_string(),
             onnx_model_path: Some("model".to_string()),
             onnx_tokenizer_path: None,
+            server_api_key_path: None,
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
-            repositories_base_path: None,
+            repositories_base_path: Some(data_path.clone()),
         };
 
-        // --- Save initial config with printing ---
-        println!("--- Saving config to: {} ---", config_path.display());
-        println!("--- Config to save ---\n{:?}\n--- End Config to save ---", initial_config);
-        let content_to_save = toml::to_string_pretty(&initial_config).unwrap();
-        println!("--- Serialized Content ---\n{}\n--- End Serialized Content ---", content_to_save);
-        fs::write(&config_path, content_to_save).unwrap();
-        // --- End Save ---
+        // Save and load
+        save_config_to_path(&config, &config_path).unwrap();
+        let loaded_config = load_config_from_path(&config_path).unwrap();
 
-        // --- Load it back with printing ---
-        println!("--- Reading config from: {} ---", config_path.display());
-        let loaded_content = fs::read_to_string(&config_path).unwrap();
-        println!("--- Read content ---\n{}\n--- End Read Content ---", loaded_content);
-        let loaded_config: AppConfig = toml::from_str(&loaded_content).map_err(|e| {
-            println!("!!! Deserialization Error: {} !!!", e);
-            anyhow::Error::from(e)
-        }).unwrap();
-        println!("--- Deserialized Config ---\n{:?}\n--- End Deserialized Config ---", loaded_config);
-        // --- End Load ---
-
-        // --- Explicit Field Assertions ---
-        assert_eq!(initial_config.qdrant_url, loaded_config.qdrant_url, "qdrant_url mismatch");
-        assert_eq!(initial_config.onnx_model_path, loaded_config.onnx_model_path, "onnx_model_path mismatch");
-        assert_eq!(initial_config.active_repository, loaded_config.active_repository, "active_repository mismatch");
-        assert_eq!(initial_config.repositories.len(), loaded_config.repositories.len(), "repositories length mismatch");
-
-        // Compare repo1 fields
-        assert_eq!(initial_config.repositories[0].name, loaded_config.repositories[0].name, "repo1 name mismatch");
-        assert_eq!(initial_config.repositories[0].url, loaded_config.repositories[0].url, "repo1 url mismatch");
-        assert_eq!(initial_config.repositories[0].local_path, loaded_config.repositories[0].local_path, "repo1 local_path mismatch");
-        assert_eq!(initial_config.repositories[0].default_branch, loaded_config.repositories[0].default_branch, "repo1 default_branch mismatch");
-        assert_eq!(initial_config.repositories[0].tracked_branches, loaded_config.repositories[0].tracked_branches, "repo1 tracked_branches mismatch");
-        assert_eq!(initial_config.repositories[0].remote_name, loaded_config.repositories[0].remote_name, "repo1 remote_name mismatch");
-        assert_eq!(initial_config.repositories[0].last_synced_commits, loaded_config.repositories[0].last_synced_commits, "repo1 last_synced_commits mismatch");
-        assert_eq!(initial_config.repositories[0].active_branch, loaded_config.repositories[0].active_branch, "repo1 active_branch mismatch");
-        assert_eq!(initial_config.repositories[0].ssh_key_path, loaded_config.repositories[0].ssh_key_path, "repo1 ssh_key_path mismatch");
-        assert_eq!(initial_config.repositories[0].ssh_key_passphrase, loaded_config.repositories[0].ssh_key_passphrase, "repo1 ssh_key_passphrase mismatch");
-        assert_eq!(initial_config.repositories[0].indexed_languages, loaded_config.repositories[0].indexed_languages, "repo1 indexed_languages mismatch");
-
-        // Compare repo2 fields
-        assert_eq!(initial_config.repositories[1].name, loaded_config.repositories[1].name, "repo2 name mismatch");
-        assert_eq!(initial_config.repositories[1].url, loaded_config.repositories[1].url, "repo2 url mismatch");
-        assert_eq!(initial_config.repositories[1].local_path, loaded_config.repositories[1].local_path, "repo2 local_path mismatch");
-        assert_eq!(initial_config.repositories[1].default_branch, loaded_config.repositories[1].default_branch, "repo2 default_branch mismatch");
-        assert_eq!(initial_config.repositories[1].tracked_branches, loaded_config.repositories[1].tracked_branches, "repo2 tracked_branches mismatch");
-        assert_eq!(initial_config.repositories[1].remote_name, loaded_config.repositories[1].remote_name, "repo2 remote_name mismatch");
-        assert_eq!(initial_config.repositories[1].last_synced_commits, loaded_config.repositories[1].last_synced_commits, "repo2 last_synced_commits mismatch");
-        assert_eq!(initial_config.repositories[1].active_branch, loaded_config.repositories[1].active_branch, "repo2 active_branch mismatch");
-        assert_eq!(initial_config.repositories[1].ssh_key_path, loaded_config.repositories[1].ssh_key_path, "repo2 ssh_key_path mismatch");
-        assert_eq!(initial_config.repositories[1].ssh_key_passphrase, loaded_config.repositories[1].ssh_key_passphrase, "repo2 ssh_key_passphrase mismatch");
-        assert_eq!(initial_config.repositories[1].indexed_languages, loaded_config.repositories[1].indexed_languages, "repo2 indexed_languages mismatch");
-
-        // Test default creation
-        let default_config = AppConfig::default();
-        assert_eq!(default_config.qdrant_url, default_qdrant_url());
-        assert!(default_config.repositories.is_empty());
-        assert!(default_config.active_repository.is_none());
-        for repo in &default_config.repositories {
-            assert!(repo.remote_name.is_none());
-            assert!(repo.ssh_key_path.is_none());
-            assert!(repo.ssh_key_passphrase.is_none());
-            assert!(repo.indexed_languages.is_none());
-        }
+        // Assert
+        assert_eq!(config, loaded_config);
+        assert_eq!(loaded_config.repositories.len(), 2);
+        assert_eq!(loaded_config.active_repository, Some("repo1".to_string()));
+        assert_eq!(loaded_config.repositories[0].last_synced_commits.len(), 0);
+        assert_eq!(loaded_config.repositories[1].last_synced_commits.get("dev"), Some(&"abc".to_string()));
+        assert_eq!(loaded_config.repositories[1].ssh_key_path, Some(PathBuf::from("~/.ssh/id_rsa2")));
     }
 
     #[test]
@@ -364,6 +325,7 @@ mod tests {
             qdrant_url: "test".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
         };

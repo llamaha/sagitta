@@ -79,6 +79,7 @@ fn handle_set_repo_base_path(
 mod tests {
     use super::*;
     use crate::config::load_config;
+    use crate::config::save_config;
     use tempfile::tempdir;
 
     #[test]
@@ -93,6 +94,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
         };
@@ -116,5 +118,90 @@ mod tests {
             let loaded_config = load_config(Some(&config_path)).unwrap();
             assert_eq!(loaded_config.repositories_base_path, Some(repos_dir));
         }
+    }
+
+    #[test]
+    fn test_handle_config_set_paths() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // Initial config (empty paths)
+        let mut config = AppConfig {
+            qdrant_url: "http://initial".to_string(),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories: vec![],
+            active_repository: None,
+            repositories_base_path: None,
+        };
+        save_config(&config, Some(&config_path)).unwrap();
+
+        // Args to set paths
+        let _model_path = "/test/model.onnx".to_string();
+        let _tokenizer_path = "/test/tokenizer".to_string();
+        let _qdrant_url = "http://new-qdrant".to_string();
+
+        let _args = ConfigArgs {
+            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: PathBuf::new() })
+            // The test setup below seems incorrect for ConfigCommand::SetRepoBasePath
+            // It manually sets fields that are not part of ConfigArgs directly
+            // onnx_model_path: Some(model_path.clone()),
+            // onnx_tokenizer_path: Some(tokenizer_path.clone()),
+            // qdrant_url: Some(qdrant_url.clone()),
+            // repositories_base_path: None,
+        };
+
+        // Reconstructing the test intent - testing handle_set_repo_base_path implicitly via handle_config
+        let repo_base_path = dir.path().join("test_base_path");
+        let base_path_args = ConfigArgs {
+            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: repo_base_path.clone() })
+        };
+
+        // Call the handler to set the base path
+        let result_base_path = handle_config(base_path_args, &mut config, Some(&config_path));
+        assert!(result_base_path.is_ok(), "handle_config (SetRepoBasePath) failed: {:?}", result_base_path.err());
+
+        // Verify config was updated for base path
+        let loaded_config_base = load_config(Some(&config_path)).unwrap();
+        assert!(loaded_config_base.repositories_base_path.is_some());
+        assert_eq!(loaded_config_base.repositories_base_path.unwrap(), repo_base_path);
+
+        // This part seems to test setting other paths, which is not supported by ConfigCommand anymore
+        // assert_eq!(config.onnx_model_path, Some(model_path));
+        // assert_eq!(config.onnx_tokenizer_path, Some(tokenizer_path));
+        // assert_eq!(config.qdrant_url, qdrant_url);
+    }
+    
+    #[test]
+    fn test_handle_config_set_base_path() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let base_path = dir.path().join("my_repos");
+
+        // Initial config
+        let mut config = AppConfig {
+            qdrant_url: "http://initial".to_string(),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories: vec![],
+            active_repository: None,
+            repositories_base_path: None,
+        };
+        save_config(&config, Some(&config_path)).unwrap();
+
+        // Args to set base path
+        let args = ConfigArgs {
+            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: base_path.clone() })
+        };
+
+        // Call the handler
+        let result = handle_config(args, &mut config, Some(&config_path));
+        assert!(result.is_ok(), "handle_config failed: {:?}", result.err());
+
+        // Verify config was updated
+        config = load_config(Some(&config_path)).unwrap();
+        assert_eq!(config.repositories_base_path, Some(base_path));
     }
 } 

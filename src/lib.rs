@@ -29,18 +29,19 @@
 //! Clients can then connect to the gRPC API to perform operations.
 //! Use the `vectordb-client` crate for a full-featured Rust client.
 
-// Public modules (essential for CLI/server usage)
-pub mod cli;      // CLI commands and argument handling
-pub mod config;   // Configuration management
+// Public modules that can be used when importing the crate
+pub mod config;
+pub mod syntax;
+pub mod utils;
+pub mod vectordb;
 
-// Only include server module when the server feature is enabled
+// Making cli and git public to allow tests to access them
+pub mod cli;
+pub mod git;
+
+// Only include server module when the "server" feature is enabled
 #[cfg(feature = "server")]
-pub mod server;   // gRPC server implementation
-
-// Internal implementation modules, made public for testing
-pub mod syntax;   // Code parsing with tree-sitter
-mod vectordb;     // Vector database and embedding operations 
-mod utils;        // Utility functions
+pub mod server;
 
 // Re-export minimal set of items for CLI usage
 pub use config::{AppConfig, load_config};

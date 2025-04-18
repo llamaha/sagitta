@@ -1,6 +1,5 @@
 use vectordb_client::VectorDBClient;
 use std::error::Error;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[tokio::main]

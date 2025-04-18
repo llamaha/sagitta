@@ -2,11 +2,9 @@ use anyhow::{anyhow, Context, Result};
 use clap::Args;
 use std::sync::Arc;
 use colored::*;
+use std::fmt::Debug;
 
-use qdrant_client::{
-    qdrant::{Filter, Condition, SearchPointsBuilder},
-    Qdrant,
-};
+use qdrant_client::qdrant::{Filter, Condition, SearchPointsBuilder};
 
 use crate::{
     config::AppConfig,
@@ -14,6 +12,7 @@ use crate::{
     cli::formatters::print_search_results,
     vectordb::embedding_logic::EmbeddingHandler,
     cli::commands::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
+    vectordb::qdrant_client_trait::QdrantClientTrait,
 };
 
 #[derive(Args, Debug, Clone)]
@@ -43,13 +42,15 @@ pub struct RepoQueryArgs {
     pub element_type: Option<String>,
 }
 
-pub async fn handle_repo_query(
+pub async fn handle_repo_query<C>(
     args: RepoQueryArgs,
-    config: &AppConfig, // Borrow config immutably
-    client: Arc<Qdrant>,
-    // Pass CliArgs to get embedding model details
-    cli_args: &crate::cli::CliArgs, 
-) -> Result<()> {
+    config: &AppConfig,
+    client: Arc<C>,
+    cli_args: &crate::cli::CliArgs,
+) -> Result<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
     let repo_name = args.name.as_ref().or(config.active_repository.as_ref())
         .ok_or_else(|| anyhow!("No active repository set and no repository name provided with --name."))?;
 
@@ -137,8 +138,9 @@ pub async fn handle_repo_query(
         .with_vectors(false); // Usually don't need vectors in results
 
     println!("Performing search...");
-    let search_result = client.search_points(search_request).await
-        .context("Failed to execute search query against Qdrant")?;
+    let search_result = client.search_points(search_request.into())
+        .await
+        .context(format!("Failed to search points in collection '{}'", collection_name))?;
 
     println!("Search returned {} results.", search_result.result.len());
 

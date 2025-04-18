@@ -1,12 +1,11 @@
 use anyhow::{bail, Context, Result};
 use clap::Args;
 use colored::*;
-use qdrant_client::Qdrant;
-use std::{fs, path::PathBuf, sync::Arc};
-use log;
+use std::{path::PathBuf, sync::Arc, fmt::Debug};
 
 use crate::config::{self, AppConfig};
-use crate::cli::repo_commands::helpers;
+use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use crate::cli::repo_commands::helpers::delete_repository_data;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -19,25 +18,27 @@ pub struct RemoveRepoArgs {
     pub yes: bool,
 }
 
-pub async fn handle_repo_remove(
+pub async fn handle_repo_remove<C>(
     args: RemoveRepoArgs, 
     config: &mut AppConfig,
-    client: Arc<Qdrant>,
+    client: Arc<C>,
     override_path: Option<&PathBuf>,
-) -> Result<()> {
+) -> Result<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
     let repo_name = &args.name;
-
-    println!(
-        "{}",
-        format!(
-            "Preparing to remove repository '{}'. This will delete configuration, Qdrant data, and the local clone.",
-            repo_name.cyan()
-        ).yellow()
-    );
-    println!("{}", "This action CANNOT be undone.".red().bold());
 
     // Add confirmation prompt if -y is not passed
     if !args.yes {
+         println!(
+            "{}",
+            format!(
+                "Preparing to remove repository '{}'. This will delete configuration, Qdrant data, and the local clone.",
+                repo_name.cyan()
+            ).yellow()
+        );
+        println!("{}", "This action CANNOT be undone.".red().bold());
         println!("Are you sure you want to continue? (yes/No)");
         let mut confirmation = String::new();
         std::io::stdin().read_line(&mut confirmation)
@@ -57,51 +58,13 @@ pub async fn handle_repo_remove(
     // Get details before removing from config
     let repo_config = config.repositories[repo_config_index].clone(); 
 
-    // Attempt to delete the Qdrant collection
-    let collection_name = helpers::get_collection_name(repo_name);
-    println!("Attempting to delete Qdrant collection '{}'...", collection_name.cyan());
-    match client.delete_collection(&collection_name).await {
-        Ok(response) => {
-            // Check the result field within the response
-            if response.result {
-                println!("Successfully deleted Qdrant collection '{}'.", collection_name.green());
-            } else {
-                // This case might indicate the collection didn't exist or another non-error condition
-                 println!("Qdrant reported non-success deleting collection '{}'. It might not have existed.", collection_name.yellow());
-            }
-        }
-        Err(e) => {
-            // Log error but continue with removing config/local dir
-            log::error!(
-                "Failed to delete Qdrant collection '{}': {}. Please check Qdrant manually.", 
-                collection_name, e
-            );
-            println!(
-                "{}", 
-                format!("Warning: Failed to delete Qdrant collection '{}'. Please check Qdrant manually.", collection_name).yellow()
-            );
-        }
-    }
+    // Attempt to delete the Qdrant collection and local data using the helper
+    println!("Removing associated data for '{}'...", repo_name.cyan());
+    delete_repository_data(&repo_config, client.clone()).await
+        .context("Failed during repository data deletion (Qdrant collection / local files)")?;
+    println!("Data removal process completed.");
 
-    // Attempt to remove the local repository directory
-    println!("Attempting to remove local clone at {}...", repo_config.local_path.display());
-    if repo_config.local_path.exists() {
-        match fs::remove_dir_all(&repo_config.local_path) {
-            Ok(_) => println!("Successfully removed local directory '{}'.", repo_config.local_path.display().to_string().green()),
-            Err(e) => {
-                // Log error but continue with removing config
-                 log::error!("Failed to remove local directory '{}': {}. Please remove it manually.", repo_config.local_path.display(), e);
-                 println!(
-                    "{}", 
-                    format!("Warning: Failed to remove local directory '{}'. Please remove it manually.", repo_config.local_path.display()).yellow()
-                );
-            }
-        }
-    } else {
-        println!("Local directory '{}' does not exist. Skipping removal.", repo_config.local_path.display().to_string().yellow());
-    }
-
-    // Remove the repository from the config
+    // Remove the repository from the config (CLI-specific part)
     println!("Removing repository configuration for '{}'.", repo_name.cyan());
     config.repositories.remove(repo_config_index);
 
