@@ -59,7 +59,7 @@ pub async fn handle_repo_add(
         bail!("Repository '{}' already exists.", repo_name);
     }
 
-    let repo_base_path = config::get_repo_base_path()?;
+    let repo_base_path = config::get_repo_base_path(Some(config))?;
     fs::create_dir_all(&repo_base_path)
         .with_context(|| format!("Failed to create repository base directory at {}", repo_base_path.display()))?;
     let local_path = args.local_path.unwrap_or(repo_base_path.join(&repo_name));
@@ -211,6 +211,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: Some("/fake/path/model.onnx".to_string()),
             onnx_tokenizer_path: Some("/fake/path/tokenizer".to_string()),
+            repositories_base_path: None,
         };
         (config, temp_dir)
     }
@@ -309,6 +310,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            repositories_base_path: None,
         };
         
         // Verify the initial state

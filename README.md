@@ -35,6 +35,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
         -   [`repo clear`](#repo-clear)
         -   [`repo query`](#repo-query)
         -   [`repo stats`](#repo-stats)
+        -   [`repo config`](#repo-config)
 -   [Server Mode](#server-mode)
 
 ## Features
@@ -132,7 +133,7 @@ docker run -p 6333:6333 -p 6334:6334 \
     qdrant/qdrant:latest
 ```
 
-This starts Qdrant with the default gRPC port (6333, used by `vectordb-cli`) and HTTP/REST port (6334, typically for the web UI) mapped to your host. Data will be persisted in the `qdrant_storage` directory in your current working directory.
+This starts Qdrant with the default HTTP/REST port (6333, used for the web UI at http://localhost:6333/dashboard) and gRPC port (6334, used by `vectordb-cli`) mapped to your host. Data will be persisted in the `qdrant_storage` directory in your current working directory.
 
 **Option 2: Qdrant Cloud or Other Deployment**
 
@@ -211,7 +212,7 @@ For specific environment configurations (GPU acceleration), refer to the guides 
 
 ### Environment Variables
 
--   `QDRANT_URL`: URL of the Qdrant gRPC endpoint (e.g., `http://localhost:6333`). Defaults to `http://localhost:6333` if not set.
+-   `QDRANT_URL`: URL of the Qdrant gRPC endpoint (e.g., `http://localhost:6334`). Defaults to `http://localhost:6334` if not set.
 -   `QDRANT_API_KEY`: API key for Qdrant authentication (optional).
 -   `VECTORDB_ONNX_MODEL`: Full path to the `.onnx` model file.
 -   `VECTORDB_ONNX_TOKENIZER_DIR`: Full path to the directory containing the `tokenizer.json` file.
@@ -241,9 +242,14 @@ onnx_model_path = "/path/to/your/model.onnx"
 # Note: Key name is `onnx_tokenizer_path`
 onnx_tokenizer_path = "/path/to/your/tokenizer_directory"
 
+# --- Optional: Repository Storage Configuration ---
+# Base path where all repositories will be stored
+# If not provided, uses ~/.local/share/vectordb-cli/repositories
+repositories_base_path = "/path/to/your/repositories"
+
 # --- Repository Management ---
 # The active repository (used by default for commands like sync, query)
-# Set via `repo use <name>`
+# Set via `repo use <n>`
 active_repository = "my-project"
 
 # List of managed repositories
@@ -341,6 +347,18 @@ vectordb-cli repo add --url <repo-url> [--local-path <path>] [--name <repo-name>
 -   `--remote <remote_name>` (Optional): Name for the Git remote (defaults to "origin").
 -   `--ssh-key <path>` (Optional): Path to the SSH private key file for authentication.
 -   `--ssh-passphrase <passphrase>` (Optional): Passphrase for the SSH key.
+
+#### `repo config`
+
+Configure repository management settings.
+
+```bash
+vectordb-cli repo config set-repo-base-path <path>
+```
+
+-   `<path>`: The directory path where all repositories will be stored by default.
+
+This command sets the global repository storage location. New repositories added with `repo add` will be stored in this directory unless overridden with `--local-path`. Existing repositories will remain at their current locations.
 
 #### `repo list`
 

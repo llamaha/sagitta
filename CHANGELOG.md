@@ -177,3 +177,14 @@ First release of vectordb-cli with basic functionality.
 
 - `ce4d4ebe` - fix: Resolve warnings & test failure in search module
 - `c29f80b2` - docs: Add build tool prerequisites to README
+
+## [Unreleased]
+
+### Added
+
+- Add support for configuring the repository storage location using `repo config set-repo-base-path` command.
+- Add `repositories_base_path` configuration setting to specify the global repository storage location.
+
+## [1.4.5] - 2024-04-15
+
+### Added
