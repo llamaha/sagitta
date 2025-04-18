@@ -8,6 +8,7 @@ pub mod use_branch;
 pub mod add;
 pub mod remove;
 pub mod helpers; // Make public
+pub mod config; // Add new config module
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -57,6 +58,8 @@ enum RepoCommand {
     Sync(sync::SyncRepoArgs),
     /// Show statistics about the vector database collection for a repository.
     Stats(super::stats::StatsArgs),
+    /// Configure repository settings.
+    Config(config::ConfigArgs),
 }
 
 pub async fn handle_repo_command(
@@ -76,6 +79,7 @@ pub async fn handle_repo_command(
         RepoCommand::Query(query_args) => query::handle_repo_query(query_args, config, client, cli_args).await,
         RepoCommand::Sync(sync_args) => sync::handle_repo_sync(sync_args, cli_args, config, client, override_path).await,
         RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), client).await,
+        RepoCommand::Config(config_args) => config::handle_config(config_args, config, override_path),
     }
 }
 
@@ -111,6 +115,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            repositories_base_path: None,
         }
     }
 

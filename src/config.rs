@@ -53,6 +53,11 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub active_repository: Option<String>,
+    
+    /// Optional base path where all repositories will be stored.
+    /// If not provided, uses the default XDG data directory.
+    #[serde(default)]
+    pub repositories_base_path: Option<PathBuf>,
 }
 
 impl Default for AppConfig {
@@ -63,6 +68,7 @@ impl Default for AppConfig {
             onnx_tokenizer_path: None,
             repositories: Vec::new(),
             active_repository: None,
+            repositories_base_path: None,
         }
     }
 }
@@ -82,8 +88,17 @@ fn get_config_path() -> Result<PathBuf> {
 
 /// Returns the base directory where local repository clones should be stored.
 ///
-/// Based on XDG base directory specification (e.g., `~/.local/share/vectordb-cli/repositories`).
-pub fn get_repo_base_path() -> Result<PathBuf> {
+/// If a repositories_base_path is configured in AppConfig, uses that.
+/// Otherwise, falls back to XDG base directory specification (e.g., `~/.local/share/vectordb-cli/repositories`).
+pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
+    // First check if there's a configured base path
+    if let Some(cfg) = config {
+        if let Some(base_path) = &cfg.repositories_base_path {
+            return Ok(base_path.clone());
+        }
+    }
+    
+    // Fall back to default XDG location
     dirs::data_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find data directory"))
         .map(|data_dir| data_dir.join(APP_NAME).join(REPO_DIR_NAME))
@@ -253,6 +268,7 @@ mod tests {
             onnx_tokenizer_path: None,
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
+            repositories_base_path: None,
         };
 
         // --- Save initial config with printing ---
@@ -341,6 +357,26 @@ mod tests {
     #[test]
     fn test_repo_path_generation() {
         let base_path = PathBuf::from("/fake/data/vectordb-cli/repositories");
+        
+        // Test with explicit config path
+        let config = AppConfig {
+            repositories_base_path: Some(PathBuf::from("/custom/repos")),
+            qdrant_url: "test".to_string(),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            repositories: Vec::new(),
+            active_repository: None,
+        };
+        
+        // Should use the custom path from config
+        let repo_path = get_repo_base_path(Some(&config)).unwrap();
+        assert_eq!(repo_path, PathBuf::from("/custom/repos"));
+        
+        // Test with None config (should use default XDG path)
+        let default_repo_path = get_repo_base_path(None).unwrap();
+        assert!(default_repo_path.to_string_lossy().contains("vectordb-cli/repositories"));
+        
+        // Create a repo config with a local path based on the base_path
         let repo_config = RepositoryConfig {
             name: "my-test-repo".to_string(),
             url: "some_url".to_string(),
