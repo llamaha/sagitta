@@ -1,9 +1,10 @@
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Subcommand};
 use std::sync::Arc;
 use std::path::PathBuf;
 use crate::config::AppConfig;
-use tracing::{info, error};
+use tracing::info;
+use tracing::error;
 use crate::cli::commands::CliArgs;
 use qdrant_client::Qdrant;
 
@@ -73,15 +74,15 @@ pub async fn handle_server_command(
     client: Arc<Qdrant>,
 ) -> Result<()> {
     match args.command {
-        ServerCommands::Start(start_args) => handle_server_start(start_args, config, client).await,
+        ServerCommands::Start(start_args) => handle_server_start(&config, start_args, client).await,
     }
 }
 
 // Server implementation when server feature is enabled
 #[cfg(feature = "server")]
 async fn handle_server_start(
+    config: &AppConfig,
     args: ServerStartArgs,
-    config: AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
     // Set up server configuration
@@ -122,7 +123,7 @@ async fn handle_server_start(
     // Start the server
     info!("Starting VectorDB server on {}...", addr);
     
-    let app_config = Arc::new(config);
+    let app_config = Arc::new(config.clone());
     
     crate::server::start_server(
         addr,
@@ -141,8 +142,8 @@ async fn handle_server_start(
 // Stub implementation when server feature is not enabled
 #[cfg(not(feature = "server"))]
 async fn handle_server_start(
-    args: ServerStartArgs,
-    _config: AppConfig,
+    _config: &AppConfig,
+    _args: ServerStartArgs,
     _client: Arc<Qdrant>,
 ) -> Result<()> {
     error!("Server feature not enabled. Compile with --features=server to enable server mode.");

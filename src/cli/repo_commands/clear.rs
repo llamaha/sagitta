@@ -1,11 +1,13 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use colored::*;
-use qdrant_client::{Qdrant, qdrant::{Filter, DeletePointsBuilder, PointsSelector, points_selector::PointsSelectorOneOf}};
+use qdrant_client::qdrant::{Filter, PointsSelector, points_selector::PointsSelectorOneOf};
 use std::{sync::Arc, path::PathBuf};
 use super::helpers::{get_collection_name};
 use log;
 use crate::config::{self, AppConfig};
+use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use std::fmt::Debug;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -19,12 +21,15 @@ pub struct ClearRepoArgs {
     pub yes: bool,
 }
 
-pub async fn handle_repo_clear(
+pub async fn handle_repo_clear<C>(
     args: ClearRepoArgs, 
     config: &mut AppConfig, 
-    client: Arc<Qdrant>,
+    client: Arc<C>,
     _override_path: Option<&PathBuf>,
-) -> Result<()> {
+) -> Result<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
     let repo_name = match args.name.as_ref().or(config.active_repository.as_ref()) {
         Some(name) => name.clone(),
         None => bail!("No active repository set and no repository name provided."),
@@ -59,7 +64,7 @@ pub async fn handle_repo_clear(
     let collection_name = get_collection_name(&repo_name);
 
     // Check if collection exists before attempting to delete points
-    match client.collection_exists(&collection_name).await {
+    match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => {
             if !exists {
                 log::warn!("Collection '{}' does not exist. Nothing to clear.", collection_name);
@@ -78,7 +83,7 @@ pub async fn handle_repo_clear(
 
     println!("Deleting all points from collection '{}'...", collection_name.cyan());
 
-    // Reconstruct the builder and pass it to delete_points
+    // Reconstruct the builder and pass it to delete_points_blocking
     let selector = PointsSelector {
         points_selector_one_of: Some(PointsSelectorOneOf::Filter(Filter { 
             must: vec![], 
@@ -87,11 +92,7 @@ pub async fn handle_repo_clear(
             min_should: None
         }))
     };
-    let delete_request = DeletePointsBuilder::new(&collection_name)
-        .points(selector.points_selector_one_of.unwrap())
-        .wait(false);
-
-    client.delete_points(delete_request).await?;
+    client.delete_points_blocking(&collection_name, &selector).await?;
 
     // Clear the sync status in the config
     let repo_config_mut = &mut config.repositories[repo_config_index];

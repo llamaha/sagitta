@@ -1,20 +1,25 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Result, bail};
+use colored::*;
 use git2::{Repository, CredentialType, FetchOptions, RemoteCallbacks, Cred};
-use qdrant_client::qdrant::{CreateCollectionBuilder, Distance, FieldType, VectorParamsBuilder, Filter, PointId, Condition, PointStruct, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList, DeletePointsBuilder, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector};
-use qdrant_client::{Qdrant, Payload};
+use qdrant_client::qdrant::{Filter, PointId, Condition, PointStruct, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList, DeletePointsBuilder, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, UpsertPointsBuilder, UpdateStatus};
+use qdrant_client::Payload;
 use std::collections::{HashSet};
 use std::path::{PathBuf};
 use indicatif::{ProgressBar, ProgressStyle};
 use log;
-use colored::Colorize;
 use uuid::Uuid;
-
+use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
 use crate::cli::commands::{
-    ensure_payload_index, upsert_batch, CliArgs, FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, 
+    CliArgs, FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, 
     FIELD_LANGUAGE, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_EXTENSION, BATCH_SIZE, FIELD_BRANCH, FIELD_COMMIT_HASH
 };
 use crate::{syntax, vectordb::{embedding::EmbeddingModelType, embedding_logic::EmbeddingHandler}, config::{AppConfig, RepositoryConfig}};
 use crate::cli::repo_commands::COLLECTION_NAME_PREFIX;
+use std::sync::Arc;
+use std::fs;
+use log::{info, warn, error};
+use std::path::Path;
+use std::collections::HashMap;
 
 pub(crate) const DEFAULT_VECTOR_DIMENSION: u64 = 384;
 const MAX_FILE_SIZE_BYTES: u64 = 250 * 1024; // 250 KB limit
@@ -186,12 +191,14 @@ pub(crate) fn collect_files_from_tree(
 }
 
 /// Update the config file with the last synced commit and detected languages
-pub(crate) async fn update_sync_status_and_languages(
+pub(crate) async fn update_sync_status_and_languages<
+    C: QdrantClientTrait + Send + Sync + 'static,
+>(
     config: &mut AppConfig,
     repo_config_index: usize,
     branch_name: &str,
     commit_oid_str: &str,
-    client: &Qdrant,
+    client: &C,
     collection_name: &str,
 ) -> Result<()> {
     log::debug!("Updating last synced commit for branch '{}' to {}", branch_name, commit_oid_str);
@@ -214,7 +221,7 @@ pub(crate) async fn update_sync_status_and_languages(
             builder = builder.offset(o);
         }
 
-        let scroll_request = builder;
+        let scroll_request = builder.into();
         let scroll_result: Result<ScrollResponse, _> = client.scroll(scroll_request).await;
         match scroll_result {
             Ok(response) => {
@@ -250,8 +257,10 @@ pub(crate) async fn update_sync_status_and_languages(
 
 
 /// Deletes points associated with specific file paths from a Qdrant collection.
-pub(crate) async fn delete_points_for_files(
-    client: &Qdrant,
+pub(crate) async fn delete_points_for_files<
+    C: QdrantClientTrait + Send + Sync + 'static,
+>(
+    client: &C,
     collection_name: &str,
     branch_name: &str,
     relative_paths: &[PathBuf],
@@ -287,7 +296,7 @@ pub(crate) async fn delete_points_for_files(
             builder = builder.offset(o);
         }
         
-        let scroll_request = builder;
+        let scroll_request = builder.into();
         let scroll_result: ScrollResponse = client.scroll(scroll_request).await
             .with_context(|| format!("Failed to scroll points for deletion in collection '{}'", collection_name))?;
         if scroll_result.result.is_empty() {
@@ -318,7 +327,7 @@ pub(crate) async fn delete_points_for_files(
          };
          let delete_request = DeletePointsBuilder::new(collection_name)
             .points(chunk.to_vec());
-         client.delete_points(delete_request).await
+         client.delete_points(delete_request.into()).await
              .with_context(|| format!("Failed to delete a batch of points from collection '{}'", collection_name))?;
         log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch_name);
     }
@@ -327,9 +336,64 @@ pub(crate) async fn delete_points_for_files(
     Ok(())
 }
 
+/// Custom implementation of upsert_batch for QdrantClientTrait
+async fn custom_upsert_batch<C: QdrantClientTrait>(
+    client: &C,
+    collection_name: &str,
+    points: Vec<PointStruct>,
+    progress_bar: &ProgressBar,
+) -> Result<()> {
+    if points.is_empty() {
+        return Ok(());
+    }
+    let num_points = points.len();
+    
+    let request = UpsertPointsBuilder::new(collection_name, points)
+        .wait(false)
+        .build();
+
+    match client.upsert_points(request).await {
+         Ok(response) => {
+             if let Some(result) = response.result {
+                 match UpdateStatus::try_from(result.status) {
+                     Ok(UpdateStatus::Completed) => {
+                         progress_bar.inc(num_points as u64);
+                         log::debug!("Upsert batch successful.");
+                         Ok(())
+                     },
+                     Ok(status) => {
+                         let msg = format!("Qdrant upsert batch completed with status: {:?}", status);
+                         log::debug!("{}", msg);
+                         Ok(()) 
+                     },
+                     Err(_) => {
+                         let msg = format!("Qdrant upsert batch completed with unknown status code: {}", result.status);
+                         progress_bar.println(format!("Error: {}", msg));
+                         log::error!("{}", msg);
+                         Err(anyhow::anyhow!(msg))
+                     }
+                 }
+             } else {
+                 let msg = "Qdrant upsert response missing result status";
+                 progress_bar.println(format!("Error: {}", msg));
+                 log::error!("{}", msg);
+                 Err(anyhow::anyhow!(msg))
+             }
+         },
+         Err(e) => {
+             let msg = format!("Failed to upsert batch to {}: {}", collection_name, e);
+             progress_bar.println(format!("Error: {}", msg));
+             log::error!("{}", msg);
+             Err(anyhow::anyhow!(msg).context(e))
+         }
+    }
+}
+
 /// Indexes a list of files into the specified Qdrant collection.
-pub(crate) async fn index_files(
-    client: &Qdrant,
+pub async fn index_files<
+    C: QdrantClientTrait + Send + Sync + 'static,
+>(
+    client: &C,
     cli_args: &CliArgs,
     config: &AppConfig,
     repo_root: &PathBuf,
@@ -337,7 +401,8 @@ pub(crate) async fn index_files(
     collection_name: &str,
     branch_name: &str,
     commit_hash: &str,
-) -> Result<()> {
+) -> Result<()>
+{
     if relative_paths.is_empty() {
         log::info!("No files provided for indexing in branch '{}'.", branch_name);
         return Ok(());
@@ -373,7 +438,7 @@ pub(crate) async fn index_files(
     log::debug!("Pre-warming embedding provider cache...");
     let embedding_dim = embedding_handler.dimension()? as u64;
     log::debug!("Embedding provider cache warmed. Detected dimension: {}", embedding_dim);
-    
+
     // Ensure collection exists with the correct embedding dimension
     ensure_repository_collection_exists(client, collection_name, embedding_dim).await?;
 
@@ -476,7 +541,8 @@ pub(crate) async fn index_files(
                     payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
                     points_batch.push(PointStruct::new(point_id_uuid, embedding, payload));
                     if points_batch.len() >= BATCH_SIZE {
-                        upsert_batch(client, collection_name, points_batch, 0, 0, &pb).await?;
+                        // Use our custom upsert function
+                        custom_upsert_batch(client, collection_name, points_batch, &pb).await?;
                         points_batch = Vec::new();
                     }
                 }
@@ -489,49 +555,272 @@ pub(crate) async fn index_files(
         pb.inc(1);
     }
     if !points_batch.is_empty() {
-        upsert_batch(client, collection_name, points_batch, 0, 0, &pb).await?;
+        // Use our custom upsert function
+        custom_upsert_batch(client, collection_name, points_batch, &pb).await?;
     }
     pb.finish_with_message("Indexing complete");
     Ok(())
 }
 
-/// Ensures that a Qdrant collection exists for the repository, creating it if necessary.
-pub(crate) async fn ensure_repository_collection_exists(
-    client: &Qdrant,
+/// Ensures that a Qdrant collection exists for the repository and has the correct configuration.
+/// If the collection does not exist, it will be created.
+/// If it exists but has the wrong vector dimension, it will be deleted and recreated.
+pub(crate) async fn ensure_repository_collection_exists<
+    C: QdrantClientTrait + Send + Sync + 'static,
+>(
+    client: &C,
     collection_name: &str,
-    embedding_dimension: u64,
-) -> Result<()> {
-    log::debug!("Checking existence of collection: {}", collection_name);
-    match client.collection_info(collection_name).await {
-        Ok(_) => {
-            log::info!("Collection '{}' already exists.", collection_name);
-            Ok(())
-        }
-        Err(e) => {
-            if e.to_string().contains("Not found") || e.to_string().contains("doesn't exist") {
-                 log::info!("Collection '{}' not found. Creating...", collection_name);
-                println!("Creating Qdrant collection '{}'...", collection_name);
-                let create_request = CreateCollectionBuilder::new(collection_name)
-                        .vectors_config(VectorParamsBuilder::new(embedding_dimension, Distance::Cosine));
-                client
-                    .create_collection(create_request)
-                    .await
-                    .with_context(|| format!("Failed to create collection '{}'", collection_name))?;
-                 log::info!("Collection '{}' created successfully.", collection_name);
-                 log::debug!("Ensuring payload indexes exist for collection '{}'", collection_name);
-                 ensure_payload_index(client, collection_name, FIELD_FILE_PATH, FieldType::Keyword, true, None).await?;
-                 ensure_payload_index(client, collection_name, FIELD_LANGUAGE, FieldType::Keyword, true, None).await?;
-                 ensure_payload_index(client, collection_name, FIELD_BRANCH, FieldType::Keyword, true, None).await?;
-                 ensure_payload_index(client, collection_name, FIELD_COMMIT_HASH, FieldType::Keyword, true, None).await?;
-                 ensure_payload_index(client, collection_name, FIELD_ELEMENT_TYPE, FieldType::Keyword, true, None).await?;
-                 ensure_payload_index(client, collection_name, FIELD_FILE_EXTENSION, FieldType::Keyword, true, None).await?;
-                 log::info!("Payload indexes ensured for collection '{}'.", collection_name);
+    vector_dimension: u64,
+) -> Result<()>
+{
+    match client.collection_exists(collection_name.to_string()).await {
+        Ok(exists) => {
+            if exists {
+                log::debug!("Collection '{}' already exists.", collection_name);
+                // TODO: Optionally verify existing collection parameters?
                 Ok(())
             } else {
-                Err(anyhow!("Failed to check collection '{}': {}", collection_name, e))
+                log::info!("Collection '{}' does not exist. Creating...", collection_name);
+                // Create collection using the trait method
+                client.create_collection(collection_name, vector_dimension).await?;
+                println!(
+                    "{}",
+                    format!(
+                        "Created Qdrant collection '{}' with dimension {}.",
+                        collection_name.cyan(),
+                        vector_dimension
+                    ).green()
+                );
+                Ok(())
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to check or create collection '{}': {}", collection_name, e);
+            Err(anyhow!("Failed to ensure collection '{}' exists: {}", collection_name, e))
+        }
+    }
+}
+
+/// Create a filter for a specific branch
+pub fn create_branch_filter(branch_name: &str) -> qdrant_client::qdrant::Filter {
+    qdrant_client::qdrant::Filter::must([
+        qdrant_client::qdrant::Condition::matches(crate::cli::commands::FIELD_BRANCH, branch_name.to_string()),
+    ])
+}
+
+// ============================================================================
+// Shared Repository Management Logic (for CLI and Server)
+// ============================================================================
+
+/// Core logic to clone or open a repository and prepare its config.
+/// Does not modify AppConfig or save anything.
+pub async fn prepare_repository<C>(
+    url: &str,
+    name_opt: Option<&str>,
+    local_path_opt: Option<&PathBuf>,
+    branch_opt: Option<&str>,
+    remote_opt: Option<&str>,
+    ssh_key_path_opt: Option<&PathBuf>,
+    ssh_passphrase_opt: Option<&str>,
+    base_path_for_new_clones: &Path,
+    client: Arc<C>,
+    embedding_dim: u64, // Pass dimension instead of full handler
+) -> Result<RepositoryConfig>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    let repo_name = match name_opt {
+        Some(name) => name.to_string(),
+        None => PathBuf::from(url)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.trim_end_matches(".git").to_string())
+            .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?,
+    };
+
+    let local_path = local_path_opt.map_or_else(|| base_path_for_new_clones.join(&repo_name), |p| p.clone());
+
+    let repo = if local_path.exists() {
+        info!("Local directory '{}' already exists. Opening.", local_path.display());
+        Repository::open(&local_path)
+            .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?
+    } else {
+        info!("Cloning repository '{}' from {}", repo_name, url);
+        fs::create_dir_all(&local_path)
+            .with_context(|| format!("Failed to create directory at {}", local_path.display()))?;
+
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("clone").arg(url).arg(&local_path);
+
+        if let Some(ssh_key) = ssh_key_path_opt {
+            let ssh_cmd = if ssh_passphrase_opt.is_some() {
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            } else {
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            };
+            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+            info!("Using SSH key: {}", ssh_key.display());
+        }
+
+        let status = cmd.status().context("Failed to execute git clone command")?;
+        if !status.success() {
+            bail!("Git clone command failed with exit code: {}", status);
+        }
+        info!("Repository cloned successfully to {}", local_path.display());
+        Repository::open(&local_path)
+            .with_context(|| format!("Failed to open newly cloned repository at {}", local_path.display()))?
+    };
+
+    let initial_branch_name = match branch_opt {
+        Some(branch_name) => branch_name.to_string(),
+        None => {
+            let head_ref = repo.find_reference("HEAD")?;
+            let head_ref_resolved = head_ref.resolve()?;
+            head_ref_resolved.shorthand()
+                .ok_or_else(|| anyhow!("Could not determine default branch name from HEAD"))?
+                .to_string()
+        }
+    };
+    info!("Using initial branch: {}", initial_branch_name);
+
+    let collection_name = get_collection_name(&repo_name);
+    info!("Ensuring Qdrant collection '{}' exists (dim={})...", collection_name, embedding_dim);
+    ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await?;
+    info!("Qdrant collection ensured.");
+
+    let new_repo_config = RepositoryConfig {
+        name: repo_name.clone(),
+        url: url.to_string(),
+        local_path: local_path.clone(),
+        default_branch: initial_branch_name.clone(),
+        tracked_branches: vec![initial_branch_name.clone()],
+        active_branch: Some(initial_branch_name.clone()),
+        remote_name: Some(remote_opt.unwrap_or("origin").to_string()),
+        ssh_key_path: ssh_key_path_opt.cloned(),
+        ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
+        last_synced_commits: HashMap::new(),
+        indexed_languages: None,
+    };
+
+    Ok(new_repo_config)
+}
+
+
+/// Core logic to delete repository data (Qdrant collection, local files).
+/// Does not modify AppConfig or save anything.
+pub async fn delete_repository_data<C>(
+    repo_config: &RepositoryConfig,
+    client: Arc<C>,
+) -> Result<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    let repo_name = &repo_config.name;
+    let collection_name = get_collection_name(repo_name);
+    info!("Attempting to delete Qdrant collection '{}'...", collection_name);
+    match client.delete_collection(collection_name.clone()).await {
+        Ok(deleted) => {
+            if deleted {
+                info!("Successfully deleted Qdrant collection '{}'.", collection_name);
+            } else {
+                info!("Qdrant collection '{}' did not exist or was already deleted.", collection_name);
+            }
+        }
+        Err(e) => {
+            // Log error but consider it non-fatal for the overall removal
+            warn!("Failed to delete Qdrant collection '{}': {}. Continuing removal process.", collection_name, e);
+        }
+    }
+
+    info!("Attempting to remove local clone at {}...", repo_config.local_path.display());
+    if repo_config.local_path.exists() {
+        match fs::remove_dir_all(&repo_config.local_path) {
+            Ok(_) => info!("Successfully removed local directory '{}'.", repo_config.local_path.display()),
+            Err(e) => {
+                // Log error but consider it non-fatal
+                 error!("Failed to remove local directory '{}': {}. Please remove it manually.", repo_config.local_path.display(), e);
+                 // Maybe return error here? Or just warn?
+                 // For now, just warn and continue, as config removal is most important.
+                  warn!(
+                    "Failed to remove local directory '{}'. Please remove it manually.",
+                    repo_config.local_path.display()
+                );
+            }
+        }
+    } else {
+        info!("Local directory '{}' does not exist. Skipping removal.", repo_config.local_path.display());
+    }
+
+    Ok(())
+}
+
+
+/// Core logic to switch branch for a repository.
+/// Uses git2, potentially blocking.
+/// Does not modify AppConfig or save anything.
+pub fn switch_repository_branch(
+    repo_config: &RepositoryConfig,
+    target_branch_name: &str,
+) -> Result<()> {
+    let repo = Repository::open(&repo_config.local_path)
+        .with_context(|| format!("Failed to open repository at {}", repo_config.local_path.display()))?;
+
+    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin");
+
+    if repo.find_branch(target_branch_name, git2::BranchType::Local).is_err() {
+        info!(
+            "Local branch '{}' not found. Checking remote '{}'...",
+            target_branch_name, remote_name
+        );
+        
+        info!("Fetching from remote '{}' to update refs...", remote_name);
+        let mut remote = repo.find_remote(remote_name)?;
+        
+        // Need fetch options potentially with SSH creds
+        let mut fetch_opts = create_fetch_options(
+            vec![repo_config.clone()], // Hack: Need a way to pass config or creds
+            &repo_config.url,
+            repo_config.ssh_key_path.as_ref(),
+            repo_config.ssh_key_passphrase.as_deref()
+        )?;
+        remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)
+            .with_context(|| format!("Failed initial fetch from remote '{}' before branch check", remote_name))?;
+        info!("Fetch for refs update complete.");
+
+        let remote_branch_ref = format!("{}/{}", remote_name, target_branch_name);
+        match repo.find_branch(&remote_branch_ref, git2::BranchType::Remote) {
+            Ok(remote_branch) => {
+                info!(
+                    "Branch '{}' found on remote '{}'. Creating local tracking branch...",
+                    target_branch_name, remote_name
+                );
+                let commit = remote_branch.get().peel_to_commit()
+                    .with_context(|| format!("Failed to get commit for remote branch {}", remote_branch_ref))?;
+                repo.branch(target_branch_name, &commit, false)
+                    .with_context(|| format!("Failed to create local branch '{}'", target_branch_name))?;
+                let mut local_branch = repo.find_branch(target_branch_name, git2::BranchType::Local)?;
+                local_branch.set_upstream(Some(&remote_branch_ref))
+                    .with_context(|| format!("Failed to set upstream for branch '{}' to '{}'", target_branch_name, remote_branch_ref))?;
+            }
+            Err(_) => {
+                bail!(
+                    "Branch '{}' not found locally or on remote '{}'.",
+                    target_branch_name,
+                    remote_name
+                );
             }
         }
     }
+
+    info!("Checking out branch '{}'...", target_branch_name);
+    let ref_name = format!("refs/heads/{}", target_branch_name);
+    repo.set_head(&ref_name)
+        .with_context(|| format!("Failed to checkout branch '{}'", target_branch_name))?;
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .with_context(|| format!("Failed to force checkout head for branch '{}'", target_branch_name))?;
+
+    info!("Successfully switched to branch '{}'", target_branch_name);
+    Ok(())
 }
 
 #[cfg(test)]

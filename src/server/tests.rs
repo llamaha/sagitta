@@ -7,64 +7,45 @@ mod tests {
     use crate::config::AppConfig;
     use crate::server::{ServerConfig, start_server};
     use qdrant_client::Qdrant;
+    use tokio::time::{timeout, Duration};
     
     #[tokio::test]
     async fn test_server_startup_shutdown() {
-        // Create a test configuration
-        let config = AppConfig::default();
-        let server_config = ServerConfig::default();
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap(); // Use port 0 for random available port
+        let config = Arc::new(AppConfig::default());
+        let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
+        let _server_config = ServerConfig::default(); // Prefix with underscore
         
-        // Choose a random high port for testing
-        let port = 50052 + fastrand::u16(0..1000);
-        let addr: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-        
-        // Create a shutdown channel
         let (tx, rx) = oneshot::channel();
         
-        // Create a Qdrant client (mock)
-        let client = mock_qdrant_client();
-        
-        // Start the server in a background task
         let server_handle = tokio::spawn(async move {
-            match start_server(
-                addr,
-                Arc::new(config),
-                client,
-                Some(rx),
-                false,
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(_) => println!("Server shut down gracefully"),
-                Err(e) => panic!("Server error: {}", e),
-            }
+            start_server(addr, config, client, Some(rx), false, None, None).await
         });
         
-        // Wait a moment for the server to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Give the server a moment to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
         
-        // Send the shutdown signal
-        tx.send(()).unwrap();
+        // Send shutdown signal
+        let _ = tx.send(());
         
-        // Wait for the server to shut down
-        let _ = tokio::time::timeout(
-            tokio::time::Duration::from_secs(1),
-            server_handle,
-        )
-        .await
-        .expect("Server did not shut down within timeout");
+        // Wait for server to shut down gracefully (with timeout)
+        let result = timeout(Duration::from_secs(5), server_handle).await;
+        
+        assert!(result.is_ok(), "Server task timed out");
+        let server_result = result.unwrap();
+        assert!(server_result.is_ok(), "Server task panicked");
+        assert!(server_result.unwrap().is_ok(), "Server returned an error during run");
     }
     
     // Helper function to create a mock Qdrant client for testing
-    fn mock_qdrant_client() -> Arc<Qdrant> {
-        // For now, we'll use a real client but with a bogus URL
-        // In a real test, we might want to use a proper mock
-        let client = qdrant_client::Qdrant::from_url("http://localhost:6334")
-            .build()
-            .expect("Failed to create Qdrant client");
+    // This function appears unused.
+    // fn mock_qdrant_client() -> Arc<Qdrant> {
+    //     // For now, we'll use a real client but with a bogus URL
+    //     // In a real test, we might want to use a proper mock
+    //     let client = qdrant_client::Qdrant::from_url("http://localhost:6334")
+    //         .build()
+    //         .expect("Failed to create Qdrant client");
         
-        Arc::new(client)
-    }
+    //     Arc::new(client)
+    // }
 } 

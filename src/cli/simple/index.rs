@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use indicatif::ProgressBar;

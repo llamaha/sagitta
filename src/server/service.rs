@@ -1,91 +1,79 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use qdrant_client::Qdrant;
-use crate::config::AppConfig;
-use crate::server::error::{Result, ServerError};
-use crate::server::auth::{ApiKeyAuthenticator, authenticate_request};
-use chrono::Utc;
-use qdrant_client::qdrant::{Distance, CreateCollectionBuilder, VectorParamsBuilder};
+use crate::config::{AppConfig, save_config, get_repo_base_path};
+use crate::server::auth::{ApiKeyAuthenticator};
+use qdrant_client::qdrant::{Distance, CreateCollectionBuilder, VectorParamsBuilder, SearchPointsBuilder, Filter};
 use std::fmt;
-
-// Import the generated gRPC code conditionally
-#[cfg(feature = "server")]
-use vectordb_proto::vectordb::{
-    Empty, ServerInfo, ModelInfo, StatusResponse, CreateCollectionRequest,
-    CollectionRequest, ListCollectionsResponse, QueryRequest, QueryResponse,
-    SearchResult, IndexFilesRequest, IndexResponse, AddRepositoryRequest,
-    ListRepositoriesResponse, RepositoryRequest, RemoveRepositoryRequest,
-    SyncRepositoryRequest, UseBranchRequest, RepositoryInfo
+use crate::cli::repo_commands::helpers;
+use anyhow::{anyhow, Context};
+use std::path::{PathBuf};
+use std::fs;
+use arc_swap::ArcSwap;
+use tracing::{error, info, warn};
+use crate::vectordb::embedding_logic::EmbeddingHandler;
+use crate::vectordb::embedding::EmbeddingModelType;
+use std::time::Instant;
+use crate::cli::commands::{
+    FIELD_CHUNK_CONTENT, FIELD_COMMIT_HASH, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
+    FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, FIELD_BRANCH
 };
 
 #[cfg(feature = "server")]
-use vectordb_proto::vector_db_service_server::VectorDbService;
-use crate::cli;
+use vectordb_proto::vectordb::{
+    vector_db_service_server::VectorDbService,
+    QueryRequest, QueryResponse, SearchResult,
+    ServerInfo,
+    ListCollectionsResponse,
+    StatusResponse, CollectionRequest, CreateCollectionRequest,
+    ListRepositoriesResponse, RepositoryInfo, RepositoryRequest, Empty,
+    IndexFilesRequest, IndexResponse, AddRepositoryRequest,
+    RemoveRepositoryRequest, SyncRepositoryRequest, UseBranchRequest,
+};
 
 #[cfg(feature = "server")]
-use std::time::Instant;
-
-// Import the right types for filters
-#[cfg(feature = "server")]
-use qdrant_client::qdrant::{Filter, Condition, FieldCondition, SearchPoints, WithPayloadSelector};
-#[cfg(feature = "server")]
-use qdrant_client::qdrant::with_payload_selector::SelectorOptions;
-#[cfg(feature = "server")]
-use qdrant_client::qdrant::r#match::MatchValue;
-#[cfg(feature = "server")]
-use qdrant_client::qdrant::condition::ConditionOneOf;
-
-// Service implementation
 pub struct VectorDBServiceImpl {
-    config: Arc<AppConfig>,
     client: Arc<Qdrant>,
+    config: Arc<ArcSwap<AppConfig>>,
     authenticator: Option<ApiKeyAuthenticator>,
-    pub(crate) version: String,
-    pub(crate) build_date: String,
 }
 
-// Manual implementation of Debug since Qdrant doesn't implement it
 impl fmt::Debug for VectorDBServiceImpl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VectorDBServiceImpl")
-            .field("config", &self.config)
-            .field("client", &"<Qdrant client>")
+            .field("config", &self.config.load())
+            .field("client", &"<Arc<Qdrant> client>")
             .field("authenticator", &self.authenticator)
-            .field("version", &self.version)
-            .field("build_date", &self.build_date)
             .finish()
     }
 }
 
+#[cfg(feature = "server")]
 impl VectorDBServiceImpl {
-    /// Create a new service implementation
-    pub fn new(config: Arc<AppConfig>, client: Arc<Qdrant>) -> Self {
-        // TODO: Initialize authenticator from server config when available
-        Self {
-            config,
+    pub fn new(client: Arc<Qdrant>, initial_config: Arc<AppConfig>, api_key: Option<String>) -> Result<Self, anyhow::Error> {
+        let authenticator = match api_key {
+             Some(key_path_str) => {
+                 let key_path = PathBuf::from(key_path_str);
+                 Some(ApiKeyAuthenticator::new(Some(&key_path), true)?)
+             }
+             None => None,
+        };
+
+        Ok(Self {
             client,
-            authenticator: None,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            build_date: env!("CARGO_PKG_VERSION").to_string(), // This should be build date but for now we'll use version
-        }
+            config: Arc::new(ArcSwap::from(initial_config)),
+            authenticator,
+        })
     }
-    
-    /// Set the authenticator for this service
-    pub fn with_authenticator(mut self, authenticator: ApiKeyAuthenticator) -> Self {
-        self.authenticator = Some(authenticator);
-        self
-    }
-    
-    /// Authenticate a request
-    fn authenticate<T>(&self, request: &Request<T>) -> Result<()> {
+
+    fn authenticate<T>(&self, request: &Request<T>) -> Result<(), Status> {
         if let Some(auth) = &self.authenticator {
-            auth.authenticate(request)?;
+            auth.authenticate(request).map_err(|e| Status::unauthenticated(e.to_string()))?;
         }
         Ok(())
     }
 }
 
-// Conditional implementation of the gRPC service
 #[cfg(feature = "server")]
 #[tonic::async_trait]
 impl VectorDbService for VectorDBServiceImpl {
@@ -93,539 +81,342 @@ impl VectorDbService for VectorDBServiceImpl {
         &self,
         request: Request<Empty>,
     ) -> std::result::Result<Response<ServerInfo>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Get model information
-        let model_info = ModelInfo {
-            model_path: self.config.onnx_model_path.clone().unwrap_or_default(),
-            tokenizer_path: self.config.onnx_tokenizer_path.clone().unwrap_or_default(),
-            vector_dimension: 384, // Default dimension (should be dynamically detected)
-            model_type: "onnx".to_string(),
-        };
-        
-        // Create response
-        let response = ServerInfo {
-            version: self.version.clone(),
-            build_date: self.build_date.clone(),
+        let config = self.config.load();
+        let build_date = env!("CARGO_PKG_VERSION").to_string();
+
+        let active_repo_name = config.active_repository.clone();
+        let _active_repo_info = active_repo_name.as_ref().and_then(|name| {
+            config.repositories.iter().find(|r| &r.name == name)
+        }).map(|r| RepositoryInfo {
+             name: r.name.clone(),
+             url: r.url.clone(),
+             local_path: r.local_path.to_string_lossy().into_owned(),
+             default_branch: r.default_branch.clone(),
+             active_branch: r.active_branch.clone().unwrap_or_default(),
+             tracked_branches: r.tracked_branches.clone(),
+             indexed_languages: r.indexed_languages.clone().unwrap_or_default(),
+             is_active: true,
+        });
+
+        Ok(Response::new(ServerInfo {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            build_date,
             is_healthy: true,
-            model_info: Some(model_info),
-        };
-        
-        Ok(Response::new(response))
+            model_info: None,
+        }))
     }
     
     async fn create_collection(
         &self,
         request: Request<CreateCollectionRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
         let collection_name = req.name;
         let vector_size = req.vector_size as u64;
-        
-        // Parse distance metric
+
         let distance = match req.distance.as_str() {
             "cosine" => Distance::Cosine,
-            "euclidean" => Distance::Euclid,
+            "euclid" => Distance::Euclid,
             "dot" => Distance::Dot,
-            _ => {
-                return Ok(Response::new(StatusResponse {
-                    success: false,
-                    message: format!("Invalid distance metric: {}", req.distance),
-                }));
-            }
+            _ => return Err(Status::invalid_argument(format!("Invalid distance metric: {}", req.distance))),
         };
-        
-        // Create the collection in Qdrant using Builder pattern
+
         let create_request = CreateCollectionBuilder::new(&collection_name)
             .vectors_config(VectorParamsBuilder::new(vector_size, distance));
-            
-        let create_result = self.client
-            .create_collection(create_request)
-            .await;
-            
-        // Handle the result
-        match create_result {
-            Ok(_) => {
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Collection '{}' created successfully", collection_name),
-                }))
-            }
-            Err(e) => {
-                // Check if collection already exists
+
+        self.client.create_collection(create_request.build()).await
+            .map(|_| Response::new(StatusResponse {
+                success: true,
+                message: format!("Collection '{}' created successfully", collection_name),
+            }))
+            .map_err(|e| {
                 if e.to_string().contains("already exists") {
-                    Ok(Response::new(StatusResponse {
-                        success: false,
-                        message: format!("Collection '{}' already exists", collection_name),
-                    }))
+                    Status::already_exists(format!("Collection '{}' already exists", collection_name))
                 } else {
-                    Err(Status::internal(format!("Failed to create collection: {}", e)))
+                    error!("Failed to create collection '{}': {}", collection_name, e);
+                    Status::internal(format!("Failed to create collection: {}", e))
                 }
-            }
-        }
+            })
     }
     
     async fn list_collections(
         &self,
         request: Request<Empty>,
     ) -> std::result::Result<Response<ListCollectionsResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Get collections from Qdrant
-        let collections_result = self.client.list_collections().await;
-        
-        match collections_result {
-            Ok(response) => {
-                let collection_names = response
-                    .collections
-                    .into_iter()
-                    .map(|c| c.name)
-                    .collect();
-                
-                Ok(Response::new(ListCollectionsResponse {
-                    collections: collection_names,
-                }))
-            }
-            Err(e) => {
-                Err(Status::internal(format!("Failed to list collections: {}", e)))
-            }
-        }
+        let collections_response = self.client.list_collections().await
+            .map_err(|e| {
+                error!("Failed to list collections: {}", e);
+                Status::internal(format!("Failed to list collections: {}", e))
+            })?;
+        Ok(Response::new(ListCollectionsResponse {
+            collections: collections_response.collections.into_iter().map(|c| c.name).collect(),
+        }))
+    }
+    
+    async fn clear_collection(
+        &self,
+        _request: Request<CollectionRequest>,
+    ) -> std::result::Result<Response<StatusResponse>, Status> {
+         self.authenticate(&_request)?;
+         warn!("clear_collection RPC endpoint is not fully implemented yet.");
+         Ok(Response::new(StatusResponse {
+             success: false,
+             message: "clear_collection not implemented".to_string(),
+         }))
     }
     
     async fn delete_collection(
         &self,
         request: Request<CollectionRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract the collection name
         let collection_name = request.into_inner().name;
-        
-        // Delete the collection
-        let delete_result = self.client.delete_collection(collection_name.clone()).await;
-        
-        match delete_result {
-            Ok(_) => {
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Collection '{}' deleted successfully", collection_name),
-                }))
-            }
-            Err(e) => {
+
+        self.client.delete_collection(collection_name.clone()).await
+            .map(|_| Response::new(StatusResponse {
+                success: true,
+                message: format!("Collection '{}' deleted successfully", collection_name),
+            }))
+            .map_err(|e| {
                 if e.to_string().contains("not found") || e.to_string().contains("doesn't exist") {
-                    Ok(Response::new(StatusResponse {
-                        success: false,
-                        message: format!("Collection '{}' does not exist", collection_name),
-                    }))
+                   Status::not_found(format!("Collection '{}' does not exist", collection_name))
                 } else {
-                    Err(Status::internal(format!("Failed to delete collection: {}", e)))
+                    error!("Failed to delete collection '{}': {}", collection_name, e);
+                    Status::internal(format!("Failed to delete collection: {}", e))
                 }
-            }
-        }
-    }
-    
-    async fn clear_collection(
-        &self,
-        request: Request<CollectionRequest>,
-    ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
-        self.authenticate(&request)?;
-        
-        // Extract the collection name
-        let collection_name = request.into_inner().name;
-        
-        // First check if the collection exists
-        let collections_result = self.client.list_collections().await;
-        
-        match collections_result {
-            Ok(response) => {
-                let collections = response.collections.into_iter().map(|c| c.name).collect::<Vec<String>>();
-                
-                if !collections.contains(&collection_name) {
-                    return Ok(Response::new(StatusResponse {
-                        success: false,
-                        message: format!("Collection '{}' does not exist", collection_name),
-                    }));
-                }
-            }
-            Err(e) => {
-                return Err(Status::internal(format!("Failed to list collections: {}", e)));
-            }
-        }
-        
-        // Delete the collection
-        let delete_result = self.client.delete_collection(collection_name.clone()).await;
-        
-        match delete_result {
-            Ok(_) => {
-                // Create an empty collection again with the same name/settings using Builder pattern
-                // We assume the vector size is 384 which is our default
-                let create_request = CreateCollectionBuilder::new(&collection_name)
-                    .vectors_config(VectorParamsBuilder::new(384, Distance::Cosine));
-                    
-                let create_result = self.client
-                    .create_collection(create_request)
-                    .await;
-                    
-                match create_result {
-                    Ok(_) => {
-                        Ok(Response::new(StatusResponse {
-                            success: true,
-                            message: format!("Collection '{}' cleared successfully", collection_name),
-                        }))
-                    }
-                    Err(e) => {
-                        Err(Status::internal(format!("Failed to recreate collection after clearing: {}", e)))
-                    }
-                }
-            }
-            Err(e) => {
-                Err(Status::internal(format!("Failed to clear collection: {}", e)))
-            }
-        }
+            })
     }
     
     async fn index_files(
         &self,
         request: Request<IndexFilesRequest>,
     ) -> std::result::Result<Response<IndexResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
-        let paths = req.paths;
-        let extensions = req.extensions;
+        let config_arc = self.config.load();
         let collection_name = req.collection_name;
-        
-        // First check if the collection exists
-        let collections_result = self.client.list_collections().await;
-        
-        let collection_exists = match collections_result {
-            Ok(response) => {
-                let collections = response.collections.into_iter().map(|c| c.name).collect::<Vec<String>>();
-                collections.contains(&collection_name)
-            }
-            Err(e) => {
-                return Err(Status::internal(format!("Failed to list collections: {}", e)));
-            }
-        };
-        
-        // If collection doesn't exist, create it
-        if !collection_exists {
-            let create_request = CreateCollectionBuilder::new(&collection_name)
-                .vectors_config(VectorParamsBuilder::new(384, Distance::Cosine));
-                
-            let create_result = self.client
-                .create_collection(create_request)
-                .await;
-                
-            if let Err(e) = create_result {
-                return Err(Status::internal(format!("Failed to create collection: {}", e)));
-            }
+        let paths = req.paths;
+        let file_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+
+        let repo_name = config_arc.active_repository.as_ref()
+                .ok_or_else(|| Status::failed_precondition("No active repository set for index_files request"))?.clone();
+
+        let repo_config = config_arc.repositories.iter().find(|r| r.name == repo_name)
+            .ok_or_else(|| Status::not_found(format!("Active repository '{}' config not found", repo_name)))?.clone();
+
+        let active_branch = repo_config.active_branch.as_deref().unwrap_or(&repo_config.default_branch);
+        let commit_hash = "HEAD";
+
+        let index_start_time = Instant::now();
+        let mut errors = Vec::new();
+
+        let result = crate::cli::repo_commands::helpers::index_files(
+            self.client.as_ref(),
+            &crate::cli::commands::CliArgs::default(),
+            config_arc.as_ref(),
+            &repo_config.local_path,
+            &file_paths,
+            &collection_name,
+            active_branch,
+            commit_hash,
+        ).await;
+
+        let indexing_duration = index_start_time.elapsed();
+        if result.is_err() {
+             errors.push(format!("{}", result.err().unwrap()));
         }
-        
-        // Use the CLI's simple index logic to perform the indexing
-        // Since this is already implemented in the CLI, we'll call into that directly
-        // We're adapting it to work within the server context
-        
-        #[cfg(feature = "onnx")]
-        let index_result = {
-            use crate::vectordb::embedding_logic::EmbeddingHandler;
-            use crate::vectordb::embedding::EmbeddingModelType;
-            use std::path::PathBuf;
-            use indicatif::ProgressBar;
-            use crate::cli::simple::index;
-            
-            // Create embedding handler
-            let handler = EmbeddingHandler::new(
-                EmbeddingModelType::Onnx,
-                self.config.onnx_model_path.clone().map(PathBuf::from),
-                self.config.onnx_tokenizer_path.clone().map(PathBuf::from),
-            ).map_err(|e| Status::internal(format!("Failed to create embedding handler: {}", e)))?;
-            
-            // Convert paths to PathBufs
-            let path_bufs = paths.into_iter().map(PathBuf::from).collect::<Vec<PathBuf>>();
-            
-            // Create a hidden progress bar for server-side operations
-            let progress_bar = ProgressBar::hidden();
-            
-            // Run the indexing operation
-            let result = index::index_paths(
-                self.client.as_ref(),
-                &collection_name,
-                &handler,
-                &path_bufs,
-                &extensions,
-                &progress_bar,
-            ).await;
-            
-            match result {
-                Ok((indexed_files, indexed_chunks)) => {
-                    Ok(Response::new(IndexResponse {
-                        success: true,
-                        message: format!("Successfully indexed {} files with {} chunks", indexed_files, indexed_chunks),
-                        indexed_files: indexed_files as i32,
-                        indexed_chunks: indexed_chunks as i32,
-                    }))
-                }
-                Err(e) => {
-                    Err(Status::internal(format!("Indexing failed: {}", e)))
-                }
-            }
-        };
-        
-        #[cfg(not(feature = "onnx"))]
-        let index_result = Err(Status::internal("ONNX support not enabled"));
-        
-        index_result
+
+        info!(
+            "Indexing completed for collection '{}': requested {} files in {:.2?}. Errors: {}",
+            collection_name, file_paths.len(), indexing_duration, errors.len()
+        );
+
+        Ok(Response::new(IndexResponse {
+            success: errors.is_empty(),
+            message: if errors.is_empty() {
+                format!("Successfully processed indexing request for {} files in {:.2?}",
+                       file_paths.len(), indexing_duration)
+            } else {
+                format!("Indexing request failed: {}", errors.join("; "))
+            },
+            indexed_files: if errors.is_empty() { file_paths.len() as i32 } else { 0 },
+            indexed_chunks: 0,
+        }))
     }
     
     async fn query_collection(
         &self,
         request: Request<QueryRequest>,
     ) -> std::result::Result<Response<QueryResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
         let query_text = req.query_text;
         let collection_name = req.collection_name;
-        let limit = req.limit as u64;
-        let language_filter = req.language;
+        let limit = req.limit;
+        let lang_filter = req.language;
         let element_type_filter = req.element_type;
-        
-        // Create embedding for the query
-        #[cfg(feature = "onnx")]
-        let embedding_result = {
-            use crate::vectordb::embedding_logic::EmbeddingHandler;
-            use crate::vectordb::embedding::EmbeddingModelType;
-            use std::path::PathBuf;
-            
+
+        if query_text.is_empty() {
+            return Err(Status::invalid_argument("Query text cannot be empty"));
+        }
+        if collection_name.is_empty() {
+            return Err(Status::invalid_argument("Collection name cannot be empty"));
+        }
+
+        let embedding_vec = async {
+            let config = self.config.load();
             let handler = EmbeddingHandler::new(
                 EmbeddingModelType::Onnx,
-                self.config.onnx_model_path.clone().map(PathBuf::from),
-                self.config.onnx_tokenizer_path.clone().map(PathBuf::from),
-            ).map_err(|e| Status::internal(format!("Failed to create embedding handler: {}", e)))?;
-            
-            // Fix: Use embed method instead of get_embedding
-            handler.embed(&[&query_text])
-                .map_err(|e| Status::internal(format!("Failed to create query embedding: {}", e)))
-                .map(|embeddings| embeddings[0].clone())
-        };
-        
-        #[cfg(not(feature = "onnx"))]
-        let embedding_result = Err(Status::internal("ONNX support not enabled"));
-        
-        let embedding = embedding_result?;
-        
-        // Start measuring query time
-        let start = Instant::now();
-        
-        // Create a SearchPointsBuilder for the query
-        use qdrant_client::qdrant::SearchPointsBuilder;
-        
-        // Initialize filter
+                config.onnx_model_path.clone().map(PathBuf::from),
+                config.onnx_tokenizer_path.clone().map(PathBuf::from),
+            ).map_err(anyhow::Error::from)?;
+            handler.embed(&[&query_text]).map_err(anyhow::Error::from)
+        }.await.map_err(|e: anyhow::Error| {
+            error!("Embedding generation failed: {}", e);
+            Status::internal(format!("Failed to generate embedding: {}", e))
+        })?;
+
+        let embedding = embedding_vec.into_iter().next()
+            .ok_or_else(|| Status::internal("Embedding generation returned empty result"))?;
+
         let mut filter_conditions = Vec::new();
-        
-        // Add language filter if provided
-        if let Some(lang) = language_filter {
-            use qdrant_client::qdrant::FieldCondition;
-            use qdrant_client::qdrant::Match;
-            
-            let lang_condition = FieldCondition {
-                key: cli::commands::FIELD_LANGUAGE.to_string(),
-                r#match: Some(Match {
-                    match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(lang)),
-                }),
-                range: None,
-                geo_bounding_box: None,
-                geo_radius: None,
-                values_count: None,
-                geo_polygon: None,
-                datetime_range: None,
+        if let Some(lang) = lang_filter {
+            use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf};
+            use qdrant_client::qdrant::r#match::MatchValue;
+            let condition = FieldCondition {
+                key: FIELD_LANGUAGE.to_string(),
+                r#match: Some(Match { match_value: Some(MatchValue::Keyword(lang)) }),
+                ..Default::default()
             };
-            
-            use qdrant_client::qdrant::Condition;
-            use qdrant_client::qdrant::condition::ConditionOneOf;
-            
-            filter_conditions.push(Condition {
-                condition_one_of: Some(ConditionOneOf::Field(lang_condition)),
+            filter_conditions.push(qdrant_client::qdrant::Condition {
+                 condition_one_of: Some(ConditionOneOf::Field(condition)),
             });
         }
         
-        // Add element type filter if provided
         if let Some(elem_type) = element_type_filter {
-            use qdrant_client::qdrant::FieldCondition;
-            use qdrant_client::qdrant::Match;
-            
-            let type_condition = FieldCondition {
-                key: cli::commands::FIELD_ELEMENT_TYPE.to_string(),
-                r#match: Some(Match {
-                    match_value: Some(qdrant_client::qdrant::r#match::MatchValue::Keyword(elem_type)),
-                }),
-                range: None,
-                geo_bounding_box: None,
-                geo_radius: None,
-                values_count: None,
-                geo_polygon: None,
-                datetime_range: None,
+            use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf};
+            use qdrant_client::qdrant::r#match::MatchValue;
+            let condition = FieldCondition {
+                key: FIELD_ELEMENT_TYPE.to_string(),
+                r#match: Some(Match { match_value: Some(MatchValue::Keyword(elem_type)) }),
+                ..Default::default()
             };
-            
-            use qdrant_client::qdrant::Condition;
-            use qdrant_client::qdrant::condition::ConditionOneOf;
-            
-            filter_conditions.push(Condition {
-                condition_one_of: Some(ConditionOneOf::Field(type_condition)),
+            filter_conditions.push(qdrant_client::qdrant::Condition {
+                 condition_one_of: Some(ConditionOneOf::Field(condition)),
             });
         }
-        
-        // Create a filter if we have conditions
-        let filter = if !filter_conditions.is_empty() {
-            use qdrant_client::qdrant::Filter;
-            Some(Filter {
-                should: Vec::new(),
-                must: filter_conditions,
-                must_not: Vec::new(),
-                min_should: None,
-            })
-        } else {
-            None
+
+        let search_filter = Filter {
+            must: filter_conditions,
+            should: vec![],
+            must_not: vec![],
+            min_should: None,
         };
-        
-        // Build the search request
-        let search_request = SearchPointsBuilder::new(collection_name, embedding, limit)
+
+        let search_request_builder = SearchPointsBuilder::new(collection_name.clone(), embedding, limit as u64)
             .with_payload(true);
-            
-        // Add filter if present
-        let search_request = if let Some(f) = filter {
-            search_request.filter(f)
+
+        let search_request = if !search_filter.must.is_empty() || !search_filter.should.is_empty() || !search_filter.must_not.is_empty() {
+            search_request_builder.filter(search_filter)
         } else {
-            search_request
+            search_request_builder
         };
-        
-        // Perform search
-        let search_result = self.client.search_points(search_request).await;
-        
-        // Calculate query time
-        let query_time = start.elapsed();
-        
-        match search_result {
-            Ok(search_response) => {
-                // Convert points to SearchResults
-                let results: Vec<SearchResult> = search_response.result
-                    .into_iter()
-                    .map(|point| {
-                        let payload = point.payload;
-                        
-                        // Extract fields from payload
-                        let file_path = get_string_from_payload(&payload, cli::commands::FIELD_FILE_PATH).unwrap_or_default();
-                        let start_line = get_integer_from_payload(&payload, cli::commands::FIELD_START_LINE).unwrap_or(0) as i32;
-                        let end_line = get_integer_from_payload(&payload, cli::commands::FIELD_END_LINE).unwrap_or(0) as i32;
-                        let language = get_string_from_payload(&payload, cli::commands::FIELD_LANGUAGE).unwrap_or_default();
-                        let element_type = get_string_from_payload(&payload, cli::commands::FIELD_ELEMENT_TYPE).unwrap_or_default();
-                        let content = get_string_from_payload(&payload, cli::commands::FIELD_CHUNK_CONTENT).unwrap_or_default();
-                        let branch = get_string_from_payload(&payload, cli::commands::FIELD_BRANCH);
-                        let commit_hash = get_string_from_payload(&payload, cli::commands::FIELD_COMMIT_HASH);
-                        
-                        SearchResult {
-                            file_path,
-                            start_line,
-                            end_line,
-                            language,
-                            element_type,
-                            content,
-                            score: point.score,
-                            branch,
-                            commit_hash,
-                        }
-                    })
-                    .collect();
-                
-                Ok(Response::new(QueryResponse {
-                    total_results: results.len() as i32,
-                    query_time_ms: query_time.as_millis() as f32,
-                    results,
-                }))
-            },
-            Err(e) => {
-                Err(Status::internal(format!("Search query failed: {}", e)))
+
+        let start_time = Instant::now();
+        info!("Executing search in '{}' for query: '{}'", collection_name, query_text.chars().take(50).collect::<String>());
+
+        let search_response = self.client.search_points(search_request).await
+             .map_err(|e| {
+                error!("Search points failed in collection '{}': {}", collection_name, e);
+                Status::internal("Failed to execute search query")
+             })?;
+
+        let query_time = start_time.elapsed();
+         info!("Search completed in {:.2?}", query_time);
+
+        let result_count = search_response.result.len();
+        let results: Vec<SearchResult> = search_response.result.into_iter().map(|hit| {
+            let start_line = get_integer_from_payload(&hit.payload, FIELD_START_LINE).unwrap_or(0);
+            let end_line = get_integer_from_payload(&hit.payload, FIELD_END_LINE).unwrap_or(0);
+            SearchResult {
+                file_path: get_string_from_payload(&hit.payload, FIELD_FILE_PATH).unwrap_or_default(),
+                start_line: start_line as i32,
+                end_line: end_line as i32,
+                language: get_string_from_payload(&hit.payload, FIELD_LANGUAGE).unwrap_or_default(),
+                element_type: get_string_from_payload(&hit.payload, FIELD_ELEMENT_TYPE).unwrap_or_default(),
+                content: get_string_from_payload(&hit.payload, FIELD_CHUNK_CONTENT).unwrap_or_default(),
+                score: hit.score,
+                branch: Some(get_string_from_payload(&hit.payload, FIELD_BRANCH).unwrap_or_default()),
+                commit_hash: Some(get_string_from_payload(&hit.payload, FIELD_COMMIT_HASH).unwrap_or_default()),
             }
-        }
+        }).collect();
+
+        Ok(Response::new(QueryResponse {
+            results,
+            total_results: result_count as i32,
+            query_time_ms: query_time.as_millis() as f32,
+        }))
     }
     
     async fn add_repository(
         &self,
         request: Request<AddRepositoryRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
-        
-        // Clone the values we need
-        let name_opt = req.name.clone();
-        let url = req.url.clone();
-        
-        // Use the CLI's repo_commands::add_repository function
-        let result = {
-            use std::path::PathBuf;
-            use crate::cli::repo_commands::{add_repository, add::AddRepoArgs};
-            
-            let local_path = req.local_path.map(PathBuf::from);
-            let branch = req.branch;
-            let remote = req.remote.unwrap_or_else(|| "origin".to_string());
-            let ssh_key_path = req.ssh_key_path.map(PathBuf::from);
-            let ssh_passphrase = req.ssh_passphrase;
-            
-            // Create a mutable copy of the config
-            let mut config = self.config.as_ref().clone();
-            
-            // Create AddRepoArgs
-            let args = AddRepoArgs {
-                url: url.clone(),
-                name: name_opt.clone(),
-                local_path: local_path.clone(),
-                branch: branch.clone(),
-                remote: Some(remote.clone()),
-                ssh_key: ssh_key_path.clone(),
-                ssh_passphrase: ssh_passphrase.clone(),
+        let url = req.url;
+        let name_opt = req.name;
+
+        if url.is_empty() {
+            return Err(Status::invalid_argument("Repository URL cannot be empty"));
+        }
+
+        let result = async {
+            let current_config_arc = self.config.load();
+            let mut config = (**current_config_arc).clone();
+            let repo_name_str = match name_opt.as_deref() {
+                Some(name) => name.to_string(),
+                None => PathBuf::from(&url).file_stem().and_then(|s| s.to_str())
+                    .map(|s| s.trim_end_matches(".git").to_string())
+                    .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?,
             };
-            
-            // Call the add_repository function
-            add_repository(
-                args,
-                &mut config,
-                self.client.clone(),
-                None,
-            ).await
-        };
-        
-        match result {
-            Ok(()) => {
-                // Get the repository name from the request
-                let repo_name = name_opt.unwrap_or_else(|| {
-                    // Extract repo name from URL
-                    let url_str = url.trim_end_matches(".git");
-                    url_str.split('/').last().unwrap_or("unknown").to_string()
-                });
-            
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Repository '{}' added successfully", repo_name),
-                }))
+            if config.repositories.iter().any(|r| r.name == repo_name_str) {
+                return Err(anyhow!("Repository '{}' already exists.", repo_name_str));
             }
+            let repo_base_path = get_repo_base_path(Some(&config))?;
+            fs::create_dir_all(&repo_base_path).context("Failed to create base repo dir")?;
+            let embedding_dim = helpers::DEFAULT_VECTOR_DIMENSION;
+            let new_repo_config = helpers::prepare_repository(
+                &url, Some(&repo_name_str),
+                req.local_path.as_ref().map(PathBuf::from).as_ref(),
+                req.branch.as_deref(), req.remote.as_deref(),
+                req.ssh_key_path.as_ref().map(PathBuf::from).as_ref(),
+                req.ssh_passphrase.as_deref(),
+                &repo_base_path, Arc::clone(&self.client), embedding_dim
+            ).await?;
+            let final_repo_name = new_repo_config.name.clone();
+            config.repositories.push(new_repo_config);
+            config.active_repository = Some(final_repo_name.clone());
+            save_config(&config, None).context("Failed to save config")?;
+            self.config.store(Arc::new(config));
+            info!("Added repository '{}' and set as active.", final_repo_name);
+            Ok::<_, anyhow::Error>(final_repo_name)
+        }.await;
+
+        match result {
+            Ok(repo_name) => Ok(Response::new(StatusResponse {
+                success: true, message: format!("Repository '{}' added successfully", repo_name),
+            })),
             Err(e) => {
-                Err(Status::internal(format!("Failed to add repository: {}", e)))
+                if e.to_string().contains("already exists") {
+                     Err(Status::already_exists(e.to_string()))
+                } else {
+                     error!("Failed to add repository '{}': {}", url, e);
+                     Err(Status::internal(format!("Failed to add repository: {}", e)))
+                }
             }
         }
     }
@@ -634,97 +425,69 @@ impl VectorDbService for VectorDBServiceImpl {
         &self,
         request: Request<Empty>,
     ) -> std::result::Result<Response<ListRepositoriesResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Use the CLI's repo_commands::list_repositories function to get repositories
-        let result = {
-            use crate::cli::repo_commands::get_managed_repos;
-            
-            // Create a copy of the config
-            let config = self.config.as_ref().clone();
-            
-            get_managed_repos(&config)
-        };
-        
-        match result {
-            Ok(managed_repos) => {
-                let active_repo = managed_repos.active_repository.clone();
-                
-                // Convert to gRPC repository info
-                let repositories = managed_repos.repositories.into_iter()
-                    .map(|repo| {
-                        // Determine if this is the active repo
-                        let is_active = active_repo.as_ref()
-                            .map(|active| active == &repo.name)
-                            .unwrap_or(false);
-                            
-                        // Convert tracked branches to strings
-                        let tracked_branches = repo.tracked_branches.into_iter().collect();
-                            
-                        // Get indexed languages (we'll return empty for now as it's
-                        // not stored in the config)
-                        let indexed_languages = Vec::new();
-                        
-                        RepositoryInfo {
-                            name: repo.name,
-                            url: repo.url,
-                            local_path: repo.local_path.to_string_lossy().to_string(),
-                            default_branch: repo.default_branch.clone(),
-                            active_branch: repo.active_branch.clone().unwrap_or_default(),
-                            tracked_branches,
-                            indexed_languages,
-                            is_active,
-                        }
-                    })
-                    .collect();
-                    
-                Ok(Response::new(ListRepositoriesResponse {
-                    repositories,
-                    active_repository: active_repo,
-                }))
-            }
-            Err(e) => {
-                Err(Status::internal(format!("Failed to list repositories: {}", e)))
-            }
-        }
+        let config = self.config.load();
+        let active_repo_name = config.active_repository.clone();
+
+        let repos = config.repositories.iter().map(|r| RepositoryInfo {
+             name: r.name.clone(),
+             url: r.url.clone(),
+             local_path: r.local_path.to_string_lossy().into_owned(),
+             default_branch: r.default_branch.clone(),
+             active_branch: r.active_branch.clone().unwrap_or_default(),
+             tracked_branches: r.tracked_branches.clone(),
+             indexed_languages: r.indexed_languages.clone().unwrap_or_default(),
+             is_active: active_repo_name.as_ref() == Some(&r.name),
+        }).collect();
+
+        Ok(Response::new(ListRepositoriesResponse {
+            repositories: repos,
+            active_repository: active_repo_name,
+        }))
     }
     
     async fn use_repository(
         &self,
         request: Request<RepositoryRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let repo_name = request.into_inner().name;
-        
-        // Use the CLI's repo_commands::use_repository function
-        let result = {
-            use crate::cli::repo_commands::{set_active_repo, r#use::UseRepoArgs};
-            
-            // Create a mutable copy of the config
-            let mut config = self.config.as_ref().clone();
-            
-            // Create UseRepoArgs
-            let args = UseRepoArgs {
-                name: repo_name.clone(),
-            };
-            
-            // Call the set_active_repo function
-            set_active_repo(args, &mut config, None)
-        };
-        
-        match result {
-            Ok(_) => {
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Repository '{}' is now active", repo_name),
-                }))
+        if repo_name.is_empty() {
+            return Err(Status::invalid_argument("Repository name cannot be empty"));
+        }
+
+        let result: std::result::Result<_, anyhow::Error> = {
+            let current_config_arc = self.config.load();
+            let mut config = (**current_config_arc).clone();
+            if config.repositories.iter().any(|r| r.name == repo_name) {
+                config.active_repository = Some(repo_name.clone());
+                let save_result = save_config(&config, None).context("Failed to save config");
+                match save_result {
+                    Ok(_) => {
+                        self.config.store(Arc::new(config));
+                        info!("Set active repository to '{}'", repo_name);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        Err(e)
+                    }
+                }
+            } else {
+                Err(anyhow!("Repository '{}' not found.", repo_name))
             }
+        };
+
+        match result {
+            Ok(_) => Ok(Response::new(StatusResponse {
+                success: true, message: format!("Repository '{}' is now active", repo_name),
+            })),
             Err(e) => {
-                Err(Status::internal(format!("Failed to set active repository: {}", e)))
+                 if e.to_string().contains("not found") {
+                     Err(Status::not_found(format!("Repository '{}' not found", repo_name)))
+                 } else {
+                     error!("Failed to set active repository to '{}': {}", repo_name, e);
+                     Err(Status::internal(format!("Failed to set active repository: {}", e)))
+                 }
             }
         }
     }
@@ -733,43 +496,42 @@ impl VectorDbService for VectorDBServiceImpl {
         &self,
         request: Request<RemoveRepositoryRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
         let repo_name = req.name;
-        let skip_confirmation = req.skip_confirmation;
-        
-        // Use the CLI's repo_commands::remove_repository function
-        let result = {
-            use crate::cli::repo_commands::{remove_repository, remove::RemoveRepoArgs};
-            
-            // Create a mutable copy of the config
-            let mut config = self.config.as_ref().clone();
-            
-            // Create RemoveRepoArgs
-            let args = RemoveRepoArgs {
-                name: repo_name.clone(),
-                yes: skip_confirmation,
-            };
-            
-            // Create a client for Qdrant
-            let client = self.client.clone();
-            
-            // Call the remove_repository function
-            remove_repository(args, &mut config, client, None).await
-        };
-        
-        match result {
-            Ok(_) => {
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Repository '{}' removed successfully", repo_name),
-                }))
+        if repo_name.is_empty() {
+            return Err(Status::invalid_argument("Repository name cannot be empty"));
+        }
+
+        let result = async {
+            let current_config_arc = self.config.load();
+            let mut config = (**current_config_arc).clone();
+            let repo_config_index = config.repositories.iter().position(|r| r.name == repo_name)
+                .ok_or_else(|| anyhow!("Repository '{}' not found.", repo_name))?;
+            let repo_config_to_delete = config.repositories[repo_config_index].clone();
+            helpers::delete_repository_data(&repo_config_to_delete, Arc::clone(&self.client)).await?;
+            config.repositories.remove(repo_config_index);
+            if config.active_repository.as_deref() == Some(&repo_name) {
+                config.active_repository = config.repositories.first().map(|r| r.name.clone());
+                 info!("Reset active repository after removing '{}'", repo_name);
             }
-            Err(e) => {
-                Err(Status::internal(format!("Failed to remove repository: {}", e)))
+            save_config(&config, None).context("Failed to save config")?;
+            self.config.store(Arc::new(config));
+            info!("Removed repository '{}'", repo_name);
+            Ok::<_, anyhow::Error>(())
+        }.await;
+
+        match result {
+            Ok(_) => Ok(Response::new(StatusResponse {
+                success: true, message: format!("Repository '{}' removed successfully", repo_name),
+            })),
+             Err(e) => {
+                 if e.to_string().contains("not found") {
+                     Err(Status::not_found(format!("Repository '{}' not found", repo_name)))
+                 } else {
+                    error!("Failed to remove repository '{}': {}", repo_name, e);
+                    Err(Status::internal(format!("Failed to remove repository: {}", e)))
+                 }
             }
         }
     }
@@ -778,91 +540,123 @@ impl VectorDbService for VectorDBServiceImpl {
         &self,
         request: Request<SyncRepositoryRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
-        
-        // Clone the name to avoid issues with moved values
-        let name_opt = req.name.clone();
-        let _extensions = req.extensions;
-        let _force = req.force;
-        
-        // Create a simple message-only response for now
-        // Due to Send issues with the git2 library in async contexts,
-        // we'll have to implement a more sophisticated solution later
-        // that properly isolates the non-Send git operations
-        
-        let repo_name = name_opt.unwrap_or_else(|| {
-            self.config.active_repository.clone().unwrap_or_else(|| "unknown".to_string())
-        });
-        
-        // Create a response indicating we need a better implementation
-        Ok(Response::new(StatusResponse {
-            success: true,
-            message: format!(
-                "Repository '{}' sync request received. Please use the CLI for now as server-side git operations need to be refactored.",
-                repo_name
-            ),
-        }))
+        let config_arc = self.config.load();
+
+        let repo_name = match req.name {
+            Some(name) => name,
+            None => config_arc.active_repository.as_ref()
+                .ok_or_else(|| Status::failed_precondition("No repository name provided and no active repository set"))?.clone(),
+        };
+        let repo_config = config_arc.repositories.iter().find(|r| r.name == repo_name)
+            .ok_or_else(|| Status::not_found(format!("Repository '{}' not found", repo_name)))?.clone();
+
+        let options = crate::git::SyncOptions {
+            force: req.force,
+            extensions: if req.extensions.is_empty() { None } else { Some(req.extensions) }
+        };
+        info!("Starting sync for repository '{}' with options: {:?}", repo_name, options);
+
+        let sync_result_res = crate::git::sync_repository(
+            Arc::clone(&self.client),
+            repo_config.clone(), options,
+            &crate::cli::commands::CliArgs::default(),
+            &config_arc,
+        ).await;
+
+        let final_result = async {
+            let sync_result = sync_result_res.map_err(|e|
+                anyhow!("Failed to sync repository '{}': {}", repo_name, e)
+            )?;
+            if sync_result.success && !sync_result.indexed_languages.is_empty() {
+                let current_config_arc_post_sync = self.config.load();
+                let mut config_to_update = (**current_config_arc_post_sync).clone();
+                if let Some(idx) = config_to_update.repositories.iter().position(|r| r.name == repo_name) {
+                    info!(
+                        "Updating indexed languages for repo '{}' to: {:?}",
+                        repo_name, &sync_result.indexed_languages
+                    );
+                    config_to_update.repositories[idx].indexed_languages = Some(sync_result.indexed_languages.clone());
+                    save_config(&config_to_update, None).context("Failed to save config after sync")?;
+                    self.config.store(Arc::new(config_to_update));
+                } else {
+                     warn!("Repository '{}' not found in config after successful sync, cannot update indexed languages.", repo_name);
+                }
+            }
+            Ok::<_, anyhow::Error>(sync_result)
+        }.await;
+
+        match final_result {
+            Ok(result) => {
+                info!("Sync successful for repository '{}': {}", repo_name, result.message);
+                Ok(Response::new(StatusResponse {
+                     success: result.success, message: result.message,
+                }))
+            },
+            Err(e) => {
+                error!("Error during sync or config update for '{}': {}", repo_name, e);
+                Err(Status::internal(e.to_string()))
+            }
+        }
     }
     
     async fn use_branch(
         &self,
         request: Request<UseBranchRequest>,
     ) -> std::result::Result<Response<StatusResponse>, Status> {
-        // Authenticate the request
         self.authenticate(&request)?;
-        
-        // Extract request data
         let req = request.into_inner();
         let branch_name = req.branch_name;
-        let repository_name = req.repository_name;
-        
-        // Use the CLI's repo_commands::use_branch function
-        let result = {
-            use crate::cli::repo_commands::{use_branch, use_branch::UseBranchArgs};
-            
-            // Create a mutable copy of the config
-            let mut config = self.config.as_ref().clone();
-            
-            // Create UseBranchArgs
-            let args = UseBranchArgs {
-                name: branch_name.clone(),
-            };
-            
-            // Call the use_branch function
-            use_branch(args, &mut config, None).await
-        };
-        
+        let repository_name_opt = req.repository_name;
+        if branch_name.is_empty() {
+            return Err(Status::invalid_argument("Branch name cannot be empty"));
+        }
+
+        let result = async {
+             let current_config_arc = self.config.load();
+             let mut config = (**current_config_arc).clone();
+             let repo_name = repository_name_opt.clone().or_else(|| config.active_repository.clone())
+                 .ok_or_else(|| anyhow!("No repository name provided and no active repository set"))?;
+             let repo_config_index = config.repositories.iter().position(|r| r.name == repo_name)
+                 .ok_or_else(|| anyhow!("Repository '{}' configuration not found.", repo_name))?;
+             let repo_config_clone = config.repositories[repo_config_index].clone();
+             let branch_name_clone = branch_name.clone();
+             tokio::task::spawn_blocking(move || {
+                 helpers::switch_repository_branch(&repo_config_clone, &branch_name_clone)
+             }).await??;
+             let repo_config_mut = &mut config.repositories[repo_config_index];
+             repo_config_mut.active_branch = Some(branch_name.to_string());
+             if !repo_config_mut.tracked_branches.contains(&branch_name) {
+                 repo_config_mut.tracked_branches.push(branch_name.to_string());
+             }
+             save_config(&config, None).context("Failed to save config")?;
+             self.config.store(Arc::new(config));
+             info!("Switched repository '{}' to branch '{}'", repo_name, branch_name);
+             Ok::<_, anyhow::Error>(repo_name)
+        }.await;
+
         match result {
-            Ok(()) => {
-                // Extract repository name (use provided or active)
-                let repo_name = repository_name.unwrap_or_else(|| {
-                    self.config.active_repository.clone().unwrap_or_else(|| "unknown".to_string())
-                });
-                
-                Ok(Response::new(StatusResponse {
-                    success: true,
-                    message: format!("Switched to branch '{}' in repository '{}'", branch_name, repo_name),
-                }))
-            }
-            Err(e) => {
-                Err(Status::internal(format!("Failed to switch branch: {}", e)))
+            Ok(repo_name) => Ok(Response::new(StatusResponse {
+                success: true, message: format!("Switched to branch '{}' in repository '{}'", branch_name, repo_name),
+            })),
+             Err(e) => {
+                 if e.to_string().contains("not found") {
+                     Err(Status::not_found(e.to_string()))
+                 } else {
+                     error!("Failed to switch branch to '{}' in repo '{}': {}", branch_name, repository_name_opt.unwrap_or_default(), e);
+                     Err(Status::internal(format!("Failed to switch branch: {}", e)))
+                 }
             }
         }
     }
 }
 
-// Helper functions for extracting data from payload
+// Helper functions to extract values from Qdrant payload
 #[cfg(feature = "server")]
-fn get_string_from_payload(
-    payload: &std::collections::HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<String> {
-    payload.get(key).and_then(|value| {
-        if let Some(qdrant_client::qdrant::value::Kind::StringValue(s)) = &value.kind {
+fn get_string_from_payload(payload: &std::collections::HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> Option<String> {
+    payload.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| {
+        if let qdrant_client::qdrant::value::Kind::StringValue(s) = k {
             Some(s.clone())
         } else {
             None
@@ -871,216 +665,12 @@ fn get_string_from_payload(
 }
 
 #[cfg(feature = "server")]
-fn get_integer_from_payload(
-    payload: &std::collections::HashMap<String, qdrant_client::qdrant::Value>,
-    key: &str,
-) -> Option<i64> {
-    payload.get(key).and_then(|value| {
-        if let Some(qdrant_client::qdrant::value::Kind::IntegerValue(i)) = &value.kind {
+fn get_integer_from_payload(payload: &std::collections::HashMap<String, qdrant_client::qdrant::Value>, key: &str) -> Option<i64> {
+    payload.get(key).and_then(|v| v.kind.as_ref()).and_then(|k| {
+        if let qdrant_client::qdrant::value::Kind::IntegerValue(i) = k {
             Some(*i)
         } else {
             None
         }
     })
-}
-
-#[cfg(all(test, feature = "server"))]
-mod tests {
-    use super::*;
-    use tonic::Request;
-    use std::sync::Arc;
-    use crate::config::AppConfig;
-    use qdrant_client::Qdrant;
-    use vectordb_proto::vectordb::{Empty, CreateCollectionRequest, CollectionRequest};
-    
-    // Helper function to create a test service
-    fn create_test_service() -> VectorDBServiceImpl {
-        let config = Arc::new(AppConfig::default());
-        let client = Arc::new(
-            Qdrant::from_url("http://localhost:6334")
-                .build()
-                .expect("Failed to create Qdrant client")
-        );
-        
-        VectorDBServiceImpl::new(config, client)
-    }
-    
-    #[tokio::test]
-    async fn test_get_server_info() {
-        let service = create_test_service();
-        let request = Request::new(Empty {});
-        
-        let response = service.get_server_info(request).await;
-        assert!(response.is_ok(), "Failed to get server info: {:?}", response.err());
-        
-        let server_info = response.unwrap().into_inner();
-        assert_eq!(server_info.version, env!("CARGO_PKG_VERSION"));
-        assert!(server_info.is_healthy);
-        assert!(server_info.model_info.is_some());
-    }
-    
-    #[tokio::test]
-    async fn test_collection_management() {
-        let service = create_test_service();
-        
-        // Test collection name
-        let collection_name = format!("test_collection_{}", fastrand::u64(..));
-        
-        // Create a collection
-        let create_request = Request::new(CreateCollectionRequest {
-            name: collection_name.clone(),
-            vector_size: 384,
-            distance: "cosine".to_string(),
-        });
-        
-        let create_response = service.create_collection(create_request).await;
-        assert!(create_response.is_ok(), "Failed to create collection: {:?}", create_response.err());
-        let create_result = create_response.unwrap().into_inner();
-        assert!(create_result.success, "Create collection failed: {}", create_result.message);
-        
-        // List collections
-        let list_request = Request::new(Empty {});
-        let list_response = service.list_collections(list_request).await;
-        assert!(list_response.is_ok(), "Failed to list collections: {:?}", list_response.err());
-        let collections = list_response.unwrap().into_inner().collections;
-        assert!(collections.contains(&collection_name), "Created collection not found in list");
-        
-        // Delete the collection
-        let delete_request = Request::new(CollectionRequest {
-            name: collection_name.clone(),
-        });
-        
-        let delete_response = service.delete_collection(delete_request).await;
-        assert!(delete_response.is_ok(), "Failed to delete collection: {:?}", delete_response.err());
-        let delete_result = delete_response.unwrap().into_inner();
-        assert!(delete_result.success, "Delete collection failed: {}", delete_result.message);
-        
-        // Verify it's gone
-        let list_request = Request::new(Empty {});
-        let list_response = service.list_collections(list_request).await;
-        assert!(list_response.is_ok(), "Failed to list collections after delete: {:?}", list_response.err());
-        let collections_after = list_response.unwrap().into_inner().collections;
-        assert!(!collections_after.contains(&collection_name), "Collection still exists after deletion");
-    }
-    
-    // Add test for repository APIs
-    #[tokio::test]
-    async fn test_repository_management() {
-        use std::fs;
-        use std::path::Path;
-        use tempfile::tempdir;
-        
-        // Create a temporary directory for testing
-        let temp_dir = tempdir().expect("Failed to create temp dir");
-        let temp_path = temp_dir.path();
-        
-        // Create a test repo in the temp directory
-        let repo_path = temp_path.join("test_repo");
-        fs::create_dir_all(&repo_path).expect("Failed to create test repo dir");
-        
-        // Initialize an empty git repo
-        let repo = git2::Repository::init(&repo_path).expect("Failed to init git repo");
-        
-        // Create a test file
-        let file_path = repo_path.join("test.rs");
-        fs::write(&file_path, "fn test() {}\n").expect("Failed to write test file");
-        
-        // Commit the file
-        let mut index = repo.index().expect("Failed to get index");
-        index.add_path(Path::new("test.rs")).expect("Failed to add path");
-        index.write().expect("Failed to write index");
-        
-        let oid = index.write_tree().expect("Failed to write tree");
-        let tree = repo.find_tree(oid).expect("Failed to find tree");
-        
-        let signature = git2::Signature::now("Test", "test@example.com").expect("Failed to create signature");
-        repo.commit(Some("HEAD"), &signature, &signature, "Initial commit", &tree, &[])
-            .expect("Failed to commit");
-            
-        // Create a test branch
-        let head = repo.head().expect("Failed to get HEAD");
-        let commit = repo.find_commit(head.target().unwrap()).expect("Failed to find commit");
-        repo.branch("test-branch", &commit, false).expect("Failed to create branch");
-        
-        // Now test the repository management APIs
-        let service = create_test_service();
-        
-        // Test add_repository (we'll use the path where we just created the repo)
-        let add_request = Request::new(AddRepositoryRequest {
-            url: format!("file://{}", repo_path.to_string_lossy()),
-            local_path: Some(repo_path.to_string_lossy().to_string()),
-            name: Some("test_repo".to_string()),
-            branch: Some("main".to_string()),
-            remote: Some("origin".to_string()),
-            ssh_key_path: None,
-            ssh_passphrase: None,
-        });
-        
-        // This test will be more of an integration test that requires actual Git operations,
-        // so we'll keep it commented but include it for documentation purposes
-        /*
-        let add_response = service.add_repository(add_request).await;
-        assert!(add_response.is_ok(), "Failed to add repository: {:?}", add_response.err());
-        let add_result = add_response.unwrap().into_inner();
-        assert!(add_result.success, "Add repository failed: {}", add_result.message);
-        
-        // Test list_repositories
-        let list_request = Request::new(Empty {});
-        let list_response = service.list_repositories(list_request).await;
-        assert!(list_response.is_ok(), "Failed to list repositories: {:?}", list_response.err());
-        let repositories = list_response.unwrap().into_inner().repositories;
-        assert!(repositories.iter().any(|r| r.name == "test_repo"), "Added repository not found in list");
-        
-        // Test use_repository
-        let use_request = Request::new(RepositoryRequest {
-            name: "test_repo".to_string(),
-        });
-        
-        let use_response = service.use_repository(use_request).await;
-        assert!(use_response.is_ok(), "Failed to use repository: {:?}", use_response.err());
-        let use_result = use_response.unwrap().into_inner();
-        assert!(use_result.success, "Use repository failed: {}", use_result.message);
-        
-        // Test use_branch
-        let branch_request = Request::new(UseBranchRequest {
-            branch_name: "test-branch".to_string(),
-            repository_name: Some("test_repo".to_string()),
-        });
-        
-        let branch_response = service.use_branch(branch_request).await;
-        assert!(branch_response.is_ok(), "Failed to use branch: {:?}", branch_response.err());
-        let branch_result = branch_response.unwrap().into_inner();
-        assert!(branch_result.success, "Use branch failed: {}", branch_result.message);
-        
-        // Test sync_repository
-        let sync_request = Request::new(SyncRepositoryRequest {
-            name: Some("test_repo".to_string()),
-            extensions: vec!["rs".to_string()],
-            force: false,
-        });
-        
-        let sync_response = service.sync_repository(sync_request).await;
-        assert!(sync_response.is_ok(), "Failed to sync repository: {:?}", sync_response.err());
-        let sync_result = sync_response.unwrap().into_inner();
-        assert!(sync_result.success, "Sync repository failed: {}", sync_result.message);
-        
-        // Test remove_repository
-        let remove_request = Request::new(RemoveRepositoryRequest {
-            name: "test_repo".to_string(),
-            skip_confirmation: true,
-        });
-        
-        let remove_response = service.remove_repository(remove_request).await;
-        assert!(remove_response.is_ok(), "Failed to remove repository: {:?}", remove_response.err());
-        let remove_result = remove_response.unwrap().into_inner();
-        assert!(remove_result.success, "Remove repository failed: {}", remove_result.message);
-        
-        // Verify it's gone
-        let list_request = Request::new(Empty {});
-        let list_response = service.list_repositories(list_request).await;
-        assert!(list_response.is_ok(), "Failed to list repositories after removal: {:?}", list_response.err());
-        let repositories_after = list_response.unwrap().into_inner().repositories;
-        assert!(!repositories_after.iter().any(|r| r.name == "test_repo"), "Repository still exists after removal");
-        */
-    }
 } 

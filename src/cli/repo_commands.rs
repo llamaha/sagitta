@@ -12,34 +12,27 @@ pub mod config; // Add new config module
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use qdrant_client::Qdrant;
 use std::{path::PathBuf, sync::Arc};
 
-use crate::config::AppConfig;
 use crate::cli::commands::CliArgs;
+use crate::config::AppConfig;
+use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use std::fmt::Debug;
 
 const COLLECTION_NAME_PREFIX: &str = "repo_";
 pub(crate) const FIELD_BRANCH: &str = "branch";
 pub(crate) const FIELD_COMMIT_HASH: &str = "commit_hash";
 
-// Public functions for server use
-pub use add::handle_repo_add as add_repository;
-pub use r#use::use_repository as set_active_repo;
-pub use remove::handle_repo_remove as remove_repository;
-pub use sync::handle_repo_sync as sync_repository;
-pub use use_branch::handle_use_branch as use_branch;
-pub use list::get_managed_repos;
-
 #[derive(Args, Debug)]
 #[derive(Clone)]
 pub struct RepoArgs {
     #[command(subcommand)]
-    command: RepoCommand,
+    pub command: RepoCommand,
 }
 
 #[derive(Subcommand, Debug)]
 #[derive(Clone)]
-enum RepoCommand {
+pub enum RepoCommand {
     /// Add a new repository to manage.
     Add(add::AddRepoArgs),
     /// List managed repositories.
@@ -62,25 +55,29 @@ enum RepoCommand {
     Config(config::ConfigArgs),
 }
 
-pub async fn handle_repo_command(
+pub async fn handle_repo_command<C>(
     args: RepoArgs,
     cli_args: &CliArgs,
     config: &mut AppConfig,
-    client: Arc<Qdrant>,
+    client: Arc<C>,
     override_path: Option<&PathBuf>,
-) -> Result<()> {
+) -> Result<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
     match args.command {
-        RepoCommand::Add(add_args) => add::handle_repo_add(add_args, config, client, override_path).await,
-        RepoCommand::List => list::list_repositories(config),
-        RepoCommand::Use(use_args) => r#use::use_repository(use_args, config, override_path),
-        RepoCommand::Remove(remove_args) => remove::handle_repo_remove(remove_args, config, client, override_path).await,
-        RepoCommand::Clear(clear_args) => clear::handle_repo_clear(clear_args, config, client, override_path).await,
-        RepoCommand::UseBranch(branch_args) => use_branch::handle_use_branch(branch_args, config, override_path).await,
-        RepoCommand::Query(query_args) => query::handle_repo_query(query_args, config, client, cli_args).await,
-        RepoCommand::Sync(sync_args) => sync::handle_repo_sync(sync_args, cli_args, config, client, override_path).await,
-        RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), client).await,
-        RepoCommand::Config(config_args) => config::handle_config(config_args, config, override_path),
+        RepoCommand::Add(add_args) => add::handle_repo_add(add_args, config, Arc::clone(&client), override_path).await?,
+        RepoCommand::List => list::list_repositories(config)?,
+        RepoCommand::Use(use_args) => r#use::use_repository(use_args, config, override_path)?,
+        RepoCommand::Remove(remove_args) => remove::handle_repo_remove(remove_args, config, Arc::clone(&client), override_path).await?,
+        RepoCommand::Clear(clear_args) => clear::handle_repo_clear(clear_args, config, client, override_path).await?,
+        RepoCommand::UseBranch(branch_args) => use_branch::handle_use_branch(branch_args, config, override_path).await?,
+        RepoCommand::Query(query_args) => query::handle_repo_query(query_args, config, Arc::clone(&client), cli_args).await?,
+        RepoCommand::Sync(sync_args) => sync::handle_repo_sync(sync_args, cli_args, config, Arc::clone(&client), override_path).await?,
+        RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), Arc::clone(&client)).await?,
+        RepoCommand::Config(config_args) => config::handle_config(config_args, config, override_path)?,
     }
+    Ok(())
 }
 
 // Helper function for tests - allows access to the list_repositories function
@@ -92,7 +89,7 @@ pub fn handle_repo_command_test(config: &AppConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, RepositoryConfig, load_config, save_config}; 
+    use crate::config::{AppConfig, RepositoryConfig, load_config, save_config};
     use crate::cli::commands::Commands;
     use crate::cli::repo_commands::{RepoArgs, RepoCommand};
     use crate::cli::repo_commands::remove::RemoveRepoArgs;
@@ -103,6 +100,8 @@ mod tests {
     use std::path::{PathBuf};
     use std::fs;
     use tempfile::{tempdir};
+    use crate::vectordb::qdrant_client_trait::MockQdrantClientTrait;
+    use mockall::predicate::eq;
 
     // Helper function to create a default AppConfig for tests
     fn create_test_config_data() -> AppConfig {
@@ -115,6 +114,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            server_api_key_path: None,
             repositories_base_path: None,
         }
     }
@@ -140,43 +140,100 @@ mod tests {
     fn test_handle_repo_clear_specific_repo() {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
-            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
-            // Use create_test_config_data directly, no need for temp file here
+            let test_repo_name = "my-test-repo-clear-specific".to_string();
+            let collection_name = helpers::get_collection_name(&test_repo_name);
+
+            // Configure Mock Client
+            let mut mock_client = MockQdrantClientTrait::new();
+            mock_client.expect_collection_exists()
+                .with(eq(collection_name.clone()))
+                .times(1)
+                .returning(|_| Ok(true)); // Collection exists
+            
+            mock_client.expect_delete_points_blocking()
+                .times(1)
+                .returning(|_, _| Ok(())); // Successfully deleted points
+            
+            let client = Arc::new(mock_client);
+
+            // Setup config
             let mut config = create_test_config_data(); 
-            let test_repo_name = "my-test-repo-clear-specific"; 
-             config.repositories.push(RepositoryConfig { name: test_repo_name.to_string(), /* .. other fields .. */ url: "url_clear".to_string(), local_path: PathBuf::from("/tmp/clear_spec"), default_branch: "main".to_string(), tracked_branches: vec![], active_branch: None, remote_name: None, ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None});
-             config.active_repository = Some("repo1".to_string()); 
+            config.repositories.push(RepositoryConfig {
+                 name: test_repo_name.clone(), 
+                 url: "url_clear".to_string(), 
+                 local_path: PathBuf::from("/tmp/clear_spec"), 
+                 default_branch: "main".to_string(), 
+                 tracked_branches: vec![], 
+                 active_branch: None, 
+                 remote_name: None, 
+                 ssh_key_path: None, 
+                 ssh_key_passphrase: None, 
+                 last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit".to_string())]), // Add some dummy sync state
+                 indexed_languages: Some(vec!["rust".to_string()])
+            });
+            config.active_repository = Some("other_repo".to_string()); // Ensure it clears the specified one
             
             let args = clear::ClearRepoArgs { name: Some(test_repo_name.to_string()), yes: true };
             let dummy_cli_args = create_dummy_cli_args(RepoCommand::Clear(args.clone()));
-            let _ = client.delete_collection(&helpers::get_collection_name(test_repo_name)).await; 
 
+            // Execute with Mock Client
             let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client, None).await;
-            assert!(result.is_ok());
+            
+            // Assertions
+            assert!(result.is_ok(), "handle_repo_command failed: {:?}", result.err());
+            let updated_repo = config.repositories.iter().find(|r| r.name == test_repo_name).expect("Test repo config not found after clear");
+            assert!(updated_repo.last_synced_commits.is_empty(), "Sync status was not cleared");
+            assert!(updated_repo.indexed_languages.is_none(), "Indexed languages were not cleared");
         });
     }
     #[test]
     fn test_handle_repo_clear_active_repo() {
          let rt = Runtime::new().unwrap();
          rt.block_on(async {
-             let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
-             // Use create_test_config_data directly
+             let active_repo_name = "my-test-repo-clear-active".to_string();
+             let collection_name = helpers::get_collection_name(&active_repo_name);
+
+            // Configure Mock Client
+            let mut mock_client = MockQdrantClientTrait::new();
+            mock_client.expect_collection_exists()
+                .with(eq(collection_name.clone()))
+                .times(1)
+                .returning(|_| Ok(true)); // Collection exists
+            
+            mock_client.expect_delete_points_blocking()
+                .times(1)
+                .returning(|_, _| Ok(())); // Successfully deleted points
+            
+            let client = Arc::new(mock_client);
+
+             // Setup config
              let mut config = create_test_config_data(); 
-             let active_repo_name = "my-test-repo-clear-active"; 
-             config.repositories.push(RepositoryConfig { name: active_repo_name.to_string(), /* .. other fields .. */ url: "url_clear_active".to_string(), local_path: PathBuf::from("/tmp/clear_active"), default_branch: "main".to_string(), tracked_branches: vec![], active_branch: None, remote_name: None, ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None});
+             config.repositories.push(RepositoryConfig {
+                 name: active_repo_name.clone(), 
+                 url: "url_clear_active".to_string(), 
+                 local_path: PathBuf::from("/tmp/clear_active"), 
+                 default_branch: "main".to_string(), 
+                 tracked_branches: vec![], 
+                 active_branch: Some("main".to_string()), 
+                 remote_name: None, 
+                 ssh_key_path: None, 
+                 ssh_key_passphrase: None,
+                 last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit_active".to_string())]), // Add dummy sync state
+                 indexed_languages: Some(vec!["python".to_string()])
+             });
              config.active_repository = Some(active_repo_name.to_string());
 
              let args = clear::ClearRepoArgs { name: None, yes: true }; // Clear active
              let dummy_cli_args = create_dummy_cli_args(RepoCommand::Clear(args.clone()));
-             let _ = client.delete_collection(&helpers::get_collection_name(active_repo_name)).await;
 
+             // Execute with Mock Client
              let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client, None).await;
-             assert!(result.is_ok());
-
-             // Add assertion for config state change if desired (e.g., sync status cleared)
-             // let updated_repo = config.repositories.iter().find(|r| r.name == active_repo_name);
-             // assert!(updated_repo.is_some());
-             // assert!(updated_repo.unwrap().last_synced_commits.is_empty());
+             
+             // Assertions
+             assert!(result.is_ok(), "handle_repo_command failed: {:?}", result.err());
+             let updated_repo = config.repositories.iter().find(|r| r.name == active_repo_name).expect("Active repo config not found after clear");
+             assert!(updated_repo.last_synced_commits.is_empty(), "Sync status was not cleared for active repo");
+             assert!(updated_repo.indexed_languages.is_none(), "Indexed languages were not cleared for active repo");
          });
     }
     #[test]

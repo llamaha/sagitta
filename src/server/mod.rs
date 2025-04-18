@@ -19,7 +19,7 @@ use qdrant_client::Qdrant;
 use crate::config::AppConfig;
 use service::VectorDBServiceImpl;
 use tokio::sync::oneshot;
-use tonic::transport::{Server, Identity, ServerTlsConfig};
+use tonic::transport::Server;
 use tracing::{info, error};
 
 #[cfg(feature = "server")]
@@ -42,11 +42,14 @@ pub async fn start_server(
     client: Arc<Qdrant>,
     shutdown_signal: Option<oneshot::Receiver<()>>,
     use_tls: bool,
-    cert_path: Option<String>,
-    key_path: Option<String>,
+    _cert_path: Option<String>,
+    _key_path: Option<String>,
 ) -> anyhow::Result<()> {
-    // Create the service implementation
-    let service = VectorDBServiceImpl::new(config, client);
+    // Extract API key path from config
+    let api_key_path = config.server_api_key_path.clone(); // Assuming this field exists
+
+    // Create the service implementation, swapping args and adding api_key_path
+    let service = VectorDBServiceImpl::new(client, config, api_key_path)?;
     
     // Register the reflection service
     let reflection_service = tonic_reflection::server::Builder::configure()

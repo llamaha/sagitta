@@ -5,12 +5,14 @@ use clap::Parser;
 use std::sync::Arc;
 use std::process::exit;
 use tracing_subscriber::fmt;
+use std::time::Instant;
 
 // Import library modules
 use vectordb_lib::{
-    config::{self, AppConfig},
+    config::{self},
     cli::commands::handle_command,
     cli::commands::CliArgs,
+    cli::repo_commands::handle_repo_command,
 };
 use qdrant_client::Qdrant;
 
@@ -44,17 +46,55 @@ async fn main() -> Result<()> {
          }
     };
 
+    // --- Pre-Command Config Checks --- 
+    // Check for required ONNX paths specifically for commands that need them
+    match &args.command {
+        vectordb_lib::cli::commands::Commands::Repo(repo_cmd) => {
+            match &repo_cmd.command {
+                vectordb_lib::cli::repo_commands::RepoCommand::Add(_) => {
+                    if config.onnx_model_path.is_none() {
+                        anyhow::bail!("ONNX model path must be provided in config for 'repo add'");
+                    }
+                    if config.onnx_tokenizer_path.is_none() {
+                        anyhow::bail!("ONNX tokenizer path must be provided in config for 'repo add'");
+                    }
+                }
+                 vectordb_lib::cli::repo_commands::RepoCommand::Sync(_) => {
+                    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+                        anyhow::bail!("ONNX paths must be provided in config for 'repo sync'");
+                    }
+                 }
+                _ => {}
+            }
+        }
+        vectordb_lib::cli::commands::Commands::Simple(simple_cmd) => {
+             // Assuming SimpleArgs structure allows access to its command
+             // If SimpleArgs.command is private, it needs a similar getter
+             match &simple_cmd.command {
+                 vectordb_lib::cli::simple::SimpleCommand::Index(_) => {
+                     if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+                         anyhow::bail!("ONNX paths must be provided in config for 'simple index'");
+                     }
+                 }
+                 _ => {}
+             }
+        }
+        // Re-add wildcard arm to make match exhaustive
+        _ => {}
+    }
+
     // --- Execute Command --- 
     tracing::info!("Executing command: {:?}", args.command);
 
     // Pass mutable reference to config
-    let result = handle_command(args, &mut config, client).await;
+    let command_result = handle_command(args, &mut config, client).await;
+    tracing::info!("DEBUG: handle_command returned: {:?}", command_result);
 
     // --- Handle Result ---
-    if let Err(e) = result {
+    if let Err(e) = command_result {
         tracing::error!("Command execution failed: {:?}", e);
         eprintln!("Error: {}", e);
-        exit(1);
+        return Err(e);
     } else {
          tracing::debug!("Command executed successfully.");
     }

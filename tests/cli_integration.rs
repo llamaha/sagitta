@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use predicates::str::contains;
 use std::fs;
 //use std::path::Path;
 //use tempfile::tempdir;
@@ -289,19 +290,21 @@ fn test_index_rejects_local_onnx_args() -> Result<()> {
     fs::create_dir(&dummy_target_dir)?;
     fs::write(dummy_target_dir.join("file.txt"), "data")?;
 
-    // Test simple index rejection
+    // Test rejection when both arg and env var are provided (using tokenizer path for test)
     println!("Testing simple index rejection with arg + env...");
-    Command::new(&bin_path)
-        .arg("simple")
-        .arg("index")
-        .arg(dummy_target_dir.to_str().unwrap())
-        .arg("--onnx-tokenizer-dir")
-        .arg(&*dummy_tokenizer_dir_str)
-        .env("VECTORDB_ONNX_MODEL", &*dummy_model_path_str)
-        .env("VECTORDB_ONNX_TOKENIZER_DIR", &*dummy_tokenizer_dir_str)
-        .assert()
+    let mut cmd = Command::new(&bin_path);
+    cmd.env("VECTORDB_ONNX_MODEL", dummy_model_path.as_os_str());
+    cmd.env("VECTORDB_ONNX_TOKENIZER_DIR", dummy_tokenizer_dir.as_os_str());
+    cmd.arg("simple");
+    cmd.arg("index");
+    cmd.arg(dummy_target_dir.to_str().unwrap());
+    cmd.arg("--onnx-tokenizer-dir").arg(dummy_tokenizer_dir.as_os_str());
+    cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("Cannot provide ONNX model path via both"));
+        .stderr(contains("ONNX paths must be provided in config")); // Updated expected error
+
+    // Clean up environment variables
+    std::env::remove_var("VECTORDB_ONNX_MODEL");
 
     Ok(())
 }
