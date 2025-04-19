@@ -115,7 +115,7 @@ message QueryResponse {
 
 // Repository management messages
 message AddRepositoryRequest {
-  string url = 1;
+  optional string url = 1;
   optional string local_path = 2;
   optional string name = 3;
   optional string branch = 4;

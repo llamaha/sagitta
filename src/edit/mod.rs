@@ -11,7 +11,7 @@ pub mod cli;    // Placeholder for CLI command implementation (later)
 pub mod grpc;
 
 // Re-export CLI args and handler
-pub use cli::{EditArgs, handle_edit_command};
+pub use cli::{EditArgs, ApplyArgs, ValidateArgs, handle_edit_command};
 
 // Potentially re-export key functions or structs if needed
 // pub use engine::apply_edit; 

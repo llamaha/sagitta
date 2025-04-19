@@ -15,7 +15,7 @@ use crate::grpc_generated::editing::{
 };
 
 // Import engine types
-use crate::edit::engine::{self, EditTarget, EngineValidationIssue, EngineValidationSeverity, EngineEditOptions}; // Import EngineEditOptions
+use crate::edit::engine::{self, EditTarget, EngineValidationSeverity, EngineEditOptions}; // Import EngineEditOptions
 
 // The server implementation
 #[derive(Debug, Default)]

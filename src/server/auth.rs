@@ -2,18 +2,9 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
-use std::task::{Context, Poll};
-use std::pin::Pin;
-#[cfg(feature = "server")]
-use tonic::{Request, Status};
-#[cfg(feature = "server")]
-use tonic::transport::server::TcpConnectInfo;
-#[cfg(feature = "server")]
-use tower::{Layer, Service};
-#[cfg(feature = "server")]
-use futures_util::future::{BoxFuture, FutureExt};
 use tracing::{debug, error, warn};
 use crate::server::error::ServerError;
+use tonic::{Request, Status};
 
 const API_KEY_HEADER: &str = "x-api-key";
 
@@ -80,6 +71,6 @@ pub fn authenticate_request<T>(
 ) -> Result<(), Status> {
     match authenticator.authenticate(request) {
         Ok(_) => Ok(()),
-        Err(e) => Err(Status::unauthenticated(format!("Authentication failed: {}", e))),
+        Err(e) => Err(e.into()),
     }
 } 

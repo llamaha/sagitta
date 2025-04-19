@@ -5,7 +5,6 @@ use tempfile::NamedTempFile;
 use anyhow::{Result, Context, bail, anyhow};
 use tree_sitter::{Parser, Language, Query, QueryCursor, Node, Point};
 use regex::Regex;
-use std::path::PathBuf;
 
 // --- Public Struct/Enum Definitions ---
 
@@ -339,12 +338,9 @@ fn find_semantic_element(tree: &tree_sitter::Tree, language: &Language, element_
 // --- Tests --- 
 #[cfg(test)]
 mod tests {
-    use super::*; // Bring engine items into scope
+    use std::path::{PathBuf, Path};
     use std::fs;
     use std::io::Write;
-    use tempfile::{tempdir, NamedTempFile}; // Use full path here
-    use std::path::{Path, PathBuf}; // Add PathBuf import
-    use crate::edit::engine::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationSeverity};
 
     // Helper function to create a temporary file with content
     fn create_temp_file(content: &str) -> tempfile::NamedTempFile { // Use full path here
