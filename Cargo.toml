@@ -116,7 +116,7 @@ tower = { version = "0.4", optional = true, features = ["limit"] }
 # Add this for code generation
 vectordb-proto = { path = "proto/rust", optional = true, version = "0.1.0" }
 # Add new client dependency
-vectordb-client = { path = "crates/vectordb-client", version = "0.1.0" }
+vectordb-client = { path = "crates/vectordb-client", version = "0.2.0" }
 arc-swap = { version = "1.6", optional = true }
 axum = { version = "0.7.5", optional = true }
 futures-util = { version = "0.3", optional = true }
