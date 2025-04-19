@@ -16,10 +16,19 @@ mod tests {
         let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
         let _server_config = ServerConfig::default(); // Prefix with underscore
         
-        let (tx, rx) = oneshot::channel();
+        let (tx, _rx) = oneshot::channel();
         
         let server_handle = tokio::spawn(async move {
-            start_server(addr, config, client, Some(rx), false, None, None).await
+            start_server(
+                addr, 
+                config, 
+                client, 
+                None,    // _api_key
+                false,   // _require_auth
+                None,    // tls_config
+                None,    // _max_concurrent_requests
+                Some(_rx) // Pass the receiver back in
+            ).await
         });
         
         // Give the server a moment to start

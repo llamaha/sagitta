@@ -15,9 +15,6 @@ use crate::server::ServerConfig;
 use log::info;
 
 #[cfg(feature = "server")]
-use std::net::SocketAddr;
-
-#[cfg(feature = "server")]
 use tonic::transport::server::ServerTlsConfig;
 
 #[cfg(feature = "server")]
@@ -157,7 +154,7 @@ async fn handle_server_start(
     let api_key = server_config.api_key;
     let max_requests = server_config.max_concurrent_requests;
     
-    crate::server::start_server(addr, app_config, client, api_key, require_auth, tls_config, Some(max_requests)).await?;
+    crate::server::start_server(addr, app_config, client, api_key, require_auth, tls_config, Some(max_requests), None).await?;
     
     Ok(())
 }

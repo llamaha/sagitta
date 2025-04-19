@@ -19,9 +19,10 @@ use qdrant_client::Qdrant;
 use crate::config::AppConfig;
 use crate::server::service::VectorDBServiceImpl;
 use crate::edit::grpc::EditingServiceImpl;
-use tokio::sync::oneshot;
 use tonic::transport::Server;
-use tracing::{info, error};
+use tracing::{info, error, warn};
+use anyhow::Context;
+use tokio::sync::oneshot;
 
 #[cfg(feature = "server")]
 use {
@@ -48,10 +49,11 @@ pub async fn start_server(
     addr: SocketAddr,
     config: Arc<AppConfig>,
     client: Arc<Qdrant>,
-    api_key: Option<String>,
-    require_auth: bool,
+    _api_key: Option<String>,
+    _require_auth: bool,
     tls_config: Option<tonic::transport::server::ServerTlsConfig>,
-    max_concurrent_requests: Option<usize>,
+    _max_concurrent_requests: Option<usize>,
+    shutdown_rx: Option<oneshot::Receiver<()>>,
 ) -> Result<()> {
     info!("Entering start_server function (server feature enabled)");
 
@@ -82,7 +84,7 @@ pub async fn start_server(
         .add_service(EditingServiceServer::new(editing_service_impl));
     info!("Finished adding services.");
     
-    if let Some(tls_config) = tls_config {
+    if let Some(_tls_config) = tls_config {
         // TLS support is currently disabled for compilation
         error!("TLS support is temporarily disabled for compilation reasons");
         return Err(anyhow::anyhow!("TLS support is temporarily disabled").into());
@@ -116,17 +118,32 @@ pub async fn start_server(
         */
     } else {
         info!("Starting server without TLS...");
-        let shutdown = shutdown_signal(); // Get the shutdown future
+        let os_shutdown = shutdown_signal();
+        let test_shutdown = async { 
+            if let Some(rx) = shutdown_rx {
+                let _ = rx.await;
+                info!("Test shutdown signal received.");
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+
         tokio::select! {
+            biased;
+
+            _ = os_shutdown => {
+                info!("OS shutdown signal received, stopping server.");
+            }
+            _ = test_shutdown => {
+                 info!("Test-specific shutdown signal received, stopping server.");
+            }
+
             res = server_builder.serve(addr) => {
                 if let Err(e) = res {
                     error!("Server failed to serve: {}", e);
-                    return Err(e.into()); // Propagate the error
+                    return Err(e.into());
                 }
                 info!("Server finished serving normally.");
-            }
-            _ = shutdown => {
-                info!("Shutdown signal received, stopping server.");
             }
         }
     }
@@ -140,10 +157,11 @@ pub async fn start_server(
     _addr: SocketAddr,
     _config: Arc<AppConfig>,
     _client: Arc<Qdrant>,
-    _shutdown_signal: Option<oneshot::Receiver<()>>,
-    _use_tls: bool,
-    _cert_path: Option<String>,
-    _key_path: Option<String>,
+    _api_key: Option<String>,
+    _require_auth: bool,
+    _tls_config: Option<tonic::transport::server::ServerTlsConfig>,
+    _max_concurrent_requests: Option<usize>,
+    _shutdown_rx: Option<oneshot::Receiver<()>>,
 ) -> anyhow::Result<()> {
     error!("Server feature not enabled. Compile with --features=server to enable server mode.");
     Err(anyhow::anyhow!("Server feature not enabled"))
@@ -156,7 +174,7 @@ pub async fn start_default_server(
     client: Arc<Qdrant>,
 ) -> crate::server::Result<()> {
     let addr = format!("0.0.0.0:{}", port).parse()?;
-    start_server(addr, config, client, None, false, None, None).await
+    start_server(addr, config, client, None, false, None, None, None).await
 }
 
 #[cfg(feature = "server")]
@@ -185,4 +203,45 @@ async fn shutdown_signal() {
     }
 
     info!("Termination signal received.");
+}
+
+#[cfg(feature = "server")]
+pub async fn run_server(
+    config: AppConfig,
+    _api_key: Option<String>,
+    _require_auth: bool,
+    addr: SocketAddr,
+    _max_concurrent_requests: Option<usize>,
+    tls_config: Option<tonic::transport::server::ServerTlsConfig>,
+) -> Result<()> {
+    let config = Arc::new(config);
+    info!("Server starting on {}", addr);
+    
+    let client = Arc::new(Qdrant::from_url(&config.qdrant_url).build()
+        .context("Failed to build Qdrant client")?);
+
+    let service = VectorDBServiceImpl::new(Arc::clone(&client), config, None)?;
+
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(vectordb_proto::FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(crate::grpc_generated::EDITING_FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .unwrap();
+    
+    let mut builder = Server::builder();
+
+    if let Some(_tls_config) = tls_config {
+        warn!("TLS configuration is provided but not yet implemented!");
+    } else {
+        info!("Starting server without TLS.");
+    }
+
+    builder
+        .add_service(VectorDbServiceServer::new(service))
+        .add_service(reflection_service)
+        .serve(addr)
+        .await
+        .context("gRPC server failed")?;
+
+    Ok(())
 }

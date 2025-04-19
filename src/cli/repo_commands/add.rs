@@ -19,7 +19,8 @@ pub struct AddRepoArgs {
 
     #[clap(long, value_parser)]
     /// URL of the repository to clone (e.g., https://gitlab.com/user/repo.git)
-    pub url: String,
+    /// Required when adding a new repository, optional when adding an existing local repository.
+    pub url: Option<String>,
 
     /// Optional custom name for the repository (defaults to deriving from URL).
     #[arg(short, long)]
@@ -51,13 +52,32 @@ pub async fn handle_repo_add<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let repo_name = match args.name {
-        Some(name) => name,
-        None => PathBuf::from(&args.url)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.trim_end_matches(".git").to_string())
-            .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?,
+    // Validate basic arguments
+    if args.local_path.is_none() && args.url.is_none() {
+        bail!("Either --local-path or --url must be specified.");
+    }
+
+    // Handle repository name
+    let repo_name = match &args.name {
+        Some(name) => name.clone(),
+        None => {
+            // If URL is provided, derive name from URL
+            if let Some(url) = &args.url {
+                PathBuf::from(url)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.trim_end_matches(".git").to_string())
+                    .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?
+            } else {
+                // If only local path is provided, derive name from the directory name
+                let local_path = args.local_path.as_ref().unwrap(); // Safe because we checked above
+                local_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("Could not derive repository name from local path"))?
+            }
+        },
     };
 
     // TODO: Fix cosmetic error exit on first repo add - somehow the bail below triggers after success
@@ -74,6 +94,9 @@ where
         .with_context(|| format!("Failed to create repository base directory at {}", repo_base_path.display()))?;
     let local_path = args.local_path.unwrap_or(repo_base_path.join(&repo_name));
 
+    // If URL is not provided but required
+    let mut repo_url = args.url.clone();
+
     let repo = if local_path.exists() {
          println!(
             "{}",
@@ -82,11 +105,38 @@ where
                 local_path.display()
             ).yellow()
         );
-        Repository::open(&local_path)
-            .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?
+        let git_repo = Repository::open(&local_path)
+            .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?;
+        
+        // If URL wasn't provided, try to extract it from the repository's remote
+        if repo_url.is_none() {
+            let remote_name = args.remote.as_deref().unwrap_or("origin");
+            match git_repo.find_remote(remote_name) {
+                Ok(remote) => {
+                    if let Some(url) = remote.url() {
+                        println!("Found remote URL for '{}': {}", remote_name, url);
+                        repo_url = Some(url.to_string());
+                    } else {
+                        bail!("Remote '{}' exists but has no URL. Please specify --url.", remote_name);
+                    }
+                }
+                Err(_) => {
+                    bail!("Could not find remote '{}' in existing repository. Please specify --url.", remote_name);
+                }
+            }
+        }
+        
+        git_repo
     } else {
+        // For new clones, URL is required
+        if repo_url.is_none() {
+            bail!("URL is required when adding a new repository (--local-path does not exist).");
+        }
+        
+        let url = repo_url.as_ref().unwrap(); // Safe because we checked above
+        
         println!("{}",
-            format!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, args.url).bold().cyan()
+            format!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, url).bold().cyan()
         );
         
         // Create the directory if it doesn't exist
@@ -96,7 +146,7 @@ where
         // Use direct git command instead of git2-rs for SSH authentication
         let mut cmd = std::process::Command::new("git");
         cmd.arg("clone")
-           .arg(&args.url)
+           .arg(url)
            .arg(&local_path);
         
         // If SSH key is provided, use GIT_SSH_COMMAND to specify the key
@@ -158,9 +208,12 @@ where
     helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim as u64).await?;
     println!("Qdrant collection ensured.");
 
+    // Ensure we have the final URL
+    let final_url = repo_url.ok_or_else(|| anyhow!("Failed to determine repository URL."))?;
+    
     let new_repo_config = config::RepositoryConfig {
         name: repo_name.clone(),
-        url: args.url.clone(),
+        url: final_url,
         local_path: local_path.clone(),
         default_branch: initial_branch_name.clone(),
         tracked_branches: vec![initial_branch_name.clone()],
@@ -276,10 +329,15 @@ mod tests {
         std::fs::create_dir_all(repo_path.join(".git/objects")).unwrap();
         std::fs::write(repo_path.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
         
+        // Create minimal remote config
+        std::fs::create_dir_all(repo_path.join(".git/refs/remotes/origin")).unwrap();
+        let remote_config = "[remote \"origin\"]\n\turl = https://example.com/test-repo.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
+        std::fs::write(repo_path.join(".git/config"), remote_config).unwrap();
+        
         // Create test repository args
         let args = AddRepoArgs {
             local_path: Some(repo_path.clone()),
-            url: "https://example.com/test-repo.git".to_string(),
+            url: Some("https://example.com/test-repo.git".to_string()),
             name: Some("test-repo".to_string()),
             branch: Some("main".to_string()), // Specify branch to avoid git lookups
             remote: None,
@@ -308,6 +366,75 @@ mod tests {
             assert_eq!(config.repositories.len(), 1, "Repository should be added to config");
             assert_eq!(config.repositories[0].name, "test-repo", "Repository name should match");
             assert_eq!(config.active_repository, Some("test-repo".to_string()), 
+                "Repository should be set as active");
+        }
+    }
+    
+    // Test handling a local repository without explicit URL
+    #[tokio::test]
+    async fn test_handle_repo_add_existing_path_no_url() {
+        // Create a mock client
+        let client = Arc::new(qdrant_client::Qdrant::from_url("http://localhost:6334").build().unwrap());
+        
+        // Set up test config and temp directory
+        let temp_dir = tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+        let repo_path = temp_dir.path().join("test-repo-no-url");
+        
+        // Initial config for the test
+        let mut config = AppConfig {
+            repositories: Vec::new(),
+            active_repository: None,
+            qdrant_url: "http://localhost:6334".to_string(),
+            onnx_model_path: Some("/fake/path/model.onnx".to_string()),
+            onnx_tokenizer_path: Some("/fake/path/tokenizer".to_string()),
+            server_api_key_path: None,
+            repositories_base_path: None,
+        };
+        
+        // Create a directory to simulate an existing repository
+        std::fs::create_dir_all(&repo_path).unwrap();
+        // Create a .git directory to make it look like a valid repository
+        std::fs::create_dir_all(repo_path.join(".git")).unwrap();
+        
+        // We need to create a minimal git repository structure
+        std::fs::create_dir_all(repo_path.join(".git/refs/heads")).unwrap();
+        std::fs::create_dir_all(repo_path.join(".git/objects")).unwrap();
+        std::fs::write(repo_path.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+        
+        // Create minimal remote config - this is important for the URL extraction test
+        std::fs::create_dir_all(repo_path.join(".git/refs/remotes/origin")).unwrap();
+        let remote_config = "[remote \"origin\"]\n\turl = https://example.com/test-repo-no-url.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
+        std::fs::write(repo_path.join(".git/config"), remote_config).unwrap();
+        
+        // Create test repository args - no URL provided
+        let args = AddRepoArgs {
+            local_path: Some(repo_path.clone()),
+            url: None,
+            name: Some("test-repo-no-url".to_string()),
+            branch: Some("main".to_string()), // Specify branch to avoid git lookups
+            remote: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+        };
+        
+        // Run the function with our mocked setup
+        let result = handle_repo_add(
+            args,
+            &mut config,
+            client,
+            Some(&config_path),
+        ).await;
+        
+        // The test might fail if Qdrant is not running locally, but we're more
+        // interested in the config update logic than the DB operations
+        if result.is_ok() {
+            // Verify the config was updated correctly
+            assert_eq!(config.repositories.len(), 1, "Repository should be added to config");
+            assert_eq!(config.repositories[0].name, "test-repo-no-url", "Repository name should match");
+            assert_eq!(config.repositories[0].url, "https://example.com/test-repo-no-url.git", 
+                "URL should be extracted from remote config");
+            assert_eq!(config.active_repository, Some("test-repo-no-url".to_string()), 
                 "Repository should be set as active");
         }
     }

@@ -345,7 +345,7 @@ async fn custom_upsert_batch<C: QdrantClientTrait>(
     points: Vec<PointStruct>,
     progress_bar: &ProgressBar,
 ) -> Result<(), Error> {
-    let total_points = points.len();
+    let _total_points = points.len();
     let mut success_count = 0;
     let mut retry_count = 0;
     const MAX_RETRIES: u32 = 3;
@@ -440,8 +440,8 @@ pub async fn index_files<
         .or(config.onnx_tokenizer_path.as_deref())
         .ok_or_else(|| Error::Other("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config".to_string()))?;
 
-    let model_path = PathBuf::from(onnx_model_path_str);
-    let tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
+    let _model_path = PathBuf::from(onnx_model_path_str);
+    let _tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
 
     // Construct VdbConfig for the handler
     let embedding_handler = EmbeddingHandler::new(config)
@@ -646,80 +646,77 @@ pub async fn prepare_repository<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
+    // Require either URL or existing local path
+    if url.is_empty() && (local_path_opt.is_none() || !local_path_opt.unwrap().exists()) {
+        return Err(Error::Other("Either URL or existing local repository path must be provided".to_string()));
+    }
+
+    // Handle repository name
     let repo_name = match name_opt {
         Some(name) => name.to_string(),
-        None => PathBuf::from(url)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.trim_end_matches(".git").to_string())
-            .ok_or_else(|| Error::Other("Could not derive repository name from URL".to_string()))?,
+        None => {
+            if !url.is_empty() {
+                // If URL is provided, derive name from URL
+                PathBuf::from(url)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.trim_end_matches(".git").to_string())
+                    .ok_or_else(|| Error::Other("Could not derive repository name from URL".to_string()))?
+            } else {
+                // If URL is not provided, derive name from local path directory name
+                local_path_opt.unwrap() // Safe because we checked is_none() above
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| Error::Other("Could not derive repository name from local path".to_string()))?
+            }
+        },
     };
 
     let local_path = local_path_opt.map_or_else(|| base_path_for_new_clones.join(&repo_name), |p| p.clone());
 
-    // If the repo path already exists, return an error, as this function is for preparing *new* repos.
+    // Handle URL extraction from existing repository
+    let mut final_url = url.to_string();
+
+    // Check if repository path exists
     if local_path.exists() {
-        return Err(Error::RepositoryError(format!(
-            "Repository directory '{}' already exists. Use 'repo sync' or remove manually.",
-            local_path.display()
-        )));
-    } else {
-        info!("Cloning repository '{}' from {}", repo_name, url);
-        // Create the directory first
-        fs::create_dir_all(&local_path)
-            .with_context(|| format!("Failed to create directory at {}", local_path.display()))?;
-
-        // Execute clone using std::process::Command
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("clone").arg(url).arg(&local_path);
-        if let Some(branch) = branch_opt {
-            cmd.arg("-b").arg(branch);
-        }
-
-        // Setup SSH command if keys provided
-        let git_ssh_command = if let Some(key_path) = ssh_key_path_opt {
-            let key_path_str = key_path.to_string_lossy();
-            let base_ssh_cmd = format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", key_path_str);
-            if ssh_passphrase_opt.is_some() {
-                warn!("SSH key passphrase provided but direct use in GIT_SSH_COMMAND is insecure/unsupported. Relying on ssh-agent.");
+        info!("Repository directory '{}' already exists.", local_path.display());
+        
+        // Attempt to open the repository
+        let repo = Repository::open(&local_path)
+            .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?;
+        
+        // If URL is empty, try to extract it from the repository's remote
+        if final_url.is_empty() {
+            let remote_name = remote_opt.unwrap_or("origin");
+            match repo.find_remote(remote_name) {
+                Ok(remote) => {
+                    if let Some(url) = remote.url() {
+                        info!("Found remote URL for '{}': {}", remote_name, url);
+                        final_url = url.to_string();
+                    } else {
+                        return Err(Error::Other(format!("Remote '{}' exists but has no URL.", remote_name)));
+                    }
+                }
+                Err(_) => {
+                    return Err(Error::Other(format!("Could not find remote '{}' in existing repository.", remote_name)));
+                }
             }
-            Some(base_ssh_cmd)
-        } else {
-            None
-        };
-
-        if let Some(ssh_cmd) = git_ssh_command {
-            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-        }
-
-        let clone_output = cmd.output().context("Failed to execute git clone command")?;
-
-        if !clone_output.status.success() {
-            let stderr = String::from_utf8_lossy(&clone_output.stderr);
-            log::error!("Git clone command failed with status: {}. Stderr:\n{}", clone_output.status, stderr);
-            return Err(Error::Other(format!(
-                "Git clone command failed with status: {}. Stderr: {}",
-                clone_output.status,
-                stderr
-            )));
         }
         
-        info!("Repository cloned successfully to {}", local_path.display());
-        // Open the repo to determine the initial branch if not specified
-        let repo = Repository::open(&local_path)
-                .with_context(|| format!("Failed to open newly cloned repository at {}", local_path.display()))?;
-
+        // Determine branch
         let initial_branch_name = match branch_opt {
-            Some(b) => b.to_string(),
+            Some(branch_name) => branch_name.to_string(),
             None => {
-                let head = repo.head().context("Failed to get HEAD reference after clone")?;
-                head.shorthand()
+                let head_ref = repo.find_reference("HEAD")?;
+                let head_ref_resolved = head_ref.resolve()?;
+                head_ref_resolved.shorthand()
                     .ok_or_else(|| Error::Other("Could not determine default branch name from HEAD".to_string()))?
                     .to_string()
             }
         };
-        log::info!("Default branch determined as: {}", initial_branch_name);
-
+        
+        // Setup Collection
         let collection_name = get_collection_name(&repo_name);
         info!("Ensuring Qdrant collection '{}' exists (dim={})...", collection_name, embedding_dim);
         if let Err(e) = ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await {
@@ -733,11 +730,11 @@ where
                 }
             }
         }
-        info!("Qdrant collection ensured.");
-
+        info!("Qdrant collection ensured for existing repository.");
+        
         let new_repo_config = RepositoryConfig {
             name: repo_name.clone(),
-            url: url.to_string(),
+            url: final_url,
             local_path: local_path.clone(),
             default_branch: initial_branch_name.clone(),
             tracked_branches: vec![initial_branch_name.clone()],
@@ -748,9 +745,102 @@ where
             last_synced_commits: HashMap::new(),
             indexed_languages: None,
         };
-
-        Ok(new_repo_config)
+        
+        return Ok(new_repo_config);
     }
+    
+    // For new clones, URL is required and must not be empty
+    if final_url.is_empty() {
+        return Err(Error::Other("URL is required when adding a new repository (local directory doesn't exist).".to_string()));
+    }
+    
+    // Clone repository
+    info!("Cloning repository '{}' from {}", repo_name, final_url);
+    // Create the directory first
+    fs::create_dir_all(&local_path)
+        .with_context(|| format!("Failed to create directory at {}", local_path.display()))?;
+
+    // Execute clone using std::process::Command
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("clone").arg(&final_url).arg(&local_path);
+    if let Some(branch) = branch_opt {
+        cmd.arg("-b").arg(branch);
+    }
+
+    // Setup SSH command if keys provided
+    let git_ssh_command = if let Some(key_path) = ssh_key_path_opt {
+        let key_path_str = key_path.to_string_lossy();
+        let base_ssh_cmd = format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", key_path_str);
+        if ssh_passphrase_opt.is_some() {
+            warn!("SSH key passphrase provided but direct use in GIT_SSH_COMMAND is insecure/unsupported. Relying on ssh-agent.");
+        }
+        Some(base_ssh_cmd)
+    } else {
+        None
+    };
+
+    if let Some(ssh_cmd) = git_ssh_command {
+        cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+    }
+
+    let clone_output = cmd.output().context("Failed to execute git clone command")?;
+
+    if !clone_output.status.success() {
+        let stderr = String::from_utf8_lossy(&clone_output.stderr);
+        log::error!("Git clone command failed with status: {}. Stderr:\n{}", clone_output.status, stderr);
+        return Err(Error::Other(format!(
+            "Git clone command failed with status: {}. Stderr: {}",
+            clone_output.status,
+            stderr
+        )));
+    }
+    
+    info!("Repository cloned successfully to {}", local_path.display());
+    // Open the repo to determine the initial branch if not specified
+    let repo = Repository::open(&local_path)
+            .with_context(|| format!("Failed to open newly cloned repository at {}", local_path.display()))?;
+
+    let initial_branch_name = match branch_opt {
+        Some(b) => b.to_string(),
+        None => {
+            let head = repo.head().context("Failed to get HEAD reference after clone")?;
+            head.shorthand()
+                .ok_or_else(|| Error::Other("Could not determine default branch name from HEAD".to_string()))?
+                .to_string()
+        }
+    };
+    log::info!("Default branch determined as: {}", initial_branch_name);
+
+    let collection_name = get_collection_name(&repo_name);
+    info!("Ensuring Qdrant collection '{}' exists (dim={})...", collection_name, embedding_dim);
+    if let Err(e) = ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await {
+        // Map the specific QdrantError or general Error to Error::Other for reporting
+        match e {
+            Error::QdrantError(qe) => {
+                return Err(Error::Other(format!("Failed to ensure collection '{}' exists: {}", collection_name, qe.to_string())))
+            },
+            _ => {
+                return Err(Error::Other(format!("Failed to ensure collection '{}' exists: {}", collection_name, e.to_string())))
+            }
+        }
+    }
+    info!("Qdrant collection ensured.");
+
+    let new_repo_config = RepositoryConfig {
+        name: repo_name.clone(),
+        url: final_url,
+        local_path: local_path.clone(),
+        default_branch: initial_branch_name.clone(),
+        tracked_branches: vec![initial_branch_name.clone()],
+        active_branch: Some(initial_branch_name.clone()),
+        remote_name: Some(remote_opt.unwrap_or("origin").to_string()),
+        ssh_key_path: ssh_key_path_opt.cloned(),
+        ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
+        last_synced_commits: HashMap::new(),
+        indexed_languages: None,
+    };
+
+    Ok(new_repo_config)
 }
 
 
@@ -780,23 +870,61 @@ where
         }
     }
 
-    info!("Attempting to remove local clone at {}...", repo_config.local_path.display());
-    if repo_config.local_path.exists() {
-        match fs::remove_dir_all(&repo_config.local_path) {
-            Ok(_) => info!("Successfully removed local directory '{}'.", repo_config.local_path.display()),
-            Err(e) => {
-                // Log error but consider it non-fatal
-                 error!("Failed to remove local directory '{}': {}. Please remove it manually.", repo_config.local_path.display(), e);
-                 // Maybe return error here? Or just warn?
-                 // For now, just warn and continue, as config removal is most important.
-                  warn!(
-                    "Failed to remove local directory '{}'. Please remove it manually.",
-                    repo_config.local_path.display()
-                );
-            }
+    // Added safety checks for repository path removal
+    let local_path = &repo_config.local_path;
+    
+    // Perform safety checks before deleting the directory
+    if !local_path.exists() {
+        info!("Local directory '{}' does not exist. Skipping removal.", local_path.display());
+        return Ok(());
+    }
+
+    // SAFETY CHECK 1: Ensure path is not too short (could be system root, home dir, etc.)
+    let path_str = local_path.to_string_lossy();
+    if path_str.len() < 10 {  // Arbitrary but reasonable minimum path length for a repo directory
+        error!("Path '{}' is suspiciously short. Skipping removal for safety.", path_str);
+        return Ok(());
+    }
+
+    // SAFETY CHECK 2: Verify .git directory exists (confirming it's likely a git repo)
+    let git_dir = local_path.join(".git");
+    if !git_dir.exists() || !git_dir.is_dir() {
+        warn!("No .git directory found at '{}'. This may not be a git repository. Skipping removal for safety.", local_path.display());
+        return Ok(());
+    }
+
+    // SAFETY CHECK 3: Check for potentially dangerous paths
+    let dangerous_paths = [
+        "/", "/home", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt",
+        "/boot", "/lib", "/dev", "/proc", "/sys", "/run"
+    ];
+    
+    if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{}/", p))) {
+        error!("Path '{}' appears to be a system directory. Refusing to delete for safety.", path_str);
+        return Ok(());
+    }
+
+    // SAFETY CHECK 4: Only delete if we can confirm it's in a repositories directory
+    // Look for patterns like .../repositories/repo-name or vectordb-cli/repo-name
+    let is_in_repos_dir = path_str.contains("/repositories/") || 
+                           path_str.contains("/vectordb-cli/") ||
+                           path_str.contains("/repos/");
+                           
+    if !is_in_repos_dir {
+        warn!("Repository path '{}' doesn't appear to be in a standard repositories directory. Skipping automatic removal for safety.", path_str);
+        warn!("If you want to delete this directory, please do so manually.");
+        return Ok(());
+    }
+
+    // If all safety checks pass, proceed with deletion
+    info!("Attempting to remove local clone at {}...", local_path.display());
+    match fs::remove_dir_all(local_path) {
+        Ok(_) => info!("Successfully removed local directory '{}'.", local_path.display()),
+        Err(e) => {
+            // Log error but consider it non-fatal
+             error!("Failed to remove local directory '{}': {}. Please remove it manually.", local_path.display(), e);
+             warn!("Failed to remove local directory '{}'. Please remove it manually.", local_path.display());
         }
-    } else {
-        info!("Local directory '{}' does not exist. Skipping removal.", repo_config.local_path.display());
     }
 
     Ok(())
@@ -873,20 +1001,20 @@ pub fn switch_repository_branch(
 }
 
 pub async fn sync_repository_branch(
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     config: &AppConfig,
     repo_config_index: usize,
-    client: Arc<impl QdrantClientTrait + Send + Sync + 'static>,
-    fetch_and_merge: bool,
+    _client: Arc<impl QdrantClientTrait + Send + Sync + 'static>,
+    _fetch_and_merge: bool,
 ) -> Result<(), Error> {
     let repo_config = config.repositories.get(repo_config_index)
         .ok_or_else(|| Error::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
 
     // Initialize embedding handler
-    let embedding_handler = EmbeddingHandler::new(config)
+    let _embedding_handler = EmbeddingHandler::new(config)
         .map_err(|e: VectorDBError| Error::Other(format!("Failed to initialize embedding handler for sync: {}", e)))?;
 
-    let repo_root = PathBuf::from(&repo_config.local_path);
+    let _repo_root = PathBuf::from(&repo_config.local_path);
 
     // ... rest of function ...
 

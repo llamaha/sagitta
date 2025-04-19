@@ -9,7 +9,7 @@ use crate::config::{AppConfig, save_config, get_repo_base_path};
 #[cfg(feature = "server")]
 use crate::server::auth::{ApiKeyAuthenticator};
 #[cfg(feature = "server")]
-use qdrant_client::qdrant::{Distance, PointStruct, CreateCollectionBuilder, VectorParamsBuilder, SearchPointsBuilder, Filter};
+use qdrant_client::qdrant::{Distance, CreateCollectionBuilder, VectorParamsBuilder, SearchPointsBuilder};
 #[cfg(feature = "server")]
 use crate::cli::repo_commands::helpers;
 #[cfg(feature = "server")]
@@ -25,8 +25,6 @@ use tracing::{error, info, warn};
 #[cfg(feature = "server")]
 use crate::vectordb::embedding_logic::EmbeddingHandler;
 #[cfg(feature = "server")]
-use crate::vectordb::embedding::EmbeddingModelType;
-#[cfg(feature = "server")]
 use std::time::Instant;
 #[cfg(feature = "server")]
 use vectordb_proto::vectordb::*;
@@ -35,7 +33,7 @@ use vectordb_proto::vector_db_service_server::VectorDbService;
 #[cfg(feature = "server")]
 use std::fmt;
 #[cfg(feature = "server")]
-use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf, r#match::MatchValue};
+use qdrant_client::qdrant::{Match};
 
 #[cfg(feature = "server")]
 pub struct VectorDBServiceImpl {
@@ -273,11 +271,10 @@ impl VectorDbService for VectorDBServiceImpl {
             .ok_or_else(|| Status::internal("Embedding generation yielded no result"))?;
 
         let mut filter_conditions = Vec::new();
-        use qdrant_client::qdrant::{Condition, Filter, condition::ConditionOneOf, r#match::MatchValue};
-        use qdrant_client::qdrant::FieldCondition;
+        use qdrant_client::qdrant::{Condition, Filter, condition::ConditionOneOf, r#match::MatchValue, FieldCondition};
 
         if let Some(lang) = req.language {
-            filter_conditions.push(qdrant_client::qdrant::Condition {
+            filter_conditions.push(Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                     key: "language".to_string(),
                     r#match: Some(Match {
@@ -293,7 +290,7 @@ impl VectorDbService for VectorDBServiceImpl {
             });
         }
         if let Some(elem_type) = req.element_type {
-            filter_conditions.push(qdrant_client::qdrant::Condition {
+            filter_conditions.push(Condition {
                 condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                     key: "element_type".to_string(),
                     r#match: Some(Match {
@@ -367,34 +364,64 @@ impl VectorDbService for VectorDBServiceImpl {
         let req = request.into_inner();
         let url = req.url;
         let name_opt = req.name;
+        let local_path = req.local_path;
 
-        if url.is_empty() {
-            return Err(Status::invalid_argument("Repository URL cannot be empty"));
+        // At least one of URL or local_path must be provided
+        if url.is_empty() && local_path.is_none() {
+            return Err(Status::invalid_argument("Either URL or local path must be provided"));
+        }
+
+        // If local_path is provided but doesn't exist and URL is empty, return error
+        if url.is_empty() && local_path.is_some() {
+            let path = PathBuf::from(local_path.as_ref().unwrap());
+            if !path.exists() {
+                return Err(Status::invalid_argument(
+                    "Local path doesn't exist and no URL provided to clone from"
+                ));
+            }
         }
 
         let result = async {
             let current_config_arc = self.config.load();
             let mut config = (**current_config_arc).clone();
+
+            // Determine repository name
             let repo_name_str = match name_opt.as_deref() {
                 Some(name) => name.to_string(),
-                None => PathBuf::from(&url).file_stem().and_then(|s| s.to_str())
-                    .map(|s| s.trim_end_matches(".git").to_string())
-                    .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?,
+                None => {
+                    if !url.is_empty() {
+                        // If URL is provided, derive name from URL
+                        PathBuf::from(&url).file_stem().and_then(|s| s.to_str())
+                            .map(|s| s.trim_end_matches(".git").to_string())
+                            .ok_or_else(|| anyhow!("Could not derive repository name from URL"))?
+                    } else {
+                        // If URL is not provided, derive name from local path directory name
+                        let path = PathBuf::from(local_path.as_ref().unwrap());
+                        path.file_name()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_string())
+                            .ok_or_else(|| anyhow!("Could not derive repository name from local path"))?
+                    }
+                }
             };
+
             if config.repositories.iter().any(|r| r.name == repo_name_str) {
                 return Err(anyhow!("Repository '{}' already exists.", repo_name_str));
             }
+
             let repo_base_path = get_repo_base_path(Some(&config))?;
             fs::create_dir_all(&repo_base_path).context("Failed to create base repo dir")?;
             let embedding_dim = helpers::DEFAULT_VECTOR_DIMENSION;
+            
             let new_repo_config = helpers::prepare_repository(
                 &url, Some(&repo_name_str),
-                req.local_path.as_ref().map(PathBuf::from).as_ref(),
+                local_path.as_ref().map(PathBuf::from).as_ref(),
                 req.branch.as_deref(), req.remote.as_deref(),
                 req.ssh_key_path.as_ref().map(PathBuf::from).as_ref(),
                 req.ssh_passphrase.as_deref(),
                 &repo_base_path, Arc::clone(&self.client), embedding_dim
             ).await?;
+            
             let final_repo_name = new_repo_config.name.clone();
             config.repositories.push(new_repo_config);
             config.active_repository = Some(final_repo_name.clone());
@@ -412,7 +439,7 @@ impl VectorDbService for VectorDBServiceImpl {
                 if e.to_string().contains("already exists") {
                      Err(Status::already_exists(e.to_string()))
                 } else {
-                     error!("Failed to add repository '{}': {}", url, e);
+                     error!("Failed to add repository: {}", e);
                      Err(Status::internal(format!("Failed to add repository: {}", e)))
                 }
             }

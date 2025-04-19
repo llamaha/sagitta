@@ -283,8 +283,8 @@ fn test_index_rejects_local_onnx_args() -> Result<()> {
     let dummy_tokenizer_dir = temp_dir.path().join("dummy_tokenizer");
     fs::create_dir_all(&dummy_tokenizer_dir)?;
     fs::write(dummy_tokenizer_dir.join("tokenizer.json"), "{}")?;
-    let dummy_model_path_str = dummy_model_path.to_string_lossy();
-    let dummy_tokenizer_dir_str = dummy_tokenizer_dir.to_string_lossy();
+    let _dummy_model_path_str = dummy_model_path.to_string_lossy();
+    let _dummy_tokenizer_dir_str = dummy_tokenizer_dir.to_string_lossy();
 
     let dummy_target_dir = temp_dir.path().join("target_dir");
     fs::create_dir(&dummy_target_dir)?;

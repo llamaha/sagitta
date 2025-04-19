@@ -1,11 +1,9 @@
+#[cfg(feature = "server")]
 use thiserror::Error;
 #[cfg(feature = "server")]
 use tonic::Status;
 use std::io;
 use std::net;
-use qdrant_client::QdrantError;
-#[cfg(feature = "ort")]
-use ort;
 
 /// Server-specific error type
 #[derive(Error, Debug)]

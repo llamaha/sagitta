@@ -161,21 +161,21 @@ async fn handle_simple_index(
         .or(config.onnx_tokenizer_path.as_ref())
         .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
 
-    let onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
+    let _onnx_model_path = PathBuf::from(onnx_model_path_str);
+    let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
 
-    if !onnx_model_path.exists() {
-        return Err(anyhow!("Resolved ONNX model path does not exist: {}", onnx_model_path.display()));
+    if !_onnx_model_path.exists() {
+        return Err(anyhow!("Resolved ONNX model path does not exist: {}", _onnx_model_path.display()));
     }
-    if !onnx_tokenizer_path.is_dir() {
-        return Err(anyhow!("Resolved ONNX tokenizer path is not a directory: {}", onnx_tokenizer_path.display()));
+    if !_onnx_tokenizer_path.is_dir() {
+        return Err(anyhow!("Resolved ONNX tokenizer path is not a directory: {}", _onnx_tokenizer_path.display()));
     }
-    let tokenizer_file = onnx_tokenizer_path.join("tokenizer.json");
+    let tokenizer_file = _onnx_tokenizer_path.join("tokenizer.json");
     if !tokenizer_file.exists() {
-        return Err(anyhow!("tokenizer.json not found in the ONNX tokenizer directory: {}", onnx_tokenizer_path.display()));
+        return Err(anyhow!("tokenizer.json not found in the ONNX tokenizer directory: {}", _onnx_tokenizer_path.display()));
     }
-    log::info!("Using resolved ONNX model: {}", onnx_model_path.display());
-    log::info!("Using resolved ONNX tokenizer directory: {}", onnx_tokenizer_path.display());
+    log::info!("Using resolved ONNX model: {}", _onnx_model_path.display());
+    log::info!("Using resolved ONNX tokenizer directory: {}", _onnx_tokenizer_path.display());
 
     log::info!("Using embedding handler for indexing...");
     let embedding_handler = EmbeddingHandler::new(config)
@@ -397,8 +397,8 @@ async fn handle_simple_query(
         .or(tokenizer_env_var.as_ref())
         .or(config.onnx_tokenizer_path.as_ref())
         .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
-    let onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
+    let _onnx_model_path = PathBuf::from(onnx_model_path_str);
+    let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple query")?;
 

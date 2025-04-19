@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Result, bail};
 use clap::Args;
 use std::sync::Arc;
 use colored::*;
@@ -51,104 +51,72 @@ pub async fn handle_repo_query<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let repo_name = args.name.as_ref().or(config.active_repository.as_ref())
-        .ok_or_else(|| anyhow!("No active repository set and no repository name provided with --name."))?;
+    let repo_name = match args.name.as_ref().or(config.active_repository.as_ref()) {
+        Some(name) => name.clone(),
+        None => bail!("No repository specified and no active repository set. Use 'repo use <name>' or provide --name."),
+    };
 
     let repo_config = config.repositories.iter()
-        .find(|r| &r.name == repo_name)
+        .find(|r| r.name == repo_name)
         .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name))?;
 
-    let collection_name = helpers::get_collection_name(repo_name);
-    println!("Querying repository '{}' in collection '{}'...", repo_name.cyan(), collection_name.cyan());
+    let branch_name = args.branch.clone()
+        .or_else(|| repo_config.active_branch.clone())
+        .unwrap_or_else(|| repo_config.default_branch.clone());
 
-    // Determine the branch to filter by
-    let branch_filter = args.branch.as_ref().or(repo_config.active_branch.as_ref());
-    if let Some(branch) = branch_filter {
-        println!("Filtering by branch: {}", branch.yellow());
-    } else {
-         println!("{}", "Warning: No branch specified and repository has no active branch. Querying across all branches.".yellow());
-    }
+    let collection_name = helpers::get_collection_name(&repo_name);
 
-    // --- Embedding Setup ---
+    // Determine ONNX paths (needed for embedding query)
     let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
 
-    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_ref()
-        .or(model_env_var.as_ref())
-        .or(config.onnx_model_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config"))?;
-    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_ref()
-        .or(tokenizer_env_var.as_ref())
-        .or(config.onnx_tokenizer_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
+    let _onnx_model_path_str = cli_args.onnx_model_path_arg.as_deref()
+        .or(model_env_var.as_deref())
+        .or(config.onnx_model_path.as_deref())
+        .ok_or_else(|| anyhow!("ONNX model path not found. Provide via --onnx-model, env var, or config."))?;
     
-    let embedding_handler = Arc::new(
-        EmbeddingHandler::new(config)
-            .context("Failed to initialize embedding handler")?,
+    let _onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_deref()
+        .or(tokenizer_env_var.as_deref())
+        .or(config.onnx_tokenizer_path.as_deref())
+        .ok_or_else(|| anyhow!("ONNX tokenizer dir not found. Provide via --onnx-tokenizer-dir, env var, or config."))?;
+
+    // Initialize embedding handler using the config
+    let embedding_handler = EmbeddingHandler::new(config)?;
+
+    println!(
+        "Querying repository '{}' (collection: '{}', branch: '{}')...",
+        repo_name.cyan(),
+        collection_name.cyan(),
+        branch_name.cyan()
     );
-    let embedding_dim = embedding_handler.dimension()?;
-    
-    // --- Create Query Vector ---
-    let query_vector = embedding_handler.embed(&[&args.query])?.remove(0);
-    if query_vector.len() != embedding_dim {
-         return Err(anyhow!(
-             "Query embedding dimension ({}) does not match model dimension ({}).", 
-             query_vector.len(), embedding_dim
-         ));
+
+    // Get query embedding
+    let query_embedding = embedding_handler.embed(&[&args.query])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("Failed to generate embedding for the query"))?;
+
+    // Build search filter based on CLI args
+    let mut filter_conditions = vec![Condition::matches(FIELD_BRANCH, branch_name)];
+    if let Some(lang) = args.lang {
+        filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang));
     }
-    log::debug!("Query vector created with dimension: {}", query_vector.len());
-
-
-    // --- Construct Qdrant Filter ---
-    let mut filter_conditions = vec![
-        // Filter by repository name (should always be present in repo collections)
-        // Condition::matches(helpers::FIELD_REPO_NAME, repo_name.clone()),
-        // Repo name is implicit in the collection name now
-    ];
-
-    if let Some(branch) = branch_filter {
-        filter_conditions.push(Condition::matches(FIELD_BRANCH, branch.clone()));
+    if let Some(element_type) = args.element_type {
+        filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type));
     }
-    
-    // Add lang filter if provided
-    if let Some(lang) = &args.lang {
-        println!("Filtering by language: {}", lang.yellow());
-        filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang.clone()));
-    }
+    let search_filter = Filter::must(filter_conditions);
 
-    // Add type filter if provided
-    if let Some(el_type) = &args.element_type {
-        println!("Filtering by element type: {}", el_type.yellow());
-        filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, el_type.clone()));
-    }
+    // Build the search request
+    let search_request = SearchPointsBuilder::new(collection_name, query_embedding, args.limit)
+        .filter(search_filter)
+        .with_payload(true);
 
-    let query_filter = Filter {
-        must: filter_conditions,
-        ..Default::default() // Use default for should, must_not, min_should
-    };
+    // Perform the search
+    let search_response = client.search_points(search_request.into()).await
+        .context("Failed to perform search query in Qdrant")?;
 
-    // --- Perform Search ---
-    let search_request = SearchPointsBuilder::new(&collection_name, query_vector, args.limit)
-        .filter(query_filter)
-        .with_payload(true) // Request payload to display results
-        .with_vectors(false); // Usually don't need vectors in results
-
-    println!("Performing search...");
-    let search_result = client.search_points(search_request.into())
-        .await
-        .context(format!("Failed to search points in collection '{}'", collection_name))?;
-
-    println!("Search returned {} results.", search_result.result.len());
-
-    if search_result.result.is_empty() {
-        println!("{}", "No matching results found.".yellow());
-        return Ok(());
-    }
-    
-    // Removed call to print_summary_stats
-    // print_summary_stats(&search_result);
-    // Call the renamed formatter function
-    print_search_results(&search_result.result, &args.query)?;
+    // Format and print results
+    print_search_results(&search_response.result, args.query.as_str())?;
 
     Ok(())
 } 
