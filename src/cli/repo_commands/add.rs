@@ -146,20 +146,8 @@ where
     let collection_name = helpers::get_collection_name(&repo_name);
     println!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
     
-    // Determine model and tokenizer paths from the config
-    let onnx_model_path_str = config.onnx_model_path.as_deref()
-        .ok_or_else(|| anyhow!("ONNX model path must be provided in config"))?;
-    
-    let onnx_tokenizer_dir_str = config.onnx_tokenizer_path.as_deref()
-        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided in config"))?;
-    
-    // Initialize embedding handler to get actual model dimension
-    let embedding_handler = EmbeddingHandler::new(
-        crate::vectordb::embedding::EmbeddingModelType::Onnx,
-        Some(PathBuf::from(onnx_model_path_str)),
-        Some(PathBuf::from(onnx_tokenizer_dir_str)),
-    )
-    .context("Failed to initialize embedding handler for collection creation")?;
+    // Initialize embedding handler with config to check paths
+    let embedding_handler = EmbeddingHandler::new(config)?;
     
     // Get actual embedding dimension from the model
     let embedding_dim = embedding_handler.dimension()

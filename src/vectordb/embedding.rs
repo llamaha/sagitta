@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use crate::vectordb::error::VectorDBError;
 use std::fmt;
+use crate::config::AppConfig;
+#[cfg(feature = "ort")]
+use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
 
 // Use the embedding dimensions from the providers
 // use crate::vectordb::provider::fast::FAST_EMBEDDING_DIM;
@@ -171,4 +174,41 @@ mod tests {
     // Mock Provider needed to test `generate_embeddings`
     // #[test]
     // fn test_embedding_model_generate_embeddings() { ... }
+}
+
+pub fn initialize_provider(
+    config: &AppConfig,
+) -> std::result::Result<Arc<dyn EmbeddingProvider + Send + Sync>, VectorDBError> {
+    // Determine model type - currently only supports ONNX/Default
+    // In the future, this could check a field like `config.embedding_model.model_type`
+    let model_type = EmbeddingModelType::Onnx; // Assume ONNX for now
+
+    match model_type {
+        EmbeddingModelType::Default | EmbeddingModelType::Onnx => {
+            #[cfg(feature = "ort")]
+            {
+                // Access AppConfig fields directly
+                let model_path = config.onnx_model_path.as_deref()
+                    .ok_or_else(|| VectorDBError::ConfigurationError("ONNX model path not set in AppConfig".to_string()))?;
+                let tokenizer_path = config.onnx_tokenizer_path.as_deref()
+                    .ok_or_else(|| VectorDBError::ConfigurationError("ONNX tokenizer path not set in AppConfig".to_string()))?;
+                
+                let onnx_provider_result = OnnxEmbeddingModel::new(
+                    Path::new(model_path), 
+                    Path::new(tokenizer_path)
+                );
+                    
+                match onnx_provider_result {
+                    Ok(provider) => Ok(Arc::new(provider)),
+                    // Explicitly convert error just in case
+                    Err(e) => Err(VectorDBError::from(e)), 
+                }
+            }
+            #[cfg(not(feature = "ort"))]
+            {
+                Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+            }
+        }
+        // Handle other model types if necessary
+    }
 }

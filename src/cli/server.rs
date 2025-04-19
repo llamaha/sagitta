@@ -3,7 +3,6 @@ use clap::{Args, Subcommand};
 use std::sync::Arc;
 use std::path::PathBuf;
 use crate::config::AppConfig;
-use tracing::info;
 use tracing::error;
 use crate::cli::commands::CliArgs;
 use qdrant_client::Qdrant;
@@ -11,6 +10,21 @@ use qdrant_client::Qdrant;
 // Import server module only when server feature is enabled
 #[cfg(feature = "server")]
 use crate::server::ServerConfig;
+
+#[cfg(feature = "server")]
+use log::info;
+
+#[cfg(feature = "server")]
+use std::net::SocketAddr;
+
+#[cfg(feature = "server")]
+use tonic::transport::server::ServerTlsConfig;
+
+#[cfg(feature = "server")]
+use tonic::transport::Identity;
+
+#[cfg(feature = "server")]
+use tokio::fs::read;
 
 /// CLI arguments for the server command
 #[derive(Debug, Clone, Args)]
@@ -125,16 +139,25 @@ async fn handle_server_start(
     
     let app_config = Arc::new(config.clone());
     
-    crate::server::start_server(
-        addr,
-        app_config,
-        client,
-        None,
-        server_config.use_tls,
-        server_config.cert_path.map(|p| p.to_string_lossy().to_string()),
-        server_config.key_path.map(|p| p.to_string_lossy().to_string()),
-    )
-    .await?;
+    let tls_config = if let (Some(cert_path), Some(key_path)) = 
+        (server_config.cert_path.as_ref(), server_config.key_path.as_ref())
+    {
+        info!("Loading TLS certificate from: {}", cert_path.display());
+        info!("Loading TLS key from: {}", key_path.display());
+        let cert = read(cert_path).await.map_err(|e| anyhow::anyhow!("Failed to read cert file: {}", e))?;
+        let key = read(key_path).await.map_err(|e| anyhow::anyhow!("Failed to read key file: {}", e))?;
+        let identity = Identity::from_pem(cert, key);
+        Some(ServerTlsConfig::new().identity(identity))
+    } else {
+        info!("TLS not configured, starting server without encryption.");
+        None
+    };
+    
+    let require_auth = server_config.require_auth;
+    let api_key = server_config.api_key;
+    let max_requests = server_config.max_concurrent_requests;
+    
+    crate::server::start_server(addr, app_config, client, api_key, require_auth, tls_config, Some(max_requests)).await?;
     
     Ok(())
 }

@@ -17,13 +17,21 @@ use std::sync::Arc;
 use anyhow;
 use qdrant_client::Qdrant;
 use crate::config::AppConfig;
-use service::VectorDBServiceImpl;
+use crate::server::service::VectorDBServiceImpl;
+use crate::edit::grpc::EditingServiceImpl;
 use tokio::sync::oneshot;
 use tonic::transport::Server;
 use tracing::{info, error};
 
 #[cfg(feature = "server")]
-use vectordb_proto;
+use {
+    // Use nested module path for VectorDbServiceServer from vectordb_proto
+    vectordb_proto::vector_db_service_server::VectorDbServiceServer,
+    // Use path from crate::grpc_generated::editing for EditingServiceServer
+    crate::grpc_generated::editing::editing_service_server::EditingServiceServer,
+    vectordb_proto::FILE_DESCRIPTOR_SET as VECTORDB_FILE_DESCRIPTOR_SET,
+    crate::grpc_generated::EDITING_FILE_DESCRIPTOR_SET
+};
 
 /// Start the VectorDB gRPC server
 ///
@@ -34,39 +42,50 @@ use vectordb_proto;
 /// * `shutdown_signal` - Optional shutdown signal receiver
 ///
 /// # Returns
-/// * `anyhow::Result<()>` - The result of the server operation
+/// * `crate::server::Result<()>` - The result of the server operation using local Result
 #[cfg(feature = "server")]
 pub async fn start_server(
     addr: SocketAddr,
     config: Arc<AppConfig>,
     client: Arc<Qdrant>,
-    shutdown_signal: Option<oneshot::Receiver<()>>,
-    use_tls: bool,
-    _cert_path: Option<String>,
-    _key_path: Option<String>,
-) -> anyhow::Result<()> {
+    api_key: Option<String>,
+    require_auth: bool,
+    tls_config: Option<tonic::transport::server::ServerTlsConfig>,
+    max_concurrent_requests: Option<usize>,
+) -> Result<()> {
+    info!("Entering start_server function (server feature enabled)");
+
     // Extract API key path from config
-    let api_key_path = config.server_api_key_path.clone(); // Assuming this field exists
+    let api_key_path = config.server_api_key_path.clone();
 
     // Create the service implementation, swapping args and adding api_key_path
-    let service = VectorDBServiceImpl::new(client, config, api_key_path)?;
+    let vectordb_service = VectorDBServiceImpl::new(client.clone(), config.clone(), api_key_path)?;
+    
+    // Create the new editing service implementation instance
+    info!("Creating EditingServiceImpl instance...");
+    let editing_service_impl = EditingServiceImpl::default();
     
     // Register the reflection service
+    info!("Building reflection service...");
     let reflection_service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(vectordb_proto::FILE_DESCRIPTOR_SET)
-        .build()?;
+        .register_encoded_file_descriptor_set(VECTORDB_FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(EDITING_FILE_DESCRIPTOR_SET)
+        .build_v1()?;
 
     // Start the server with or without TLS
-    info!("Starting gRPC server on {}", addr);
+    info!("Configuring server builder on {}", addr);
     
-    let server = Server::builder()
+    info!("Adding services (Reflection, VectorDB, Editing)...");
+    let server_builder = Server::builder()
         .add_service(reflection_service)
-        .add_service(vectordb_proto::vector_db_service_server::VectorDbServiceServer::new(service));
+        .add_service(VectorDbServiceServer::new(vectordb_service))
+        .add_service(EditingServiceServer::new(editing_service_impl));
+    info!("Finished adding services.");
     
-    if use_tls {
+    if let Some(tls_config) = tls_config {
         // TLS support is currently disabled for compilation
         error!("TLS support is temporarily disabled for compilation reasons");
-        return Err(anyhow::anyhow!("TLS support is temporarily disabled"));
+        return Err(anyhow::anyhow!("TLS support is temporarily disabled").into());
         
         /* TLS support code commented out for compilation - to be fixed in a future update
         if let (Some(cert_path), Some(key_path)) = (cert_path, key_path) {
@@ -96,15 +115,19 @@ pub async fn start_server(
         }
         */
     } else {
-        if let Some(signal) = shutdown_signal {
-            server
-                .serve_with_shutdown(addr, async {
-                    let _ = signal.await;
-                    info!("Shutdown signal received, stopping server");
-                })
-                .await?;
-        } else {
-            server.serve(addr).await?;
+        info!("Starting server without TLS...");
+        let shutdown = shutdown_signal(); // Get the shutdown future
+        tokio::select! {
+            res = server_builder.serve(addr) => {
+                if let Err(e) = res {
+                    error!("Server failed to serve: {}", e);
+                    return Err(e.into()); // Propagate the error
+                }
+                info!("Server finished serving normally.");
+            }
+            _ = shutdown => {
+                info!("Shutdown signal received, stopping server.");
+            }
         }
     }
     
@@ -131,7 +154,35 @@ pub async fn start_default_server(
     port: u16,
     config: Arc<AppConfig>,
     client: Arc<Qdrant>,
-) -> anyhow::Result<()> {
+) -> crate::server::Result<()> {
     let addr = format!("0.0.0.0:{}", port).parse()?;
     start_server(addr, config, client, None, false, None, None).await
-} 
+}
+
+#[cfg(feature = "server")]
+async fn shutdown_signal() {
+    // Wait for Ctrl+C or SIGTERM
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("Termination signal received.");
+}

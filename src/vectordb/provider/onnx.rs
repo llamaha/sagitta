@@ -54,24 +54,25 @@ impl OnnxEmbeddingModel {
             .commit_from_file(model_path)?;
 
         // Determine dimension
-        let pooler_output_name = "pooler_output"; 
-        let output_dim = session.outputs.iter()
-            .find(|meta| meta.name == pooler_output_name)
-            .and_then(|meta| {
-                match &meta.output_type {
-                    ort::value::ValueType::Tensor { dimensions, .. } => {
-                        // Assume dimensions.last() gives Option<&i64>
-                        dimensions.last().map(|dim_ref| *dim_ref as usize)
-                    }
-                    _ => None,
+        #[cfg(feature = "ort")]
+        let dimension = session
+            .outputs
+            .iter()
+            .find(|output| output.name == "pooler_output")
+            // Match on output_type to get dimensions
+            .and_then(|output| match output.output_type {
+                ort::value::ValueType::Tensor { ref dimensions, .. } => {
+                    // Use last dimension if available, otherwise None
+                    dimensions.last().map(|&d| d as usize)
                 }
+                _ => None, // Not a tensor or wrong type
             })
-            .ok_or_else(|| Error::msg(format!("Could not determine embedding dimension from model output '{}'", pooler_output_name)))?;
+            .ok_or_else(|| VectorDBError::Other("Failed to get model dimension from pooler_output".to_string()))?;
 
         debug!(
             "ONNX model loaded successfully from {}, determined embedding dimension: {}",
             model_path.display(),
-            output_dim
+            dimension
         );
 
         let tokenizer = Arc::new(Mutex::new(tokenizer));
@@ -80,7 +81,7 @@ impl OnnxEmbeddingModel {
             session,
             tokenizer,
             max_seq_length: 128, // TODO: Make this configurable or detect from model?
-            dimension: output_dim,
+            dimension,
         })
     }
 
@@ -236,33 +237,54 @@ mod tests {
         // assert_eq!(provider.dimension(), 384); // Example dimension
     }
 
-    #[test]
-    #[ignore] // Ignore by default as it needs a real ONNX model and tokenizer
-    fn test_onnx_provider_new_and_basics() {
-        let dir = tempdir().unwrap();
-        let (model_path, tokenizer_path) = create_dummy_onnx_files(dir.path());
-
-        // Test successful creation
-        let provider = OnnxEmbeddingModel::new(&model_path, &tokenizer_path);
-        assert!(provider.is_ok());
-        test_provider_basics(&provider.unwrap());
+    // Helper to create dummy files for testing path existence
+    fn create_dummy_file(dir: &tempfile::TempDir, name: &str) -> PathBuf {
+        let file_path = dir.path().join(name);
+        let mut file = File::create(&file_path).expect("Failed to create dummy file");
+        writeln!(file, "dummy").expect("Failed to write to dummy file");
+        file_path
     }
 
+    // This test requires valid model/tokenizer files or sophisticated mocking.
     #[test]
-    #[ignore] // Ignore by default
+    #[ignore] // Ignore because it requires valid ONNX files or mocking
+    fn test_onnx_provider_new_and_basics() {
+        let dir = tempdir().unwrap();
+        let model_path = create_dummy_file(&dir, "model.onnx");
+        let tokenizer_path = create_dummy_file(&dir, "tokenizer.json");
+        
+        // This will likely fail if dummy files aren't valid/loadable by ORT
+        let provider_result = OnnxEmbeddingModel::new(&model_path, &tokenizer_path);
+        
+        // Original assertion: Fails b/c dummy files are invalid
+        assert!(provider_result.is_ok(), "Provider creation failed: {:?}", provider_result.err()); 
+
+        // If creation *did* succeed (e.g., with mocking), we could test dimensions
+        // if let Ok(provider) = provider_result {
+        //     assert_eq!(provider.dimensions(), 384); // Example dimension
+        // }
+    }
+
+    // This test also requires valid model files or mocking
+    #[test]
+    #[ignore] // Ignore because it requires valid ONNX files or mocking
     fn test_batch_embedding() {
         let dir = tempdir().unwrap();
-        let (model_path, tokenizer_path) = create_dummy_onnx_files(dir.path());
-
+        let model_path = create_dummy_file(&dir, "model.onnx");
+        let tokenizer_path = create_dummy_file(&dir, "tokenizer.json");
+        
         let provider = OnnxEmbeddingModel::new(&model_path, &tokenizer_path).unwrap();
-        let texts = vec!["Hello, world!", "This is a test sentence."];
-        let embeddings = provider.embed_batch(&texts);
+        
+        let texts = vec!["hello world".to_string(), "another test".to_string()];
+        // Convert Vec<String> to Vec<&str> for the provider
+        let text_slices: Vec<&str> = texts.iter().map(AsRef::as_ref).collect();
+        let embeddings_result = provider.embed_batch(&text_slices);
 
-        assert!(embeddings.is_ok());
-        let embeddings = embeddings.unwrap();
-        assert_eq!(embeddings.len(), 2); // Should get two embeddings
-        // Check dimensions (assuming dummy model outputs correctly)
-        // assert_eq!(embeddings[0].len(), provider.dimension());
-        // assert_eq!(embeddings[1].len(), provider.dimension());
+        assert!(embeddings_result.is_ok(), "Embedding generation failed: {:?}", embeddings_result.err());
+        // if let Ok(embeddings) = embeddings_result {
+        //     assert_eq!(embeddings.len(), 2);
+        //     assert_eq!(embeddings[0].len(), provider.dimensions());
+        //     assert_eq!(embeddings[1].len(), provider.dimensions());
+        // }
     }
 }

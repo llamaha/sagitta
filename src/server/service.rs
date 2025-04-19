@@ -1,35 +1,41 @@
-use std::sync::Arc;
-use tonic::{Request, Response, Status};
-use qdrant_client::Qdrant;
-use crate::config::{AppConfig, save_config, get_repo_base_path};
-use crate::server::auth::{ApiKeyAuthenticator};
-use qdrant_client::qdrant::{Distance, CreateCollectionBuilder, VectorParamsBuilder, SearchPointsBuilder, Filter};
-use std::fmt;
-use crate::cli::repo_commands::helpers;
-use anyhow::{anyhow, Context};
-use std::path::{PathBuf};
-use std::fs;
-use arc_swap::ArcSwap;
-use tracing::{error, info, warn};
-use crate::vectordb::embedding_logic::EmbeddingHandler;
-use crate::vectordb::embedding::EmbeddingModelType;
-use std::time::Instant;
-use crate::cli::commands::{
-    FIELD_CHUNK_CONTENT, FIELD_COMMIT_HASH, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
-    FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, FIELD_BRANCH
-};
-
 #[cfg(feature = "server")]
-use vectordb_proto::vectordb::{
-    vector_db_service_server::VectorDbService,
-    QueryRequest, QueryResponse, SearchResult,
-    ServerInfo,
-    ListCollectionsResponse,
-    StatusResponse, CollectionRequest, CreateCollectionRequest,
-    ListRepositoriesResponse, RepositoryInfo, RepositoryRequest, Empty,
-    IndexFilesRequest, IndexResponse, AddRepositoryRequest,
-    RemoveRepositoryRequest, SyncRepositoryRequest, UseBranchRequest,
-};
+use std::sync::Arc;
+#[cfg(feature = "server")]
+use tonic::{Request, Response, Status};
+#[cfg(feature = "server")]
+use qdrant_client::Qdrant;
+#[cfg(feature = "server")]
+use crate::config::{AppConfig, save_config, get_repo_base_path};
+#[cfg(feature = "server")]
+use crate::server::auth::{ApiKeyAuthenticator};
+#[cfg(feature = "server")]
+use qdrant_client::qdrant::{Distance, PointStruct, CreateCollectionBuilder, VectorParamsBuilder, SearchPointsBuilder, Filter};
+#[cfg(feature = "server")]
+use crate::cli::repo_commands::helpers;
+#[cfg(feature = "server")]
+use anyhow::{anyhow, Context};
+#[cfg(feature = "server")]
+use std::path::{PathBuf};
+#[cfg(feature = "server")]
+use std::fs;
+#[cfg(feature = "server")]
+use arc_swap::ArcSwap;
+#[cfg(feature = "server")]
+use tracing::{error, info, warn};
+#[cfg(feature = "server")]
+use crate::vectordb::embedding_logic::EmbeddingHandler;
+#[cfg(feature = "server")]
+use crate::vectordb::embedding::EmbeddingModelType;
+#[cfg(feature = "server")]
+use std::time::Instant;
+#[cfg(feature = "server")]
+use vectordb_proto::vectordb::*;
+#[cfg(feature = "server")]
+use vectordb_proto::vector_db_service_server::VectorDbService;
+#[cfg(feature = "server")]
+use std::fmt;
+#[cfg(feature = "server")]
+use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf, r#match::MatchValue};
 
 #[cfg(feature = "server")]
 pub struct VectorDBServiceImpl {
@@ -253,111 +259,103 @@ impl VectorDbService for VectorDBServiceImpl {
     ) -> std::result::Result<Response<QueryResponse>, Status> {
         self.authenticate(&request)?;
         let req = request.into_inner();
-        let query_text = req.query_text;
+        let config = self.config.load();
         let collection_name = req.collection_name;
-        let limit = req.limit;
-        let lang_filter = req.language;
-        let element_type_filter = req.element_type;
+        let query_text = req.query_text;
+        let limit = if req.limit > 0 { req.limit as u64 } else { 10 };
 
-        if query_text.is_empty() {
-            return Err(Status::invalid_argument("Query text cannot be empty"));
-        }
-        if collection_name.is_empty() {
-            return Err(Status::invalid_argument("Collection name cannot be empty"));
-        }
+        let embedding_handler = EmbeddingHandler::new(config.as_ref())
+            .map_err(|e| Status::internal(format!("Failed to create embedding handler: {}", e)))?;
 
-        let embedding_vec = async {
-            let config = self.config.load();
-            let handler = EmbeddingHandler::new(
-                EmbeddingModelType::Onnx,
-                config.onnx_model_path.clone().map(PathBuf::from),
-                config.onnx_tokenizer_path.clone().map(PathBuf::from),
-            ).map_err(anyhow::Error::from)?;
-            handler.embed(&[&query_text]).map_err(anyhow::Error::from)
-        }.await.map_err(|e: anyhow::Error| {
-            error!("Embedding generation failed: {}", e);
-            Status::internal(format!("Failed to generate embedding: {}", e))
-        })?;
-
-        let embedding = embedding_vec.into_iter().next()
-            .ok_or_else(|| Status::internal("Embedding generation returned empty result"))?;
+        let query_embedding = embedding_handler.embed(&[&query_text])
+            .map_err(|e| Status::internal(format!("Failed to generate query embedding: {}", e)))?
+            .into_iter().next()
+            .ok_or_else(|| Status::internal("Embedding generation yielded no result"))?;
 
         let mut filter_conditions = Vec::new();
-        if let Some(lang) = lang_filter {
-            use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf};
-            use qdrant_client::qdrant::r#match::MatchValue;
-            let condition = FieldCondition {
-                key: FIELD_LANGUAGE.to_string(),
-                r#match: Some(Match { match_value: Some(MatchValue::Keyword(lang)) }),
-                ..Default::default()
-            };
+        use qdrant_client::qdrant::{Condition, Filter, condition::ConditionOneOf, r#match::MatchValue};
+        use qdrant_client::qdrant::FieldCondition;
+
+        if let Some(lang) = req.language {
             filter_conditions.push(qdrant_client::qdrant::Condition {
-                 condition_one_of: Some(ConditionOneOf::Field(condition)),
+                condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                    key: "language".to_string(),
+                    r#match: Some(Match {
+                        match_value: Some(MatchValue::Keyword(lang)),
+                    }),
+                    range: None,
+                    geo_bounding_box: None,
+                    geo_radius: None,
+                    values_count: None,
+                    geo_polygon: None,
+                    datetime_range: None,
+                })),
             });
         }
-        
-        if let Some(elem_type) = element_type_filter {
-            use qdrant_client::qdrant::{FieldCondition, Match, condition::ConditionOneOf};
-            use qdrant_client::qdrant::r#match::MatchValue;
-            let condition = FieldCondition {
-                key: FIELD_ELEMENT_TYPE.to_string(),
-                r#match: Some(Match { match_value: Some(MatchValue::Keyword(elem_type)) }),
-                ..Default::default()
-            };
+        if let Some(elem_type) = req.element_type {
             filter_conditions.push(qdrant_client::qdrant::Condition {
-                 condition_one_of: Some(ConditionOneOf::Field(condition)),
+                condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                    key: "element_type".to_string(),
+                    r#match: Some(Match {
+                        match_value: Some(MatchValue::Keyword(elem_type)),
+                    }),
+                    range: None,
+                    geo_bounding_box: None,
+                    geo_radius: None,
+                    values_count: None,
+                    geo_polygon: None,
+                    datetime_range: None,
+                })),
             });
         }
 
         let search_filter = Filter {
-            must: filter_conditions,
-            should: vec![],
-            must_not: vec![],
-            min_should: None,
+             must: filter_conditions,
+             should: vec![],
+             must_not: vec![],
+             min_should: None,
         };
 
-        let search_request_builder = SearchPointsBuilder::new(collection_name.clone(), embedding, limit as u64)
+        let search_request_builder = SearchPointsBuilder::new(collection_name.clone(), query_embedding, limit)
             .with_payload(true);
 
-        let search_request = if !search_filter.must.is_empty() || !search_filter.should.is_empty() || !search_filter.must_not.is_empty() {
-            search_request_builder.filter(search_filter)
-        } else {
-            search_request_builder
+        let search_request = search_request_builder;
+        
+        let search_request = if !search_filter.must.is_empty() { 
+             search_request.filter(search_filter) 
+        } else { 
+             search_request 
         };
 
-        let start_time = Instant::now();
-        info!("Executing search in '{}' for query: '{}'", collection_name, query_text.chars().take(50).collect::<String>());
-
+        let search_start_time = Instant::now();
         let search_response = self.client.search_points(search_request).await
-             .map_err(|e| {
+            .map_err(|e| {
                 error!("Search points failed in collection '{}': {}", collection_name, e);
                 Status::internal("Failed to execute search query")
-             })?;
-
-        let query_time = start_time.elapsed();
-         info!("Search completed in {:.2?}", query_time);
+            })?;
+        let search_duration = search_start_time.elapsed();
+        info!("Qdrant search completed in {:.2?}", search_duration);
 
         let result_count = search_response.result.len();
-        let results: Vec<SearchResult> = search_response.result.into_iter().map(|hit| {
-            let start_line = get_integer_from_payload(&hit.payload, FIELD_START_LINE).unwrap_or(0);
-            let end_line = get_integer_from_payload(&hit.payload, FIELD_END_LINE).unwrap_or(0);
-            SearchResult {
-                file_path: get_string_from_payload(&hit.payload, FIELD_FILE_PATH).unwrap_or_default(),
-                start_line: start_line as i32,
-                end_line: end_line as i32,
-                language: get_string_from_payload(&hit.payload, FIELD_LANGUAGE).unwrap_or_default(),
-                element_type: get_string_from_payload(&hit.payload, FIELD_ELEMENT_TYPE).unwrap_or_default(),
-                content: get_string_from_payload(&hit.payload, FIELD_CHUNK_CONTENT).unwrap_or_default(),
-                score: hit.score,
-                branch: Some(get_string_from_payload(&hit.payload, FIELD_BRANCH).unwrap_or_default()),
-                commit_hash: Some(get_string_from_payload(&hit.payload, FIELD_COMMIT_HASH).unwrap_or_default()),
+        let proto_results: Vec<vectordb_proto::vectordb::SearchResult> = search_response.result.into_iter().map(|scored_point| {
+            let payload = scored_point.payload;
+            vectordb_proto::vectordb::SearchResult {
+                score: scored_point.score,
+                file_path: get_string_from_payload(&payload, "file_path").unwrap_or_default(),
+                start_line: get_integer_from_payload(&payload, "start_line").unwrap_or(0) as i32,
+                end_line: get_integer_from_payload(&payload, "end_line").unwrap_or(0) as i32,
+                content: get_string_from_payload(&payload, "content").unwrap_or_default(),
+                language: get_string_from_payload(&payload, "language").unwrap_or_default(),
+                branch: Some(get_string_from_payload(&payload, "branch").unwrap_or_default()),
+                commit_hash: Some(get_string_from_payload(&payload, "commit_hash").unwrap_or_default()),
+                element_type: get_string_from_payload(&payload, "element_type").unwrap_or_default(),
             }
         }).collect();
 
-        Ok(Response::new(QueryResponse {
-            results,
-            total_results: result_count as i32,
-            query_time_ms: query_time.as_millis() as f32,
+        Ok(Response::new(QueryResponse { 
+            results: proto_results, 
+            total_results: result_count as i32, 
+            query_time_ms: search_duration.as_millis() as f32 
         }))
     }
     

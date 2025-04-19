@@ -130,6 +130,9 @@ pub enum Commands {
     #[command(subcommand_negates_reqs = true)]
     #[cfg(feature = "server")]
     Server(super::server::ServerArgs), // Add Server command
+    /// Edit code using semantic understanding
+    #[command(subcommand_negates_reqs = true)]
+    Edit(crate::edit::cli::EditArgs),
 }
 
 // --- Main Command Handler Function ---
@@ -149,6 +152,7 @@ pub async fn handle_command(
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
         #[cfg(feature = "server")]
         Commands::Server(ref cmd_args) => super::server::handle_server_command(cmd_args.clone(), &args, config.clone(), client).await,
+        Commands::Edit(ref cmd_args) => crate::edit::cli::handle_edit_command(cmd_args.clone(), &args, config.clone(), client).await,
     }
 }
 

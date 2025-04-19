@@ -1,6 +1,11 @@
 use thiserror::Error;
+#[cfg(feature = "server")]
 use tonic::Status;
 use std::io;
+use std::net;
+use qdrant_client::QdrantError;
+#[cfg(feature = "ort")]
+use ort;
 
 /// Server-specific error type
 #[derive(Error, Debug)]
@@ -34,12 +39,18 @@ pub enum ServerError {
     
     #[error("Embedding error: {0}")]
     EmbeddingError(String),
+    
+    #[error("Reflection error: {0}")]
+    Reflection(String),
+    
+    #[error("Transport error: {0}")]
+    Transport(tonic::transport::Error),
 }
 
 /// Server-specific result type
 pub type Result<T> = std::result::Result<T, ServerError>;
 
-/// Convert ServerError to tonic::Status for gRPC responses
+#[cfg(feature = "server")]
 impl From<ServerError> for Status {
     fn from(err: ServerError) -> Self {
         match err {
@@ -53,6 +64,8 @@ impl From<ServerError> for Status {
             ServerError::InvalidRequest(msg) => Status::invalid_argument(msg),
             ServerError::RepositoryError(msg) => Status::failed_precondition(msg),
             ServerError::EmbeddingError(msg) => Status::internal(format!("Embedding error: {}", msg)),
+            ServerError::Reflection(msg) => Status::internal(msg),
+            ServerError::Transport(e) => Status::internal(format!("Transport error: {}", e)),
         }
     }
 }
@@ -71,10 +84,10 @@ impl From<qdrant_client::QdrantError> for ServerError {
     }
 }
 
-/// Convert tonic transport errors to ServerError
+#[cfg(feature = "server")]
 impl From<tonic::transport::Error> for ServerError {
     fn from(err: tonic::transport::Error) -> Self {
-        ServerError::ServiceError(format!("Transport error: {}", err))
+        ServerError::Transport(err)
     }
 }
 
@@ -89,4 +102,18 @@ impl From<crate::vectordb::error::VectorDBError> for ServerError {
             _ => ServerError::Internal(format!("{}", err)),
         }
     }
-} 
+}
+
+#[cfg(feature = "server")]
+impl From<tonic_reflection::server::Error> for ServerError {
+    fn from(err: tonic_reflection::server::Error) -> Self {
+        ServerError::Reflection(err.to_string()) // Or a more specific variant if desired
+    }
+}
+
+// Add From trait implementation for AddrParseError
+impl From<net::AddrParseError> for ServerError {
+    fn from(err: net::AddrParseError) -> Self {
+        ServerError::Configuration(format!("Invalid socket address: {}", err))
+    }
+}

@@ -23,7 +23,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::{
-    cli::CliArgs, config::AppConfig, syntax, vectordb::{embedding, embedding_logic::EmbeddingHandler}
+    cli::CliArgs, config::AppConfig, syntax, vectordb::embedding_logic::EmbeddingHandler
 };
 use crate::cli::commands::{
     upsert_batch, BATCH_SIZE, LEGACY_INDEX_COLLECTION, // Import constants
@@ -116,9 +116,9 @@ pub async fn handle_simple_command(
     client: Arc<Qdrant>,
 ) -> Result<()> {
     match args.command {
-        SimpleCommand::Index(index_args) => handle_simple_index(&index_args, cli_args, config, client).await,
-        SimpleCommand::Query(query_args) => handle_simple_query(&query_args, cli_args, config, client).await,
-        SimpleCommand::Clear(clear_args) => handle_simple_clear(&clear_args, config, client).await,
+        SimpleCommand::Index(index_args) => handle_simple_index(&index_args, cli_args, &config, client).await,
+        SimpleCommand::Query(query_args) => handle_simple_query(&query_args, cli_args, &config, client).await,
+        SimpleCommand::Clear(clear_args) => handle_simple_clear(&clear_args, &config, client).await,
     }
 }
 
@@ -127,7 +127,7 @@ pub async fn handle_simple_command(
 async fn handle_simple_index(
     cmd_args: &SimpleIndexArgs,
     cli_args: &CliArgs,
-    config: AppConfig, 
+    config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
     log::info!("Starting simple indexing process...");
@@ -178,14 +178,8 @@ async fn handle_simple_index(
     log::info!("Using resolved ONNX tokenizer directory: {}", onnx_tokenizer_path.display());
 
     log::info!("Using embedding handler for indexing...");
-    let embedding_handler = Arc::new(
-        EmbeddingHandler::new(
-            embedding::EmbeddingModelType::Onnx,
-            Some(onnx_model_path),
-            Some(onnx_tokenizer_path),
-        )
-        .context("Failed to initialize embedding handler")?,
-    );
+    let embedding_handler = EmbeddingHandler::new(config)
+        .context("Failed to initialize embedding handler for simple index")?;
     let embedding_dim = embedding_handler // Use _ to avoid warning
         .dimension()
         .context("Failed to get embedding dimension")?;
@@ -379,7 +373,7 @@ async fn handle_simple_index(
 async fn handle_simple_query(
     args: &SimpleQueryArgs,
     cli_args: &CliArgs,
-    config: AppConfig,
+    config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
     log::info!("Starting simple query process...");
@@ -405,12 +399,8 @@ async fn handle_simple_query(
         .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
     let onnx_model_path = PathBuf::from(onnx_model_path_str);
     let onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
-    let embedding_handler = EmbeddingHandler::new(
-        embedding::EmbeddingModelType::Onnx,
-        Some(onnx_model_path),
-        Some(onnx_tokenizer_path),
-    )
-    .context("Failed to initialize embedding handler")?;
+    let embedding_handler = EmbeddingHandler::new(config)
+        .context("Failed to initialize embedding handler for simple query")?;
 
     let embedding_results = embedding_handler.create_embedding_model()?.embed_batch(&[&args.query])?;
     let query_embedding = embedding_results.into_iter().next()
@@ -451,7 +441,7 @@ async fn handle_simple_query(
 
 async fn handle_simple_clear(
     _args: &SimpleClearArgs,
-    _config: AppConfig,
+    _config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
     let collection_name = LEGACY_INDEX_COLLECTION;

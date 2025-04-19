@@ -1,5 +1,44 @@
 # vectordb-cli Release Notes
 
+## [1.6.0] - 2025-04-19
+
+### Added
+- **Semantic Code Editing**: Powerful code editing capabilities that leverage semantic understanding:
+  - Semantic element targeting for editing entire classes, functions, or methods
+  - Line-based precision editing for targeted changes to specific sections
+  - Validation-first workflow to ensure safety of edits
+  - Both CLI and gRPC interfaces for programmatic access
+- New CLI commands: `edit apply` and `edit validate` for code modification
+- New gRPC endpoints: `EditCode` and `ValidateEdit` for programmatic editing
+
+### Changed
+- Updated tonic from 0.10.2 to 0.12.3 and prost from 0.12 to 0.13
+- Improved embedding handler initialization using AppConfig
+- Enhanced error handling throughout the codebase
+- Refactored gRPC server implementation for better modularity
+
+### Fixed
+- Improved batch processing with retry logic and better error handling
+- Fixed various issues with embedding handler initialization
+- Enhanced server shutdown mechanism
+
+### Documentation
+- Added detailed documentation for the edit feature (docs/edit_feature.md)
+- Updated the gRPC interface documentation
+- Enhanced the README with new usage examples
+
+## [1.5.0] - 2024-04-18
+
+### Added
+- Add support for configuring the repository storage location using `repo config set-repo-base-path` command.
+- Add `repositories_base_path` configuration setting to specify the global repository storage location.
+- Fix Qdrant port documentation to correctly identify 6333 as HTTP/REST (web UI) and 6334 as gRPC.
+- Improve quickstart guide to clearly explain how to use the default ONNX model provided via Git LFS.
+
+## [1.4.5] - 2024-04-15
+
+### Added
+
 ## v1.4.3 - CLI Restructuring and Markdown Improvements
 
 This release enhances the CLI structure, significantly improves markdown parsing, and includes various fixes and optimizations.
