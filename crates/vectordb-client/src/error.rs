@@ -30,6 +30,12 @@ pub enum ClientError {
     
     #[error("Feature not available: {0}")]
     FeatureNotAvailable(String),
+    
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+    
+    #[error("Service unavailable: {0}")]
+    Unavailable(String),
 }
 
 /// Client-specific result type

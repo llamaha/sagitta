@@ -1,5 +1,4 @@
-use std::error::Error;
-use vectordb_client::{VectorDBClient, ClientConfig};
+use vectordb_client::ClientConfig;
 
 /// This test is disabled by default as it requires a running server.
 /// Use `cargo test --features server -- --ignored` to run it.

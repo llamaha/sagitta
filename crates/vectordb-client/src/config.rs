@@ -123,7 +123,7 @@ impl ClientConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    
     use tempfile::NamedTempFile;
     
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         };
         
         // Create a temporary file
-        let mut temp_file = NamedTempFile::new()?;
+        let temp_file = NamedTempFile::new()?;
         let path = temp_file.path().to_owned();
         
         // Save the config

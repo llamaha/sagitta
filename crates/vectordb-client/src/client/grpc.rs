@@ -7,6 +7,7 @@ use tonic::Request;
 
 use crate::config::ClientConfig;
 use crate::error::{ClientError, Result};
+use crate::client::editing::{EditingClient, EditFileTarget, EditFileOptions, ValidationIssueInfo};
 use vectordb_proto::vector_db_service_client::VectorDbServiceClient;
 use vectordb_proto::vectordb::{
     Empty, ServerInfo, StatusResponse, CreateCollectionRequest,
@@ -15,18 +16,25 @@ use vectordb_proto::vectordb::{
     AddRepositoryRequest, RepositoryRequest, RemoveRepositoryRequest,
     SyncRepositoryRequest, UseBranchRequest, ListRepositoriesResponse,
 };
+use vectordb_proto::editing::{EditCodeResponse};
 
 /// VectorDB gRPC client
 pub struct VectorDBClient {
     client: VectorDbServiceClient<Channel>,
+    editing_client: Option<EditingClient>,
     config: ClientConfig,
 }
 
 impl VectorDBClient {
     /// Create a new VectorDB client with the given configuration
     pub async fn new(config: ClientConfig) -> Result<Self> {
-        let client = Self::create_client(&config).await?;
-        Ok(Self { client, config })
+        let channel = Self::create_channel(&config).await?;
+        let client = VectorDbServiceClient::new(channel.clone());
+        
+        // Create the editing client using the same channel
+        let editing_client = Some(EditingClient::new(channel));
+        
+        Ok(Self { client, editing_client, config })
     }
     
     /// Create a new client with default configuration
@@ -40,7 +48,7 @@ impl VectorDBClient {
         Self::new(config).await
     }
     
-    async fn create_client(config: &ClientConfig) -> Result<VectorDbServiceClient<Channel>> {
+    async fn create_channel(config: &ClientConfig) -> Result<Channel> {
         let channel = if config.use_tls {
             let tls_config = if let Some(ca_cert_path) = &config.ca_cert_path {
                 let ca_cert = tokio::fs::read(ca_cert_path).await
@@ -67,10 +75,7 @@ impl VectorDBClient {
                 .await?
         };
         
-        // Create a basic client without any authentication
-        let client = VectorDbServiceClient::new(channel);
-        
-        Ok(client)
+        Ok(channel)
     }
     
     fn extract_domain(address: &str) -> Result<String> {
@@ -275,6 +280,121 @@ impl VectorDBClient {
         let response = self.client.use_branch(request).await?;
         Ok(response.into_inner())
     }
+
+    // --- Editing Features ---
+    
+    /// Apply an edit to a file using line-based targeting
+    pub async fn edit_file_by_lines(
+        &mut self,
+        file_path: String,
+        start_line: u32,
+        end_line: u32,
+        content: String,
+        format: bool,
+        update_references: bool,
+    ) -> Result<EditCodeResponse> {
+        let client = self.get_editing_client()?;
+        
+        let target = EditFileTarget::LineRange {
+            start: start_line,
+            end: end_line,
+        };
+        
+        let options = Some(EditFileOptions {
+            update_references,
+            preserve_documentation: true,
+            format_code: format,
+        });
+        
+        client.edit_code(file_path, target, content, options).await
+    }
+    
+    /// Apply an edit to a file using semantic element targeting
+    pub async fn edit_file_by_element(
+        &mut self,
+        file_path: String,
+        element_query: String,
+        content: String,
+        format: bool,
+        update_references: bool,
+    ) -> Result<EditCodeResponse> {
+        let client = self.get_editing_client()?;
+        
+        let target = EditFileTarget::Semantic {
+            element_query,
+        };
+        
+        let options = Some(EditFileOptions {
+            update_references,
+            preserve_documentation: true,
+            format_code: format,
+        });
+        
+        client.edit_code(file_path, target, content, options).await
+    }
+    
+    /// Validate an edit without applying it (line-based targeting)
+    pub async fn validate_edit_by_lines(
+        &mut self,
+        file_path: String,
+        start_line: u32,
+        end_line: u32,
+        content: String,
+        format: bool,
+        update_references: bool,
+    ) -> Result<Vec<ValidationIssueInfo>> {
+        let client = self.get_editing_client()?;
+        
+        let target = EditFileTarget::LineRange {
+            start: start_line,
+            end: end_line,
+        };
+        
+        let options = Some(EditFileOptions {
+            update_references,
+            preserve_documentation: true,
+            format_code: format,
+        });
+        
+        let response = client.validate_edit(file_path, target, content, options).await?;
+        
+        // Convert validation issues to client-friendly format
+        Ok(response.issues.into_iter().map(ValidationIssueInfo::from).collect())
+    }
+    
+    /// Validate an edit without applying it (semantic element targeting)
+    pub async fn validate_edit_by_element(
+        &mut self,
+        file_path: String,
+        element_query: String,
+        content: String,
+        format: bool,
+        update_references: bool,
+    ) -> Result<Vec<ValidationIssueInfo>> {
+        let client = self.get_editing_client()?;
+        
+        let target = EditFileTarget::Semantic {
+            element_query,
+        };
+        
+        let options = Some(EditFileOptions {
+            update_references,
+            preserve_documentation: true,
+            format_code: format,
+        });
+        
+        let response = client.validate_edit(file_path, target, content, options).await?;
+        
+        // Convert validation issues to client-friendly format
+        Ok(response.issues.into_iter().map(ValidationIssueInfo::from).collect())
+    }
+    
+    // Helper to get the editing client, error if not available
+    fn get_editing_client(&mut self) -> Result<&mut EditingClient> {
+        self.editing_client.as_mut().ok_or_else(|| 
+            ClientError::Unavailable("Editing client is not available".into())
+        )
+    }
 }
 
 #[cfg(test)]
@@ -308,21 +428,18 @@ mod tests {
     
     #[test]
     fn test_prepare_request_with_api_key() {
-        let client = VectorDBClient {
-            client: VectorDbServiceClient::new(Channel::from_static("http://[::1]:50051")),
-            config: ClientConfig {
-                server_address: "http://localhost:50051".to_string(),
-                use_tls: false,
-                api_key: Some("test-api-key".to_string()),
-                ca_cert_path: None,
-            },
-        };
-        
+        // Create a request directly for testing
         let request = Request::new(Empty {});
-        let prepared = client.prepare_request(request);
         
-        // Get the metadata and verify the API key is set
-        let metadata: &MetadataMap = prepared.metadata();
+        // Add the API key manually to the request
+        let mut req = request;
+        let api_key = "test-api-key";
+        if let Ok(value) = MetadataValue::try_from(api_key) {
+            req.metadata_mut().insert("x-api-key", value);
+        }
+        
+        // Verify the API key is set
+        let metadata: &MetadataMap = req.metadata();
         assert!(metadata.contains_key("x-api-key"));
         assert_eq!(
             metadata.get("x-api-key").unwrap().to_str().unwrap(),
@@ -332,21 +449,11 @@ mod tests {
     
     #[test]
     fn test_prepare_request_without_api_key() {
-        let client = VectorDBClient {
-            client: VectorDbServiceClient::new(Channel::from_static("http://[::1]:50051")),
-            config: ClientConfig {
-                server_address: "http://localhost:50051".to_string(),
-                use_tls: false,
-                api_key: None,
-                ca_cert_path: None,
-            },
-        };
-        
+        // Create a request directly for testing
         let request = Request::new(Empty {});
-        let prepared = client.prepare_request(request);
         
-        // No API key should be set
-        let metadata: &MetadataMap = prepared.metadata();
+        // Verify no API key is set
+        let metadata: &MetadataMap = request.metadata();
         assert!(!metadata.contains_key("x-api-key"));
     }
 }

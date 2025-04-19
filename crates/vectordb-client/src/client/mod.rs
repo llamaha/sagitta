@@ -2,4 +2,5 @@
 //!
 //! This module provides client functionality for connecting to the VectorDB server.
 
-pub mod grpc; 
+pub mod grpc;
+pub mod editing; 

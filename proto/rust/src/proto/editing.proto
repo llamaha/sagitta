@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package editing;
+
+// Service definition for code editing operations
+service EditingService {
+    // Applies a code edit to a specified file
+    rpc EditCode (EditCodeRequest) returns (EditCodeResponse);
+    
+    // Validates a potential code edit without applying it
+    rpc ValidateEdit (ValidateEditRequest) returns (ValidateEditResponse);
+}
+
+// --- Request/Response Messages ---
+
+// Shared structure for identifying the target of an edit
+message EditTarget {
+    oneof target_type {
+        LineRange line_range = 1;
+        SemanticElement semantic_element = 2;
+    }
+}
+
+message LineRange {
+    uint32 start_line = 1; // 1-based inclusive
+    uint32 end_line = 2;   // 1-based inclusive
+}
+
+message SemanticElement {
+    string element_query = 1; // e.g., "function:process_data", "class:User.method:auth"
+}
+
+// Shared structure for edit options
+message EditOptions {
+    bool update_references = 1;        // Attempt to update references to the edited element
+    bool preserve_documentation = 2; // Keep associated docstrings/comments (best effort)
+    bool format_code = 3;            // Apply formatting consistent with the file
+}
+
+// Request for EditCode RPC
+message EditCodeRequest {
+    string file_path = 1;         // Absolute or relative path to the file
+    EditTarget target = 2;        // How to identify the code to edit
+    string content = 3;           // The new code content
+    EditOptions options = 4;      // Options controlling the edit behavior
+}
+
+// Response for EditCode RPC
+message EditCodeResponse {
+    bool success = 1;             // True if the edit was applied successfully
+    optional string error_message = 2; // Details if the edit failed
+    repeated string affected_elements = 3; // List of elements potentially modified (e.g., updated references)
+}
+
+// Request for ValidateEdit RPC (mirrors EditCodeRequest)
+message ValidateEditRequest {
+    string file_path = 1;
+    EditTarget target = 2;
+    string content = 3;
+    EditOptions options = 4;
+}
+
+// Response for ValidateEdit RPC
+message ValidateEditResponse {
+    bool is_valid = 1;            // True if the edit passes validation checks
+    repeated ValidationIssue issues = 2; // List of potential issues found
+}
+
+// Represents a specific validation issue
+message ValidationIssue {
+    enum Severity {
+        INFO = 0;
+        WARNING = 1;
+        ERROR = 2;
+    }
+    Severity severity = 1;        // How critical the issue is
+    string message = 2;           // Description of the issue
+    optional uint32 line_number = 3; // Approximate line number related to the issue
+} 

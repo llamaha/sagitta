@@ -2,7 +2,8 @@
 //!
 //! Client library for interacting with the VectorDB semantic code search service.
 //! This crate provides a gRPC client for connecting to the VectorDB server and
-//! performing operations such as indexing code, searching, and repository management.
+//! performing operations such as indexing code, searching, repository management,
+//! and semantic code editing.
 //!
 //! ## Usage
 //!
@@ -29,6 +30,37 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ## Code Editing Features
+//!
+//! The client supports semantic code editing with both line-based and element-based targeting:
+//!
+//! ```rust,no_run
+//! use vectordb_client::VectorDBClient;
+//! use std::error::Error;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn Error>> {
+//!     let mut client = VectorDBClient::default().await?;
+//!     
+//!     // Edit a function by element name
+//!     let result = client.edit_file_by_element(
+//!         "src/main.rs".to_string(),
+//!         "function:process_data".to_string(),
+//!         "fn process_data(input: &str) -> String {\n    format!(\"processed: {}\", input)\n}".to_string(),
+//!         true,  // format code
+//!         false, // don't update references
+//!     ).await?;
+//!     
+//!     if result.success {
+//!         println!("Edit applied successfully");
+//!     } else {
+//!         println!("Edit failed: {}", result.error_message.unwrap_or_default());
+//!     }
+//!     
+//!     Ok(())
+//! }
+//! ```
 
 pub mod error;
 pub mod config;
@@ -46,4 +78,8 @@ pub use vectordb_proto::vectordb::{
     AddRepositoryRequest, RepositoryRequest, RemoveRepositoryRequest,
     SyncRepositoryRequest, UseBranchRequest, ListRepositoriesResponse,
     SearchResult,
-}; 
+};
+
+// Re-export editing types
+pub use client::editing::{EditFileTarget, EditFileOptions, ValidationSeverity, ValidationIssueInfo};
+pub use vectordb_proto::editing::{EditCodeResponse, ValidateEditResponse}; 
