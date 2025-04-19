@@ -7,12 +7,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell cargo to rebuild if the proto file changes
     println!("cargo:rerun-if-changed=src/proto/vectordb.proto");
     
-    // Configure tonic-build
+    // Configure tonic-build and chain calls
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
         .file_descriptor_set_path(out_dir.join("vectordb_descriptor.bin"))
-        .compile(&["src/proto/vectordb.proto"], &["src/proto"])?;
+        .compile_protos(&["src/proto/vectordb.proto"], &["src/proto"])?;
     
     Ok(())
 } 

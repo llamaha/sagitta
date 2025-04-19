@@ -7,10 +7,10 @@ description = "Protocol buffer definitions for vectordb-cli"
 license = "MIT"
 
 [dependencies]
-tonic = "0.10.2"
-prost = "0.12.3"
-prost-types = "0.12.3"
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
 
 [build-dependencies]
-tonic-build = "0.10.2"
-prost-build = "0.12.3" 
+tonic-build = "0.12"
+prost-build = "0.13"

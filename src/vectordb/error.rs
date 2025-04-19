@@ -2,6 +2,7 @@ use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 // use syn;
+#[cfg(feature = "ort")]
 use ort;
 // use serde::ser::Error as SerError;
 // use serde::de::Error as DeError;
@@ -117,19 +118,31 @@ pub enum VectorDBError {
     #[error("Feature not implemented: {0}")]
     NotImplemented(String),
 
-    /// Error for ONNX Runtime
-    #[error("ONNX Runtime error: {0}")]
-    OrtError(#[from] ort::Error),
+    #[cfg(feature = "ort")]
+    #[error("ONNX Runtime session error: {0}")]
+    OrtSession(#[from] ort::Error),
+
+    #[cfg(feature = "ort")]
+    #[error("ONNX Runtime initialization error: {0}")]
+    OrtInitialization(ort::Error),
+
+    /// New variant for when a feature is required but not enabled
+    #[error("Required feature not enabled: {0}")]
+    FeatureNotEnabled(String),
 }
 
-// Implement conversion from anyhow::Error
+// Custom conversion from anyhow::Error to VectorDBError
+// Tries to downcast to preserve the original VectorDBError type if possible.
 impl From<anyhow::Error> for VectorDBError {
     fn from(err: anyhow::Error) -> Self {
-        // This is a simplified conversion. In a real application, you might
-        // want to inspect the anyhow::Error further (e.g., using downcasting)
-        // to map it to more specific VectorDBError variants if possible.
-        // For now, mapping to HNSWError based on the existing test expectation.
-        VectorDBError::HNSWError(err.to_string())
+        // Attempt to downcast to the original VectorDBError
+        if let Some(specific_err) = err.downcast_ref::<VectorDBError>() {
+            specific_err.clone() // Clone the original error if downcast succeeds
+        } else {
+            // Fallback: If downcast fails, wrap the error message in Other
+            // This preserves the error context but loses the specific variant type.
+            VectorDBError::Other(format!("{:?}", err))
+        }
     }
 }
 
@@ -186,7 +199,11 @@ impl Clone for VectorDBError {
             Self::QdrantError(e) => Self::GeneralError(format!("Cannot clone QdrantError: {}", e)),
             Self::GitError(_) => Self::GeneralError("Cannot clone git2::Error".to_string()),
             Self::NotImplemented(s) => Self::NotImplemented(s.clone()),
-            Self::OrtError(_) => Self::GeneralError("Cannot clone ort::Error".to_string()),
+            #[cfg(feature = "ort")]
+            Self::OrtSession(e) => Self::Other(format!("OrtSession Error: {}", e)),
+            #[cfg(feature = "ort")]
+            Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error: {}", e)),
+            Self::FeatureNotEnabled(s) => Self::FeatureNotEnabled(s.clone()),
         }
     }
 }
@@ -429,10 +446,51 @@ mod tests {
     // Example test for From<anyhow::Error>
     #[test]
     fn test_from_anyhow_error() {
-        let anyhow_err = anyhow::anyhow!("Something failed in another library");
-        let vectordb_err = VectorDBError::from(anyhow_err);
-        // Check if it maps to HNSWError as defined in the From impl
-        assert!(matches!(vectordb_err, VectorDBError::HNSWError(_)));
-        assert!(vectordb_err.to_string().contains("HNSW index error: Something failed in another library"));
+        let original_err = VectorDBError::HNSWError("Test HNSW error".to_string());
+        let anyhow_err = anyhow::Error::new(original_err.clone()); // Clone the original error
+        let vectordb_err: VectorDBError = anyhow_err.into();
+        // Check if the downcasted error is the correct variant
+        assert!(
+            matches!(vectordb_err, VectorDBError::HNSWError(_)),
+            "Expected HNSWError, got {:?}", // Add debug print on failure
+            vectordb_err
+        );
+        // Optionally, check if the content is preserved
+        if let VectorDBError::HNSWError(msg) = vectordb_err {
+            assert_eq!(msg, "Test HNSW error");
+        }
+    }
+
+    #[derive(Error, Debug, Clone)]
+    #[error("Mock specific error: {0}")]
+    struct MockError(String);
+
+    impl PartialEq for MockError {
+        fn eq(&self, other: &Self) -> bool {
+            self.0 == other.0
+        }
+    }
+
+    #[test]
+    fn test_from_anyhow_error_other() {
+        let original_err = VectorDBError::HNSWError("Test HNSW error".to_string());
+        let anyhow_err = anyhow::Error::new(original_err.clone());
+        let vectordb_err: VectorDBError = anyhow_err.into();
+        
+        // Assert that the downcasted error is the correct variant
+        assert!(
+            matches!(vectordb_err, VectorDBError::HNSWError(_)), 
+            "Expected HNSWError, got {:?}", 
+            vectordb_err
+        );
+        
+        // Additionally, check if the content matches
+        if let VectorDBError::HNSWError(msg) = vectordb_err {
+            assert_eq!(msg, "Test HNSW error");
+        } else {
+            // This branch shouldn't be reached if the matches! assertion passed,
+            // but it's good practice for completeness or if matches! is removed.
+            panic!("Error variant was not HNSWError after checking with matches!");
+        }
     }
 }

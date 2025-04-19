@@ -83,12 +83,8 @@ where
         .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
     
     let embedding_handler = Arc::new(
-        EmbeddingHandler::new(
-            crate::vectordb::embedding::EmbeddingModelType::Onnx,
-            Some(onnx_model_path_str.into()),
-            Some(onnx_tokenizer_dir_str.into()),
-        )
-        .context("Failed to initialize embedding handler for query")?,
+        EmbeddingHandler::new(config)
+            .context("Failed to initialize embedding handler")?,
     );
     let embedding_dim = embedding_handler.dimension()?;
     

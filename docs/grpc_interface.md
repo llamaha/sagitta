@@ -4,6 +4,10 @@ VectorDB provides a gRPC API that allows you to interact with the service from a
 
 ## gRPC Service Definition
 
+VectorDB offers two main services:
+- `VectorDBService` - provides methods for managing collections, indexing files, and performing searches
+- `EditingService` - provides methods for precise code editing with semantic understanding
+
 The VectorDB service is defined in the `vectordb.proto` file. The main service is `VectorDBService`, which provides methods for managing collections, indexing files, and performing searches.
 
 ## Using grpcurl
@@ -115,6 +119,65 @@ List repositories:
 
 ```bash
 grpcurl -plaintext localhost:50051 vectordb.VectorDBService/ListRepositories
+```
+
+### Code Editing
+
+The EditingService provides two key methods for code editing:
+
+Validate an edit without applying it:
+
+```bash
+grpcurl -plaintext -d '{
+  "file_path": "/path/to/file.py",
+  "target": {
+    "semantic_element": {
+      "element_query": "class:MyClass"
+    }
+  },
+  "content": "class MyClass:\n    def __init__(self):\n        pass\n\n    def new_method(self):\n        return True",
+  "options": {
+    "format_code": false,
+    "update_references": false
+  }
+}' localhost:50051 editing.EditingService/ValidateEdit
+```
+
+Apply a validated edit:
+
+```bash
+grpcurl -plaintext -d '{
+  "file_path": "/path/to/file.py",
+  "target": {
+    "semantic_element": {
+      "element_query": "class:MyClass"
+    }
+  },
+  "content": "class MyClass:\n    def __init__(self):\n        pass\n\n    def new_method(self):\n        return True",
+  "options": {
+    "format_code": false,
+    "update_references": false
+  }
+}' localhost:50051 editing.EditingService/EditCode
+```
+
+You can also use line-based targeting by changing the target field:
+
+```bash
+grpcurl -plaintext -d '{
+  "file_path": "/path/to/file.py",
+  "target": {
+    "line_range": {
+      "start_line": 10,
+      "end_line": 15
+    }
+  },
+  "content": "    def new_method(self):\n        return True",
+  "options": {
+    "format_code": false,
+    "update_references": false
+  }
+}' localhost:50051 editing.EditingService/EditCode
 ```
 
 ## Client Libraries

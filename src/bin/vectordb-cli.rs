@@ -5,14 +5,12 @@ use clap::Parser;
 use std::sync::Arc;
 use std::process::exit;
 use tracing_subscriber::fmt;
-use std::time::Instant;
 
 // Import library modules
 use vectordb_lib::{
     config::{self},
     cli::commands::handle_command,
     cli::commands::CliArgs,
-    cli::repo_commands::handle_repo_command,
 };
 use qdrant_client::Qdrant;
 

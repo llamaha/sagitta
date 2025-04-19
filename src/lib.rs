@@ -11,6 +11,7 @@
 //! *   **CLI**: Command-line interface for local operations and server management
 //! *   **Server**: gRPC server implementation for remote access
 //! *   **Config**: Configuration management for the application
+//! *   **Edit**: Semantic code editing with validation
 //!
 //! ## Internal Components (not part of public API)
 //!
@@ -28,20 +29,33 @@
 //!
 //! Clients can then connect to the gRPC API to perform operations.
 //! Use the `vectordb-client` crate for a full-featured Rust client.
+//! 
+//! ## Edit Feature
+//! 
+//! The library provides powerful code editing capabilities:
+//! 
+//! ```bash
+//! # Example: Replace a class with semantic targeting
+//! vectordb-cli edit apply --file src/my_app.py --element "class:Calculator" --content-file new_calculator.py
+//! 
+//! # Example: Validate before applying an edit
+//! vectordb-cli edit validate --file src/my_app.py --element "function:process_data" --content-file new_function.py
+//! ```
+//! 
+//! For library usage, see the [`edit`](edit) module documentation.
 
 // Public modules that can be used when importing the crate
+pub mod cli;
+// pub mod client; // Removed - likely refers to workspace crate
 pub mod config;
+pub mod edit;
+pub mod git;
+pub mod grpc_generated;
+#[cfg(feature = "server")]
+pub mod server;
 pub mod syntax;
 pub mod utils;
 pub mod vectordb;
-
-// Making cli and git public to allow tests to access them
-pub mod cli;
-pub mod git;
-
-// Only include server module when the "server" feature is enabled
-#[cfg(feature = "server")]
-pub mod server;
 
 // Re-export minimal set of items for CLI usage
 pub use config::{AppConfig, load_config};
