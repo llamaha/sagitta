@@ -40,6 +40,10 @@ pub struct RepoQueryArgs {
     /// Optional: Filter by specific code element type (e.g., "function", "struct", "impl").
     #[arg(long = "type")]
     pub element_type: Option<String>,
+
+    /// Output results in JSON format.
+    #[arg(long)]
+    pub json: bool,
 }
 
 pub async fn handle_repo_query<C>(
@@ -116,7 +120,7 @@ where
         .context("Failed to perform search query in Qdrant")?;
 
     // Format and print results
-    print_search_results(&search_response.result, args.query.as_str())?;
+    print_search_results(&search_response.result, args.query.as_str(), args.json)?;
 
     Ok(())
 } 

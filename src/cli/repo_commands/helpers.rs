@@ -46,9 +46,6 @@ pub(crate) fn create_fetch_options<'a>(
         .cloned();
         
     // Check if running in server mode (no interactive prompts allowed)
-    #[cfg(feature = "server")]
-    let is_server_mode = true;
-    #[cfg(not(feature = "server"))]
     let is_server_mode = false;
     
     // Is this an SSH URL? (starts with git@ or ssh://)

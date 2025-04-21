@@ -52,7 +52,7 @@ mod tests {
         config.active_repository = Some("test-repo-1".to_string());
         
         // Access list_repositories directly now that it's public
-        let result = list_repositories(&config);
+        let result = list_repositories(&config, false);
         assert!(result.is_ok());
         Ok(())
     }
@@ -62,7 +62,7 @@ mod tests {
         let config = create_test_config();
         // No active repository set
         
-        let result = list_repositories(&config);
+        let result = list_repositories(&config, false);
         assert!(result.is_ok());
         Ok(())
     }
@@ -72,7 +72,7 @@ mod tests {
         let config = AppConfig::default();
         // No repositories in the config
         
-        let result = list_repositories(&config);
+        let result = list_repositories(&config, false);
         assert!(result.is_ok());
         Ok(())
     }

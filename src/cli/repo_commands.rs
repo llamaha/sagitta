@@ -30,13 +30,20 @@ pub struct RepoArgs {
     pub command: RepoCommand,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct ListArgs {
+    /// Output the list of repositories in JSON format.
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[derive(Subcommand, Debug)]
 #[derive(Clone)]
 pub enum RepoCommand {
     /// Add a new repository to manage.
     Add(add::AddRepoArgs),
     /// List managed repositories.
-    List,
+    List(ListArgs),
     /// Set the active repository for commands.
     Use(r#use::UseRepoArgs),
     /// Remove a managed repository (config and index).
@@ -67,7 +74,7 @@ where
 {
     match args.command {
         RepoCommand::Add(add_args) => add::handle_repo_add(add_args, config, Arc::clone(&client), override_path).await?,
-        RepoCommand::List => list::list_repositories(config)?,
+        RepoCommand::List(list_args) => list::list_repositories(config, list_args.json)?,
         RepoCommand::Use(use_args) => r#use::use_repository(use_args, config, override_path)?,
         RepoCommand::Remove(remove_args) => remove::handle_repo_remove(remove_args, config, Arc::clone(&client), override_path).await?,
         RepoCommand::Clear(clear_args) => clear::handle_repo_clear(clear_args, config, client, override_path).await?,
@@ -83,7 +90,7 @@ where
 // Helper function for tests - allows access to the list_repositories function
 #[cfg(test)]
 pub fn handle_repo_command_test(config: &AppConfig) -> Result<()> {
-    list::list_repositories(config)
+    list::list_repositories(config, false)
 }
 
 #[cfg(test)]
@@ -398,26 +405,31 @@ mod tests {
            });
        }
 
-    // Keep repo list test as is, it doesn't save config
+    // Test for handling the List command
     #[test]
     fn test_handle_repo_list() {
-        // Setup config
-        let mut config = create_test_config_data();
-        config.active_repository = Some("repo1".to_string());
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Mock or real client
+            let mut config = create_test_config_data();
+            config.active_repository = Some("repo1".to_string());
 
-        // Call list_repositories directly or via handle_repo_command
-        // Since list doesn't modify/save, override_path isn't strictly needed, but let's pass None for consistency
-        let list_args = RepoArgs { command: RepoCommand::List };
-        let dummy_cli_args = create_dummy_cli_args(RepoCommand::List);
-        let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap()); // Dummy client needed for handle_repo_command signature
+            // Define ListArgs
+            let list_args = ListArgs { json: false }; 
 
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(async {
-             handle_repo_command(list_args, &dummy_cli_args, &mut config, client, None).await // Pass None
+            // Create dummy CliArgs with the correct RepoCommand structure
+            let dummy_cli_args = create_dummy_cli_args(RepoCommand::List(list_args.clone())); 
+
+            // Create RepoArgs containing the List command with ListArgs
+            let repo_args = RepoArgs { command: RepoCommand::List(list_args) };
+            
+            // Execute handle_repo_command
+            let result = handle_repo_command(repo_args, &dummy_cli_args, &mut config, client, None).await;
+            
+            // Assertions (basic check that it runs)
+            assert!(result.is_ok(), "handle_repo_command failed for List: {:?}", result.err());
+            // Add more specific assertions based on expected output capture if needed
         });
-
-        // List command prints to stdout, so we'd typically capture stdout to assert output
-        // For now, just assert it runs without error
-        assert!(result.is_ok());
     }
 
     // TODO: Add tests for sync_repository, especially for the extension filter.

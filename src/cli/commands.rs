@@ -68,6 +68,7 @@ impl Default for CliArgs {
                     limit: 10,
                     lang: None,
                     element_type: None,
+                    json: false,
                 }),
             }),
             onnx_model_path_arg: None,
@@ -126,10 +127,6 @@ pub enum Commands {
     /// Manage the simple, non-repository index (index, query, clear)
     #[command(subcommand_negates_reqs = true)]
     Simple(super::simple::SimpleArgs), // Add Simple command group
-    /// Start the VectorDB server with gRPC API
-    #[command(subcommand_negates_reqs = true)]
-    #[cfg(feature = "server")]
-    Server(super::server::ServerArgs), // Add Server command
     /// Edit code using semantic understanding
     #[command(subcommand_negates_reqs = true)]
     Edit(crate::edit::cli::EditArgs),
@@ -150,8 +147,6 @@ pub async fn handle_command(
     match args.command {
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client, None).await,
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
-        #[cfg(feature = "server")]
-        Commands::Server(ref cmd_args) => super::server::handle_server_command(cmd_args.clone(), &args, config.clone(), client).await,
         Commands::Edit(ref cmd_args) => crate::edit::cli::handle_edit_command(cmd_args.clone(), &args, config.clone(), client).await,
     }
 }

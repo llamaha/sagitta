@@ -40,7 +40,10 @@ mod tests {
         rt.block_on(async {
             let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
             let config = create_test_config();
-            let args = StatsArgs { config_file: None };
+            let args = StatsArgs { 
+                config_file: None, 
+                json: false 
+            };
             
             // This is mainly testing that the function either succeeds or fails with an expected error
             let result = handle_stats(args, config.clone(), client).await;
@@ -71,7 +74,10 @@ mod tests {
             let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
             let mut config = create_test_config();
             config.active_repository = None; // No active repository
-            let args = StatsArgs { config_file: None };
+            let args = StatsArgs {
+                config_file: None,
+                json: false,
+            };
             
             let result = handle_stats(args, config, client).await;
             assert!(result.is_err());
