@@ -7,9 +7,6 @@
 pub mod engine; // Module for the core editing logic
 pub mod cli;    // Placeholder for CLI command implementation (later)
 
-#[cfg(feature = "server")]
-pub mod grpc;
-
 // Re-export CLI args and handler
 pub use cli::{EditArgs, ApplyArgs, ValidateArgs, handle_edit_command};
 

@@ -66,6 +66,7 @@ impl Default for SimpleCommand {
             limit: 10,
             lang: None,
             element_type: None,
+            json: false,
         })
     }
 }
@@ -99,6 +100,10 @@ pub struct SimpleQueryArgs {
     /// Optional: Filter by specific code element type (e.g., "function", "struct", "impl").
     #[arg(long = "type")]
     pub element_type: Option<String>,
+    
+    /// Output results in JSON format.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug, Clone)] 
@@ -432,7 +437,7 @@ async fn handle_simple_query(
 
     log::info!("Search returned {} results from collection {}", search_response.result.len(), collection_name);
     
-    crate::cli::formatters::print_search_results(&search_response.result, &args.query)?;
+    crate::cli::formatters::print_search_results(&search_response.result, &args.query, args.json)?;
 
     Ok(())
 }

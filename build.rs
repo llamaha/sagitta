@@ -46,45 +46,7 @@ fn find_onnx_runtime_lib_dir() -> Option<PathBuf> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=proto/editing.proto"); // Add rerun trigger for proto
-
-    // Conditionally compile based on features
-    let server_enabled = cfg!(feature = "server");
-
-    // --- Compile gRPC services --- 
-    if server_enabled {
-        println!("cargo:warning=vectordb-cli@1.5.0: build.rs: Compiling gRPC services (server feature enabled)...");
-        
-        let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
-        let editing_descriptor_path = out_dir.join("editing_descriptor.bin");
-        
-        tonic_build::configure()
-            .build_server(true)
-            .build_client(false)
-            .file_descriptor_set_path(&editing_descriptor_path) // Generate descriptor set
-            .compile_protos(&["proto/editing.proto"], &["proto"])
-            .map_err(|e| format!("Failed to compile gRPC services for server: {}", e))?;
-            
-        // Generate a Rust module that includes the descriptor as a constant
-        let descriptor_mod = format!(
-            r#"
-            /// Generated file descriptor set for editing service
-            pub const EDITING_FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("{}");
-            "#,
-            editing_descriptor_path.display().to_string().replace('\\', "\\\\")
-        );
-        
-        let descriptor_mod_path = out_dir.join("editing_descriptor.rs");
-        fs::write(&descriptor_mod_path, descriptor_mod)
-            .map_err(|e| format!("Failed to write descriptor module: {}", e))?;
-            
-        println!("cargo:warning=vectordb-cli@1.5.0: build.rs: Generated editing descriptor at {}", editing_descriptor_path.display());
-        println!("cargo:warning=vectordb-cli@1.5.0: build.rs: Finished compiling gRPC services.");
-    } else {
-        // No need to create dummy files if server feature is off, 
-        // as the include! macro in src/grpc_generated/mod.rs is cfg-gated.
-        println!("cargo:warning=build.rs: Skipping gRPC service compilation (server feature not enabled).");
-    }
+    // println!("cargo:rerun-if-changed=proto/editing.proto"); // Remove rerun trigger for proto
 
     // --- Rpath and Library Copy Logic for Linux/macOS ---
     if cfg!(target_os = "linux") || cfg!(target_os = "macos") {

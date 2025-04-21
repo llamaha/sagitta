@@ -36,7 +36,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
         -   [`repo query`](#repo-query)
         -   [`repo stats`](#repo-stats)
         -   [`repo config`](#repo-config)
--   [Server Mode](#server-mode)
+-   [Development](#development)
 
 ## Features
 
@@ -51,7 +51,7 @@ A lightweight command-line tool for fast, local code search using semantic retri
     - **Semantic element targeting** - Edit entire classes, functions, or methods using semantic identifiers
     - **Line-based precision edits** - Make targeted changes to specific sections of code
     - **Validation-first workflow** - Validate edits before applying them to ensure safety
-    - **Both CLI and gRPC interfaces** - Use from the command line or programmatically
+    - **CLI interface** - Use from the command line
 
 ## Use Cases
 
@@ -63,8 +63,6 @@ A lightweight command-line tool for fast, local code search using semantic retri
     - Replace entire classes or functions using semantic targeting
     - Add methods to existing classes with line-based targeting
     - Validate edits before applying for safety and reliability
-    - Build automated refactoring workflows using the gRPC API
--   **Building AI Coding Tools:** Integrate with the VectorDB server using the `vectordb-client` crate to build your own AI-powered development tools, agents, or custom workflows.
 -   **Documentation Search:** Index and search through Markdown documentation alongside code (Note: Current Markdown parsing is basic but will be improved).
 -   **Refactoring & Auditing:** Identify code locations potentially affected by refactoring or search for specific patterns related to security or best practices.
 
@@ -185,16 +183,6 @@ For specific environment configurations (GPU acceleration), refer to the guides 
     *   **With Metal GPU Support (macOS):** (See [docs/MACOS_GPU_SETUP.md](./docs/MACOS_GPU_SETUP.md))
         ```bash
         cargo build --release --features ort/coreml # Or ort/metal if preferred/available
-        ```
-    *   **With Server Support:** To build with gRPC server functionality:
-        ```bash
-        cargo build --release --features server
-        ```
-    *   **With Server and GPU Support:** To combine server functionality with GPU acceleration:
-        ```bash
-        cargo build --release --features ort/cuda,server # Linux with NVIDIA GPU
-        # OR
-        cargo build --release --features ort/coreml,server # macOS with Metal GPU
         ```
 
     **For a complete reference of all build options and feature flags, see [Compilation Options](./docs/compile_options.md).**
@@ -468,42 +456,9 @@ Displays statistics (like point count) about the Qdrant collection for the *acti
 vectordb-cli repo stats
 ```
 
-## Library integration via gRPC
-
-To integrate semantic code search functionality into your own applications, use the `vectordb-client` crate to connect to VectorDB in server mode.
-
-```rust
-use vectordb_client::VectorDBClient;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Connect to the server
-    let client = VectorDBClient::default().await?;
-    
-    // Perform a semantic search
-    let results = client.query(
-        "implementing authentication middleware", 
-        10,  // limit 
-        None, // language filter (optional)
-        None, // element type filter (optional)
-    ).await?;
-    
-    // Process the results
-    for result in results.results {
-        println!("{}:{} (Score: {})", result.file_path, result.line_number, result.score);
-        println!("{}", result.content);
-        println!("---");
-    }
-    
-    Ok(())
-}
-```
-
-For detailed information on client usage, see the [Server Mode Documentation](./docs/server_usage.md).
-
 ## Development
 
-The project has 42% unit test coverage and thorough end-to-end testing for key features.
+The project has unit test coverage and end-to-end testing for key features.
 
 ```bash
 # Run tests without server features (faster, fewer dependencies)
@@ -531,53 +486,3 @@ Certain tests are conditionally compiled based on feature flags to allow for fas
 ## License
 
 MIT License
-
-## Server Mode
-
-VectorDB-CLI can be run as a gRPC server, allowing you to integrate semantic code search into your own applications.
-
-**Note**: Server functionality requires compiling with the `server` feature flag: `cargo build --release --features server`. See the [Build](#installation) section for details.
-
-```bash
-# Start the server with default settings (localhost:50051)
-vectordb-cli server start
-
-# Or with custom host and port
-vectordb-cli server start --host 0.0.0.0 --port 8080
-
-# With authentication
-vectordb-cli server start --api-key your_secret_key
-
-# With TLS
-vectordb-cli server start --tls --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
-```
-
-For detailed information on server configuration, API usage, and client examples, see the [Server Mode Documentation](./docs/server_usage.md).
-
-### gRPC API
-
-The server exposes a gRPC API that can be used by clients in any language. The API is defined in the `proto/vectordb.proto` file.
-
-Client libraries:
-- **Rust**: Use the [`vectordb-client`](./crates/vectordb-client) crate for easy integration
-- **Other Languages**: Generate client code from the `.proto` files, see the [gRPC Interface Documentation](./docs/grpc_interface.md)
-
-## Usage Examples
-
-### Code Editing
-
-The edit feature allows you to make precise changes to your code with built-in validation:
-
-```bash
-# Example: Replace a class with semantic targeting
-vectordb-cli edit apply --file src/my_app.py --element "class:Calculator" --content-file new_calculator.py
-
-# Example: Add a method to a class with line-based targeting
-vectordb-cli edit apply --file src/my_app.py --line-start 25 --line-end 25 \
-  --content "    def multiply(self, x):\n        self.value *= x\n        return self.value"
-
-# Example: Validate before applying an edit
-vectordb-cli edit validate --file src/my_app.py --element "function:process_data" --content-file new_function.py
-```
-
-For more details and best practices, see the [edit feature documentation](docs/edit_feature.md).

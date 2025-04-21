@@ -58,7 +58,7 @@ mod tests {
         ];
 
         // This test primarily verifies the function doesn't panic
-        let result = print_search_results(&points, "test query");
+        let result = print_search_results(&points, "test query", false);
         assert!(result.is_ok());
     }
 
@@ -66,7 +66,7 @@ mod tests {
     fn test_print_search_results_empty() {
         let empty_points: Vec<ScoredPoint> = vec![];
         
-        let result = print_search_results(&empty_points, "empty query");
+        let result = print_search_results(&empty_points, "empty query", false);
         assert!(result.is_ok());
     }
 
@@ -88,7 +88,7 @@ mod tests {
         let points = vec![point];
         
         // Should still work with missing fields
-        let result = print_search_results(&points, "missing fields query");
+        let result = print_search_results(&points, "missing fields query", false);
         assert!(result.is_ok());
     }
 } 

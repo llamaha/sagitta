@@ -50,9 +50,6 @@ pub mod cli;
 pub mod config;
 pub mod edit;
 pub mod git;
-pub mod grpc_generated;
-#[cfg(feature = "server")]
-pub mod server;
 pub mod syntax;
 pub mod utils;
 pub mod vectordb;
