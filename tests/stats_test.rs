@@ -1,4 +1,4 @@
-use vectordb_lib::config::{AppConfig, RepositoryConfig};
+use vectordb_core::config::{AppConfig, RepositoryConfig};
 use vectordb_lib::cli::stats::{StatsArgs, handle_stats};
 use qdrant_client::Qdrant;
 use std::path::PathBuf;
@@ -26,6 +26,7 @@ mod tests {
             ssh_key_path: None,
             ssh_key_passphrase: None,
             last_synced_commits: HashMap::new(),
+            added_as_local_path: false,
         };
         
         config.repositories.push(repo);
@@ -74,6 +75,24 @@ mod tests {
             let client = Arc::new(Qdrant::from_url("http://localhost:6334").build().unwrap());
             let mut config = create_test_config();
             config.active_repository = None; // No active repository
+
+            // Add a second repository to trigger the specific error
+            let repo2 = RepositoryConfig {
+                name: "test-repo-2".to_string(),
+                url: "https://github.com/test/repo2.git".to_string(),
+                local_path: PathBuf::from("/tmp/test-repo-2"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                indexed_languages: None,
+                active_branch: None,
+                remote_name: None,
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                last_synced_commits: HashMap::new(),
+                added_as_local_path: false,
+            };
+            config.repositories.push(repo2);
+
             let args = StatsArgs {
                 config_file: None,
                 json: false,

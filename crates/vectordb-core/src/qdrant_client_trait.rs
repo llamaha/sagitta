@@ -8,7 +8,7 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
-use crate::vectordb::error::{VectorDBError, Result};
+use crate::error::{VectorDBError, Result}; // Use crate::error
 
 // Use mockall::automock for automatic mock generation in tests
 #[cfg_attr(test, mockall::automock)]

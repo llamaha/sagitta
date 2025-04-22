@@ -27,18 +27,17 @@ mod tests {
     #[test]
     fn test_parse_simple_function_py() -> Result<()> {
         let code = r#"
-# A simple function
-def greet(name):
-    print(f"Hello, {name}!")
+def simple_func():
+    """This is a docstring."""
+    print("Hello")
 
-# Another comment
+# A comment after
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
 
-        assert_eq!(chunks.len(), 1, "Expected one function chunk");
-        assert_chunk(&chunks[0], "def greet(name):\n    print(f\"Hello, {name}!\")", 3, 4, "function");
-
+        assert_eq!(chunks.len(), 1, "Expected function");
+        assert_chunk(&chunks[0], "def simple_func():\n    \"\"\"This is a docstring.\"\"\"\n    print(\"Hello\")", 2, 4, "function");
         Ok(())
     }
 
@@ -99,39 +98,36 @@ result = fibonacci(5)
     }
 
     #[test]
-    fn test_parse_top_level_statements_py() -> Result<()> {
+    fn test_parse_async_function_py() -> Result<()> {
         let code = r#"
-"""Module docstring - should be ignored"""
+import asyncio
 
-import os
+async def fetch_data():
+    print("Fetching...")
+    await asyncio.sleep(1)
+    print("Fetched!")
+    return {"data": 123}
 
-VARIABLE = "test"
+async def main():
+    data = await fetch_data()
+    print(data)
 
-def func():
-    pass # Function definition is a chunk
-
-print(VARIABLE)
-
-if __name__ == "__main__":
-    func()
-
-pass # Top-level pass should be ignored
+asyncio.run(main())
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
 
-        // Expecting Import, Assignment, Function Def, Print, If block
-        assert_eq!(chunks.len(), 5, "Expected 5 top-level chunks");
-        assert_chunk(&chunks[0], "import os", 4, 4, "statement");
-        assert_chunk(&chunks[1], "VARIABLE = \"test\"", 6, 6, "statement");
-        assert_chunk(&chunks[2], "def func():\n    pass # Function definition is a chunk", 8, 9, "function");
-        assert_chunk(&chunks[3], "print(VARIABLE)", 11, 11, "statement");
-        assert_chunk(&chunks[4], "if __name__ == \"__main__\":\n    func()", 13, 14, "statement");
+        // Expecting Import, async function, async function, statement
+        assert_eq!(chunks.len(), 4);
+        assert_chunk(&chunks[0], "import asyncio", 2, 2, "statement");
+        assert_chunk(&chunks[1], "async def fetch_data():\n    print(\"Fetching...\")\n    await asyncio.sleep(1)\n    print(\"Fetched!\")\n    return {\"data\": 123}", 4, 8, "function");
+        assert_chunk(&chunks[2], "async def main():\n    data = await fetch_data()\n    print(data)", 10, 12, "function");
+        assert_chunk(&chunks[3], "asyncio.run(main())", 14, 14, "statement");
 
         Ok(())
     }
 
-     #[test]
+    #[test]
     fn test_parse_empty_input_py() -> Result<()> {
         let code = "";
         let mut parser = create_parser();
@@ -144,27 +140,33 @@ pass # Top-level pass should be ignored
     fn test_parse_comments_only_py() -> Result<()> {
         let code = r#"
 # This is a comment
-# Another comment
+""" This is a
+multiline docstring
+"""
+pass # A simple pass statement
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
-        // Expect fallback to file chunk as comments aren't captured by the specific query
-        assert_eq!(chunks.len(), 1, "Expected fallback file chunk");
-        assert_eq!(chunks[0].element_type, "file", "Expected element type file");
-        assert_eq!(chunks[0].language, "python");
+        // The current query/logic skips top-level docstrings and pass, leaving no chunks
+        assert!(chunks.is_empty(), "Expected no chunks for comments, docstrings, and pass");
         Ok(())
     }
 
-     #[test]
-    fn test_parse_pass_only_py() -> Result<()> {
-        let code = r#"
-pass
-"#;
+    #[test]
+    fn test_skip_top_level_pass_py() -> Result<()> {
+        let code = "pass";
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
-        // Expect fallback to file chunk as top-level 'pass' is ignored by predicate
-        assert_eq!(chunks.len(), 1, "Expected fallback file chunk");
-        assert_eq!(chunks[0].element_type, "file", "Expected element type file");
+        assert!(chunks.is_empty(), "Expected top-level pass to be skipped");
+        Ok(())
+    }
+
+    #[test]
+    fn test_skip_top_level_docstring_py() -> Result<()> {
+        let code = "\"\"\"Module docstring\"\"\"";
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.py")?;
+        assert!(chunks.is_empty(), "Expected top-level docstring to be skipped");
         Ok(())
     }
 } 

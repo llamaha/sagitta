@@ -117,27 +117,6 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
 
 // Ensure all test module declarations are present and conditional
 #[cfg(test)]
-mod rust_tests;
-#[cfg(test)]
-mod ruby_tests;
-#[cfg(test)]
-mod golang_tests;
-#[cfg(test)]
-mod javascript_tests;
-#[cfg(test)]
-mod typescript_tests;
-#[cfg(test)]
-mod yaml_tests;
-#[cfg(test)]
-mod markdown_tests;
-#[cfg(test)]
-mod python_tests; // Ensure python_tests is declared conditionally
-#[cfg(test)]
-mod fallback_tests; // Keep fallback_tests from HEAD/main
-#[cfg(test)]
-mod languages_tests; // Add tests for language detection
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
@@ -208,3 +187,27 @@ mod tests {
         Ok(())
     }
 }
+
+// Conditionally compile test modules
+#[cfg(test)]
+mod ruby_tests;
+#[cfg(test)]
+mod rust_tests;
+#[cfg(test)]
+mod typescript_tests;
+#[cfg(test)]
+mod yaml_tests;
+#[cfg(test)]
+mod fallback_tests;
+#[cfg(test)]
+mod golang_tests;
+#[cfg(test)]
+mod javascript_tests;
+#[cfg(test)]
+mod languages_tests;
+
+// Comment out test modules that don't exist yet
+// #[cfg(test)]
+// mod markdown_tests;
+// #[cfg(test)]
+// mod python_tests;

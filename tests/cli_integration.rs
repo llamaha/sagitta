@@ -11,8 +11,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use git2::{Repository, Signature, Commit, Oid};
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{CountPointsBuilder, Filter, Condition};
-use vectordb_lib::config::AppConfig;
+use vectordb_core::config::AppConfig;
 use vectordb_lib::cli::commands::{FIELD_FILE_PATH, FIELD_BRANCH, FIELD_COMMIT_HASH};
+use std::sync::Arc;
 
 // Helper function to get the path to the compiled binary
 fn get_binary_path() -> Result<PathBuf> {
@@ -188,9 +189,21 @@ fn test_cli_clear_failures() -> Result<()> {
 
     // === Test `repo clear` failures ===
 
+    // Need ONNX paths for config initialization, even if command fails later
+    println!("Checking for ONNX files for setup...");
+    let onnx_paths_opt = get_default_onnx_paths();
+    if onnx_paths_opt.is_none() {
+        println!("Skipping test_cli_clear_failures: Default ONNX files not found.");
+        return Ok(());
+    }
+    let (model_path, tokenizer_path) = onnx_paths_opt.unwrap();
+    let tokenizer_dir = tokenizer_path.parent().ok_or(anyhow::anyhow!("Tokenizer path has no parent"))?;
+
     // 1. Fail when no repo specified and no active repo is set
     println!("Testing repo clear without active repo/specifier...");
     Command::new(&bin_path)
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap()) // Ensure ONNX paths are set
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
         .arg("repo")
         .arg("clear")
         .arg("-y")
@@ -269,42 +282,78 @@ fn test_cli_clear_failures() -> Result<()> {
 }
 
 #[test]
-fn test_index_rejects_local_onnx_args() -> Result<()> {
-    let temp_dir = TempDir::new()?;
+fn test_index_rejects_conflicting_onnx_args() -> Result<()> {
     let bin_path = get_binary_path()?;
+    let temp_dir = TempDir::new()?;
     let config_dir = temp_dir.path().join("config");
     let data_dir = temp_dir.path().join("data");
     std::env::set_var("XDG_CONFIG_HOME", config_dir.to_str().unwrap());
     std::env::set_var("XDG_DATA_HOME", data_dir.to_str().unwrap());
+    let _ = fs::remove_dir_all(config_dir.join("vectordb-cli")); // Ensure no prior config
 
-    // Setup dummy ONNX files
+    println!("Testing simple index rejection with conflicting ONNX paths (env + arg)...");
+
+    // Create dummy ONNX files and target dir
     let dummy_model_path = temp_dir.path().join("dummy.onnx");
-    fs::write(&dummy_model_path, "dummy_model_data")?;
     let dummy_tokenizer_dir = temp_dir.path().join("dummy_tokenizer");
     fs::create_dir_all(&dummy_tokenizer_dir)?;
-    fs::write(dummy_tokenizer_dir.join("tokenizer.json"), "{}")?;
-    let _dummy_model_path_str = dummy_model_path.to_string_lossy();
-    let _dummy_tokenizer_dir_str = dummy_tokenizer_dir.to_string_lossy();
+    fs::write(&dummy_model_path, "dummy_onnx_content")?;
+    fs::write(dummy_tokenizer_dir.join("tokenizer.json"), "dummy_tokenizer_content")?;
+    let target_dir = temp_dir.path().join("target_dir");
+    fs::create_dir_all(&target_dir)?;
+    fs::write(target_dir.join("file.txt"), "content")?;
 
-    let dummy_target_dir = temp_dir.path().join("target_dir");
-    fs::create_dir(&dummy_target_dir)?;
-    fs::write(dummy_target_dir.join("file.txt"), "data")?;
-
-    // Test rejection when both arg and env var are provided (using tokenizer path for test)
-    println!("Testing simple index rejection with arg + env...");
-    let mut cmd = Command::new(&bin_path);
-    cmd.env("VECTORDB_ONNX_MODEL", dummy_model_path.as_os_str());
-    cmd.env("VECTORDB_ONNX_TOKENIZER_DIR", dummy_tokenizer_dir.as_os_str());
-    cmd.arg("simple");
-    cmd.arg("index");
-    cmd.arg(dummy_target_dir.to_str().unwrap());
-    cmd.arg("--onnx-tokenizer-dir").arg(dummy_tokenizer_dir.as_os_str());
-    cmd.assert()
+    // Set ONNX paths via BOTH environment variables AND CLI args
+    Command::new(&bin_path)
+        .env("VECTORDB_ONNX_MODEL", dummy_model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", dummy_tokenizer_dir.to_str().unwrap())
+        .arg("simple")
+        .arg("index")
+        .arg(target_dir.to_str().unwrap())
+        .arg("--onnx-model") // Provide CLI arg
+        .arg(dummy_model_path.to_str().unwrap())
+        .assert()
         .failure()
-        .stderr(contains("ONNX paths must be provided in config")); // Updated expected error
+        // Check for the error about requiring config-only paths (takes precedence now)
+        .stderr(contains("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables.")); 
 
-    // Clean up environment variables
-    std::env::remove_var("VECTORDB_ONNX_MODEL");
+    Ok(())
+}
+
+#[test]
+fn test_index_requires_config_onnx_args() -> Result<()> {
+    let bin_path = get_binary_path()?;
+    let temp_dir = TempDir::new()?;
+    let config_dir = temp_dir.path().join("config");
+    let data_dir = temp_dir.path().join("data");
+    std::env::set_var("XDG_CONFIG_HOME", config_dir.to_str().unwrap());
+    std::env::set_var("XDG_DATA_HOME", data_dir.to_str().unwrap());
+    let _ = fs::remove_dir_all(config_dir.join("vectordb-cli")); // Ensure no prior config
+
+    println!("Testing simple index rejection with ONNX paths in env only (expect config required error)...");
+
+    // Create dummy ONNX files and target dir
+    let dummy_model_path = temp_dir.path().join("dummy.onnx");
+    let dummy_tokenizer_dir = temp_dir.path().join("dummy_tokenizer");
+    fs::create_dir_all(&dummy_tokenizer_dir)?;
+    fs::write(&dummy_model_path, "dummy_onnx_content")?;
+    fs::write(dummy_tokenizer_dir.join("tokenizer.json"), "dummy_tokenizer_content")?;
+    let target_dir = temp_dir.path().join("target_dir");
+    fs::create_dir_all(&target_dir)?;
+    fs::write(target_dir.join("file.txt"), "content")?;
+
+    // Set ONNX paths ONLY via environment variables
+    Command::new(&bin_path)
+        .env("VECTORDB_ONNX_MODEL", dummy_model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", dummy_tokenizer_dir.to_str().unwrap())
+        .arg("simple")
+        .arg("index")
+        .arg(target_dir.to_str().unwrap())
+        // DO NOT provide --onnx-model-path or --onnx-tokenizer-dir args
+        .assert()
+        .failure()
+        // Check for error indicating paths MUST be in config (now matches the specific error)
+        .stderr(contains("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables.")); 
 
     Ok(())
 }
@@ -561,7 +610,7 @@ async fn test_repo_sync_scenarios() -> Result<()> {
     std::env::set_var("XDG_CONFIG_HOME", config_dir.to_str().unwrap());
 
     // Initialize Qdrant client
-    let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
+    let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6334".to_string());
     let client = Qdrant::from_url(&qdrant_url).build()?;
 
     // Clean up collection if it exists from a previous failed run

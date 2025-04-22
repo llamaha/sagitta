@@ -3,7 +3,8 @@ use clap::Args;
 use std::path::PathBuf;
 use colored::*;
 
-use crate::config::{self, AppConfig};
+// Use config types from vectordb_core
+use vectordb_core::{AppConfig, save_config};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -21,7 +22,7 @@ pub fn use_repository(
 
     if config.repositories.iter().any(|r| r.name == repo_name) {
         config.active_repository = Some(repo_name.clone());
-        config::save_config(&config, override_path)?;
+        save_config(&config, override_path)?;
         println!(
             "{}",
             format!("Set active repository to '{}'.", repo_name.cyan()).green()

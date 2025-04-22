@@ -1,7 +1,7 @@
 [package]
 name = "vectordb-cli"
 description = "A CLI tool for semantic code search."
-version = "1.6.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Adam Mulvany <amulvany@gitlab.com>"]
 license = "MIT"
@@ -30,7 +30,8 @@ exclude = [
 [workspace]
 members = [
     ".",
-    "crates/relay"
+    "crates/relay",
+    "crates/vectordb-core"
 ]
 
 [features]
@@ -41,6 +42,7 @@ onnx = ["ort"]
 cuda = ["ort/cuda"]
 
 [dependencies]
+vectordb_core = { path = "crates/vectordb-core" }
 clap = { version = "4.5.7", features = ["derive", "env"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
 walkdir = "2.5.0"
@@ -97,6 +99,9 @@ env_logger = "0.11.3"
 toml = "0.8.20"
 futures = "0.3.31"
 git2 = "0.18.3"
+ndarray-stats = "0.6.0"
+url = "2.5"
+tonic = "0.12.3"
 # Add gRPC dependencies (Update versions)
 # tonic = { version = "0.12", features = ["codegen", "transport", "tls", "tls-roots"], optional = true }
 # tonic-reflection = { version = "0.12", optional = true }

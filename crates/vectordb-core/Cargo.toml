@@ -1,0 +1,66 @@
+[package]
+name = "vectordb_core"
+version = "0.1.0"
+edition = "2021"
+
+# Add features needed by moved modules
+[features]
+default = ["onetime_rayon", "ort"]
+onetime_rayon = ["dep:rayon"]
+onnx = ["ort"]
+cuda = ["ort/cuda"]
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0.61"
+serde = { version = "1.0.203", features = ["derive"] }
+toml = "0.8.20"
+dirs = "5.0.1"
+log = "0.4"
+uuid = { version = "1.8", features = ["v4", "serde"] } # Needed by error.rs
+async-trait = "0.1.77" # Add async-trait dependency
+lazy_static = "1.4.0" # Added for syntax::languages
+
+# Add dependencies needed by error.rs
+qdrant-client = "1.13.0"
+git2 = "0.18.3"
+
+# Add dependency for onetime_rayon feature
+rayon = { version = "1.10.0", optional = true }
+
+# Add dependency for ort feature
+ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
+
+# Dependencies for embedding/provider/onnx.rs
+tokenizers = { version = "0.21.1" }
+ndarray = { version = "0.16" }
+
+# Dependencies for repo_add / repo_helpers
+clap = { version = "4.5.7", features = ["derive"] } # For AddRepoArgs
+colored = "2.0"
+tokio = { version = "1.37.0", features = ["full"] } # For async fn
+tracing = "0.1"
+# Need embedding_logic dependencies if used internally (like ort, tokenizers)
+# Assuming ort is already added for error.rs
+# tokenizers = "0.21.1" # REMOVED DUPLICATE Assuming helpers or add might need this indirectly
+
+# Dependency for repo_helpers
+indicatif = "0.17.8"
+
+# Dependencies for syntax module
+tree-sitter = "0.22.6"
+tree-sitter-rust = "0.21.0"
+tree-sitter-ruby = "0.21.0"
+tree-sitter-go = "0.21.0"
+tree-sitter-md = "0.2.3"
+tree-sitter-javascript = "0.21.0"
+tree-sitter-typescript = "0.21.0"
+tree-sitter-yaml = "0.6.1"
+tree-sitter-python = "0.21.0"
+
+# Add other dependencies as modules are moved...
+
+[dev-dependencies] # Add dev dependencies if needed for tests in core
+tempfile = "3.10.1"
+serde_json = "1.0.117"
+mockall = "0.12.1"

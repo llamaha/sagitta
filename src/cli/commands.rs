@@ -36,8 +36,11 @@ use indicatif::ProgressBar;
 use log;
 
 // Import config
-use crate::config::AppConfig;
-// Removed: use crate::config;
+// use crate::cli::server::ServerArgs; // Removed - Module/Struct likely moved or removed
+use crate::cli::stats::StatsArgs;
+
+// Use config types from vectordb_core
+use vectordb_core::AppConfig;
 
 // Moved from index.rs
 pub(crate) const BATCH_SIZE: usize = 128;

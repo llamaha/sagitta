@@ -129,6 +129,12 @@ pub enum VectorDBError {
     /// New variant for when a feature is required but not enabled
     #[error("Required feature not enabled: {0}")]
     FeatureNotEnabled(String),
+
+    #[error("Git error: {0}")]
+    GitMessageError(String),
+
+    #[error("Config error: {0}")]
+    ConfigError(String),
 }
 
 // Custom conversion from anyhow::Error to VectorDBError
@@ -204,6 +210,8 @@ impl Clone for VectorDBError {
             #[cfg(feature = "ort")]
             Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error: {}", e)),
             Self::FeatureNotEnabled(s) => Self::FeatureNotEnabled(s.clone()),
+            Self::GitMessageError(s) => Self::GitMessageError(s.clone()),
+            Self::ConfigError(s) => Self::ConfigError(s.clone()),
         }
     }
 }
