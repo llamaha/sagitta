@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
 
-use vectordb_core::{AppConfig, save_config, load_config};
+use vectordb_core::AppConfig;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -78,7 +78,7 @@ fn handle_set_repo_base_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    
     use tempfile::tempdir;
     use vectordb_core::{load_config, save_config};
 

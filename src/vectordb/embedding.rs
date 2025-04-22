@@ -6,16 +6,6 @@ use std::fmt;
 use vectordb_core::AppConfig;
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "ort")]
-// use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
-use ort::environment::Environment;
-use ort::memory::Allocator;
-use ort::session::builder::{GraphOptimizationLevel, SessionBuilder};
-use ort::session::Session;
-use ort::value::Value;
-use tokenizers::Tokenizer;
-use ndarray::{Axis, Array2};
-use anyhow::{Result as AnyhowResult, Context};
 use serde::{Serialize, Deserialize};
 
 // Use the embedding dimensions from the providers
@@ -100,8 +90,8 @@ impl EmbeddingModel {
 mod tests {
     use super::*;
     use std::path::Path;
-    use ndarray::Array;
-    use ndarray_stats::QuantileExt;
+    
+    
 
     // Removed test_fast_embedding
     // #[test]

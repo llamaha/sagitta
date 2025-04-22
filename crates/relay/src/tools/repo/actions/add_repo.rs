@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-use anyhow::{Context as AnyhowContext, Result as AnyhowResult};
-use vectordb_core::repo_add::{handle_repo_add, AddRepoArgs, AddRepoError};
-use vectordb_core::config::{AppConfig as VectorDBAppConfig, RepositoryConfig, get_repo_base_path};
+use vectordb_core::repo_add::{handle_repo_add, AddRepoArgs};
+use vectordb_core::config::get_repo_base_path;
 use vectordb_core::embedding::EmbeddingHandler;
 
 // --- Add Repo Action ---

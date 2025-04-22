@@ -1,5 +1,5 @@
 use clap::Args;
-use anyhow::{Result, Context, bail, anyhow};
+use anyhow::{Result, Context, anyhow};
 use std::{fs, path::PathBuf, sync::Arc};
 use std::io::{self, Write};
 use colored::*;

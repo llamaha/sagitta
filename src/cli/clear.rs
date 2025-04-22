@@ -4,7 +4,7 @@ use colored::*;
 use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
-use vectordb_core::{AppConfig, RepositoryConfig, save_config}; // Added RepositoryConfig
+use vectordb_core::{AppConfig, RepositoryConfig}; // Added RepositoryConfig
 use vectordb_core::qdrant_client_trait::QdrantClientTrait; // Use core trait
 use vectordb_core::repo_helpers::get_collection_name; // Use core helper
 

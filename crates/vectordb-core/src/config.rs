@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
+use anyhow::anyhow;
 
 const APP_NAME: &str = "vectordb-cli";
 const CONFIG_FILE_NAME: &str = "config.toml";
@@ -82,13 +83,12 @@ fn default_qdrant_url() -> String {
     DEFAULT_QDRANT_URL.to_string()
 }
 
-/// Returns the expected path to the application's configuration file.
-///
-/// Based on XDG base directory specification (e.g., `~/.config/vectordb-cli/config.toml`).
-fn get_config_path() -> Result<PathBuf> {
-    dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))
-        .map(|config_dir| config_dir.join(APP_NAME).join(CONFIG_FILE_NAME))
+/// Returns the default path to the configuration file.
+pub fn get_config_path() -> Result<PathBuf> {
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow!("Could not find config directory"))?
+        .join("vectordb");
+    Ok(config_dir.join(APP_NAME).join(CONFIG_FILE_NAME))
 }
 
 /// Returns the base directory where local repository clones should be stored.
@@ -211,6 +211,22 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
 
     log::debug!("Configuration saved to '{}'", config_file_path.display());
     Ok(())
+}
+
+/// Structure holding repository list and active status, for listing purposes.
+#[derive(Debug, Serialize)] // Keep Serialize needed by original caller
+pub struct ManagedRepositories {
+    pub repositories: Vec<RepositoryConfig>,
+    pub active_repository: Option<String>,
+}
+
+/// Gets a snapshot of the repository configurations and the active repository name.
+pub fn get_managed_repos_from_config(config: &AppConfig) -> ManagedRepositories {
+    // Return a structure containing clones of the needed data
+    ManagedRepositories {
+        repositories: config.repositories.clone(),
+        active_repository: config.active_repository.clone(),
+    }
 }
 
 #[cfg(test)]

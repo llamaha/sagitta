@@ -1,4 +1,3 @@
-use crate::cli::commands::CliArgs;
 use vectordb_core::repo_helpers;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 

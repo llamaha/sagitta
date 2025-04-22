@@ -6,11 +6,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 // Import necessary types
-use vectordb_lib::cli::repo_commands::list::get_managed_repos_from_config;
+use vectordb_core::get_managed_repos_from_config;
 use vectordb_core::config::{AppConfig, RepositoryConfig};
 use anyhow::{Result as AnyhowResult};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
+use serde_json::Value;
 
 // --- List Repositories Action ---
 // Gets the list of repositories directly from the vectordb-lib config.

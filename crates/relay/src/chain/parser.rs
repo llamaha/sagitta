@@ -10,8 +10,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use tracing::error;
 use tracing::warn;
-use crate::chain::state::ChainState;
-use crate::context::AppContext;
 
 /// Represents the expected structure of an action request from the LLM.
 #[derive(Deserialize, Debug)]
@@ -194,14 +192,30 @@ fn create_action_from_request(request: ActionRequest) -> Result<Box<dyn Action>>
         "semantic_search" => {
             let params: SemanticSearchParams = serde_json::from_value(request.params)
                  .map_err(|e| RelayError::ToolError(format!("Invalid params for semantic_search: {}", e)))?;
-            let action = SemanticSearchAction::new(params.query, params.limit, params.repo_name, params.lang, params.element_type);
+            let action = SemanticSearchAction::new(
+                params.query, 
+                params.limit, 
+                params.repo_name, 
+                params.lang, 
+                params.element_type, 
+                params.branch
+            );
              Ok(Box::new(action))
         },
         "semantic_edit" => {
             let params: SemanticEditParams = serde_json::from_value(request.params)
-                 .map_err(|e| RelayError::ToolError(format!("Invalid params for semantic_edit: {}", e)))?;
-            let action = SemanticEditAction::new(params.file, params.element, params.content, params.fuzzy, params.confirm);
-             Ok(Box::new(action))
+                .map_err(|e| RelayError::ToolError(format!("Failed to parse semantic_edit parameters: {}", e)))?;
+            let action = SemanticEditAction::new(
+                params.file_path,
+                params.element_query,
+                params.edit_content,
+                params.update_references,
+                None,
+                None,
+                None,
+                None,
+            );
+            Ok(Box::new(action))
         },
 
         // --- Unknown Action ---

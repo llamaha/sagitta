@@ -58,6 +58,12 @@ tree-sitter-typescript = "0.21.0"
 tree-sitter-yaml = "0.6.1"
 tree-sitter-python = "0.21.0"
 
+# --- Dependencies for edit module --- 
+regex = "1.10.3"
+tempfile = "3.5"
+# Note: tree-sitter and language crates already added above for syntax module
+# --- End dependencies for edit module ---
+
 # Add other dependencies as modules are moved...
 
 [dev-dependencies] # Add dev dependencies if needed for tests in core

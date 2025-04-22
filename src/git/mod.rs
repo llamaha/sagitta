@@ -1,22 +1,11 @@
 use anyhow::{Result, Context};
-use log::{warn};
-use qdrant_client::{
-    prelude::Payload,
-    qdrant::{
-        Condition,
-        CreateCollection, Distance, Filter, PointId, PointStruct, PointsSelector, ScoredPoint,
-        SearchPoints, VectorParams, VectorsConfig,
+use qdrant_client::qdrant::{
         ScrollPointsBuilder,
         PayloadIncludeSelector,
-        ScrollResponse,
-    },
-    Qdrant,
-};
+    };
 use std::{
-    collections::{HashMap, HashSet},
-    fs::{self, File},
-    io::Write,
-    path::{Path, PathBuf},
+    collections::HashSet,
+    path::PathBuf,
     sync::Arc,
 };
 use tokio::task;
@@ -30,7 +19,7 @@ use vectordb_core::{
 
 use crate::cli::CliArgs;
 
-use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, TreeWalkMode, TreeWalkResult, ObjectType};
+use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption};
 
 pub struct SyncResult {
     pub success: bool,

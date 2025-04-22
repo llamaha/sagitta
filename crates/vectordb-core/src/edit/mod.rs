@@ -1,9 +1,12 @@
+// crates/vectordb-core/src/edit/mod.rs
+//! Core module for handling code editing operations.
+
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
 use anyhow::{Result, Context, bail, anyhow};
-use tree_sitter::{Parser, Language, Query, QueryCursor, Node, Point};
+use tree_sitter::{Parser, Language, Node, Point};
 use regex::Regex;
 
 // --- Public Struct/Enum Definitions ---
@@ -26,6 +29,7 @@ pub struct EngineValidationIssue {
 pub struct EngineEditOptions {
     pub format_code: bool, // Placeholder for future formatting feature
     pub update_references: bool, // Placeholder for future reference updating
+    pub preserve_documentation: bool, // Placeholder for future documentation preservation
     // Add other options here as needed
 }
 
@@ -47,6 +51,7 @@ pub fn apply_edit(
     if let Some(opts) = options {
         if opts.format_code { println!("Note: Formatting option is set (not implemented yet)."); }
         if opts.update_references { println!("Note: Update references option is set (not implemented yet)."); }
+        if !opts.preserve_documentation { println!("Note: No preserve docs option is set (not implemented yet)."); }
     }
 
     let original_content = fs::read_to_string(file_path)
@@ -72,6 +77,7 @@ pub fn apply_edit(
                 original_content.as_bytes()
             ).with_context(|| format!("Failed to find semantic element '{}' in {}", element_query, file_path.display()))?;
             
+            // TODO: Replace println with logging
             println!(
                 "Found semantic element '{}' spanning lines {} to {}.", 
                 element_query, start + 1, end + 1
@@ -117,9 +123,11 @@ pub fn validate_edit(
     new_content: &str,
     options: Option<&EngineEditOptions>,
 ) -> Result<Vec<EngineValidationIssue>, anyhow::Error> {
+    // TODO: Replace println with logging
     println!("Validating edit for target: {:?}", target);
     if let Some(opts) = options {
         println!("Note: Validation called with options: {:?}", opts);
+        // Add specific checks for options if needed in the future
     }
 
     let mut issues: Vec<EngineValidationIssue> = Vec::new();
@@ -167,6 +175,7 @@ pub fn validate_edit(
                  Ok(tree) => {
                      match find_semantic_element(&tree, &language, element_query, original_content.as_bytes()) {
                          Ok((start_line, end_line)) => {
+                             // TODO: Replace println with logging
                              println!("Semantic target '{}' found at lines {}-{} (validation step).", element_query, start_line + 1, end_line + 1);
                          }
                          Err(e) => { 
@@ -206,6 +215,7 @@ pub fn validate_edit(
                     line_number,
                 });
             } else {
+                // TODO: Replace println with logging
                 println!("Basic syntax check of new content passed.");
             }
         }
@@ -219,6 +229,7 @@ pub fn validate_edit(
     }
     
     if issues.is_empty() {
+        // TODO: Replace println with logging
          println!("Validation checks passed (target existence and basic content syntax).");
     }
     Ok(issues)
@@ -250,123 +261,116 @@ fn format_content_indentation(
 }
 
 fn get_language(file_path: &Path) -> Result<Language> {
-    let extension = file_path.extension().and_then(|ext| ext.to_str()).context("File has no extension or invalid UTF-8")?;
-    match extension.to_lowercase().as_str() {
+    let extension = file_path.extension().and_then(|os_str| os_str.to_str()).unwrap_or("");
+    match extension {
         "rs" => Ok(tree_sitter_rust::language()),
         "py" => Ok(tree_sitter_python::language()),
         "js" | "jsx" => Ok(tree_sitter_javascript::language()),
         "ts" | "tsx" => Ok(tree_sitter_typescript::language_typescript()),
         "go" => Ok(tree_sitter_go::language()),
         "rb" => Ok(tree_sitter_ruby::language()),
-        "md" => Ok(tree_sitter_md::language()),
         "yaml" | "yml" => Ok(tree_sitter_yaml::language()),
-        _ => bail!("Unsupported file extension for parsing: {}", extension),
+        "md" | "mdx" => Ok(tree_sitter_md::language()),
+        _ => bail!("Unsupported file extension for semantic editing: {}", extension),
     }
 }
 
 fn parse_content(content: &str, language: &Language) -> Result<tree_sitter::Tree> {
     let mut parser = Parser::new();
-    parser.set_language(language).map_err(|e| anyhow!("Error setting tree-sitter language: {}", e))?;
-    parser.parse(content, None).context("Failed to parse content with tree-sitter")
+    parser.set_language(language).context("Failed to set tree-sitter language")?;
+    parser.parse(content, None).ok_or_else(|| anyhow!("Tree-sitter parsing failed"))
 }
 
 fn expand_range_for_comments(node: Node) -> Result<(usize, usize)> {
-    let original_range = node.range();
-    let mut current_start_point = original_range.start_point;
-    let mut prev_sibling = node.prev_named_sibling();
-    while let Some(sibling) = prev_sibling {
-        let kind = sibling.kind();
-        let is_comment = kind.contains("comment") || kind == "doc_comment";
-        if is_comment { current_start_point = sibling.range().start_point; prev_sibling = sibling.prev_named_sibling(); } else { break; }
+    let mut current_node = node;
+    while let Some(prev_sibling) = current_node.prev_named_sibling() {
+        if prev_sibling.kind().contains("comment") {
+            current_node = prev_sibling;
+        } else {
+            break;
+        }
     }
-    Ok((current_start_point.row, original_range.end_point.row))
+    Ok((current_node.start_position().row, node.end_position().row))
 }
 
 fn find_direct_child_element<'a>(parent_node: &Node<'a>, language: &Language, element_query_part: &str, source_code: &[u8]) -> Result<Node<'a>> {
-    let parts: Vec<&str> = element_query_part.splitn(2, ':').collect();
-    if parts.len() != 2 { bail!("Invalid element query format..."); }
-    let element_type = parts[0];
-    let element_name = parts[1];
-    let query_string = match language { 
-         lang if *lang == tree_sitter_rust::language() => match element_type {
-            "function" => format!("(function_item name: (identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            "struct" => format!("(struct_item name: (type_identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            "impl" => format!("(impl_item type: (type_identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            "method" => format!("(function_item name: (identifier) @name (#eq? @name \"{}\")) @element", element_name),
-             _ => bail!("Unsupported element type '{}' for Rust...", element_type),
-        },
-         lang if *lang == tree_sitter_python::language() => match element_type {
-            "function" => format!("(function_definition name: (identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            "class" => format!("(class_definition name: (identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            "method" => format!("(function_definition name: (identifier) @name (#eq? @name \"{}\")) @element", element_name),
-            _ => bail!("Unsupported element type '{}' for Python...", element_type),
-        },
-        _ => bail!("Querying not yet supported..."),
-    };
-    let query = Query::new(language, &query_string)
-        .context("Failed to create tree-sitter query from string")?;
-    let mut cursor = QueryCursor::new();
-    let captures = cursor.captures(&query, *parent_node, source_code);
-    let mut found_element: Option<Node> = None;
-    for (match_, _) in captures {
-        if let Some(cap) = match_.captures.iter().find(|c| query.capture_names()[c.index as usize] == "element") {
-             if found_element.is_some() { println!("Warning: Ambiguous query part..."); }
-             found_element = Some(cap.node); break;
+    let query_parts: Vec<&str> = element_query_part.splitn(2, ':').collect();
+    if query_parts.len() != 2 {
+        bail!("Invalid element query part format. Expected 'type:name', got '{}'", element_query_part);
+    }
+    let element_type = query_parts[0];
+    let element_name = query_parts[1];
+
+    let mut cursor = parent_node.walk();
+    for child_node in parent_node.named_children(&mut cursor) {
+        if child_node.kind() == element_type {
+            // Extract the name/identifier based on common tree-sitter patterns
+            let mut name_node_opt = child_node.child_by_field_name("name");
+            if name_node_opt.is_none() {
+                 name_node_opt = child_node.child_by_field_name("identifier");
+            }
+            // Add other common identifier field names if necessary (e.g., "id")
+
+            if let Some(name_node) = name_node_opt {
+                 let node_name = name_node.utf8_text(source_code)?;
+                if node_name == element_name {
+                     return Ok(child_node); // Found the direct child
+                 }
+            } else {
+                // Attempt fallback for simple cases like direct identifiers
+                 if child_node.kind() == element_type && child_node.child_count() > 0 {
+                     let first_child_name_opt = child_node.named_child(0).and_then(|n| n.utf8_text(source_code).ok());
+                     if first_child_name_opt.as_deref() == Some(element_name) {
+                         return Ok(child_node);
+                     }
+                 }
+            }
         }
     }
-    found_element.ok_or_else(|| anyhow!("Element part not found: '{}'", element_query_part))
+    bail!("Could not find direct child element '{}:{}' under the current node.", element_type, element_name);
 }
 
 fn find_semantic_element(tree: &tree_sitter::Tree, language: &Language, element_query_str: &str, source_code: &[u8]) -> Result<(usize, usize)> {
-    let query_parts: Vec<&str> = element_query_str.split('.').collect();
+    let parts: Vec<&str> = element_query_str.split('.').collect();
     let mut current_node = tree.root_node();
-    let mut last_found_name = String::from("root");
-    for (i, part) in query_parts.iter().enumerate() {
-        let part_query = *part;
-        let is_last_part = i == query_parts.len() - 1;
-        match find_direct_child_element(&current_node, language, part_query, source_code) {
-            Ok(found_node) => {
-                if is_last_part { return expand_range_for_comments(found_node); }
-                else { current_node = found_node; last_found_name = part_query.to_string(); }
-            }
-            Err(e) => { bail!("Failed to find element part '{}' within '{}': {}", part_query, last_found_name, e); }
-        }
+
+    for part in parts {
+         current_node = find_direct_child_element(&current_node, language, part, source_code)
+             .with_context(|| format!("Failed while searching for element part '{}'", part))?;
     }
-    bail!("Failed to resolve the full query path: {}", element_query_str);
+
+    expand_range_for_comments(current_node)
 }
 
-// --- Tests --- 
 #[cfg(test)]
 mod tests {
-    use std::path::{PathBuf, Path};
-    use std::fs;
-    use std::io::Write;
+    use super::*;
+    use std::path::PathBuf;
 
-    // Helper function to create a temporary file with content
+    // Helper to create a temp file with content
     fn create_temp_file(content: &str) -> tempfile::NamedTempFile { // Use full path here
-        let mut file = tempfile::NamedTempFile::new().expect("Failed to create temp file");
-        file.write_all(content.as_bytes()).expect("Failed to write to temp file");
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "{}", content).unwrap();
+        file.flush().unwrap();
         file
     }
 
-    // Helper function to read content from a NamedTempFile
+    // Helper to read a temp file's content
     fn read_temp_file(file: &tempfile::NamedTempFile) -> String { // Use full path here
-        fs::read_to_string(file.path()).expect("Failed to read temp file")
+        fs::read_to_string(file.path()).unwrap()
     }
 
-    // Test helper functions remain here
     fn create_test_file(dir: &Path, filename: &str, content: &str) -> PathBuf {
         let file_path = dir.join(filename);
-        fs::write(&file_path, content).expect("Failed to write test file");
+        fs::write(&file_path, content).unwrap();
         file_path
     }
+
     fn read_test_file(file_path: &Path) -> String {
-        fs::read_to_string(file_path).expect("Failed to read test file")
+        fs::read_to_string(file_path).unwrap()
     }
 
-    // Tests call public functions apply_edit, validate_edit directly
-    // They also implicitly test the private helper functions.
-    
+    // --- apply_edit Tests ---
     #[test]
     fn test_apply_edit_line_range_replace() { /* ... */ }
     #[test]
@@ -375,12 +379,16 @@ mod tests {
     fn test_apply_edit_indentation() { /* ... */ }
     #[test]
     fn test_apply_edit_indentation_start_of_file() { /* ... */ }
+
+    // --- find_semantic_element Tests ---
     #[test]
     fn test_semantic_find_rust_function() { /* ... */ }
     #[test]
     fn test_semantic_find_python_method() { /* ... */ }
     #[test]
     fn test_semantic_find_nonexistent() { /* ... */ }
+
+    // --- validate_edit Tests ---
     #[test]
     fn test_validate_line_range_ok() { /* ... */ }
     #[test]

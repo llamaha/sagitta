@@ -12,7 +12,7 @@ use colored::Colorize;
 // Use config types from vectordb_core
 use vectordb_core::AppConfig;
 use crate::cli::commands::CliArgs; // To access global args like model paths
-use crate::edit::engine::{self, EditTarget, EngineEditOptions}; // Removed EngineValidationSeverity
+use vectordb_core::edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions};
 use std::fmt::Debug;
 // NOTE: edit submodules haven't been moved to core yet. Commenting out imports.
 // use crate::edit::editor::Editor;
@@ -115,17 +115,34 @@ pub struct ValidateArgs {
 
 /// Main handler for the `edit` command group.
 pub async fn handle_edit_command(
-    _edit_args: EditArgs,
-    _cli_args: &CliArgs,
-    _config: AppConfig,
-    _client: Arc<Qdrant>,
+    edit_args: EditArgs,
+    cli_args: &CliArgs,
+    config: AppConfig,
+    _client: Arc<Qdrant>, // Qdrant client not currently needed for edit operations
 ) -> Result<()> {
-    // Placeholder: Implement actual logic for handling edit commands
-    // This might involve calling functions from the `edit` module
-    // based on the specific subcommand in `edit_args.command`.
-    // For now, it just logs and returns Ok.
-    debug!("Handling edit command (placeholder)");
-    Ok(())
+    debug!("Handling edit command: {:?}", edit_args.command);
+
+    match edit_args.command {
+        EditCommand::Apply(apply_args) => {
+            handle_apply_or_validate(apply_args, cli_args, config, false).await
+        }
+        EditCommand::Validate(validate_args) => {
+            // We can reuse ApplyArgs structure since ValidateArgs has the same fields.
+            // This might be slightly less clean than defining a common struct,
+            // but avoids defining an extra struct for now.
+            let apply_args_equivalent = ApplyArgs {
+                file_path: validate_args.file_path,
+                edit_content: validate_args.edit_content,
+                start_line: validate_args.start_line,
+                end_line: validate_args.end_line,
+                element_query: validate_args.element_query,
+                update_references: validate_args.update_references,
+                no_format: validate_args.no_format,
+                no_preserve_docs: validate_args.no_preserve_docs,
+            };
+            handle_apply_or_validate(apply_args_equivalent, cli_args, config, true).await
+        }
+    }
 }
 
 /// Combined handler for Apply and Validate logic
@@ -154,13 +171,13 @@ async fn handle_apply_or_validate(
     let options = EngineEditOptions {
         update_references: args.update_references,
         format_code: !args.no_format,
-        // preserve_documentation field removed
+        preserve_documentation: !args.no_preserve_docs,
     };
 
     // --- Perform Action (Validate or Apply) ---
     if validate_only {
         println!("Validating edit...");
-        let issues = engine::validate_edit(
+        let issues = validate_edit(
             &file_path,
             &target, // Pass target by reference
             &args.edit_content,
@@ -184,7 +201,7 @@ async fn handle_apply_or_validate(
         }
     } else {
         println!("Applying edit...");
-        engine::apply_edit(
+        apply_edit(
             &file_path,
             &target, // Pass target by reference
             &args.edit_content,

@@ -18,7 +18,6 @@ use crate::error::VectorDBError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_LANGUAGE, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_EXTENSION, BATCH_SIZE, COLLECTION_NAME_PREFIX, FIELD_BRANCH, FIELD_COMMIT_HASH};
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::embedding::EmbeddingHandler;
-use crate::git_helpers;
 
 // Use modules from the main vectordb_cli crate (until they are moved)
 // use vectordb_cli::cli::commands::{CliArgs}; // Removed

@@ -1,17 +1,11 @@
 use qdrant_client::{
-    config::QdrantConfig,
-    Payload,
     qdrant::{
         points_selector::PointsSelectorOneOf, CreateCollection, Distance, PointId, PointStruct,
         PointsIdsList, PointsSelector, SearchPoints, VectorParams, VectorsConfig,
     },
     Qdrant as QdrantApiClient,
-    QdrantError as NativeQdrantError,
 };
-use serde_json::{json, Value};
-use std::collections::HashMap;
 use thiserror::Error;
-use tokio::runtime::Builder;
 
 // Use the error module and types from the vectordb_core crate
 // use vectordb_core::error::VectorDBError; // Removed - Unused due to alias/impl
@@ -22,6 +16,13 @@ type VectordbResult<T> = std::result::Result<T, vectordb_core::error::VectorDBEr
 
 // Add back the internal QResult type alias
 type QResult<T> = std::result::Result<T, QdrantError>;
+
+// Import HashMap for tests
+use std::collections::HashMap;
+// Import Payload for tests
+use qdrant_client::Payload;
+// Import NativeQdrantError explicitly for error matching
+use qdrant_client::QdrantError as NativeQdrantError;
 
 #[derive(Error, Debug)]
 pub enum QdrantError {
@@ -213,11 +214,11 @@ pub async fn new_qdrant_client(url: &str) -> VectordbResult<Qdrant> {
 
 #[cfg(test)]
 mod tests {
-    use qdrant_client::qdrant::{PointId as QdrantPointId, PointsIdsList, PointsSelector, GetPointsBuilder, PointStruct, Distance};
+    use qdrant_client::qdrant::{PointId as QdrantPointId, PointStruct, Distance};
     // use qdrant_client::QdrantError as NativeQdrantError; // Keep if needed for specific checks
     use serde_json::json;
     use uuid::Uuid;
-    use tokio::runtime::Builder; // Keep builder if needed elsewhere, maybe not needed now
+     // Keep builder if needed elsewhere, maybe not needed now
 
     use super::*;
 

@@ -19,11 +19,6 @@ use serde::{Serialize, Deserialize};
 use log;
 
 // Keep these imports - check dependencies later
-#[cfg(feature = "ort")]
-use {
-    // tokenizers::Tokenizer, // Unused
-    // ndarray::{Axis, Array2}, // Unused
-};
 
 /// Enum representing the type of embedding model to use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]

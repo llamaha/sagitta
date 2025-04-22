@@ -37,7 +37,6 @@ use log;
 
 // Import config
 // use crate::cli::server::ServerArgs; // Removed - Module/Struct likely moved or removed
-use crate::cli::stats::StatsArgs;
 
 // Use config types from vectordb_core
 use vectordb_core::AppConfig;

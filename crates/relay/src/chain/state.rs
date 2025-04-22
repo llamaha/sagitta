@@ -1,5 +1,5 @@
 use crate::llm::message::{AnthropicMessage, Role};
-use crate::tools; // Assuming tools will have shared state eventually
+ // Assuming tools will have shared state eventually
 use serde_json::Value; // Using Value for flexible context
 use std::collections::HashMap;
 

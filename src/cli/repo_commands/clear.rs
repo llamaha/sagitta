@@ -5,7 +5,7 @@ use qdrant_client::qdrant::{Filter, PointsSelector, points_selector::PointsSelec
 use std::{sync::Arc, path::PathBuf};
 use vectordb_core::repo_helpers::{get_collection_name};
 use log;
-use vectordb_core::{AppConfig, RepositoryConfig, save_config};
+use vectordb_core::{AppConfig, save_config};
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
 use std::io::{self, Write};

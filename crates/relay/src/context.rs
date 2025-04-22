@@ -2,9 +2,7 @@ use crate::config::RelayConfig;
 use crate::llm::AnthropicClient;
 use qdrant_client::Qdrant;
 use vectordb_core::config::AppConfig as VdbConfig;
-use anyhow::Result;
-use std::sync::{Arc, Mutex};
-use crate::utils::error::RelayError;
+use std::sync::Arc;
 
 /// Holds shared application resources and configurations accessible by actions.
 #[derive(Clone)]

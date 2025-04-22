@@ -1,21 +1,16 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::Args;
 use colored::*;
-use git2::Repository;
 use std::{path::PathBuf, sync::Arc};
 use std::time::Instant;
-use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, info, warn, error};
+use log::{info, warn, error};
 
 use vectordb_core::{AppConfig, save_config};
 use crate::cli::commands::CliArgs;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
-use futures::future::join_all;
 use futures::StreamExt;
-use qdrant_client::qdrant::{PointStruct};
-use qdrant_client::Payload;
-use crate::git::{SyncOptions, SyncResult};
+use crate::git::SyncOptions;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]

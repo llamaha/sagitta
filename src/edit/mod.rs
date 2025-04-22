@@ -1,10 +1,6 @@
 // src/edit/mod.rs
 //! Core module for handling code editing operations.
 
-/// // Cleanup
-/// dir.close().unwrap();
-/// ```
-pub mod engine; // Module for the core editing logic
 pub mod cli;    // Placeholder for CLI command implementation (later)
 
 // Re-export CLI args and handler

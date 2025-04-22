@@ -5,20 +5,11 @@
 // use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType}; // Remove unused EmbeddingModel
 use crate::vectordb::embedding::{EmbeddingModelType};
 use crate::vectordb::provider::EmbeddingProvider;
-use vectordb_core::syntax::CodeChunk;
-use crate::vectordb::cache::{EmbeddingCache, CacheCheckResult};
 use vectordb_core::config::AppConfig;
-use vectordb_core::error::{Result as CoreResult, VectorDBError};
-use anyhow::{Context, Result as AnyhowResult};
-use indicatif::ProgressBar;
+use vectordb_core::error::VectorDBError;
 use rayon::prelude::*; // Add parallel processing
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
-use std::fs::{self, File};
-use tempfile::tempdir;
-use std::io::Write;
-use std::sync::Arc;
 
 // Conditional imports for ONNX provider
 #[cfg(feature = "ort")]
