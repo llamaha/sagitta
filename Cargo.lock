@@ -2472,7 +2472,6 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
- "vectordb-cli",
  "vectordb_core",
 ]
 
@@ -3641,6 +3640,7 @@ dependencies = [
  "ort",
  "qdrant-client",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

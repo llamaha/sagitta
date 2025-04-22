@@ -5,7 +5,6 @@ pub mod embedding;
 pub mod provider;
 pub mod embedding_logic;
 // pub mod error; // Moved to vectordb_core
-pub mod search;
 pub mod snippet_extractor;
 pub mod indexing;
 mod cache;

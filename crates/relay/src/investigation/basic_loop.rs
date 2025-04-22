@@ -2,14 +2,13 @@
 
 use crate::chain::{ChainExecutor, ChainState, parse_and_create_action};
 use crate::context::AppContext;
-use crate::llm::message::{AnthropicContent, AnthropicMessage, Role};
+use crate::llm::message::Role;
 use crate::utils::error::{Result, RelayError};
 use anyhow::Context;
 use futures::StreamExt;
 use std::io::{self, Write};
 use tracing::{error, info, warn};
 use serde_json::Value; // For accessing context results
-use termcolor::Color;
 
 const SYSTEM_PROMPT: &str = r#"You are Relay, an AI coding assistant. Your goal is to help users with their coding tasks.
 
@@ -123,7 +122,7 @@ pub async fn run_basic_loop(app_context: AppContext, initial_prompt: String) -> 
 
                 // Move the action into the executor
                 let executor = ChainExecutor::new().add_action(action); 
-                let mut next_state = state.clone(); // Clone state for execution
+                let next_state = state.clone(); // Clone state for execution
                 
                 // Clone the state for execution since execute takes ownership
                 let next_state_copy = next_state.clone();

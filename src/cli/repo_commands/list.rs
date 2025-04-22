@@ -1,73 +1,43 @@
 use anyhow::Result;
+use anyhow::Context;
 use colored::*;
-use serde::Serialize;
 
-// Use config types from vectordb_core
-use vectordb_core::{AppConfig, RepositoryConfig};
-
-// Define ManagedRepositories struct here if not already defined elsewhere
-#[derive(Debug, Serialize)]
-pub struct ManagedRepositories {
-    pub repositories: Vec<RepositoryConfig>,
-    pub active_repository: Option<String>,
-}
-
-// Rename function and change signature to accept &AppConfig
-pub fn get_managed_repos_from_config(config: &AppConfig) -> ManagedRepositories {
-    // Return a structure containing clones of the needed data
-    ManagedRepositories {
-        repositories: config.repositories.clone(),
-        active_repository: config.active_repository.clone(),
-    }
-}
+// Use config types and the list helper from vectordb_core
+use vectordb_core::{AppConfig, get_managed_repos_from_config};
 
 // Modify function signature to accept json flag
 pub fn list_repositories(config: &AppConfig, json_output: bool) -> Result<()> {
-    if config.repositories.is_empty() {
-        if json_output {
-            // Output empty JSON array if requested
-            println!("[]");
-        } else {
-            println!("{}", "No repositories configured yet. Use 'repo add <url>' to add one.".yellow());
-        }
-        return Ok(());
-    }
+    // Use the function from vectordb_core
+    let data = get_managed_repos_from_config(config);
 
     if json_output {
-        // Prepare data for JSON serialization
-        let data = ManagedRepositories {
-            repositories: config.repositories.clone(), // Clone data for serialization
-            active_repository: config.active_repository.clone(),
-        };
-        let json_string = serde_json::to_string_pretty(&data)?;
-        println!("{}", json_string);
+        // Serialize the entire ManagedRepositories struct
+        let json_output = serde_json::to_string_pretty(&data)
+            .context("Failed to serialize repository list to JSON")?;
+        println!("{}", json_output);
     } else {
-        // Original human-readable output
+        // Original pretty print logic (uses data.repositories and data.active_repository)
+        if data.repositories.is_empty() {
+            println!("No repositories managed yet. Use `vectordb repo add` to add one.");
+            return Ok(());
+        }
+
         println!("{}", "Managed Repositories:".bold().underline());
-        for repo in &config.repositories {
-            let active_marker = if config.active_repository.as_ref() == Some(&repo.name) {
-                "* ".green()
+        for repo in data.repositories {
+            let repo_name = repo.name.as_str();
+            let active_marker = if data.active_repository.as_deref() == Some(repo_name) {
+                "*" 
             } else {
-                "  ".into()
+                " "
             };
-            println!(
-                "{} {} ({}) -> {}",
-                active_marker,
-                repo.name.cyan(),
-                repo.url,
-                repo.local_path.display()
-            );
-            // Add more details if needed
-            println!("     Default Branch: {}", repo.default_branch);
-            if let Some(active_branch) = &repo.active_branch {
-                 println!("     Active Branch: {}", active_branch);
-             }
-            println!("     Tracked Branches: {:?}", repo.tracked_branches);
-             if let Some(langs) = &repo.indexed_languages {
-                 if !langs.is_empty() {
-                     println!("     Indexed Languages: {}", langs.join(", ").blue());
-                 }
-             }
+            let local_path = repo.local_path.display();
+            println!(" {} {} -> {}", active_marker.green(), repo_name.cyan(), local_path);
+        }
+        
+        if let Some(active) = data.active_repository {
+            println!("\n{}: {}", "Active Repository".bold(), active.green());
+        } else {
+            println!("\nNo active repository set. Use `vectordb repo use <name>` to set one.");
         }
     }
 

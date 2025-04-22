@@ -1,11 +1,10 @@
 use crate::config::RepositoryConfig;
-use crate::error::{Result as VectorDBResult, VectorDBError};
-use git2::{Repository, ErrorCode, ReferenceType, ObjectType, FetchOptions, AutotagOption, RemoteCallbacks, Commit, Object, Signature, StashFlags, Cred, CredentialType};
+use crate::error::VectorDBError;
+use git2::{Repository, ErrorCode, FetchOptions, AutotagOption, RemoteCallbacks, Cred, CredentialType};
 use log::{info, warn, debug};
 use anyhow::{Context, Result};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use colored::Colorize;
+use std::io::{Write};
+use std::path::PathBuf;
 
 /// Switches the current HEAD of the repository to the specified branch.
 pub fn switch_branch_impl(

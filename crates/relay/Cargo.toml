@@ -6,8 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# Revert to using the package name recognized by cargo
-vectordb-cli = { path = "../..", default-features = false }
+# Correct the package name to match the dependency's Cargo.toml
 vectordb_core = { path = "../vectordb-core" }
 
 # Restore missing dependencies

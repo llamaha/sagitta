@@ -1,8 +1,7 @@
 // Placeholder for configuration logic 
 
-use crate::utils::error::{RelayError, Result};
+use crate::utils::error::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tracing::warn;
 
 /// Configuration specific to the Relay agent itself.

@@ -10,20 +10,16 @@ pub mod utils;
 
 use anyhow::Result;
 // Use tracing imports directly
-use tracing::{info, error, warn};
+use tracing::{info, error};
 use tracing_subscriber::fmt;
-use crate::config::{self as relay_config, RelayConfig};
+use crate::config as relay_config;
 use crate::context::AppContext;
 use crate::llm::AnthropicClient;
 use qdrant_client::Qdrant;
-use std::sync::Arc;
-use crate::chain::{ChainExecutor, ChainState, parse_and_create_action};
-use crate::llm::message::{AnthropicContent, AnthropicMessage, Role};
-use crate::tools::RunCommandAction;
-use anyhow::Context;
-use futures::StreamExt;
-use std::io::{self, Write};
+// Add the missing import alias for vectordb_core::config
 use vectordb_core::config as vdb_config;
+use std::sync::Arc;
+use anyhow::Context;
 use crate::cli::CliArgs;
 use clap::Parser;
 

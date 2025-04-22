@@ -1,10 +1,9 @@
 // Use modules from *within* vectordb_core
-use crate::config::{AppConfig, RepositoryConfig, get_repo_base_path};
+use crate::config::RepositoryConfig;
 // use crate::error::VectorDBError; // Marked as unused
 use crate::repo_helpers as helpers;
 // use crate::repo_helpers::{prepare_repository, index_files}; // Marked as unused
 use crate::qdrant_client_trait::QdrantClientTrait;
-use crate::embedding::EmbeddingHandler;
 
 // Use modules from the main vectordb_cli crate
 // Remove the below line if it exists:
@@ -291,7 +290,7 @@ mod tests {
     use tempfile::tempdir;
     use std::fs; // Added fs import
     // Add PathBuf for dummy file paths
-    use std::path::PathBuf;
+    
 
     // Helper to create a basic AppConfig for tests
     fn test_config_with_empty_repo_list() -> AppConfig {

@@ -13,7 +13,6 @@ use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{CountPointsBuilder, Filter, Condition};
 use vectordb_core::config::AppConfig;
 use vectordb_lib::cli::commands::{FIELD_FILE_PATH, FIELD_BRANCH, FIELD_COMMIT_HASH};
-use std::sync::Arc;
 
 // Helper function to get the path to the compiled binary
 fn get_binary_path() -> Result<PathBuf> {

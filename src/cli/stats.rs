@@ -7,13 +7,11 @@ use colored::*;
 use std::sync::Arc;
 use vectordb_core::AppConfig;
 use vectordb_core::repo_helpers::get_collection_name;
-use qdrant_client::qdrant::qdrant_client::QdrantClient;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::path::PathBuf;
 use qdrant_client::qdrant::CountPointsBuilder;
 use serde::Serialize;
 use serde_json;
-use crate::cli::commands::CliArgs;
 use anyhow::Context;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use git2::{Repository, StatusOptions, Signature, IndexAddOption, Oid};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::{debug, warn, info};
+use tracing::{debug, info};
 use crate::context::AppContext;
 
 // --- Git Status Action ---

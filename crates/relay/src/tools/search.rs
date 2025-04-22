@@ -5,14 +5,9 @@ use crate::utils::error::{RelayError, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
-use vectordb_lib::cli::{
-    repo_commands::query as repo_query,
-    commands::CliArgs
-};
-use vectordb_lib::vectordb::search::SearchResult;
-use vectordb_core::qdrant_client_trait::QdrantClientTrait;
-use vectordb_core::config::AppConfig;
-use qdrant_client::qdrant::PointStruct;
+use vectordb_core::search_semantic;
+use qdrant_client::qdrant::{Filter, Condition, r#match::MatchValue};
+use std::sync::Arc;
 
 // --- Semantic Search Action ---
 // Corresponds to `vectordb-cli query [REPO_NAME]`
@@ -24,6 +19,7 @@ pub struct SemanticSearchParams {
     pub repo_name: Option<String>, // If present, use repo query, else use simple query
     pub lang: Option<String>,
     pub element_type: Option<String>,
+    pub branch: Option<String>,
 }
 
 #[derive(Debug)]
@@ -38,6 +34,7 @@ impl SemanticSearchAction {
         repo_name: Option<String>,
         lang: Option<String>,
         element_type: Option<String>,
+        branch: Option<String>,
     ) -> Self {
         Self {
             params: SemanticSearchParams {
@@ -46,6 +43,7 @@ impl SemanticSearchAction {
                 repo_name,
                 lang,
                 element_type,
+                branch,
             },
         }
     }
@@ -58,61 +56,80 @@ impl Action for SemanticSearchAction {
     }
 
     async fn execute(&self, context: &AppContext, state: &mut ChainState) -> Result<()> {
-        debug!(params = ?self.params, "Executing SemanticSearchAction");
+        debug!(params = ?self.params, "Preparing SemanticSearchAction");
 
-        // Use vdb_config from AppContext
-        let vdb_app_config = &context.vdb_config;
+        // --- Retrieve Dependencies from Context --- 
+        let qdrant_client = Arc::clone(&context.qdrant_client);
+        let vdb_app_config = Arc::clone(&context.vdb_config);
 
-        let search_results: Result<Vec<SearchResult>>;
+        // --- Determine Active Repository --- 
+        let active_repo_name = match self.params.repo_name.as_ref().or(state.active_repository.as_ref()) {
+            Some(name) => name.clone(),
+            None => {
+                let err_msg = "No active repository set and no repository specified in parameters.".to_string();
+                error!(error = err_msg, "Cannot perform semantic search");
+                return Err(RelayError::ToolError(err_msg));
+            }
+        };
 
-        // Determine which search type to use
-        // If repo_name is specified in params, use that.
-        // Otherwise, check for an active_repo in the chain state.
-        let repo_to_search = self.params.repo_name.clone()
-            .or_else(|| state.context.get("active_repo").and_then(|v| v.as_str().map(String::from)));
-
-        if let Some(repo_name) = repo_to_search {
-            // --- Repo Query --- 
-            info!(repo=%repo_name, query=%self.params.query, "Performing repository search");
-            let repo_args = repo_query::RepoQueryArgs {
-                query: self.params.query.clone(),
-                limit: self.params.limit.unwrap_or(10) as u64,
-                name: Some(repo_name.clone()),
-                branch: None,
-                lang: self.params.lang.clone(),
-                element_type: self.params.element_type.clone(),
-                json: false, 
-            };
-            
-            // Create a dummy CLI args for the query handler
-            let cli_args = CliArgs::default();
-            
-            // Use a dummy Vec<SearchResult> since we can't directly integrate with the API yet
-            let query_result = repo_query::handle_repo_query(repo_args, vdb_app_config, context.qdrant_client.clone(), &cli_args).await
-                .map_err(RelayError::Other);
-            // Assign the result to search_results
-            search_results = query_result.map(|_| Vec::new()); // Map successful query to empty results for now
-
-        } else {
-            // --- Simple Query --- 
-            info!(query=%self.params.query, "Performing simple search (no active repo specified)");
-            // Currently the API doesn't directly support our needs, so use a dummy result
-            let dummy_results = Vec::new();
-            search_results = Ok(dummy_results);
+        // Find the config for the active repository
+        let repo_config = vdb_app_config.repositories.iter()
+            .find(|r| r.name == active_repo_name)
+            .ok_or_else(|| {
+                let err_msg = format!("Configuration for repository '{}' not found.", active_repo_name);
+                error!(error = err_msg);
+                RelayError::ToolError(err_msg)
+            })?;
+        
+        // --- Construct Filter (if branch specified) --- 
+        let mut filter: Option<Filter> = None;
+        // Note: Original handle_repo_query checked repo_config.active_branch. We should mimic that logic?
+        // Or should the filter only apply if explicitly passed in params?
+        // For now, only filter if params.branch is set.
+        if let Some(branch_name) = &self.params.branch {
+            debug!(branch = %branch_name, repo = %active_repo_name, "Creating branch filter");
+            let condition = Condition::matches(
+                vectordb_core::constants::FIELD_BRANCH.to_string(),
+                MatchValue::Keyword(branch_name.clone()),
+            );
+            filter = Some(Filter {
+                must: vec![condition],
+                ..Default::default()
+            });
         }
 
-        match search_results {
+        // --- Call Library Search Function --- 
+        info!(query = %self.params.query, repo = %active_repo_name, branch = ?self.params.branch, "Calling search_semantic library function");
+
+        match search_semantic(
+            &self.params.query,
+            self.params.limit.unwrap_or(10) as usize, // Use param limit or default
+            filter, // Pass the constructed filter
+            &active_repo_name, // Pass repo name for collection name
+            &vdb_app_config, // Pass full config for embedding handler
+            qdrant_client, // Pass Qdrant client
+        ).await {
             Ok(results) => {
-                info!(count = results.len(), "Search completed successfully.");
-                state.set_context(format!("search_results_{}", self.params.query), results)
-                    .map_err(|e| RelayError::ToolError(format!("Failed to set context for search results: {}", e)))?;
+                info!(count = results.len(), "Semantic search completed successfully.");
+                let result_value = serde_json::to_value(&results)
+                    .map_err(|e| RelayError::SerializationError(e))?;
+                
+                state.set_context("last_action_status".to_string(), "success".to_string())
+                    .map_err(RelayError::SerializationError)?;
+                state.set_context("search_results".to_string(), result_value)
+                    .map_err(RelayError::SerializationError)?; 
+                state.set_context("last_action_message".to_string(), format!("Found {} results.", results.len()))
+                    .map_err(RelayError::SerializationError)?; 
                 Ok(())
-            }
+            },
             Err(e) => {
-                error!(error = %e, "Semantic search failed");
-                state.set_context(format!("search_error_{}", self.params.query), e.to_string())
-                    .map_err(|e_ctx| RelayError::ToolError(format!("Failed to set context for search error: {}", e_ctx)))?;
-                Err(e)
+                error!(error = %e, query = %self.params.query, repo = %active_repo_name, "search_semantic failed");
+                let err_msg = format!("Semantic search failed for query '{}' in repository '{}': {}", self.params.query, active_repo_name, e);
+                state.set_context("last_action_status".to_string(), "error".to_string())
+                    .map_err(RelayError::SerializationError)?;
+                state.set_context("last_action_error".to_string(), err_msg.clone())
+                    .map_err(RelayError::SerializationError)?;
+                Err(RelayError::ToolError(err_msg))
             }
         }
     }

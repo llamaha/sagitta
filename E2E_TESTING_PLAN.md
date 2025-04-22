@@ -1,15 +1,14 @@
-# VectorDB CLI & Server E2E Testing Plan
+# VectorDB CLI E2E Testing Plan
 
-This document outlines the steps for end-to-end testing of the `vectordb-cli` binary and its associated gRPC server.
+This document outlines the steps for end-to-end testing of the `vectordb-cli` binary.
 
 ## Prerequisites
 
 1.  **Compiled Binary:** The `vectordb-cli` binary compiled in release mode (e.g., `./target/release/vectordb-cli`).
 2.  **ONNX Models:** Default embedding model (`all-minilm-l6-v2.onnx` or similar) and tokenizer (`tokenizer.json`) available in the `./onnx/` directory relative to where the CLI is run, OR configured correctly in the default config file (`~/.config/vectordb-cli/config.toml`).
 3.  **Git:** Git command-line tool installed.
-4.  **grpcurl:** `grpcurl` tool installed for gRPC testing.
-5.  **Qdrant:** A running Qdrant instance accessible (usually `http://localhost:6334` by default config).
-6.  **Test Repository:** A git repository to use for testing (e.g., `https://github.com/octocat/Spoon-Knife`).
+4.  **Qdrant:** A running Qdrant instance accessible (web UI on port 6333, service for the tool on port 6334 by default config).
+5.  **Test Repository:** A git repository to use for testing (e.g., `https://github.com/octocat/Spoon-Knife`).
 
 ## Phase 1: CLI Testing
 
@@ -60,6 +59,7 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ```
 4.  **Query Repository (Initial):** Query for known content in the repo.
     ```bash
+    # NOTE: If repo is set active via 'repo use', the --repo flag is not needed.
     ./target/release/vectordb-cli repo query "Spoon-Knife" | cat
     # Expected: Search results including chunks from the repo's files.
     ```
@@ -84,18 +84,21 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ```
 8.  **Query Repository (Updated):** Query for content in the new file.
     ```bash
+    # NOTE: If repo is set active via 'repo use', the --repo flag is not needed.
     ./target/release/vectordb-cli repo query "different content" | cat
     # Expected: Search results including chunks from the new file (another_file.md).
     # Note: Previous testing showed issues indexing simple .txt files; use recognized extensions.
     ```
 9.  **Repository Stats:** Get statistics about the repository.
     ```bash
-    ./target/release/vectordb-cli repo stats "$UNIQUE_NAME" | cat
+    # NOTE: If repo is set active via 'repo use', the repo name argument is not needed.
+    ./target/release/vectordb-cli repo stats | cat
     # Expected: Output includes number of documents, vectors, and other relevant statistics.
     ```
 10. **Clear Repository:** Clear the content of the repository.
     ```bash
-    ./target/release/vectordb-cli repo clear "$UNIQUE_NAME" -y | cat
+    # NOTE: If repo is set active via 'repo use', the repo name argument is not needed.
+    ./target/release/vectordb-cli repo clear -y | cat
     # Expected: Success message, repository content cleared.
     ```
 11. **Remove Repository:** Remove the test repository config and its data.
@@ -138,7 +141,8 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ```
 3.  **Clear Index:** Clear the simple index.
     ```bash
-    ./target/release/vectordb-cli simple clear -y | cat
+    # NOTE: The -y flag is not supported for this command.
+    ./target/release/vectordb-cli simple clear | cat
     # Expected: Success message, index cleared.
     ```
 4.  **Query Index (After Clear):** Verify the index is empty.
@@ -166,15 +170,63 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ```
 
 **Test Steps:**
-1.  **Edit Function:** Use the edit command to modify the function.
+1.  **Validate Edit Function:** Use the edit validate command to check the modification.
     ```bash
-    ./target/release/vectordb-cli edit --repo "$UNIQUE_NAME" --query "change hello function to print 'Hello E2E Test'" --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" -y | cat
-    # Expected: Success message, indicating the file was edited.
+    # NOTE: The 'edit' command requires a subcommand like 'validate'.
+    # Similar to apply, needs explicit content and line numbers.
+    REPLACEMENT_CONTENT='    print("Hello E2E Test")' # Simple content to avoid escaping issues
+    ./target/release/vectordb-cli edit validate --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --edit-content "$REPLACEMENT_CONTENT" --start-line 2 --end-line 2 | cat
+    # Expected: Success message, indicating validation passed (or specific validation errors).
     ```
-2.  **Verify Edit:** Check the content of the file.
+2.  **Apply Edit Function:** Use the edit apply command to modify the function.
+    ```bash
+    # NOTE: The 'edit' command requires a subcommand like 'apply'.
+    # 'apply' needs explicit content (--edit-content) and line numbers, not a query.
+    # The test below verifies applying a direct edit, not semantic generation based on a query.
+    # Shell escaping for special characters in REPLACEMENT_CONTENT can be tricky.
+    REPLACEMENT_CONTENT='    print("Hello E2E Test")' # Simple content to avoid escaping issues
+    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --edit-content "$REPLACEMENT_CONTENT" --start-line 2 --end-line 2 | cat
+    # Expected: Success message, indicating the file was edited.
+    # ACTUAL RESULT (during test run): Command ran but did not modify the file. Phase skipped.
+    ```
+3.  **Verify Edit:** Check the content of the file.
     ```bash
     cat "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
     # Expected: Content should show print("Hello E2E Test").
+    ```
+
+4.  **Test Semantic Target (Validate):** Validate an edit using a semantic query.
+    ```bash
+    # Ensure edit_test.py exists and is committed/synced
+    ./target/release/vectordb-cli edit validate --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --element-query "function hello" --edit-content "    # Semantic edit target" | cat
+    # Expected: Validation success or failure based on finding the element.
+    ```
+
+5.  **Test Semantic Target (Apply):** Apply an edit using a semantic query.
+    ```bash
+    # Ensure edit_test.py exists and is committed/synced
+    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --element-query "function hello" --edit-content "    print(\"Semantic Edit Applied\")" | cat
+    # Expected: Success message, indicating the file was edited.
+    ```
+
+6.  **Verify Semantic Edit:** Check the content of the file.
+    ```bash
+    cat "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
+    # Expected: Content should show print("Semantic Edit Applied").
+    ```
+
+7.  **Test Feature Flags (Apply):** Run apply with unimplemented feature flags.
+    ```bash
+    # Ensure edit_test.py exists and is committed/synced
+    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --start-line 1 --end-line 1 --edit-content "# Flag Test" --no-format --update-references --no-preserve-docs | cat
+    # Expected: Success message, potentially with "Note: ... option is set (not implemented yet)." messages.
+    ```
+
+8.  **Test ONNX Flags (Apply):** Run apply with ONNX flags (should have no effect).
+    ```bash
+    # Ensure edit_test.py exists and is committed/synced
+    ./target/release/vectordb-cli -m ./onnx/all-minilm-l6-v2.onnx -t ./onnx edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --start-line 1 --end-line 1 --edit-content "# ONNX Flag Test" | cat
+    # Expected: Success message. ONNX flags are parsed but ignored by edit logic.
     ```
 
 **Cleanup:** (Covered by main cleanup)

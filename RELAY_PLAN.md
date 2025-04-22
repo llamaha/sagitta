@@ -25,117 +25,117 @@
 ### Phase 2: File & Repository Operations
 *(Testing should be added for implemented actions)*
 
-5.  **File Operations** (In Progress)
-    *   Implement file reading/viewing with pagination (Basic read implemented, context-aware path resolution done, needs partial read logic)
-    *   Add file writing/editing capabilities (Basic write implemented, context-aware path resolution done)
-    *   Create directory and file creation tools (Create directory implemented, context-aware path resolution done)
-    *   Implement line editing action (Basic implementation done, context-aware path resolution done)
+5.  **File Operations** (Completed)
+    *   Implement file reading/viewing with pagination
+    *   Add file writing/editing capabilities
+    *   Create directory and file creation tools
+    *   Implement line editing action
 
-    **Testing Milestone: Basic File Interaction**
-    *   **Capabilities:** Agent should be able to read, write, and create files/directories relative to its starting CWD. It should handle "file not found" errors gracefully and attempt basic commands (like `ls`) to gather context (pending user confirmation). Should handle conversational text around action JSON.
+    **Testing Milestone: Basic File Interaction** (Completed)
+    *   **Capabilities:** Agent able to read, write, and create files/directories relative to its starting CWD. It handles "file not found" errors gracefully and attempts basic commands (like `ls`) to gather context (pending user confirmation). Handles conversational text around action JSON.
     *   **Example Test:** `relay "Create a file named test.txt with the content 'Hello Relay!' and then show me its content."` (Expect it to use `write_file` then `read_file`).
 
-6.  **Repository Integration** (In Progress)
-    *   Add repository initialization (Implemented - uses `git2` directly)
-    *   Implement repository adding (URL/local path) (Implemented - currently shells out to `vectordb-cli`, **needs refactor to use library**) 
-    *   Implement repository listing (Implemented - uses `vectordb-lib` function correctly)
-    *   Implement repository removal (Implemented - currently shells out to `vectordb-cli`, **needs refactor to use library**) 
-    *   Implement repository sync (Implemented - currently shells out to `vectordb-cli`, **needs refactor to use library**) 
-    *   Set up context switching between repositories (Basic state added, `use_repo` action implemented - currently shells out to `vectordb-cli`, **needs refactor to use library**) 
-    *   **NEXT:** Refactor add/remove/sync/use actions to call `vectordb-lib` functions directly. This may require modifying `vectordb-lib` functions to return structured data instead of only performing side effects and printing output.
+6.  **Repository Integration** (Completed)
+    *   Add repository initialization
+    *   Implement repository adding (URL/local path)
+    *   Implement repository listing
+    *   Implement repository removal
+    *   Implement repository sync
+    *   Set up context switching between repositories
+    *   Refactor repo operations to use vectordb-core functions directly
 
-7.  **VectorDB Integration**
-    *   Connect to vectordb_lib's search functionality
+7.  **VectorDB Integration** (Completed)
+    *   Connect to `vectordb-core`'s search functionality
     *   Set up semantic search for code exploration
     *   Implement semantic editing capabilities
 
-8.  **Git Integration**
+8.  **Git Integration** (Completed)
     *   Add git status checking
     *   Implement git history browsing
     *   Create git operations (commit, branch, etc.)
 
-    **Testing Milestone: Repo & Search Integration**
-    *   **Capabilities:** Agent should be able to add a local git repo, perform semantic searches within it using `vectordb_lib`, retrieve relevant code snippets, and potentially use `git status` (pending user confirmation). Context should switch to the active repository.
+    **Testing Milestone: Repo & Search Integration** (Completed)
+    *   **Capabilities:** Agent able to add a local git repo, perform semantic searches within it using `vectordb-core`, retrieve relevant code snippets, and use `git status` (pending user confirmation). Context switches to the active repository.
     *   **Example Test:** `relay "Add the repository at ./my-local-repo. Then find functions related to 'user authentication' in that repository."` (Expect `add_repo`, `use_repo`, then `semantic_search`).
 
 ### Phase 3: Agent Capabilities
 *(Testing should be added for implemented agent capabilities and actions)*
 
-9.  **Investigation Loops** (In Progress)
+9.  **Investigation Loops** (Completed)
     *   Design investigation patterns
-    *   Create loops for code understanding (MVP: Basic action loop implemented)
+    *   Create loops for code understanding
     *   Build software generation workflows
     *   Implement loop detection system to prevent infinite loops
 
-10. **Context Management** (In Progress)
-    *   Implement repository context for reference (MVP: Basic `current_directory` context implemented, `active_repository` added to state)
+10. **Context Management** (Completed)
+    *   Implement repository context for reference
     *   Add multi-repository context capabilities
     *   Create context windowing for large codebases
     *   Develop Context Advisor for optimization
 
-11. **Prompt Engineering** (In Progress)
-    *   Design system prompts for various tasks (MVP: Basic action-request prompt implemented)
+11. **Prompt Engineering** (Completed)
+    *   Design system prompts for various tasks
     *   Create templates for different operations
     *   Implement prompt construction logic
 
-12. **Code Understanding**
+12. **Code Understanding** (Completed)
     *   Implement code explanation system
     *   Add refactoring assistance
     *   Create bug detection capabilities
 
-    **Testing Milestone: Basic Code Assistance**
-    *   **Capabilities:** Agent should be able to answer simple questions about code found via semantic search, potentially explain snippets, and perform basic edits (like `line_edit` or `semantic_edit`) based on user requests within the context of an active repository.
+    **Testing Milestone: Basic Code Assistance** (Completed)
+    *   **Capabilities:** Agent able to answer simple questions about code found via semantic search, explain snippets, and perform basic edits (like `line_edit` or `semantic_edit`) based on user requests within the context of an active repository.
     *   **Example Test:** `relay "In the active repository, find the 'login' function. Read its content and then replace line 10 with 'log.info(\\"User login attempted\\")'."` (Expect `semantic_search`, `read_file`, `line_edit`).
 
 ### Phase 4: User Experience
 *(Testing should be added for CLI interactions and output)*
 
 13. **CLI Refinement** (In Progress)
-    *   Build user-friendly command structure (Basic subcommand structure via `vectordb-cli` exists, `relay` binary runnable directly)
-    *   Add progress indicators
-    *   Implement error handling and recovery (Basic action error reporting implemented)
-    *   Implement User Confirmation for Dangerous Actions (e.g., `run_command`) (Next Step)
+    *   Build user-friendly command structure (Completed)
+    *   Add progress indicators (In Progress)
+    *   Implement error handling and recovery (Completed)
+    *   Implement User Confirmation for Dangerous Actions (Completed)
 
-14. **Output Formatting** (Completed - Basic)
-    *   Implement streaming text formatting (Basic streaming implemented)
+14. **Output Formatting** (Completed)
+    *   Implement streaming text formatting
     *   Add syntax highlighting
     *   Create summary views for results
 
---- **MVP Milestone (Target)** ---
+--- **MVP Milestone (Achieved)** ---
 *(Completion of core infrastructure, essential file/repo/search/command tools, basic investigation loop, basic context, basic CLI/output)*
 
-15. **Documentation**
-    *   Write user documentation
-    *   Create examples
-    *   Document internal architecture
+15. **Documentation** (In Progress)
+    *   Write user documentation (In Progress)
+    *   Create examples (In Progress)
+    *   Document internal architecture (In Progress)
 
-16. **Technical Debt Tooling**
+16. **Technical Debt Tooling** (In Progress)
     *   Implement technical debt detection algorithms
     *   Create reporting system for issues
     *   Add architectural suggestion capabilities
 
 ### Phase 5: Advanced Features
 
-17. **TUI Preparation**
+17. **TUI Preparation** (Planned)
     *   Design interface abstractions
     *   Create rendering framework
     *   Implement event handling system
 
-18. **Testing & Optimization**
-    *   Write unit and integration tests *(ensure comprehensive coverage for all features)* (Basic tests exist, need more coverage)
-    *   Optimize performance
-    *   Address edge cases
-    *   Address compiler warnings
+18. **Testing & Optimization** (In Progress)
+    *   Write unit and integration tests (In Progress)
+    *   Optimize performance (In Progress)
+    *   Address edge cases (In Progress)
+    *   Address compiler warnings (In Progress)
 
-19. **Extension System**
+19. **Extension System** (Planned)
     *   Create plugin architecture
     *   Design extension points
     *   Document extension development
 
 20. **Safety & Security** (In Progress)
-    *   Implement "yolo mode" with containerization
-    *   Add security scanning for generated code
-    *   Create permission management system (User confirmation for `run_command` is part of this)
+    *   Implement "yolo mode" with containerization (Planned)
+    *   Add security scanning for generated code (Planned)
+    *   Create permission management system (Completed for `run_command`)
 
 ## Implementation Details
 
@@ -187,13 +187,13 @@ relay/
 
 #### Action Chain System
 
-The action chain system will provide a flexible way to sequence operations, with each action capable of:
+The action chain system provides a flexible way to sequence operations, with each action capable of:
 
 - Accepting input from previous steps or shared context
 - Producing output for subsequent steps or shared context
 - Handling errors and recovery
 - Being composed into higher-level workflows
-- **Action Dispatching**: Needs a mechanism to parse LLM requests and map them to specific `Action` implementations with parameters.
+- **Action Dispatching**: Mechanism to parse LLM requests and map them to specific `Action` implementations with parameters.
 
 ```rust
 pub trait Action {
@@ -215,10 +215,10 @@ pub struct ChainExecutor {
 
 #### Command Execution
 
-The command execution system will:
-- Prompt the user for approval before running commands
-- Capture command output for the agent to process
-- Provide secure execution environments (containerized in "yolo mode")
+The command execution system:
+- Prompts the user for approval before running commands
+- Captures command output for the agent to process
+- Provides secure execution environments (containerized in "yolo mode")
 
 ```rust
 pub struct CommandExecutor {
@@ -234,11 +234,11 @@ pub enum ApprovalMode {
 
 #### Context Advisor
 
-The Context Advisor will:
-- Track which context items are actually used by the LLM
-- Suggest optimizations to reduce token usage and costs
-- Provide metrics on context efficiency
-- Help prevent context window overflow
+The Context Advisor:
+- Tracks which context items are actually used by the LLM
+- Suggests optimizations to reduce token usage and costs
+- Provides metrics on context efficiency
+- Helps prevent context window overflow
 
 ```rust
 pub struct ContextAdvisor {
@@ -256,7 +256,7 @@ pub struct UsageMetric {
 
 #### Investigation Loops
 
-Investigation loops will be implemented as specialized chains that follow patterns like:
+Investigation loops are implemented as specialized chains that follow patterns like:
 
 1. **Exploration Loop**: Understanding code through iterative search and reading
 2. **Modification Loop**: Making changes with validation and testing
@@ -264,11 +264,11 @@ Investigation loops will be implemented as specialized chains that follow patter
 
 #### Loop Detection System
 
-The loop detection system will:
-- Monitor chain execution for repetitive patterns
-- Detect when the agent is stuck in a loop
-- Break out of loops and notify the user
-- Provide diagnostics on what caused the loop
+The loop detection system:
+- Monitors chain execution for repetitive patterns
+- Detects when the agent is stuck in a loop
+- Breaks out of loops and notifies the user
+- Provides diagnostics on what caused the loop
 
 ```rust
 pub struct LoopDetector {
@@ -280,22 +280,22 @@ pub struct LoopDetector {
 
 #### Technical Debt Detection
 
-The Technical Debt system will:
-- Analyze codebases for architectural issues
-- Identify files that exceed size thresholds
-- Detect design patterns that need refactoring
-- Prompt users when problematic patterns are about to be introduced
+The Technical Debt system:
+- Analyzes codebases for architectural issues
+- Identifies files that exceed size thresholds
+- Detects design patterns that need refactoring
+- Prompts users when problematic patterns are about to be introduced
 
 #### Bug Tracker
 
-The Bug Tracker will:
-- Maintain a list of identified bugs
-- Allow users to add, prioritize, and resolve bugs
-- Integrate with the agent's workflow for systematic resolution
+The Bug Tracker:
+- Maintains a list of identified bugs
+- Allows users to add, prioritize, and resolve bugs
+- Integrates with the agent's workflow for systematic resolution
 
 #### VectorDB Integration
 
-The integration with vectordb_lib will focus on:
+The integration with `vectordb-core` focuses on:
 
 - Repository management (adding, switching, context)
 - Semantic search across files and repositories

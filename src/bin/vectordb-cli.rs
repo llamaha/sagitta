@@ -1,25 +1,18 @@
 #![allow(dead_code)]
 
-use anyhow::{Result, Context, anyhow};
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use std::sync::Arc;
-use std::process::exit;
-use tracing_subscriber::fmt;
-use log;
 use std::path::PathBuf;
-use colored::*;
 
 // Import library modules
 use vectordb_lib::{
     cli::commands::{handle_command, CliArgs},
 };
 use qdrant_client::Qdrant;
-use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 
 // Use items from the new core library
-use vectordb_core::{
-    config::{self as core_config, AppConfig as CoreAppConfig, load_config as core_load_config},
-};
+use vectordb_core::config::{AppConfig as CoreAppConfig, load_config as core_load_config};
 
 #[tokio::main]
 async fn main() -> Result<()> {

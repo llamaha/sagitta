@@ -3,13 +3,11 @@
 
 use crate::vectordb::embedding::EmbeddingModelType;
 // use crate::vectordb::error::Result;
-use vectordb_core::error::Result as VectorDBResult;
-use vectordb_core::error::VectorDBError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::path::PathBuf;
 // use crate::vectordb::embedding::EmbeddingResult; // Removed
-use vectordb_core::syntax::CodeChunk; // Use core CodeChunk
+ // Use core CodeChunk
 
 // === New EmbeddingProvider Trait ===
 // pub trait EmbeddingProvider: Send + Sync + Debug { // Remove local trait definition

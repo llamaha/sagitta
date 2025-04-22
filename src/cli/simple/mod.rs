@@ -22,11 +22,10 @@ use std::{
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use vectordb_core::repo_helpers as helpers;
-use vectordb_core::config::{AppConfig, RepositoryConfig};
+use vectordb_core::config::AppConfig;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use crate::{
-    cli::{CliArgs, Commands},
+    cli::CliArgs,
     syntax,
     vectordb::embedding_logic::EmbeddingHandler,
 };

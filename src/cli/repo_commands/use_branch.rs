@@ -1,12 +1,9 @@
 use clap::Args;
 use anyhow::{Result, Context, bail, anyhow};
 use std::path::PathBuf;
-use std::sync::Arc;
 use vectordb_core::repo_helpers::switch_repository_branch;
 use vectordb_core::{AppConfig, save_config};
-use crate::git;
 use colored::*;
-use log;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]

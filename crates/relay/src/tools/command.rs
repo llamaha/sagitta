@@ -8,11 +8,9 @@ use crate::utils::prompt_user_confirmation;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
-use std::io::{self, Write};
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
-use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunCommandParams {
@@ -87,7 +85,7 @@ impl Action for RunCommandAction {
         command.stderr(std::process::Stdio::piped());
         
         // Start the command
-        let mut child = match command.spawn() {
+        let child = match command.spawn() {
             Ok(child) => child,
             Err(e) => {
                 error!(command = %command_str, error = %e, "Failed to spawn command");

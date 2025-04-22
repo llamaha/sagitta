@@ -4,12 +4,19 @@ use crate::context::AppContext;
 use crate::utils::error::{RelayError, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 use std::io::{self, Write};
+use std::sync::Arc;
+use anyhow::Context as AnyhowContext;
+
+// --- Add vectordb-core imports ---
+use vectordb_core::config::{AppConfig as VectorDBAppConfig, RepositoryConfig, load_config, save_config, get_config_path};
+use vectordb_core::repo_helpers::{delete_repository_data};
+use vectordb_core::error::VectorDBError;
+// --- End vectordb-core imports ---
 
 // --- Remove Repository Action ---
-// Executes `vectordb-cli repo remove <name>`
+// Calls vectordb_core::repo_helpers::delete_repository_data
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RemoveRepositoryParams {
@@ -33,81 +40,77 @@ impl Action for RemoveRepositoryAction {
         "remove_repository"
     }
 
-    async fn execute(&self, _context: &AppContext, state: &mut ChainState) -> Result<()> {
-        debug!(name = %self.params.name, "Preparing RemoveRepositoryAction");
+    async fn execute(&self, context: &AppContext, state: &mut ChainState) -> Result<()> {
+        let repo_name = &self.params.name;
+        debug!(name = %repo_name, "Preparing RemoveRepositoryAction using library function");
 
-        // --- Construct Command --- 
-        let command_string = format!("vectordb-cli repo remove {}", self.params.name);
-        let mut command = Command::new("vectordb-cli");
-        command.args(["repo", "remove", &self.params.name]);
-        // --- End Construct Command ---
+        // --- Confirmation Logic (Placeholder) ---
+        // TODO: Confirmation should ideally happen *before* calling the action.
+        // If confirmation is needed here, it requires a different mechanism
+        // (e.g., returning a specific result type asking for confirmation).
+        // For now, proceeding without explicit confirmation within the action.
+        warn!("Executing remove_repository without explicit user confirmation within the action.");
 
-        // --- User Confirmation --- 
-        // Note: The original code included a direct user prompt here.
-        // In the Relay architecture, such direct interaction should ideally be 
-        // handled by the agent/orchestrator calling the action, not within the action itself.
-        // For now, we'll simulate automatic confirmation or delegate this responsibility.
-        // Let's assume confirmation is implicitly given for now, or handled upstream.
-        // If explicit confirmation is needed, the action should signal this requirement.
-        
-        // Original code for reference:
-        // print!("Relay wants to run: `{}`. This will remove the repository configuration. Allow? (y/n): ", command_string);
-        // io::stdout().flush().map_err(|e| RelayError::IoError(e))?; 
-        // let mut user_input = String::new();
-        // io::stdin().read_line(&mut user_input).map_err(|e| RelayError::IoError(e))?;
-        // if user_input.trim().to_lowercase() != "y" {
-        //     warn!(command = %command_string, "User denied command execution.");
-        //     let denial_message = format!("User denied execution of remove_repository command for {}", self.params.name);
-        //     state
-        //         .set_context(format!("repo_remove_error_{}", self.params.name), denial_message)
-        //         .map_err(|e| RelayError::ToolError(format!("Failed to set context for denial: {}", e)))?;
-        //     return Ok(()); 
-        // }
-        
-        info!(command = %command_string, "Executing potentially confirmed RemoveRepositoryAction");
+        // --- Retrieve Dependencies ---
+        let qdrant_client = Arc::clone(&context.qdrant_client);
+        let config_path = get_config_path()
+            .map_err(|e| RelayError::ToolError(format!("Failed to get config path: {}", e)))?;
 
-        // Configure stdio
-        command.stdin(std::process::Stdio::null());
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
+        // --- Load Current Config ---
+        // Must load the mutable config here to find the repo and later remove it
+        let mut vdb_config = load_config(Some(&config_path))
+            .map_err(|e| RelayError::ToolError(format!("Failed to load VectorDB config: {}", e)))?;
 
-        // Run the command
-        let output = command.output().await.map_err(|e| {
-            error!(error = %e, command = %command_string, "Failed to execute 'vectordb-cli repo remove'");
-            RelayError::ToolError(format!("Failed to execute vectordb-cli remove repo: {}", e))
-        })?;
+        // --- Find Repository Config ---
+        let repo_config_to_remove = vdb_config.repositories.iter()
+            .find(|r| r.name == *repo_name)
+            .cloned() // Clone the config to use it after the borrow ends
+            .ok_or_else(|| RelayError::ToolError(format!("Repository '{}' not found in configuration.", repo_name)))?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        info!(name = %repo_name, "Found repository config. Proceeding with deletion.");
 
-        if output.status.success() {
-            info!(repo_name = %self.params.name, "Successfully removed repository via CLI.");
+        // --- Call Library Function to Delete Data & Files ---
+        match delete_repository_data(&repo_config_to_remove, Arc::clone(&qdrant_client)).await {
+            Ok(_) => {
+                info!(repo_name = %repo_name, "Successfully deleted repository data and local files via library function.");
 
-            // Update ChainState if the removed repo was the active one
-            if state.active_repository.as_deref() == Some(&self.params.name) {
-                state.active_repository = None;
-                info!(repo_name = %self.params.name, "Cleared active repository in state as it was removed.");
+                // --- Remove from Config & Save ---
+                vdb_config.repositories.retain(|r| r.name != *repo_name);
+                // Also update active repo in config if it was the one removed
+                if vdb_config.active_repository.as_deref() == Some(repo_name) {
+                    vdb_config.active_repository = None;
+                    info!(repo_name = %repo_name, "Cleared active repository in config as it was removed.");
+                }
+                save_config(&vdb_config, Some(&config_path))
+                    .map_err(|e| RelayError::ToolError(format!("Failed to save updated config after removing repository '{}': {}", repo_name, e)))?;
+
+                info!(repo_name = %repo_name, "Successfully removed repository from config file.");
+
+                // --- Update ChainState ---
+                if state.active_repository.as_deref() == Some(repo_name) {
+                    state.active_repository = None;
+                    info!(repo_name = %repo_name, "Cleared active repository in chain state.");
+                }
+
+                // Set success context
+                let success_msg = format!("Successfully removed repository '{}'.", repo_name);
+                state.set_context("last_action_status".to_string(), "success".to_string())
+                    .map_err(RelayError::SerializationError)?;
+                state.set_context("last_action_message".to_string(), success_msg)
+                    .map_err(RelayError::SerializationError)?;
+
+                Ok(())
+            },
+            Err(e) => {
+                error!(error = %e, repo_name = %repo_name, "delete_repository_data library function failed");
+                let err_msg = format!("Failed to delete repository data for '{}': {}", repo_name, e);
+                // Set error context
+                state.set_context("last_action_status".to_string(), "error".to_string())
+                     .map_err(RelayError::SerializationError)?;
+                state.set_context("last_action_error".to_string(), err_msg.clone())
+                     .map_err(RelayError::SerializationError)?;
+                Err(RelayError::ToolError(err_msg))
             }
-
-            state
-                .set_context(format!("repo_remove_status_{}", self.params.name), "Success".to_string())
-                .map_err(|e| RelayError::ToolError(format!("Failed to set context for repo remove status: {}", e)))?;
-            state
-                .set_context(format!("repo_remove_stdout_{}", self.params.name), stdout)
-                .map_err(|e| RelayError::ToolError(format!("Failed to set context for repo remove stdout: {}", e)))?;
-            Ok(())
-        } else {
-            error!(status = %output.status, stderr = %stderr, command = %command_string, "'vectordb-cli repo remove' failed");
-            let err_msg = format!(
-                "Failed to remove repository '{}'. Exit code: {:?}, Stderr: {}",
-                self.params.name,
-                output.status.code(),
-                stderr
-            );
-            state
-                .set_context(format!("repo_remove_error_{}", self.params.name), err_msg.clone())
-                .map_err(|e| RelayError::ToolError(format!("Failed to set context for repo remove error: {}", e)))?;
-            Err(RelayError::ToolError(err_msg))
         }
     }
 } 

@@ -14,7 +14,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::cli::commands::CliArgs;
 // Use config types from the core library (with underscore)
-use vectordb_core::{AppConfig, load_config, save_config, embedding::EmbeddingHandler, config::get_repo_base_path};
+use vectordb_core::{AppConfig, save_config, embedding::EmbeddingHandler, config::get_repo_base_path};
 use vectordb_core::qdrant_client_trait::QdrantClientTrait; // Use core trait
 use std::fmt::Debug;
 // Moved mockall imports inside #[cfg(test)]
@@ -169,15 +169,15 @@ mod tests {
     use crate::cli::repo_commands::{RepoArgs, RepoCommand};
     use crate::cli::repo_commands::remove::RemoveRepoArgs;
     use qdrant_client::Qdrant;
-    use qdrant_client::qdrant::{Condition, Filter, PointId, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList}; // Moved qdrant test imports here
+     // Moved qdrant test imports here
     use std::sync::Arc;
     use tokio::runtime::Runtime;
     use std::collections::HashMap;
     use std::path::{PathBuf};
     use std::fs;
     use tempfile::{tempdir};
-    use mockall::{automock, predicate::*}; // Moved mockall imports here
-    use mockall::predicate::eq;
+     // Moved mockall imports here
+    
     use std::time::{SystemTime, UNIX_EPOCH};
     // use vectordb_core::qdrant_client_trait::MockQdrantClientTrait; // Commented out - may be unused or moved
 
