@@ -5,19 +5,23 @@ pub mod clear;
 pub mod query;
 pub mod sync;
 pub mod use_branch;
-pub mod add;
 pub mod remove;
-pub mod helpers; // Make public
 pub mod config; // Add new config module
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use std::{path::PathBuf, sync::Arc};
 
 use crate::cli::commands::CliArgs;
-use crate::config::AppConfig;
-use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+// Use config types from the core library (with underscore)
+use vectordb_core::{AppConfig, load_config, save_config, embedding::EmbeddingHandler, config::get_repo_base_path};
+use vectordb_core::qdrant_client_trait::QdrantClientTrait; // Use core trait
 use std::fmt::Debug;
+// Moved mockall imports inside #[cfg(test)]
+// use mockall::{automock, predicate::*};
+// use qdrant_client::qdrant::{Condition, Filter, PointId, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList};
+// // use vectordb_core::qdrant_client_trait::MockQdrantClientTrait; // Commented out - may be unused or moved
+// use vectordb_core::config::RepositoryConfig;
 
 const COLLECTION_NAME_PREFIX: &str = "repo_";
 pub(crate) const FIELD_BRANCH: &str = "branch";
@@ -41,7 +45,7 @@ pub struct ListArgs {
 #[derive(Clone)]
 pub enum RepoCommand {
     /// Add a new repository to manage.
-    Add(add::AddRepoArgs),
+    Add(vectordb_core::repo_add::AddRepoArgs),
     /// List managed repositories.
     List(ListArgs),
     /// Set the active repository for commands.
@@ -72,19 +76,82 @@ pub async fn handle_repo_command<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    match args.command {
-        RepoCommand::Add(add_args) => add::handle_repo_add(add_args, config, Arc::clone(&client), override_path).await?,
-        RepoCommand::List(list_args) => list::list_repositories(config, list_args.json)?,
-        RepoCommand::Use(use_args) => r#use::use_repository(use_args, config, override_path)?,
-        RepoCommand::Remove(remove_args) => remove::handle_repo_remove(remove_args, config, Arc::clone(&client), override_path).await?,
-        RepoCommand::Clear(clear_args) => clear::handle_repo_clear(clear_args, config, client, override_path).await?,
-        RepoCommand::UseBranch(branch_args) => use_branch::handle_use_branch(branch_args, config, override_path).await?,
-        RepoCommand::Query(query_args) => query::handle_repo_query(query_args, config, Arc::clone(&client), cli_args).await?,
-        RepoCommand::Sync(sync_args) => sync::handle_repo_sync(sync_args, cli_args, config, Arc::clone(&client), override_path).await?,
-        RepoCommand::Stats(stats_args) => super::stats::handle_stats(stats_args, config.clone(), Arc::clone(&client)).await?,
-        RepoCommand::Config(config_args) => config::handle_config(config_args, config, override_path)?,
-    }
-    Ok(())
+    let command_result = match args.command {
+        RepoCommand::Add(add_args) => {
+            // --- Prepare arguments for the refactored handle_repo_add --- 
+            
+            // 1. Initialize EmbeddingHandler and get dimension
+            //    Note: This might require error handling if ONNX paths are not set
+            let embedding_handler = EmbeddingHandler::new(config)
+                 .context("Failed to initialize embedding handler (check ONNX config)")?;
+            let embedding_dim = embedding_handler.dimension()
+                 .context("Failed to get embedding dimension")?;
+
+            // 2. Determine repo base path (prioritize args over config)
+            let repo_base_path = match &add_args.repositories_base_path {
+                Some(path) => path.clone(),
+                None => get_repo_base_path(Some(config))
+                            .context("Failed to determine repository base path")?,
+            };
+            // Ensure base path exists
+            std::fs::create_dir_all(&repo_base_path)
+                 .with_context(|| format!("Failed to create base directory: {}", repo_base_path.display()))?;
+
+            // 3. Call the refactored function from vectordb_core
+            let repo_config_result = vectordb_core::repo_add::handle_repo_add(
+                add_args, 
+                repo_base_path, // Pass determined base path
+                embedding_dim as u64, // Pass dimension
+                Arc::clone(&client)
+            ).await;
+            
+            // Handle the result as before
+            match repo_config_result {
+                Ok(new_repo_config) => {
+                    // Logic to update the main config if add succeeds
+                    config.repositories.push(new_repo_config.clone());
+                    // Optionally set as active? Depends on desired behavior.
+                    // config.active_repository = Some(new_repo_config.name);
+                    save_config(config, override_path)?;
+                    Ok(())
+                },
+                Err(e) => Err(anyhow::Error::from(e)), // Propagate AddRepoError as anyhow::Error
+            }
+        },
+        RepoCommand::List(list_args) => {
+            list::list_repositories(&config, list_args.json)?;
+            Ok(())
+        },
+        RepoCommand::Use(use_args) => {
+            r#use::use_repository(use_args, config, override_path)?;
+            Ok(())
+        },
+        RepoCommand::Remove(remove_args) => Ok(remove::handle_repo_remove(remove_args, config, client.clone(), override_path).await?),
+        RepoCommand::Clear(clear_args) => Ok(clear::handle_repo_clear(clear_args, config, client.clone(), override_path).await?),
+        RepoCommand::UseBranch(branch_args) => {
+            use_branch::handle_use_branch(branch_args, config, override_path).await?;
+            Ok(())
+        },
+        RepoCommand::Query(query_args) => {
+            query::handle_repo_query(query_args, &config, Arc::clone(&client), cli_args).await?;
+            Ok(())
+        },
+        RepoCommand::Sync(sync_args) => {
+            sync::handle_repo_sync(sync_args, cli_args, config, client.clone(), override_path).await?;
+            Ok(())
+        },
+        RepoCommand::Stats(stats_args) => {
+            super::stats::handle_stats(stats_args, config.clone(), Arc::clone(&client)).await?;
+            Ok(())
+        },
+        RepoCommand::Config(config_args) => {
+            config::handle_config(config_args, config, override_path)?;
+            Ok(())
+        },
+    };
+
+    // Evaluate the result of the match arm
+    command_result
 }
 
 // Helper function for tests - allows access to the list_repositories function
@@ -96,26 +163,30 @@ pub fn handle_repo_command_test(config: &AppConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, RepositoryConfig, load_config, save_config};
+    // Use config types and functions from vectordb_core (with underscore)
+    use vectordb_core::{AppConfig, RepositoryConfig, load_config, save_config};
     use crate::cli::commands::Commands;
     use crate::cli::repo_commands::{RepoArgs, RepoCommand};
     use crate::cli::repo_commands::remove::RemoveRepoArgs;
-    use qdrant_client::{Qdrant};
+    use qdrant_client::Qdrant;
+    use qdrant_client::qdrant::{Condition, Filter, PointId, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList}; // Moved qdrant test imports here
     use std::sync::Arc;
     use tokio::runtime::Runtime;
     use std::collections::HashMap;
     use std::path::{PathBuf};
     use std::fs;
     use tempfile::{tempdir};
-    use crate::vectordb::qdrant_client_trait::MockQdrantClientTrait;
+    use mockall::{automock, predicate::*}; // Moved mockall imports here
     use mockall::predicate::eq;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    // use vectordb_core::qdrant_client_trait::MockQdrantClientTrait; // Commented out - may be unused or moved
 
     // Helper function to create a default AppConfig for tests
     fn create_test_config_data() -> AppConfig {
         AppConfig {
             repositories: vec![
-                RepositoryConfig { name: "repo1".to_string(), url: "url1".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo1"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None },
-                RepositoryConfig { name: "repo2".to_string(), url: "url2".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo2"), default_branch: "dev".to_string(), tracked_branches: vec!["dev".to_string()], active_branch: Some("dev".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None },
+                RepositoryConfig { name: "repo1".to_string(), url: "url1".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo1"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false },
+                RepositoryConfig { name: "repo2".to_string(), url: "url2".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo2"), default_branch: "dev".to_string(), tracked_branches: vec!["dev".to_string()], active_branch: Some("dev".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false },
             ],
             active_repository: None,
             qdrant_url: "http://localhost:6334".to_string(),
@@ -140,6 +211,15 @@ mod tests {
          }
       }
 
+    // Helper to create a unique suffix for collections/repos
+    fn unique_suffix() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis()
+            .to_string()
+    }
+
     // --- Updated Tests --- 
     // Note: repo clear tests might still need Qdrant connection or mocking
     // They don't save config, so isolation isn't strictly needed for that
@@ -147,24 +227,15 @@ mod tests {
     fn test_handle_repo_clear_specific_repo() {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
-            let test_repo_name = "my-test-repo-clear-specific".to_string();
-            let collection_name = helpers::get_collection_name(&test_repo_name);
+            let suffix = unique_suffix();
+            let test_repo_name = format!("clear-specific-{}", suffix);
+            let collection_name = format!("repo_{}", test_repo_name);
+            // Use tempdir for config isolation
+            let temp_dir = tempdir().unwrap();
+            let temp_path = temp_dir.path().join("clear_specific_config.toml");
 
-            // Configure Mock Client
-            let mut mock_client = MockQdrantClientTrait::new();
-            mock_client.expect_collection_exists()
-                .with(eq(collection_name.clone()))
-                .times(1)
-                .returning(|_| Ok(true)); // Collection exists
-            
-            mock_client.expect_delete_points_blocking()
-                .times(1)
-                .returning(|_, _| Ok(())); // Successfully deleted points
-            
-            let client = Arc::new(mock_client);
-
-            // Setup config
-            let mut config = create_test_config_data(); 
+            // Setup config and save initial state to temp path
+            let mut config = create_test_config_data();
             config.repositories.push(RepositoryConfig {
                  name: test_repo_name.clone(), 
                  url: "url_clear".to_string(), 
@@ -176,44 +247,51 @@ mod tests {
                  ssh_key_path: None, 
                  ssh_key_passphrase: None, 
                  last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit".to_string())]), // Add some dummy sync state
-                 indexed_languages: Some(vec!["rust".to_string()])
+                 indexed_languages: Some(vec!["rust".to_string()]),
+                 added_as_local_path: false,
             });
             config.active_repository = Some("other_repo".to_string()); // Ensure it clears the specified one
+            save_config(&config, Some(&temp_path)).unwrap(); // Save initial state
             
             let args = clear::ClearRepoArgs { name: Some(test_repo_name.to_string()), yes: true };
             let dummy_cli_args = create_dummy_cli_args(RepoCommand::Clear(args.clone()));
 
-            // Execute with Mock Client
-            let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client, None).await;
+            let client = Arc::new(Qdrant::from_url(&config.qdrant_url).build().expect("Failed to create Qdrant client"));
+
+            // Pre-cleanup just in case
+            let _ = client.delete_collection(&collection_name).await;
+
+            // Execute command, passing the override path
+            let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client.clone(), Some(&temp_path)).await;
             
-            // Assertions
             assert!(result.is_ok(), "handle_repo_command failed: {:?}", result.err());
-            let updated_repo = config.repositories.iter().find(|r| r.name == test_repo_name).expect("Test repo config not found after clear");
+
+            // --- DEBUG ---
+            // dbg!(&config.repositories.iter().find(|r| r.name == test_repo_name)); // REMOVE THIS
+            // --- END DEBUG ---
+
+            // Verify by loading from the temporary file
+            let saved_config = load_config(Some(&temp_path)).unwrap();
+            let updated_repo = saved_config.repositories.iter().find(|r| r.name == test_repo_name).expect("Test repo config not found after clear");
             assert!(updated_repo.last_synced_commits.is_empty(), "Sync status was not cleared");
             assert!(updated_repo.indexed_languages.is_none(), "Indexed languages were not cleared");
+        
+            // Cleanup
+            let _ = client.delete_collection(&collection_name).await;
         });
     }
     #[test]
     fn test_handle_repo_clear_active_repo() {
          let rt = Runtime::new().unwrap();
          rt.block_on(async {
-             let active_repo_name = "my-test-repo-clear-active".to_string();
-             let collection_name = helpers::get_collection_name(&active_repo_name);
+             let suffix = unique_suffix();
+             let active_repo_name = format!("clear-active-{}", suffix);
+             let collection_name = format!("repo_{}", active_repo_name);
+             // Use tempdir for config isolation
+             let temp_dir = tempdir().unwrap();
+             let temp_path = temp_dir.path().join("clear_active_config.toml");
 
-            // Configure Mock Client
-            let mut mock_client = MockQdrantClientTrait::new();
-            mock_client.expect_collection_exists()
-                .with(eq(collection_name.clone()))
-                .times(1)
-                .returning(|_| Ok(true)); // Collection exists
-            
-            mock_client.expect_delete_points_blocking()
-                .times(1)
-                .returning(|_, _| Ok(())); // Successfully deleted points
-            
-            let client = Arc::new(mock_client);
-
-             // Setup config
+             // Setup config and save initial state to temp path
              let mut config = create_test_config_data(); 
              config.repositories.push(RepositoryConfig {
                  name: active_repo_name.clone(), 
@@ -224,23 +302,35 @@ mod tests {
                  active_branch: Some("main".to_string()), 
                  remote_name: None, 
                  ssh_key_path: None, 
-                 ssh_key_passphrase: None,
-                 last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit_active".to_string())]), // Add dummy sync state
-                 indexed_languages: Some(vec!["python".to_string()])
+                 ssh_key_passphrase: None, 
+                 last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit_2".to_string())]),
+                 indexed_languages: Some(vec!["python".to_string()]),
+                 added_as_local_path: false,
              });
-             config.active_repository = Some(active_repo_name.to_string());
+             config.active_repository = Some(active_repo_name.clone());
+             save_config(&config, Some(&temp_path)).unwrap(); // Save initial state
 
-             let args = clear::ClearRepoArgs { name: None, yes: true }; // Clear active
+             let args = clear::ClearRepoArgs { name: None, yes: true }; // No name uses active
              let dummy_cli_args = create_dummy_cli_args(RepoCommand::Clear(args.clone()));
 
-             // Execute with Mock Client
-             let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client, None).await;
+             let client = Arc::new(Qdrant::from_url(&config.qdrant_url).build().expect("Failed to create Qdrant client"));
+
+             // Pre-cleanup just in case
+             let _ = client.delete_collection(&collection_name).await;
+
+             // Execute command, passing the override path
+             let result = handle_repo_command(RepoArgs{ command: RepoCommand::Clear(args)}, &dummy_cli_args, &mut config, client.clone(), Some(&temp_path)).await;
              
-             // Assertions
              assert!(result.is_ok(), "handle_repo_command failed: {:?}", result.err());
-             let updated_repo = config.repositories.iter().find(|r| r.name == active_repo_name).expect("Active repo config not found after clear");
+
+             // Verify by loading from the temporary file
+             let saved_config = load_config(Some(&temp_path)).unwrap();
+             let updated_repo = saved_config.repositories.iter().find(|r| r.name == active_repo_name).expect("Active repo config not found after clear");
              assert!(updated_repo.last_synced_commits.is_empty(), "Sync status was not cleared for active repo");
              assert!(updated_repo.indexed_languages.is_none(), "Indexed languages were not cleared for active repo");
+         
+             // Cleanup
+             let _ = client.delete_collection(&collection_name).await;
          });
     }
     #[test]
@@ -328,7 +418,11 @@ mod tests {
              save_config(&config, Some(&temp_path)).unwrap();
              let initial_repo_count = config.repositories.len();
              
-             let remove_args = RemoveRepoArgs { name: "repo2".to_string(), yes: true }; 
+             let remove_args = RemoveRepoArgs { 
+                 name: "repo2".to_string(), 
+                 yes: true,
+                 delete_local: false
+             }; 
              let dummy_cli_args = create_dummy_cli_args(RepoCommand::Remove(remove_args.clone()));
              let _ = fs::remove_dir_all("/tmp/vectordb_test_repo2"); // Keep dummy dir removal
 
@@ -355,11 +449,15 @@ mod tests {
 
               let mut config = create_test_config_data();
               config.active_repository = Some("repo2".to_string());
-              config.repositories.push(RepositoryConfig { name: "repo3".to_string(), url: "url3".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo3"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None });
+              config.repositories.push(RepositoryConfig { name: "repo3".to_string(), url: "url3".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo3"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false });
               save_config(&config, Some(&temp_path)).unwrap();
               let initial_repo_count = config.repositories.len();
 
-              let remove_args = RemoveRepoArgs { name: "repo2".to_string(), yes: true };
+              let remove_args = RemoveRepoArgs { 
+                  name: "repo2".to_string(), 
+                  yes: true,
+                  delete_local: false
+              };
               let dummy_cli_args = create_dummy_cli_args(RepoCommand::Remove(remove_args.clone()));
               let _ = fs::remove_dir_all("/tmp/vectordb_test_repo2");
 
@@ -370,7 +468,7 @@ mod tests {
               let saved_config = load_config(Some(&temp_path)).unwrap();
               assert_eq!(saved_config.repositories.len(), initial_repo_count - 1);
               assert!(!saved_config.repositories.iter().any(|r| r.name == "repo2"));
-              assert_eq!(saved_config.active_repository, Some("repo1".to_string())); // Should switch to repo1
+              assert_eq!(saved_config.active_repository, None, "Active repository should be None after removal");
 
               // Keep temp_dir alive until end of test scope automatically
           });
@@ -389,12 +487,16 @@ mod tests {
                let initial_config_state = config.clone();
                let initial_repo_count = config.repositories.len();
 
-               let remove_args = RemoveRepoArgs { name: "repo3".to_string(), yes: true }; 
+               let remove_args = RemoveRepoArgs { 
+                   name: "repo3".to_string(), 
+                   yes: true,
+                   delete_local: false
+               }; 
                let dummy_cli_args = create_dummy_cli_args(RepoCommand::Remove(remove_args.clone()));
 
                let result = handle_repo_command(RepoArgs{ command: RepoCommand::Remove(remove_args)}, &dummy_cli_args, &mut config, client.clone(), Some(&temp_path)).await;
                assert!(result.is_err());
-               assert!(result.unwrap_err().to_string().contains("Repository 'repo3' not found"));
+               assert!(result.unwrap_err().to_string().contains(&format!("Configuration for repository '{}' not found", "repo3")));
 
                // Verify config file was NOT changed
                let saved_config = load_config(Some(&temp_path)).unwrap();

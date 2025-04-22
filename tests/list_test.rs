@@ -1,5 +1,5 @@
 use anyhow::Result;
-use vectordb_lib::config::{AppConfig, RepositoryConfig};
+use vectordb_core::config::{AppConfig, RepositoryConfig};
 use vectordb_lib::cli::repo_commands::list::list_repositories;
 use std::path::PathBuf;
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ mod tests {
             ssh_key_path: None,
             ssh_key_passphrase: None,
             last_synced_commits: HashMap::new(),
+            added_as_local_path: false,
         };
         
         let repo2 = RepositoryConfig {
@@ -38,6 +39,7 @@ mod tests {
             ssh_key_path: None,
             ssh_key_passphrase: None,
             last_synced_commits: HashMap::new(),
+            added_as_local_path: false,
         };
         
         config.repositories.push(repo1);

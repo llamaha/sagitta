@@ -60,11 +60,15 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ```
 4.  **Query Repository (Initial):** Query for known content in the repo.
     ```bash
-    # Replace "Spoon-Knife" with content relevant to your test repo
     ./target/release/vectordb-cli repo query "Spoon-Knife" | cat
     # Expected: Search results including chunks from the repo's files.
     ```
-5.  **Simulate Change:** Add a new file and commit it.
+5.  **Use Repository:** Switch to the test repository.
+    ```bash
+    ./target/release/vectordb-cli repo use "$UNIQUE_NAME" | cat
+    # Expected: Success message, repo set as active.
+    ```
+6.  **Simulate Change:** Add a new file and commit it.
     ```bash
     cd "$TEST_TEMP_DIR/Spoon-Knife"
     echo "This is different content." > another_file.md # Use a recognized extension like .md
@@ -73,18 +77,28 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     cd - # Return to original directory
     echo "Added and committed new file."
     ```
-6.  **Sync Repository (Again):** Index the newly committed changes.
+7.  **Sync Repository (Again):** Index the newly committed changes.
     ```bash
     ./target/release/vectordb-cli repo sync "$UNIQUE_NAME" | cat
     # Expected: Success message.
     ```
-7.  **Query Repository (Updated):** Query for content in the new file.
+8.  **Query Repository (Updated):** Query for content in the new file.
     ```bash
     ./target/release/vectordb-cli repo query "different content" | cat
     # Expected: Search results including chunks from the new file (another_file.md).
     # Note: Previous testing showed issues indexing simple .txt files; use recognized extensions.
     ```
-8.  **Remove Repository:** Remove the test repository config and its data.
+9.  **Repository Stats:** Get statistics about the repository.
+    ```bash
+    ./target/release/vectordb-cli repo stats "$UNIQUE_NAME" | cat
+    # Expected: Output includes number of documents, vectors, and other relevant statistics.
+    ```
+10. **Clear Repository:** Clear the content of the repository.
+    ```bash
+    ./target/release/vectordb-cli repo clear "$UNIQUE_NAME" -y | cat
+    # Expected: Success message, repository content cleared.
+    ```
+11. **Remove Repository:** Remove the test repository config and its data.
     ```bash
     ./target/release/vectordb-cli repo remove "$UNIQUE_NAME" -y | cat
     # Expected: Success message, repo removed, active repo possibly reset.
@@ -100,75 +114,67 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     echo "Cleaned up CLI test temporary directory."
     ```
 
-## Phase 2: gRPC Testing
+## Phase 2: Simple Index Testing
 
-**Goal:** Test the core gRPC service methods.
+**Goal:** Test the non-repository based index commands.
 
 **Setup:**
-1.  **Start the Server:** Run the server on a known address/port (e.g., `0.0.0.0:9021`).
+1.  **Create Test File:**
     ```bash
-    # Example command (adjust as needed)
-    ./target/release/vectordb-cli server start --port 9021
-    ```
-2.  **Create Temp Directory & Clone Repo (Separate from CLI phase):**
-    ```bash
-    TEMP_DIR_GRPC=$(mktemp -d)
-    echo "TEMP_DIR_GRPC=$TEMP_DIR_GRPC"
-    git clone https://github.com/octocat/Spoon-Knife "$TEMP_DIR_GRPC/Spoon-Knife-gRPC" # Replace URL if needed
-    export TEST_TEMP_DIR_GRPC="$TEMP_DIR_GRPC"
-    echo "Cloned repo to $TEST_TEMP_DIR_GRPC/Spoon-Knife-gRPC"
-    ```
-3.  **Generate Unique Name:**
-    ```bash
-    export UNIQUE_NAME_GRPC="e2e-grpc-test-$(date +%s)"
-    echo "Unique gRPC name: $UNIQUE_NAME_GRPC"
-    ```
-4.  **Define Server Address:**
-    ```bash
-    export SERVER_ADDR="0.0.0.0:9021" # Adjust if server is running elsewhere
+    echo "Simple index content for E2E test." > "$TEST_TEMP_DIR/simple_test.txt"
+    echo "Created simple test file: $TEST_TEMP_DIR/simple_test.txt"
     ```
 
 **Test Steps:**
-1.  **List Services:** Verify server is reachable and services are registered.
+1.  **Index File:** Index the created test file.
     ```bash
-    grpcurl -plaintext $SERVER_ADDR list
-    # Expected: editing.EditingService, grpc.reflection.v1.ServerReflection, vectordb.VectorDBService
+    ./target/release/vectordb-cli simple index "$TEST_TEMP_DIR/simple_test.txt" | cat
+    # Expected: Success message, file indexed.
     ```
-2.  **List Repositories (Initial):** Check current repositories via gRPC.
+2.  **Query Index:** Query for content in the indexed file.
     ```bash
-    grpcurl -plaintext -d '{}' $SERVER_ADDR vectordb.VectorDBService/ListRepositories
-    # Expected: JSON response listing repositories from default config.
+    ./target/release/vectordb-cli simple query "E2E test" | cat
+    # Expected: Search results including the chunk from simple_test.txt.
     ```
-3.  **Add Repository:** Add the test repository via RPC using `local_path`.
+3.  **Clear Index:** Clear the simple index.
     ```bash
-    grpcurl -plaintext -d '{"name": "'"$UNIQUE_NAME_GRPC"'", "local_path": "'"$TEST_TEMP_DIR_GRPC/Spoon-Knife-gRPC"'"}' $SERVER_ADDR vectordb.VectorDBService/AddRepository
-    # Expected: Success response.
+    ./target/release/vectordb-cli simple clear -y | cat
+    # Expected: Success message, index cleared.
     ```
-4.  **Sync Repository:** Sync the newly added (and likely active) repository.
+4.  **Query Index (After Clear):** Verify the index is empty.
     ```bash
-    # Assumes added repo is now active. Can add '{"name": "'"$UNIQUE_NAME_GRPC"'"}' if needed.
-    grpcurl -plaintext -d '{}' $SERVER_ADDR vectordb.VectorDBService/SyncRepository
-    # Expected: Success response.
-    ```
-5.  **Query Collection:** Query the collection associated with the repository.
-    ```bash
-    # Replace "Spoon-Knife" with relevant query text. Collection name derived from repo name.
-    grpcurl -plaintext -d '{"collection_name": "repo_'"$UNIQUE_NAME_GRPC"'", "query_text": "Spoon-Knife", "limit": 5}' $SERVER_ADDR vectordb.VectorDBService/QueryCollection
-    # Expected: JSON response with search results.
-    ```
-6.  **Remove Repository:** Remove the test repository via RPC.
-    ```bash
-    grpcurl -plaintext -d '{"name": "'"$UNIQUE_NAME_GRPC"'", "skip_confirmation": true}' $SERVER_ADDR vectordb.VectorDBService/RemoveRepository
-    # Expected: Success response.
+    ./target/release/vectordb-cli simple query "E2E test" | cat
+    # Expected: No results found or error indicating empty collection.
     ```
 
-**Cleanup:**
-1.  **Stop the Server:** Terminate the server process (e.g., Ctrl+C).
-2.  **Remove Temp Directory:**
+**Cleanup:** (Covered by main cleanup)
+
+## Phase 3: Edit Command Testing (Basic)
+
+**Goal:** Test the basic functionality of the edit command.
+
+**Setup:**
+1.  **Ensure Repo Added and Synced:** Assumes Phase 1 (Repo testing) completed successfully up to the sync step.
+2.  **Create Target File:**
     ```bash
-    rm -rf "$TEST_TEMP_DIR_GRPC"
-    unset TEST_TEMP_DIR_GRPC
-    unset UNIQUE_NAME_GRPC
-    unset SERVER_ADDR
-    echo "Cleaned up gRPC test temporary directory."
-    ``` 
+    # Use the existing cloned repo from Phase 1
+    echo -e "def hello():\\n    print(\"Hello World\")" > "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
+    echo "Created edit test file: $TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
+    # Add and commit this file so it's known to the index
+    (cd "$TEST_TEMP_DIR/Spoon-Knife" && git add edit_test.py && git -c user.name='Test User' -c user.email='test@example.com' commit -m 'Add edit_test.py')
+    ./target/release/vectordb-cli repo sync "$UNIQUE_NAME" | cat
+    ```
+
+**Test Steps:**
+1.  **Edit Function:** Use the edit command to modify the function.
+    ```bash
+    ./target/release/vectordb-cli edit --repo "$UNIQUE_NAME" --query "change hello function to print 'Hello E2E Test'" --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" -y | cat
+    # Expected: Success message, indicating the file was edited.
+    ```
+2.  **Verify Edit:** Check the content of the file.
+    ```bash
+    cat "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
+    # Expected: Content should show print("Hello E2E Test").
+    ```
+
+**Cleanup:** (Covered by main cleanup)

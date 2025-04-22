@@ -4,12 +4,18 @@ use colored::*;
 use git2::Repository;
 use std::{path::PathBuf, sync::Arc};
 use std::time::Instant;
+use indicatif::{ProgressBar, ProgressStyle};
+use log::{debug, info, warn, error};
 
-use crate::config::{self, AppConfig};
+use vectordb_core::{AppConfig, save_config};
 use crate::cli::commands::CliArgs;
-use crate::git;
-use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
+use futures::future::join_all;
+use futures::StreamExt;
+use qdrant_client::qdrant::{PointStruct};
+use qdrant_client::Payload;
+use crate::git::{SyncOptions, SyncResult};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -58,26 +64,65 @@ where
         active_branch.cyan()
     );
 
-    let _repo = Repository::open(&repo_config_clone.local_path)
-        .with_context(|| format!("Failed to open repository at {}", repo_config_clone.local_path.display()))?;
-
-    let options = git::SyncOptions {
+    let options = SyncOptions {
         force: args.force,
         extensions: args.extensions.clone(),
     };
 
-    match git::sync_repository(Arc::clone(&client), repo_config_clone, options, cli_args, config).await {
+    match crate::git::sync_repository(
+        Arc::clone(&client), 
+        repo_config_clone, 
+        options, 
+        cli_args,
+        config,
+    ).await {
         Ok(sync_result) => {
             if sync_result.success {
-                println!("Sync successful: {}", sync_result.message.green());
+                info!(
+                    "{}",
+                    format!("Successfully synced repository '{}'", repo_name).green()
+                );
                 if !sync_result.indexed_languages.is_empty() {
                     println!("Detected/updated languages: {}", sync_result.indexed_languages.join(", ").blue());
                     config.repositories[repo_config_index].indexed_languages = Some(sync_result.indexed_languages);
                 }
-                config::save_config(config, override_path)
-                    .context("Failed to save config after successful sync")?;
+                if let Err(e) = save_config(config, override_path) {
+                    error!("Failed to save config after sync: {}", e);
+                }
+                println!("{}", "Configuration saved.".dimmed());
             } else {
-                println!("Sync completed with message: {}", sync_result.message.yellow());
+                warn!(
+                    "{}",
+                    match (sync_result.success, sync_result.indexed_languages.is_empty()) {
+                        (true, true) => format!(
+                            "Sync completed for repository '{}'. New commits were indexed. Message: {}",
+                            repo_name,
+                            sync_result.message
+                        )
+                        .green(),
+                        (false, true) => format!(
+                            "Sync completed for repository '{}'. No new commits were found, but existing data was updated. Message: {}",
+                            repo_name,
+                            sync_result.message
+                        )
+                        .yellow(),
+                        (true, false) => format!(
+                            "Sync completed for repository '{}'. New commits were indexed, but some data failed to update. Message: {}",
+                            repo_name,
+                            sync_result.message
+                        )
+                        .yellow(),
+                        (false, false) => format!(
+                            "Sync completed for repository '{}', but no new changes were detected or indexed. Message: {}",
+                            repo_name,
+                            sync_result.message
+                        )
+                        .yellow(),
+                    }
+                );
+                if let Err(e) = save_config(config, override_path) {
+                    error!("Failed to save config after sync message: {}", e);
+                }
             }
         }
         Err(e) => {

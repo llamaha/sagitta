@@ -5,13 +5,16 @@ use anyhow::Result;
 use clap::Args;
 use colored::*;
 use std::sync::Arc;
-use crate::config::AppConfig;
-use crate::cli::repo_commands::helpers::get_collection_name;
-use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use vectordb_core::AppConfig;
+use vectordb_core::repo_helpers::get_collection_name;
+use qdrant_client::qdrant::qdrant_client::QdrantClient;
+use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::path::PathBuf;
 use qdrant_client::qdrant::CountPointsBuilder;
 use serde::Serialize;
 use serde_json;
+use crate::cli::commands::CliArgs;
+use anyhow::Context;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
 
@@ -63,33 +66,28 @@ where
     let active_repo_name = match active_repo_name_opt {
         Some(name) => name,
         None => {
-            let err_msg = "No active repository set. Use 'repo use <repo_name>' first.";
-            if args.json {
-                let stats = CollectionStats {
-                    collection_name: "<N/A>".to_string(),
-                    repository_name: "<N/A>".to_string(),
-                    info: None,
-                    exact_point_count: None,
-                    error: Some(err_msg.to_string()),
-                };
-                // Print error JSON to stdout as per convention?
-                println!("{}", serde_json::to_string_pretty(&stats)?);
-                // Still return an error to signal failure
-                return Err(anyhow::anyhow!(err_msg)); 
+            if config.repositories.len() == 1 {
+                // If only one repository exists, assume it's the target
+                config.repositories[0].name.clone()
             } else {
-                // Print error message to stderr for non-JSON output
-                eprintln!("{}", err_msg.red());
-                 // Return the error
-                return Err(anyhow::anyhow!(err_msg));
+                anyhow::bail!("No active repository set and multiple repositories exist. Please specify a repository with --name or use 'vectordb-cli repo use <repo_name>'.");
             }
         }
     };
 
-    let collection_name = get_collection_name(&active_repo_name);
-    log::info!("Getting stats for repository: '{}', collection: '{}'", active_repo_name, collection_name);
+    // Ensure active_repo_name is a String
+    let active_repo_name_string = active_repo_name.to_string();
+
+    println!("Fetching stats for repository: {}", active_repo_name_string.cyan());
+    
+    let collection_name = get_collection_name(&active_repo_name_string);
 
     // Fetch collection info
-    let collection_info_result = client.get_collection_info(collection_name.clone()).await;
+    let collection_info_result = client
+        .get_collection_info(collection_name.clone())
+        .await
+        .context(format!("Failed to retrieve collection info for '{}'", collection_name));
+    
     let count_result_opt = if collection_info_result.is_ok() {
         let count_request = CountPointsBuilder::new(&collection_name).exact(true).build();
         client.count(count_request).await.ok()
@@ -98,7 +96,7 @@ where
     };
 
     if args.json {
-        // Extract and convert the info
+        // Extract and convert the info from the Result
         let info = collection_info_result.as_ref().ok().map(|info| CollectionInfoStats {
             status: info.status.to_string(),
             vectors_count: info.vectors_count.unwrap_or(0),
@@ -110,7 +108,7 @@ where
 
         let stats = CollectionStats {
             collection_name: collection_name.clone(),
-            repository_name: active_repo_name.clone(),
+            repository_name: active_repo_name_string.clone(),
             info,
             exact_point_count: exact_count,
             error: error_msg,
@@ -120,12 +118,16 @@ where
         // Original human-readable output
         println!("Fetching statistics for collection: {}", collection_name.cyan());
 
-        if collection_info_result.is_err() {
+        // Check the Result for errors
+        if let Err(e) = collection_info_result {
             println!("{}", "  Error: Could not retrieve collection info (collection might not exist yet). Run 'repo sync'?".red());
-            return Ok(());
+            // Propagate the error that occurred
+            return Err(e.context(format!("Failed to get collection info for '{}'", collection_name)));
         }
-        let collection_info = collection_info_result.unwrap(); // Safe to unwrap after check
-        let info = collection_info;
+        
+        // Safe to unwrap the Result now because we checked for Err above
+        let collection_info = collection_info_result.unwrap(); 
+        let info = collection_info; // Use the unwrapped struct
 
         let exact_count = match count_result_opt {
             Some(count_result) => count_result.result.map(|r| r.count).unwrap_or(0),

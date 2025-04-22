@@ -2,7 +2,8 @@ use anyhow::Result;
 use colored::*;
 use serde::Serialize;
 
-use crate::config::{AppConfig, RepositoryConfig};
+// Use config types from vectordb_core
+use vectordb_core::{AppConfig, RepositoryConfig};
 
 // Define ManagedRepositories struct here if not already defined elsewhere
 #[derive(Debug, Serialize)]

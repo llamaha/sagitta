@@ -34,6 +34,8 @@ pub struct RepositoryConfig {
     // Indexed languages/extensions
     #[serde(default)]
     pub indexed_languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub added_as_local_path: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -256,6 +258,7 @@ mod tests {
             ssh_key_path: None,
             ssh_key_passphrase: None,
             indexed_languages: Some(vec!["rs".to_string()]),
+            added_as_local_path: false,
         };
 
         let repo2_path = data_path.join("repo2");
@@ -271,10 +274,11 @@ mod tests {
             ssh_key_path: Some(PathBuf::from("~/.ssh/id_rsa2")),
             ssh_key_passphrase: None,
             indexed_languages: None,
+            added_as_local_path: false,
         };
 
         let config = AppConfig {
-            qdrant_url: "http://localhost:6333".to_string(),
+            qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: Some("model".to_string()),
             onnx_tokenizer_path: None,
             server_api_key_path: None,
@@ -351,6 +355,7 @@ mod tests {
             ssh_key_path: None,
             ssh_key_passphrase: None,
             indexed_languages: None,
+            added_as_local_path: false,
         };
         assert_eq!(repo_config.local_path, PathBuf::from("/fake/data/vectordb-cli/repositories/my-test-repo"));
     }

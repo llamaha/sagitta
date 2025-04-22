@@ -1,10 +1,12 @@
-use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
-use colored::*;
+use anyhow::{Result, Context, bail, anyhow};
 use std::path::PathBuf;
-
-use crate::config::{self, AppConfig};
-use crate::cli::repo_commands::helpers::switch_repository_branch;
+use std::sync::Arc;
+use vectordb_core::repo_helpers::switch_repository_branch;
+use vectordb_core::{AppConfig, save_config};
+use crate::git;
+use colored::*;
+use log;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -25,10 +27,10 @@ pub async fn handle_use_branch(args: UseBranchArgs, config: &mut AppConfig, over
         .position(|r| r.name == repo_name)
         .ok_or_else(|| anyhow!("Active repository '{}' configuration not found.", repo_name))?;
 
-    let repo_config = &config.repositories[repo_config_index];
+    let repo_name_clone = config.repositories[repo_config_index].name.clone();
     let target_branch_name = &args.name;
 
-    switch_repository_branch(repo_config, target_branch_name)
+    switch_repository_branch(config, &repo_name_clone, target_branch_name)
         .context("Failed to switch repository branch")?;
 
     let repo_config_mut = &mut config.repositories[repo_config_index];
@@ -37,14 +39,14 @@ pub async fn handle_use_branch(args: UseBranchArgs, config: &mut AppConfig, over
         repo_config_mut.tracked_branches.push(target_branch_name.to_string());
     }
 
-    config::save_config(config, override_path)?;
+    save_config(config, override_path)?;
 
     println!(
         "{}",
         format!(
             "Switched to branch '{}' for repository '{}'.",
             target_branch_name,
-            repo_name.cyan()
+            repo_name_clone.cyan()
         ).green()
     );
 

@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
 
-use crate::config::{self, AppConfig};
+use vectordb_core::{AppConfig, save_config, load_config};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -61,8 +61,8 @@ fn handle_set_repo_base_path(
     // Set the config value
     config.repositories_base_path = Some(args.path.clone());
     
-    // Save the config
-    config::save_config(config, override_path)?;
+    // Save the config using the core function
+    vectordb_core::config::save_config(config, override_path)?;
     
     println!("{}", format!("Repository base path set to {}", args.path.display()).green());
     
@@ -78,9 +78,9 @@ fn handle_set_repo_base_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::load_config;
-    use crate::config::save_config;
+    use std::fs;
     use tempfile::tempdir;
+    use vectordb_core::{load_config, save_config};
 
     #[test]
     fn test_handle_set_repo_base_path() {

@@ -1,3 +1,10 @@
+use crate::cli::commands::CliArgs;
+use vectordb_core::repo_helpers;
+use vectordb_core::qdrant_client_trait::QdrantClientTrait;
+
+// Use config types from vectordb_core
+use vectordb_core::AppConfig;
+
 use anyhow::{anyhow, Context, Result, bail};
 use clap::Args;
 use std::sync::Arc;
@@ -7,12 +14,9 @@ use std::fmt::Debug;
 use qdrant_client::qdrant::{Filter, Condition, SearchPointsBuilder};
 
 use crate::{
-    config::AppConfig,
-    cli::repo_commands::helpers,
     cli::formatters::print_search_results,
     vectordb::embedding_logic::EmbeddingHandler,
     cli::commands::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
-    vectordb::qdrant_client_trait::QdrantClientTrait,
 };
 
 #[derive(Args, Debug, Clone)]
@@ -68,7 +72,7 @@ where
         .or_else(|| repo_config.active_branch.clone())
         .unwrap_or_else(|| repo_config.default_branch.clone());
 
-    let collection_name = helpers::get_collection_name(&repo_name);
+    let collection_name = repo_helpers::get_collection_name(&repo_name);
 
     // Determine ONNX paths (needed for embedding query)
     let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();

@@ -1,11 +1,15 @@
 use crate::vectordb::embedding::EmbeddingModelType;
-use crate::vectordb::error::{Result, VectorDBError};
+use lru::LruCache;
+// Use error types from vectordb_core
+use vectordb_core::error::{Result, VectorDBError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log;
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CacheEntry {

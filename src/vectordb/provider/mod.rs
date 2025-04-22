@@ -2,33 +2,29 @@
 #![allow(dead_code)]
 
 use crate::vectordb::embedding::EmbeddingModelType;
-use crate::vectordb::error::Result;
+// use crate::vectordb::error::Result;
+use vectordb_core::error::Result as VectorDBResult;
+use vectordb_core::error::VectorDBError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::path::PathBuf;
+// use crate::vectordb::embedding::EmbeddingResult; // Removed
+use vectordb_core::syntax::CodeChunk; // Use core CodeChunk
 
 // === New EmbeddingProvider Trait ===
-pub trait EmbeddingProvider: Send + Sync + Debug {
-    /// Get the embedding dimension of the model.
-    fn dimension(&self) -> usize;
-
-    /// Get the type of the model.
-    fn model_type(&self) -> EmbeddingModelType;
-
-    /// Embed a batch of texts.
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
-
-    // Optionally, a method to embed a single text?
-    // fn embed(&self, text: &str) -> Result<Vec<f32>> {
-    //     let embeddings = self.embed_batch(&[text])?;
-    //     embeddings.into_iter().next().ok_or_else(|| {
-    //         crate::vectordb::error::VectorDBError::EmbeddingError("Embedding failed for single text".to_string())
-    //     })
-    // }
-}
+// pub trait EmbeddingProvider: Send + Sync + Debug { // Remove local trait definition
+//     /// Get the embedding dimension of the model.
+//     fn dimension(&self) -> usize;
+// 
+//     /// Get the type of the model.
+//     fn model_type(&self) -> EmbeddingModelType;
+// 
+//     /// Embed a batch of texts.
+//     fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>>;
+// }
 
 // === Provider Modules (Keep existing structure) ===
-pub mod onnx;
+// pub mod onnx;
 
 // === Config Structs (Keep existing structure) ===
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,4 +74,12 @@ mod tests {
         assert_eq!(config.onnx_model_path, Some(model_path));
         assert_eq!(config.onnx_tokenizer_path, Some(tokenizer_path));
     }
-} 
+}
+
+// Re-export core embedding provider trait and ONNX implementation
+// pub use vectordb_core::provider::EmbeddingProvider; // Old incorrect path
+pub use vectordb_core::embedding::provider::EmbeddingProvider; // Corrected path
+
+// If OnnxProvider is defined locally, keep the mod declaration, otherwise remove it.
+// Assuming it's now pulled from core:
+// pub mod onnx; 

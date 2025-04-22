@@ -1,16 +1,36 @@
-use anyhow::Result;
-use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption};
-use log;
-use std::path::PathBuf;
-use std::collections::HashSet;
-use std::sync::Arc;
+use anyhow::{Result, Context};
+use log::{warn};
+use qdrant_client::{
+    prelude::Payload,
+    qdrant::{
+        Condition,
+        CreateCollection, Distance, Filter, PointId, PointStruct, PointsSelector, ScoredPoint,
+        SearchPoints, VectorParams, VectorsConfig,
+        ScrollPointsBuilder,
+        PayloadIncludeSelector,
+        ScrollResponse,
+    },
+    Qdrant,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{self, File},
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::task;
 
-use crate::config::{RepositoryConfig, AppConfig};
-use crate::cli::repo_commands::helpers;
-use crate::cli::commands::CliArgs;
-use crate::cli::commands::FIELD_LANGUAGE;
-use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use vectordb_core::{
+    config::{AppConfig, RepositoryConfig},
+    constants::FIELD_LANGUAGE,
+    qdrant_client_trait::QdrantClientTrait,
+    repo_helpers,
+};
+
+use crate::cli::CliArgs;
+
+use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, TreeWalkMode, TreeWalkResult, ObjectType};
 
 pub struct SyncResult {
     pub success: bool,
@@ -34,9 +54,14 @@ where
     // Clone all values we'll need before moving into spawn_blocking
     let repo_name = repo_config.name.clone();
     let repo_path = repo_config.local_path.clone();
+    // Determine if the repository should be treated as primarily local
+    // Check if the stored URL points to an existing local directory
+    let path_from_url = PathBuf::from(&repo_config.url);
+    let is_local_path_repo = repo_config.added_as_local_path;
+
     let active_branch = match &repo_config.active_branch {
         Some(branch) => branch.clone(),
-        None => "main".to_string(),
+        None => "main".to_string(), // Default branch if not set, consider erroring?
     };
     let remote_name = repo_config.remote_name.clone().unwrap_or_else(|| "origin".to_string());
     let last_synced_commits = repo_config.last_synced_commits.clone();
@@ -57,28 +82,54 @@ where
         // Open the repository
         let repo = Repository::open(&repo_path)?;
         
-        // Set up the fetch options
-        let mut fetch_opts = FetchOptions::new();
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.update_tips(|name, old, new| {
-            log::info!("[{}] {} -> {}", name, old, new);
-            true
-        });
-        fetch_opts.remote_callbacks(callbacks);
-        fetch_opts.download_tags(AutotagOption::All);
+        let commit_oid_str: String;
+        let branch_commit: git2::Commit;
+
+        if !repo_config.added_as_local_path {
+            log::debug!("Repository '{}' is treated as remote (added_as_local_path=false).", repo_name);
+            // --- Remote Repo Logic (Fetch and check remote ref) ---
+            
+            // Set up the fetch options
+            let mut fetch_opts = FetchOptions::new();
+            let mut callbacks = RemoteCallbacks::new();
+            callbacks.update_tips(|name, old, new| {
+                log::info!("[{}] {} -> {}", name, old, new);
+                true
+            });
+            fetch_opts.remote_callbacks(callbacks);
+            fetch_opts.download_tags(AutotagOption::All);
+            
+            // Fetch updates from the remote
+            let mut remote = repo.find_remote(&remote_name)?;
+            // Fetch only the active branch if possible, fall back to fetching all if specific fails?
+            // Using `fetch(&[&active_branch], ...)` might be restrictive if branch name format differs (e.g. no refs/heads prefix)
+            // Consider fetching all refs: remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)?;
+             match remote.fetch(&[&active_branch], Some(&mut fetch_opts), None) {
+                Ok(_) => log::info!("Fetched remote '{}' for branch '{}'", remote_name, active_branch),
+                Err(e) => log::warn!("Failed to fetch specific branch '{}' from remote '{}': {}. Consider checking remote config or branch name.", active_branch, remote_name, e),
+            };
+
+            // Find the remote branch reference
+            let branch_ref_name = format!("refs/remotes/{}/{}", remote_name, active_branch);
+            let branch_ref = repo.find_reference(&branch_ref_name)
+                .with_context(|| format!("Could not find remote-tracking reference '{}'. Was the fetch successful?", branch_ref_name))?;
+            branch_commit = branch_ref.peel_to_commit()
+                .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
+            commit_oid_str = branch_commit.id().to_string();
+
+        } else {
+             log::debug!("Repository '{}' is treated as local-only (added_as_local_path=true).", repo_name);
+            // --- Local Repo Logic (Check local head) ---
+            // Find the local branch reference
+            let branch_ref_name = format!("refs/heads/{}", active_branch);
+            let branch_ref = repo.find_reference(&branch_ref_name)
+                 .with_context(|| format!("Could not find local branch reference '{}'. Does the branch exist locally?", branch_ref_name))?;
+            branch_commit = branch_ref.peel_to_commit()
+                 .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
+            commit_oid_str = branch_commit.id().to_string();
+        }
         
-        // Fetch updates from the remote
-        let mut remote = repo.find_remote(&remote_name)?;
-        remote.fetch(&[&active_branch], Some(&mut fetch_opts), None)?;
-        
-        // Find the branch reference
-        let branch_ref_name = format!("refs/remotes/{}/{}", remote_name, active_branch);
-        let branch_ref = repo.find_reference(&branch_ref_name)?;
-        let branch_commit = branch_ref.peel_to_commit()?;
-        let commit_oid = branch_commit.id();
-        let commit_oid_str = commit_oid.to_string();
-        
-        // Check if we need a full sync
+        // Check if we need a full sync (Compare target commit with last synced)
         let mut full_sync_needed = force_sync;
         if !force_sync {
             // Direct HashMap access
@@ -153,16 +204,17 @@ where
     log::info!("Found {} files to index", files_to_index.len());
     
     // Create collection name
-    let collection_name = helpers::get_collection_name(&repo_name_outside);
+    let collection_name = repo_helpers::get_collection_name(&repo_name_outside);
     
     // Ensure the collection exists before indexing
-    let default_dimension = helpers::DEFAULT_VECTOR_DIMENSION;
-    helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, default_dimension).await?;
+    let default_dimension = repo_helpers::DEFAULT_VECTOR_DIMENSION;
+    repo_helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, default_dimension).await?;
     
     // Perform indexing using the passed cli_args and app_config
-    helpers::index_files(
+    repo_helpers::index_files(
         client.as_ref(),
-        cli_args,
+        None,
+        None,
         app_config,
         &repo_path_outside,
         &files_to_index,
@@ -175,10 +227,9 @@ where
     
     // Query for indexed languages
     let mut indexed_languages = HashSet::new();
-    let scroll_filter = helpers::create_branch_filter(&active_branch_outside);
+    let scroll_filter = repo_helpers::create_branch_filter(&active_branch_outside);
     
     // Create scroll request manually using Qdrant client libraries
-    use qdrant_client::qdrant::{ScrollPointsBuilder, PayloadIncludeSelector};
     let mut scroll_request = ScrollPointsBuilder::new(&collection_name)
         .filter(scroll_filter.clone())
         .limit(100)
@@ -195,14 +246,15 @@ where
         }
         
         // Collect languages from each point
-        for point in &points {
-            // payload is directly accessible, not wrapped in Option
-            for (key, value) in &point.payload {
-                if key == FIELD_LANGUAGE {
-                    if let Some(kind) = &value.kind {
-                        if let qdrant_client::qdrant::value::Kind::StringValue(lang) = kind {
-                            indexed_languages.insert(lang.clone());
-                        }
+        for point in points {
+            let payload = point.payload;
+            if let Some(lang_val) = payload.get(FIELD_LANGUAGE) { 
+                match lang_val.kind.as_ref() {
+                    Some(qdrant_client::qdrant::value::Kind::StringValue(lang)) => {
+                        indexed_languages.insert(lang.clone());
+                    },
+                    _ => {
+                        log::warn!("Non-string value found for FIELD_LANGUAGE: {:?}", lang_val);
                     }
                 }
             }

@@ -22,8 +22,13 @@ use std::{
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+use vectordb_core::repo_helpers as helpers;
+use vectordb_core::config::{AppConfig, RepositoryConfig};
+use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use crate::{
-    cli::CliArgs, config::AppConfig, syntax, vectordb::embedding_logic::EmbeddingHandler
+    cli::{CliArgs, Commands},
+    syntax,
+    vectordb::embedding_logic::EmbeddingHandler,
 };
 use crate::cli::commands::{
     upsert_batch, BATCH_SIZE, LEGACY_INDEX_COLLECTION, // Import constants
@@ -147,25 +152,23 @@ async fn handle_simple_index(
     }
     log::info!("Processing input paths: {:?}", cmd_args.paths);
 
-    let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
-    let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
-
-    if cli_args.onnx_model_path_arg.is_some() && model_env_var.is_some() {
-        return Err(anyhow!("Cannot provide ONNX model path via both --onnx-model argument and VECTORDB_ONNX_MODEL environment variable."));
+    // --- Enforce Config-Only ONNX Paths for Simple Index ---
+    // Simple index mode requires ONNX paths to be defined in the config file,
+    // not via CLI args or environment variables, to avoid ambiguity.
+    if cli_args.onnx_model_path_arg.is_some() || std::env::var("VECTORDB_ONNX_MODEL").is_ok() {
+        return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
-    if cli_args.onnx_tokenizer_dir_arg.is_some() && tokenizer_env_var.is_some() {
-        return Err(anyhow!("Cannot provide ONNX tokenizer dir via both --onnx-tokenizer-dir argument and VECTORDB_ONNX_TOKENIZER_DIR environment variable."));
+    if cli_args.onnx_tokenizer_dir_arg.is_some() || std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").is_ok() {
+         return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
 
-    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_ref()
-        .or(model_env_var.as_ref())
-        .or(config.onnx_model_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config"))?;
-    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_ref()
-        .or(tokenizer_env_var.as_ref())
-        .or(config.onnx_tokenizer_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
-
+    // Get paths ONLY from the loaded config object
+    let onnx_model_path_str = config.onnx_model_path.as_ref()
+        .ok_or_else(|| anyhow!("ONNX model path must be set in the configuration file when using 'simple index'"))?;
+    let onnx_tokenizer_dir_str = config.onnx_tokenizer_path.as_ref()
+        .ok_or_else(|| anyhow!("ONNX tokenizer path must be set in the configuration file when using 'simple index'"))?;
+    
+    // --- Validate resolved paths ---
     let _onnx_model_path = PathBuf::from(onnx_model_path_str);
     let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
 
@@ -183,6 +186,7 @@ async fn handle_simple_index(
     log::info!("Using resolved ONNX tokenizer directory: {}", _onnx_tokenizer_path.display());
 
     log::info!("Using embedding handler for indexing...");
+    // Create EmbeddingHandler using the validated config paths
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple index")?;
     let embedding_dim = embedding_handler // Use _ to avoid warning

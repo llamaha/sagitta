@@ -12,18 +12,24 @@ use log::{self, info, warn, error};
 use uuid::Uuid;
 use std::fs;
 
-use crate::cli::commands::{CliArgs, FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_LANGUAGE, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_EXTENSION, BATCH_SIZE, FIELD_BRANCH, FIELD_COMMIT_HASH};
+// Use modules from *within* vectordb_core
 use crate::config::{AppConfig, RepositoryConfig};
-use crate::vectordb::embedding_logic::{EmbeddingHandler};
-use crate::vectordb::error::VectorDBError;
-use crate::vectordb::qdrant_client_trait::QdrantClientTrait;
+use crate::error::VectorDBError;
+use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_LANGUAGE, FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_EXTENSION, BATCH_SIZE, COLLECTION_NAME_PREFIX, FIELD_BRANCH, FIELD_COMMIT_HASH};
+use crate::qdrant_client_trait::QdrantClientTrait;
+use crate::embedding::EmbeddingHandler;
+use crate::git_helpers;
+
+// Use modules from the main vectordb_cli crate (until they are moved)
+// use vectordb_cli::cli::commands::{CliArgs}; // Removed
 use crate::syntax;
 
 // Use a type alias for VectorDBError
 type Error = VectorDBError;
 
-const COLLECTION_NAME_PREFIX: &str = "repo_";
-pub(crate) const DEFAULT_VECTOR_DIMENSION: u64 = 384;
+// Define constants previously in main crate's repo_commands
+// const DEFAULT_VECTOR_DIMENSION: u64 = 384; // Old private const
+pub const DEFAULT_VECTOR_DIMENSION: u64 = 384; // Make public
 const MAX_FILE_SIZE_BYTES: u64 = 250 * 1024; // 250 KB limit
 
 /// Helper function to check if a file extension is explicitly supported by a parser
@@ -127,11 +133,11 @@ pub(crate) fn create_fetch_options<'a>(
     Ok(fetch_opts)
 }
 
-
-pub(crate) fn get_collection_name(repo_name: &str) -> String {
+/// Generates the Qdrant collection name for a given repository name.
+pub fn get_collection_name(repo_name: &str) -> String {
+    // Use the imported prefix constant
     format!("{}{}", COLLECTION_NAME_PREFIX, repo_name)
 }
-
 
 /// Perform a fast-forward merge if possible
 pub(crate) fn merge_local_branch<'repo>(
@@ -160,7 +166,6 @@ pub(crate) fn merge_local_branch<'repo>(
     }
     Ok(())
 }
-
 
 /// Recursively collect files from a Git tree
 pub(crate) fn collect_files_from_tree(
@@ -253,7 +258,6 @@ pub(crate) async fn update_sync_status_and_languages<
     repo_config.indexed_languages = Some(sorted_languages);
     Ok(())
 }
-
 
 /// Deletes points associated with specific file paths from a Qdrant collection.
 pub(crate) async fn delete_points_for_files<
@@ -361,7 +365,6 @@ async fn custom_upsert_batch<C: QdrantClientTrait>(
                     match qdrant_status {
                         Ok(UpdateStatus::Completed) => {
                             success_count += chunk_len;
-                            progress_bar.inc(chunk_len as u64);
                             break; // Success for this chunk
                         }
                         Ok(other_status) => {
@@ -407,7 +410,8 @@ pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
     client: &C,
-    cli_args: &CliArgs,
+    onnx_model_path_opt: Option<String>,
+    onnx_tokenizer_path_opt: Option<String>,
     config: &AppConfig,
     repo_root: &PathBuf,
     relative_paths: &[PathBuf],
@@ -423,19 +427,19 @@ pub async fn index_files<
     log::info!("Indexing {} files for branch '{}' (commit: {}) into collection '{}'...",
         relative_paths.len(), branch_name, &commit_hash[..7], collection_name);
     
-    // Determine model and tokenizer paths using CLI -> Env -> Config priority
+    // Determine model and tokenizer paths using Param -> Env -> Config priority
     let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
 
-    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_deref()
+    let onnx_model_path_str = onnx_model_path_opt.as_deref()
         .or(model_env_var.as_deref())
         .or(config.onnx_model_path.as_deref())
-        .ok_or_else(|| Error::Other("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config".to_string()))?;
+        .ok_or_else(|| Error::Other("ONNX model path must be provided via parameter, VECTORDB_ONNX_MODEL, or config".to_string()))?;
     
-    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_deref()
+    let onnx_tokenizer_dir_str = onnx_tokenizer_path_opt.as_deref()
         .or(tokenizer_env_var.as_deref())
         .or(config.onnx_tokenizer_path.as_deref())
-        .ok_or_else(|| Error::Other("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config".to_string()))?;
+        .ok_or_else(|| Error::Other("ONNX tokenizer path must be provided via parameter, VECTORDB_ONNX_TOKENIZER_DIR, or config".to_string()))?;
 
     let _model_path = PathBuf::from(onnx_model_path_str);
     let _tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
@@ -578,13 +582,13 @@ pub async fn index_files<
 /// Ensures that a Qdrant collection exists for the repository and has the correct configuration.
 /// If the collection does not exist, it will be created.
 /// If it exists but has the wrong vector dimension, it will be deleted and recreated.
-pub(crate) async fn ensure_repository_collection_exists<
-    C: QdrantClientTrait + Send + Sync + 'static,
->(
+pub async fn ensure_repository_collection_exists<C>(
     client: &C,
     collection_name: &str,
-    vector_dimension: u64,
+    vector_dim: u64,
 ) -> Result<(), Error>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
 {
     match client.collection_exists(collection_name.to_string()).await {
         Ok(exists) => {
@@ -595,14 +599,14 @@ pub(crate) async fn ensure_repository_collection_exists<
             } else {
                 log::info!("Collection '{}' does not exist. Creating...", collection_name);
                 // Create collection using the trait method
-                client.create_collection(collection_name, vector_dimension).await
+                client.create_collection(collection_name, vector_dim).await
                     .map_err(|e| Error::Other(format!("Failed to create collection '{}': {}", collection_name, e.to_string())))?;
                 println!(
                     "{}",
                     format!(
                         "Created Qdrant collection '{}' with dimension {}.",
                         collection_name.cyan(),
-                        vector_dimension
+                        vector_dim
                     ).green()
                 );
                 Ok(())
@@ -618,7 +622,7 @@ pub(crate) async fn ensure_repository_collection_exists<
 /// Create a filter for a specific branch
 pub fn create_branch_filter(branch_name: &str) -> qdrant_client::qdrant::Filter {
     qdrant_client::qdrant::Filter::must([
-        qdrant_client::qdrant::Condition::matches(crate::cli::commands::FIELD_BRANCH, branch_name.to_string()),
+        qdrant_client::qdrant::Condition::matches(crate::constants::FIELD_BRANCH, branch_name.to_string()),
     ])
 }
 
@@ -741,6 +745,7 @@ where
             ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
             last_synced_commits: HashMap::new(),
             indexed_languages: None,
+            added_as_local_path: false,
         };
         
         return Ok(new_repo_config);
@@ -835,14 +840,13 @@ where
         ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
         last_synced_commits: HashMap::new(),
         indexed_languages: None,
+        added_as_local_path: false,
     };
 
     Ok(new_repo_config)
 }
 
-
-/// Core logic to delete repository data (Qdrant collection, local files).
-/// Does not modify AppConfig or save anything.
+/// Helper to delete repository data (Qdrant collection, local files).
 pub async fn delete_repository_data<C>(
     repo_config: &RepositoryConfig,
     client: Arc<C>,
@@ -862,63 +866,40 @@ where
             }
         }
         Err(e) => {
-            // Log error but consider it non-fatal for the overall removal
             warn!("Failed to delete Qdrant collection '{}': {}. Continuing removal process.", collection_name, e);
         }
     }
 
-    // Added safety checks for repository path removal
     let local_path = &repo_config.local_path;
-    
-    // Perform safety checks before deleting the directory
     if !local_path.exists() {
         info!("Local directory '{}' does not exist. Skipping removal.", local_path.display());
         return Ok(());
     }
-
-    // SAFETY CHECK 1: Ensure path is not too short (could be system root, home dir, etc.)
     let path_str = local_path.to_string_lossy();
-    if path_str.len() < 10 {  // Arbitrary but reasonable minimum path length for a repo directory
+    if path_str.len() < 10 { 
         error!("Path '{}' is suspiciously short. Skipping removal for safety.", path_str);
         return Ok(());
     }
-
-    // SAFETY CHECK 2: Verify .git directory exists (confirming it's likely a git repo)
     let git_dir = local_path.join(".git");
     if !git_dir.exists() || !git_dir.is_dir() {
         warn!("No .git directory found at '{}'. This may not be a git repository. Skipping removal for safety.", local_path.display());
         return Ok(());
     }
-
-    // SAFETY CHECK 3: Check for potentially dangerous paths
-    let dangerous_paths = [
-        "/", "/home", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt",
-        "/boot", "/lib", "/dev", "/proc", "/sys", "/run"
-    ];
-    
+    let dangerous_paths = ["/", "/home", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
     if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{}/", p))) {
         error!("Path '{}' appears to be a system directory. Refusing to delete for safety.", path_str);
         return Ok(());
     }
-
-    // SAFETY CHECK 4: Only delete if we can confirm it's in a repositories directory
-    // Look for patterns like .../repositories/repo-name or vectordb-cli/repo-name
-    let is_in_repos_dir = path_str.contains("/repositories/") || 
-                           path_str.contains("/vectordb-cli/") ||
-                           path_str.contains("/repos/");
-                           
+    let is_in_repos_dir = path_str.contains("/repositories/") || path_str.contains("/vectordb-cli/") || path_str.contains("/repos/");
     if !is_in_repos_dir {
         warn!("Repository path '{}' doesn't appear to be in a standard repositories directory. Skipping automatic removal for safety.", path_str);
         warn!("If you want to delete this directory, please do so manually.");
         return Ok(());
     }
-
-    // If all safety checks pass, proceed with deletion
     info!("Attempting to remove local clone at {}...", local_path.display());
     match fs::remove_dir_all(local_path) {
         Ok(_) => info!("Successfully removed local directory '{}'.", local_path.display()),
         Err(e) => {
-            // Log error but consider it non-fatal
              error!("Failed to remove local directory '{}': {}. Please remove it manually.", local_path.display(), e);
              warn!("Failed to remove local directory '{}'. Please remove it manually.", local_path.display());
         }
@@ -927,78 +908,53 @@ where
     Ok(())
 }
 
-
-/// Core logic to switch branch for a repository.
-/// Uses git2, potentially blocking.
-/// Does not modify AppConfig or save anything.
+/// Switches the active branch for a repository in the configuration.
 pub fn switch_repository_branch(
-    repo_config: &RepositoryConfig,
-    target_branch_name: &str,
-) -> Result<(), Error> {
-    info!("Attempting to switch to branch '{}' in repository at {:?}", target_branch_name, repo_config.local_path);
-    let repo = Repository::open(&repo_config.local_path)
-        .with_context(|| format!("Failed to open repository at {}", repo_config.local_path.display()))?;
+    config: &mut AppConfig,
+    repo_name: &str,
+    branch_name: &str,
+) -> Result<()> {
+    let repo_config_index = config.repositories
+        .iter()
+        .position(|r| r.name == repo_name)
+        .ok_or_else(|| Error::RepositoryNotFound(repo_name.to_string()))?;
 
-    let remote_name = repo_config.remote_name.as_deref().unwrap_or("origin");
+    let repo_config = &mut config.repositories[repo_config_index];
 
-    if repo.find_branch(target_branch_name, git2::BranchType::Local).is_err() {
-        info!(
-            "Local branch '{}' not found. Checking remote '{}'...",
-            target_branch_name, remote_name
-        );
-        
-        info!("Fetching from remote '{}' to update refs...", remote_name);
-        let mut remote = repo.find_remote(remote_name)?;
-        
-        // Need fetch options potentially with SSH creds
-        let mut fetch_opts = create_fetch_options(
-            vec![repo_config.clone()], // Hack: Need a way to pass config or creds
-            &repo_config.url,
-            repo_config.ssh_key_path.as_ref(),
-            repo_config.ssh_key_passphrase.as_deref()
-        )?;
-        remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)
-            .with_context(|| format!("Failed initial fetch from remote '{}' before branch check", remote_name))?;
-        info!("Fetch for refs update complete.");
+    // Call implementation function from within core
+    crate::git_helpers::switch_branch_impl(repo_config, branch_name)?;
 
-        let remote_branch_ref = format!("{}/{}", remote_name, target_branch_name);
-        match repo.find_branch(&remote_branch_ref, git2::BranchType::Remote) {
-            Ok(remote_branch) => {
-                info!(
-                    "Branch '{}' found on remote '{}'. Creating local tracking branch...",
-                    target_branch_name, remote_name
-                );
-                let commit = remote_branch.get().peel_to_commit()
-                    .with_context(|| format!("Failed to get commit for remote branch {}", remote_branch_ref))?;
-                repo.branch(target_branch_name, &commit, false)
-                    .with_context(|| format!("Failed to create local branch '{}'", target_branch_name))?;
-                let mut local_branch = repo.find_branch(target_branch_name, git2::BranchType::Local)?;
-                local_branch.set_upstream(Some(&remote_branch_ref))
-                    .with_context(|| format!("Failed to set upstream for branch '{}' to '{}'", target_branch_name, remote_branch_ref))?;
-            }
-            Err(_) => {
-                return Err(Error::from(anyhow::anyhow!(
-                    "Branch '{}' not found locally or on remote '{}'.",
-                    target_branch_name,
-                    remote_name
-                )));
-            }
-        }
-    }
+    repo_config.active_branch = Some(branch_name.to_string());
 
-    info!("Checking out branch '{}'...", target_branch_name);
-    let ref_name = format!("refs/heads/{}", target_branch_name);
-    repo.set_head(&ref_name)
-        .with_context(|| format!("Failed to checkout branch '{}'", target_branch_name))?;
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .with_context(|| format!("Failed to force checkout head for branch '{}'", target_branch_name))?;
-
-    info!("Successfully switched to branch '{}'", target_branch_name);
     Ok(())
 }
 
+// Renamed to avoid conflict with the public API function name
+pub async fn get_current_branch_commit_hash_internal(
+    repo_name: &str,
+    app_config: &AppConfig,
+) -> Result<(String, String), Error> {
+    // Find the repo config first
+    let repo_config = app_config.repositories.iter()
+        .find(|r| r.name == repo_name)
+        .ok_or_else(|| Error::RepositoryNotFound(repo_name.to_string()))?;
+
+    // TODO: Implement the logic here or call the correct internal function
+    // The previous call was incorrect: 
+    // crate::git_helpers::get_current_branch_commit_hash_impl(repo_config).await
+    
+    // Placeholder implementation - THIS NEEDS TO BE REPLACED
+    let repo = Repository::open(&repo_config.local_path)?;
+    let head = repo.head()?;
+    let branch_name = head.shorthand().unwrap_or("[unknown_branch]").to_string();
+    let commit_hash = head.target().map(|oid| oid.to_string()).unwrap_or("[unknown_commit]".to_string());
+    
+    Ok((branch_name, commit_hash))
+
+    // Err(Error::NotImplemented("get_current_branch_commit_hash_internal logic not yet implemented".to_string()))
+}
+
 pub async fn sync_repository_branch(
-    _cli_args: &CliArgs,
     config: &AppConfig,
     repo_config_index: usize,
     _client: Arc<impl QdrantClientTrait + Send + Sync + 'static>,
@@ -1064,6 +1020,7 @@ mod tests {
                 ssh_key_passphrase: Some("passphrase".to_string()),
                 last_synced_commits: HashMap::new(),
                 indexed_languages: None,
+                added_as_local_path: false,
             }
         ];
 

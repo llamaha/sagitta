@@ -4,8 +4,9 @@ use colored::*;
 use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
-use crate::config::{AppConfig, RepositoryConfig}; // Import RepositoryConfig
-use crate::cli::repo_commands::helpers::get_collection_name;
+use vectordb_core::{AppConfig, RepositoryConfig, save_config}; // Added RepositoryConfig
+use vectordb_core::qdrant_client_trait::QdrantClientTrait; // Use core trait
+use vectordb_core::repo_helpers::get_collection_name; // Use core helper
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {
@@ -47,23 +48,17 @@ pub async fn handle_clear(
 
     // --- Confirmation --- 
     if !args.yes {
-        print!(
-            "{}",
-            format!(
-                "Are you sure you want to delete ALL indexed data for repository '{}' (collection '{}')? [y/N]: ",
-                target_repo_name.yellow().bold(),
-                collection_name.yellow().bold()
-            )
-            .red()
+        let prompt_message = format!(
+            "Are you sure you want to delete ALL indexed data for repository '{}' (collection '{}')?",
+            target_repo_name.yellow().bold(),
+            collection_name.yellow().bold()
         );
+        print!("{} (yes/No): ", prompt_message);
         io::stdout().flush().context("Failed to flush stdout")?;
-
         let mut confirmation = String::new();
-        io::stdin()
-            .read_line(&mut confirmation)
-            .context("Failed to read confirmation line")?;
-
-        if confirmation.trim().to_lowercase() != "y" {
+        io::stdin().read_line(&mut confirmation)
+            .context("Failed to read confirmation input")?;
+        if confirmation.trim().to_lowercase() != "yes" {
             println!("Operation cancelled.");
             return Ok(());
         }

@@ -1,100 +1,90 @@
 #![allow(dead_code)]
 
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use clap::Parser;
 use std::sync::Arc;
 use std::process::exit;
 use tracing_subscriber::fmt;
+use log;
+use std::path::PathBuf;
+use colored::*;
 
 // Import library modules
 use vectordb_lib::{
-    config::{self},
-    cli::commands::handle_command,
-    cli::commands::CliArgs,
+    cli::commands::{handle_command, CliArgs},
 };
 use qdrant_client::Qdrant;
+use vectordb_core::qdrant_client_trait::QdrantClientTrait;
+
+// Use items from the new core library
+use vectordb_core::{
+    config::{self as core_config, AppConfig as CoreAppConfig, load_config as core_load_config},
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // --- Setup Tracing --- 
-    fmt::init(); // Initialize tracing subscriber
+    // Initialize logger from RUST_LOG env var or default to info
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    // --- Parse Args --- 
+    // Parse command-line arguments
     let args = CliArgs::parse();
 
-    // --- Load Configuration --- 
-    let mut config = config::load_config(None).context("Failed to load configuration")?;
+    // setup_logging(args.verbose); // E0609: no field `verbose` - Keep commented out for now
     
-    tracing::info!("Using Qdrant URL from config: {}", config.qdrant_url);
+    // Determine configuration path
+    // let config_path_override = args.config.clone(); // E0609: no field `config`
+    let config_path_override: Option<PathBuf> = None; // Placeholder, fix if needed
 
-    // --- Initialize Qdrant Client (using config URL) ---
-    tracing::debug!("Initializing Qdrant Client...");
-    let qdrant_client_result = qdrant_client::Qdrant::from_url(&config.qdrant_url).build();
-
-    let client: Arc<Qdrant> = match qdrant_client_result {
-         Ok(client_instance) => {
-             tracing::debug!("Qdrant client initialized successfully.");
-             Arc::new(client_instance)
-         },
-         Err(e) => {
-             tracing::error!("Failed to initialize Qdrant client: {}", e);
-             eprintln!("Error initializing Qdrant client: {}", e);
-             eprintln!("Please check Qdrant URL in config ({}) and ensure the server is running.", config.qdrant_url);
-             exit(1);
-         }
+    // Load configuration using core_load_config
+    let mut config = match core_load_config(config_path_override.as_ref()) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Error loading configuration: {}", e);
+            eprintln!("Using default configuration.");
+            CoreAppConfig::default()
+        }
     };
 
-    // --- Pre-Command Config Checks --- 
-    // Check for required ONNX paths specifically for commands that need them
-    match &args.command {
-        vectordb_lib::cli::commands::Commands::Repo(repo_cmd) => {
-            match &repo_cmd.command {
-                vectordb_lib::cli::repo_commands::RepoCommand::Add(_) => {
-                    if config.onnx_model_path.is_none() {
-                        anyhow::bail!("ONNX model path must be provided in config for 'repo add'");
-                    }
-                    if config.onnx_tokenizer_path.is_none() {
-                        anyhow::bail!("ONNX tokenizer path must be provided in config for 'repo add'");
-                    }
-                }
-                 vectordb_lib::cli::repo_commands::RepoCommand::Sync(_) => {
-                    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
-                        anyhow::bail!("ONNX paths must be provided in config for 'repo sync'");
-                    }
-                 }
-                _ => {}
-            }
-        }
-        vectordb_lib::cli::commands::Commands::Simple(simple_cmd) => {
-             // Assuming SimpleArgs structure allows access to its command
-             // If SimpleArgs.command is private, it needs a similar getter
-             match &simple_cmd.command {
-                 vectordb_lib::cli::simple::SimpleCommand::Index(_) => {
-                     if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
-                         anyhow::bail!("ONNX paths must be provided in config for 'simple index'");
-                     }
-                 }
-                 _ => {}
-             }
-        }
-        // Re-add wildcard arm to make match exhaustive
-        _ => {}
+    // Handle ONNX model/tokenizer path overrides from CLI args
+    if let Some(model_path_str) = &args.onnx_model_path_arg {
+        config.onnx_model_path = Some(PathBuf::from(model_path_str).to_string_lossy().into_owned());
+    }
+    if let Some(tokenizer_path_str) = &args.onnx_tokenizer_dir_arg {
+        config.onnx_tokenizer_path = Some(PathBuf::from(tokenizer_path_str).to_string_lossy().into_owned());
     }
 
-    // --- Execute Command --- 
-    tracing::info!("Executing command: {:?}", args.command);
+    // Ensure required ONNX files exist if not provided by default config
+    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+        // Simplified error message - check config/CLI args for paths
+         return Err(anyhow!(
+             "ONNX model path or tokenizer path not specified. \
+              Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir) \
+              or ensure they are set in the configuration file."
+         ));
+    }
 
-    // Pass mutable reference to config
-    let command_result = handle_command(args, &mut config, client).await;
-    tracing::info!("DEBUG: handle_command returned: {:?}", command_result);
+    // Initialize Qdrant client
+    let qdrant_client = match Qdrant::from_url(&config.qdrant_url).build() {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            eprintln!("Failed to connect to Qdrant at {}: {}", config.qdrant_url, e);
+            return Err(anyhow!("Qdrant connection failed"));
+        }
+    };
 
-    // --- Handle Result ---
+    // Handle the command
+    let command_result = handle_command(
+        args,
+        &mut config, // Pass config mutably
+        qdrant_client,
+       // config_path_override.as_ref() // Remove extra argument (E0061)
+    ).await;
+
+    // Handle potential errors from command execution
     if let Err(e) = command_result {
-        tracing::error!("Command execution failed: {:?}", e);
-        eprintln!("Error: {}", e);
-        return Err(e);
-    } else {
-         tracing::debug!("Command executed successfully.");
+        eprintln!("Error executing command: {}", e);
+        // Consider exiting with a non-zero status code
+        std::process::exit(1); 
     }
 
     Ok(())

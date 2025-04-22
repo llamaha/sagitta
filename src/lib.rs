@@ -47,7 +47,7 @@
 // Public modules that can be used when importing the crate
 pub mod cli;
 // pub mod client; // Removed - likely refers to workspace crate
-pub mod config;
+// pub mod config; // Moved to vectordb-core
 pub mod edit;
 pub mod git;
 pub mod syntax;
@@ -55,4 +55,7 @@ pub mod utils;
 pub mod vectordb;
 
 // Re-export minimal set of items for CLI usage
-pub use config::{AppConfig, load_config};
+// pub use config::{AppConfig, load_config}; // Moved to vectordb-core re-export
+
+// Use the re-exports from vectordb_core (with underscore)
+pub use vectordb_core::{AppConfig, load_config};

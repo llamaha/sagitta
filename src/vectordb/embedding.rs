@@ -1,14 +1,22 @@
-use crate::vectordb::error::Result;
-use crate::vectordb::provider::{EmbeddingProvider};
-// Explicitly import the concrete provider type
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use crate::vectordb::error::VectorDBError;
+// use crate::vectordb::embedding::{EmbeddingModel, Feature};
+use vectordb_core::embedding::provider::EmbeddingProvider;
+use vectordb_core::embedding::provider::onnx::OnnxEmbeddingModel;
+use vectordb_core::error::{Result, VectorDBError};
 use std::fmt;
-use crate::config::AppConfig;
+use vectordb_core::AppConfig;
+use std::sync::Arc;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "ort")]
-use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
+// use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
+use ort::environment::Environment;
+use ort::memory::Allocator;
+use ort::session::builder::{GraphOptimizationLevel, SessionBuilder};
+use ort::session::Session;
+use ort::value::Value;
+use tokenizers::Tokenizer;
+use ndarray::{Axis, Array2};
+use anyhow::{Result as AnyhowResult, Context};
+use serde::{Serialize, Deserialize};
 
 // Use the embedding dimensions from the providers
 // use crate::vectordb::provider::fast::FAST_EMBEDDING_DIM;
@@ -57,12 +65,11 @@ pub struct EmbeddingModel {
 impl EmbeddingModel {
     /// Creates a new ONNX-based EmbeddingModel.
     pub fn new_onnx<P: AsRef<Path>>(model_path: P, tokenizer_path: P) -> Result<Self> {
-        // Use full path for the provider constructor
-        let onnx_provider = crate::vectordb::provider::onnx::OnnxEmbeddingModel::new(
-            model_path.as_ref(), 
-            tokenizer_path.as_ref()
-        ).map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX provider: {}", e)))?; // Explicitly map error
-        
+        // Use the constructor from the core onnx provider module
+        let onnx_provider = OnnxEmbeddingModel::new(
+            model_path.as_ref(),
+            tokenizer_path.as_ref(),
+        )?;
         Ok(Self {
             provider: Arc::new(onnx_provider),
             model_type: EmbeddingModelType::Onnx,
@@ -92,8 +99,9 @@ impl EmbeddingModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use crate::vectordb::error::VectorDBError; // Removed unused import
-    use std::path::PathBuf; // Added for invalid path test
+    use std::path::Path;
+    use ndarray::Array;
+    use ndarray_stats::QuantileExt;
 
     // Removed test_fast_embedding
     // #[test]
@@ -161,14 +169,14 @@ mod tests {
     #[test]
     fn test_embedding_model_new_onnx_invalid_path() {
         // Use paths known not to exist
-        let model_path = PathBuf::from("./nonexistent/model.onnx");
-        let tokenizer_path = PathBuf::from("./nonexistent/tokenizer.json");
+        let model_path = Path::new("./nonexistent/model.onnx");
+        let tokenizer_path = Path::new("./nonexistent/tokenizer.json");
 
-        // This check relies on the underlying `OnnxProvider::new` failing
-        // We expect an EmbeddingError wrapping the provider's error
         let result = EmbeddingModel::new_onnx(&model_path, &tokenizer_path);
-        assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
-        // We can't easily assert the inner error message without a real provider error
+        // Update assertion: new_onnx propagates the error directly, doesn't wrap it.
+        // Check if *any* VectorDBError is returned.
+        assert!(result.is_err(), "Creating ONNX model with invalid path should return an error");
+        // assert!(matches!(result, Err(VectorDBError::EmbeddingError(_)))); // Old assertion
     }
     
     // Mock Provider needed to test `generate_embeddings`
@@ -193,6 +201,7 @@ pub fn initialize_provider(
                 let tokenizer_path = config.onnx_tokenizer_path.as_deref()
                     .ok_or_else(|| VectorDBError::ConfigurationError("ONNX tokenizer path not set in AppConfig".to_string()))?;
                 
+                // Use the imported core struct directly
                 let onnx_provider_result = OnnxEmbeddingModel::new(
                     Path::new(model_path), 
                     Path::new(tokenizer_path)

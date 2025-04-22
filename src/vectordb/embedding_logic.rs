@@ -4,13 +4,25 @@
 
 // use crate::vectordb::embedding::{EmbeddingModel, EmbeddingModelType}; // Remove unused EmbeddingModel
 use crate::vectordb::embedding::{EmbeddingModelType};
-use crate::vectordb::error::{Result, VectorDBError};
 use crate::vectordb::provider::EmbeddingProvider;
-#[cfg(feature = "ort")]
-use crate::vectordb::provider::onnx::OnnxEmbeddingModel;
-use std::path::PathBuf;
+use vectordb_core::syntax::CodeChunk;
+use crate::vectordb::cache::{EmbeddingCache, CacheCheckResult};
+use vectordb_core::config::AppConfig;
+use vectordb_core::error::{Result as CoreResult, VectorDBError};
+use anyhow::{Context, Result as AnyhowResult};
+use indicatif::ProgressBar;
+use rayon::prelude::*; // Add parallel processing
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use crate::config::AppConfig;
+use std::fs::{self, File};
+use tempfile::tempdir;
+use std::io::Write;
+use std::sync::Arc;
+
+// Conditional imports for ONNX provider
+#[cfg(feature = "ort")]
+use vectordb_core::embedding::provider::onnx::OnnxEmbeddingModel; // Correct import from core
 
 /// Handles the configuration and creation of embedding models.
 ///
@@ -34,7 +46,7 @@ impl EmbeddingHandler {
         
         let model_type = EmbeddingModelType::Onnx;
         
-        let provider_result: Result<Box<dyn EmbeddingProvider>> = match model_type {
+        let provider_result: std::result::Result<Box<dyn EmbeddingProvider>, VectorDBError> = match model_type {
             EmbeddingModelType::Onnx | EmbeddingModelType::Default => {
                 #[cfg(feature = "ort")]
                 {
@@ -72,7 +84,7 @@ impl EmbeddingHandler {
     /// Attempts to create an [`EmbeddingProvider`] instance based on the handler's configuration.
     ///
     /// Returns an error if the model cannot be created (e.g., required paths missing for ONNX).
-    pub fn create_embedding_model(&self) -> Result<Box<dyn EmbeddingProvider>> {
+    pub fn create_embedding_model(&self) -> std::result::Result<Box<dyn EmbeddingProvider>, VectorDBError> {
         match self.embedding_model_type {
             EmbeddingModelType::Onnx => {
                 let model_path = self.onnx_model_path.as_ref().ok_or_else(|| {
@@ -105,7 +117,7 @@ impl EmbeddingHandler {
         &mut self,
         model_path: Option<PathBuf>,
         tokenizer_path: Option<PathBuf>,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), VectorDBError> {
         if let Some(model_p) = &model_path {
             if !model_p.exists() {
                 return Err(VectorDBError::EmbeddingError(format!(
@@ -156,7 +168,7 @@ impl EmbeddingHandler {
     /// Gets the embedding dimension using a cached or newly created provider.
     ///
     /// Returns an error if the provider cannot be created.
-    pub fn dimension(&self) -> Result<usize> {
+    pub fn dimension(&self) -> std::result::Result<usize, VectorDBError> {
         let mut cache_guard = self.provider_cache.lock().unwrap();
         if cache_guard.is_none() {
             log::debug!("Provider cache miss for dimension. Creating provider...");
@@ -169,7 +181,7 @@ impl EmbeddingHandler {
     /// Embeds a batch of texts using a cached or newly created provider.
     ///
     /// Returns an error if the provider cannot be created or embedding fails.
-    pub fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+    pub fn embed(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, VectorDBError> {
         let mut cache_guard = self.provider_cache.lock().unwrap();
         if cache_guard.is_none() {
             log::debug!("Provider cache miss for embed. Creating provider...");
@@ -183,8 +195,8 @@ impl EmbeddingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
-    use crate::vectordb::error::VectorDBError;
+    use vectordb_core::config::AppConfig;
+    use vectordb_core::error::VectorDBError;
     use std::fs;
     use tempfile::tempdir;
 
