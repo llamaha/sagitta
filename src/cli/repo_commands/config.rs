@@ -4,6 +4,10 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 use vectordb_core::AppConfig;
+use vectordb_core::config::{save_config, get_config_path_or_default, IndexingConfig, load_config};
+use crate::cli::CliArgs;
+use crate::cli::commands::Commands;
+use crate::cli::simple;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -75,12 +79,30 @@ fn handle_set_repo_base_path(
     Ok(())
 }
 
+fn get_default_config() -> AppConfig {
+    AppConfig {
+        qdrant_url: "http://localhost:6334".to_string(),
+        onnx_model_path: None,
+        onnx_tokenizer_path: None,
+        repositories: Vec::new(),
+        active_repository: None,
+        repositories_base_path: None,
+        server_api_key_path: None,
+        indexing: IndexingConfig::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use std::fs;
     use tempfile::tempdir;
-    use vectordb_core::{load_config, save_config};
+    use vectordb_core::config::{AppConfig, save_config, get_config_path_or_default, IndexingConfig, load_config};
+    use crate::cli::CliArgs;
+    use crate::cli::commands::Commands;
+    use crate::cli::repo_commands::config::ConfigArgs;
+    use crate::cli::simple;
+    use std::path::PathBuf;
 
     #[test]
     fn test_handle_set_repo_base_path() {
@@ -97,6 +119,7 @@ mod tests {
             server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
+            indexing: IndexingConfig::default(),
         };
         
         // Set repo base path
@@ -134,6 +157,7 @@ mod tests {
             repositories: vec![],
             active_repository: None,
             repositories_base_path: None,
+            indexing: IndexingConfig::default(),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
@@ -142,35 +166,22 @@ mod tests {
         let _tokenizer_path = "/test/tokenizer".to_string();
         let _qdrant_url = "http://new-qdrant".to_string();
 
-        let _args = ConfigArgs {
-            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: PathBuf::new() })
-            // The test setup below seems incorrect for ConfigCommand::SetRepoBasePath
-            // It manually sets fields that are not part of ConfigArgs directly
-            // onnx_model_path: Some(model_path.clone()),
-            // onnx_tokenizer_path: Some(tokenizer_path.clone()),
-            // qdrant_url: Some(qdrant_url.clone()),
-            // repositories_base_path: None,
-        };
-
-        // Reconstructing the test intent - testing handle_set_repo_base_path implicitly via handle_config
         let repo_base_path = dir.path().join("test_base_path");
         let base_path_args = ConfigArgs {
             command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: repo_base_path.clone() })
         };
 
-        // Call the handler to set the base path
+        let cli_args = CliArgs { 
+            command: Commands::Simple(simple::SimpleArgs::default()),
+            onnx_model_path_arg: None, 
+            onnx_tokenizer_dir_arg: None 
+        };
         let result_base_path = handle_config(base_path_args, &mut config, Some(&config_path));
         assert!(result_base_path.is_ok(), "handle_config (SetRepoBasePath) failed: {:?}", result_base_path.err());
 
-        // Verify config was updated for base path
         let loaded_config_base = load_config(Some(&config_path)).unwrap();
         assert!(loaded_config_base.repositories_base_path.is_some());
         assert_eq!(loaded_config_base.repositories_base_path.unwrap(), repo_base_path);
-
-        // This part seems to test setting other paths, which is not supported by ConfigCommand anymore
-        // assert_eq!(config.onnx_model_path, Some(model_path));
-        // assert_eq!(config.onnx_tokenizer_path, Some(tokenizer_path));
-        // assert_eq!(config.qdrant_url, qdrant_url);
     }
     
     #[test]
@@ -188,19 +199,22 @@ mod tests {
             repositories: vec![],
             active_repository: None,
             repositories_base_path: None,
+            indexing: IndexingConfig::default(),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
-        // Args to set base path
         let args = ConfigArgs {
             command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: base_path.clone() })
         };
 
-        // Call the handler
+        let cli_args = CliArgs { 
+            command: Commands::Simple(simple::SimpleArgs::default()),
+            onnx_model_path_arg: None, 
+            onnx_tokenizer_dir_arg: None 
+        };
         let result = handle_config(args, &mut config, Some(&config_path));
         assert!(result.is_ok(), "handle_config failed: {:?}", result.err());
 
-        // Verify config was updated
         config = load_config(Some(&config_path)).unwrap();
         assert_eq!(config.repositories_base_path, Some(base_path));
     }
