@@ -64,7 +64,7 @@ tempfile = "3.5"
 # Note: tree-sitter and language crates already added above for syntax module
 # --- End dependencies for edit module ---
 
-# Add other dependencies as modules are moved...
+num_cpus = "1.16"
 
 [dev-dependencies] # Add dev dependencies if needed for tests in core
 tempfile = "3.10.1"

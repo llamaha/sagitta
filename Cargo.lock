@@ -3637,6 +3637,7 @@ dependencies = [
  "log",
  "mockall",
  "ndarray",
+ "num_cpus",
  "ort",
  "qdrant-client",
  "rayon",
