@@ -11,12 +11,12 @@ onnx = ["ort"]
 cuda = ["ort/cuda"]
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.86"
 thiserror = "1.0.61"
 serde = { version = "1.0.203", features = ["derive"] }
 toml = "0.8.20"
 dirs = "5.0.1"
-log = "0.4"
+log = "0.4.21"
 uuid = { version = "1.8", features = ["v4", "serde"] } # Needed by error.rs
 async-trait = "0.1.77" # Add async-trait dependency
 lazy_static = "1.4.0" # Added for syntax::languages
@@ -37,7 +37,7 @@ ndarray = { version = "0.16" }
 
 # Dependencies for repo_add / repo_helpers
 clap = { version = "4.5.7", features = ["derive"] } # For AddRepoArgs
-colored = "2.0"
+colored = "2.1.0"
 tokio = { version = "1.37.0", features = ["full"] } # For async fn
 tracing = "0.1"
 # Need embedding_logic dependencies if used internally (like ort, tokenizers)
@@ -65,6 +65,9 @@ tempfile = "3.5"
 # --- End dependencies for edit module ---
 
 num_cpus = "1.16"
+
+futures = "0.3" # Moved futures to main dependencies
+chrono = { version = "0.4.38", features = ["serde"] }
 
 [dev-dependencies] # Add dev dependencies if needed for tests in core
 tempfile = "3.10.1"

@@ -3628,9 +3628,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
  "colored",
  "dirs",
+ "futures",
  "git2",
  "indicatif",
  "lazy_static",

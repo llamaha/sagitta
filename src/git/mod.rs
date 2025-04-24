@@ -201,7 +201,7 @@ where
     
     // Perform indexing using the passed cli_args and app_config
     repo_helpers::index_files(
-        client.as_ref(),
+        client.clone(),
         None,
         None,
         app_config,

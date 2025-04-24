@@ -40,6 +40,26 @@ pub struct RepositoryConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// Configuration specific to the indexing process.
+pub struct IndexingConfig {
+    /// Maximum number of concurrent batch upserts to Qdrant.
+    #[serde(default = "default_max_concurrent_upserts")]
+    pub max_concurrent_upserts: usize,
+}
+
+impl Default for IndexingConfig {
+    fn default() -> Self {
+        Self { 
+            max_concurrent_upserts: default_max_concurrent_upserts(),
+        }
+    }
+}
+
+fn default_max_concurrent_upserts() -> usize {
+    8 // Default to 8 concurrent uploads
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 /// Represents the application configuration, loaded from a `config.toml` file.
 pub struct AppConfig {
     /// The URL for the Qdrant gRPC endpoint.
@@ -63,6 +83,10 @@ pub struct AppConfig {
     /// If not provided, uses the default XDG data directory.
     #[serde(default)]
     pub repositories_base_path: Option<PathBuf>,
+
+    /// Indexing specific configuration.
+    #[serde(default)]
+    pub indexing: IndexingConfig,
 }
 
 impl Default for AppConfig {
@@ -75,6 +99,7 @@ impl Default for AppConfig {
             repositories: Vec::new(),
             active_repository: None,
             repositories_base_path: None,
+            indexing: IndexingConfig::default(),
         }
     }
 }
@@ -301,6 +326,7 @@ mod tests {
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
             repositories_base_path: Some(data_path.clone()),
+            indexing: IndexingConfig::default(),
         };
 
         // Save and load
@@ -348,6 +374,7 @@ mod tests {
             server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
+            indexing: IndexingConfig::default(),
         };
         
         // Should use the custom path from config
