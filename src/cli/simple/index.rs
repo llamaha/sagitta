@@ -12,7 +12,7 @@ use crate::cli::commands::{
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION,
     FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE
 };
-use crate::syntax;
+use vectordb_core::syntax;
 
 /// Index files from specified paths into a Qdrant collection
 ///

@@ -50,7 +50,6 @@ pub mod cli;
 // pub mod config; // Moved to vectordb-core
 pub mod edit;
 pub mod git;
-pub mod syntax;
 pub mod utils;
 pub mod vectordb;
 
