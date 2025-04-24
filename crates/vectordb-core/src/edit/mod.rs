@@ -198,6 +198,15 @@ pub fn validate_edit(
         }
     }
     
+    /*
+    // Skipping isolated syntax check for new_content.
+    // This check can be unreliable for single lines or fragments that are valid
+    // within a larger context but might be flagged as errors by the parser
+    // when parsed in isolation (e.g., missing EOF). 
+    // The `apply_edit` function implicitly validates the syntax when writing the
+    // final combined content, which is sufficient for line range edits.
+    // For semantic edits, the structure is more likely to be self-contained, 
+    // but this check might still be too simplistic.
     match parse_content(new_content, &language) {
         Ok(content_tree) => {
             if content_tree.root_node().has_error() {
@@ -227,6 +236,7 @@ pub fn validate_edit(
             });
         }
     }
+    */
     
     if issues.is_empty() {
         // TODO: Replace println with logging

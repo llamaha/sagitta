@@ -235,6 +235,8 @@ impl EmbeddingHandler {
 mod tests {
     use super::*;
     use crate::config::AppConfig;
+    use crate::config::IndexingConfig;
+    use crate::embedding::{EmbeddingHandler, EmbeddingModelType, EmbeddingModel};
     use crate::error::VectorDBError;
     use std::fs;
     use tempfile::tempdir;
@@ -251,6 +253,7 @@ mod tests {
             repositories: vec![],
             active_repository: None,
             repositories_base_path: None,
+            indexing: IndexingConfig::default(),
         }
     }
 
