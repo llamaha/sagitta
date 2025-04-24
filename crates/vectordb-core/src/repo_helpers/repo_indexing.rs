@@ -287,9 +287,9 @@ pub async fn index_files<
     }
 
     if !processing_errors.is_empty() {
-        log::error!("Encountered {} errors during file processing:", processing_errors.len());
+        log::debug!("Encountered {} files that could not be processed (e.g., non-UTF8):", processing_errors.len());
         for e in processing_errors {
-            log::error!("  - {}", e);
+            log::debug!("  - {}", e);
         }
     }
 

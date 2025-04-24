@@ -163,23 +163,43 @@ pub fn handle_repo_command_test(config: &AppConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Use config types and functions from vectordb_core (with underscore)
-    use vectordb_core::{AppConfig, RepositoryConfig, load_config, save_config};
+    use crate::cli::repo_commands::RepoArgs; 
+    use vectordb_core::config::{AppConfig, RepositoryConfig, IndexingConfig, load_config, save_config};
+    use std::path::PathBuf;
+    // use mockall::predicate::*;
     use crate::cli::commands::Commands;
-    use crate::cli::repo_commands::{RepoArgs, RepoCommand};
+    use crate::cli::repo_commands::{RepoCommand};
     use crate::cli::repo_commands::remove::RemoveRepoArgs;
     use qdrant_client::Qdrant;
-     // Moved qdrant test imports here
     use std::sync::Arc;
     use tokio::runtime::Runtime;
     use std::collections::HashMap;
-    use std::path::{PathBuf};
     use std::fs;
     use tempfile::{tempdir};
-     // Moved mockall imports here
-    
     use std::time::{SystemTime, UNIX_EPOCH};
-    // use vectordb_core::qdrant_client_trait::MockQdrantClientTrait; // Commented out - may be unused or moved
+    // Remove import for MockQdrantClientTrait as it seems unresolved/unused
+    // use vectordb_core::qdrant_client_trait::MockQdrantClientTrait; 
+    use crate::cli::CliArgs; 
+
+    // Helper function to create a default AppConfig for tests
+    fn default_test_config() -> AppConfig {
+        // Use a unique temp directory for each test run if possible, 
+        // or ensure cleanup in tests that modify the filesystem.
+        let temp_dir = tempdir().expect("Failed to create temp dir for test config");
+        let base_path = temp_dir.path().to_path_buf();
+        temp_dir.into_path(); // Prevent immediate deletion
+
+        AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            onnx_model_path: Some("default_model_path".to_string()),
+            onnx_tokenizer_path: Some("default_tokenizer_path".to_string()),
+            repositories: vec![],
+            active_repository: None,
+            repositories_base_path: Some(base_path), // Use temp path
+            server_api_key_path: None,
+            indexing: IndexingConfig::default(),
+        }
+    }
 
     // Helper function to create a default AppConfig for tests
     fn create_test_config_data() -> AppConfig {
@@ -194,6 +214,7 @@ mod tests {
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories_base_path: None,
+            indexing: IndexingConfig::default(),
         }
     }
 
