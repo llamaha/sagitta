@@ -21,6 +21,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rayon::prelude::*;
 use std::cell::RefCell;
 use std::thread_local;
+use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
+use futures::future::try_join_all;
 
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -193,7 +196,7 @@ fn process_files_parallel(
 pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
-    client: &C,
+    client: Arc<C>,
     onnx_model_path_opt: Option<String>,
     onnx_tokenizer_path_opt: Option<String>,
     config: &AppConfig,
@@ -202,10 +205,10 @@ pub async fn index_files<
     collection_name: &str,
     branch_name: &str,
     commit_hash: &str,
-) -> Result<(), Error>
+) -> Result<usize, Error>
 {
     if relative_paths.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     prewarm_thread_local_models(config);
     let pb = ProgressBar::new(relative_paths.len() as u64);
@@ -215,33 +218,91 @@ pub async fn index_files<
             .map_err(|e| Error::Other(e.to_string()))?
             .progress_chars("#=-"),
     );
-    let mut points_batch = Vec::new();
-    let mut errors = Vec::new();
+
+    let client = client.clone();
+    let collection_name = collection_name.to_string();
+
+    let max_concurrent_upserts = config.indexing.max_concurrent_upserts;
+    let semaphore = Arc::new(Semaphore::new(max_concurrent_upserts));
+    log::info!("Using max_concurrent_upserts: {}", max_concurrent_upserts);
+
+    let mut points_batch = Vec::with_capacity(BATCH_SIZE);
+    let mut processing_errors = Vec::new();
+    let mut upsert_tasks: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
+    let mut total_points_processed = 0;
+
     let results = process_files_parallel(config, repo_root, relative_paths, branch_name, commit_hash, &pb);
+
     for result in results {
         match result {
             Ok((points, _relative_path)) => {
                 for point in points {
                     points_batch.push(point);
                     if points_batch.len() >= BATCH_SIZE {
-                        crate::repo_helpers::qdrant_utils::custom_upsert_batch(client, collection_name, points_batch.clone(), &pb).await?;
-                        points_batch.clear();
+                        let batch_to_upsert = std::mem::replace(&mut points_batch, Vec::with_capacity(BATCH_SIZE));
+                        total_points_processed += batch_to_upsert.len();
+                        let client_clone = client.clone();
+                        let collection_name_clone = collection_name.clone();
+                        let pb_clone = pb.clone();
+                        let semaphore_clone = semaphore.clone();
+
+                        let task = tokio::spawn(async move {
+                            let _permit = semaphore_clone.acquire_owned().await.expect("Semaphore acquisition failed");
+                            custom_upsert_batch(&*client_clone, &collection_name_clone, batch_to_upsert, &pb_clone).await
+                        });
+                        upsert_tasks.push(task);
                     }
                 }
             }
             Err(e) => {
-                errors.push(e);
+                processing_errors.push(e);
             }
         }
     }
+
     if !points_batch.is_empty() {
-        crate::repo_helpers::qdrant_utils::custom_upsert_batch(client, collection_name, points_batch, &pb).await?;
+        let final_batch_size = points_batch.len();
+        total_points_processed += final_batch_size;
+        let client_clone = client.clone();
+        let collection_name_clone = collection_name.clone();
+        let pb_clone = pb.clone();
+        let semaphore_clone = semaphore.clone();
+        let task = tokio::spawn(async move {
+            let _permit = semaphore_clone.acquire_owned().await.expect("Semaphore acquisition failed");
+            custom_upsert_batch(&*client_clone, &collection_name_clone, points_batch, &pb_clone).await
+        });
+        upsert_tasks.push(task);
     }
-    pb.finish_with_message("Indexing complete");
-    if !errors.is_empty() {
-        for e in errors { log::error!("[index_files] {}", e); }
+
+    pb.finish_with_message("File processing complete. Waiting for uploads...");
+
+    let upsert_results = try_join_all(upsert_tasks).await
+        .map_err(|e| Error::Other(format!("Tokio task join error: {}", e)))?;
+
+    let mut upsert_errors = Vec::new();
+    for result in upsert_results {
+        if let Err(e) = result {
+            upsert_errors.push(e);
+        }
     }
-    Ok(())
+
+    if !processing_errors.is_empty() {
+        log::error!("Encountered {} errors during file processing:", processing_errors.len());
+        for e in processing_errors {
+            log::error!("  - {}", e);
+        }
+    }
+
+    if !upsert_errors.is_empty() {
+        log::error!("Encountered {} errors during batch upserts:", upsert_errors.len());
+        for e in &upsert_errors {
+             log::error!("  - {}", e);
+        }
+        return Err(upsert_errors.remove(0));
+    }
+
+    log::info!("All batches upserted successfully.");
+    Ok(total_points_processed)
 }
 
 pub async fn prepare_repository<C>(

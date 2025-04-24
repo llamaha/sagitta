@@ -16,8 +16,8 @@ use vectordb_core::config::{AppConfig as CoreAppConfig, load_config as core_load
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logger from RUST_LOG env var or default to info
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize logger from RUST_LOG env var or default to warn
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // Parse command-line arguments
     let args = CliArgs::parse();

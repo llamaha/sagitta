@@ -254,10 +254,10 @@ async fn handle_simple_index(
     // Call the repo indexer with dummy branch/commit values
     let branch_name = "main";
     let commit_hash = "simple-index";
-    vectordb_core::repo_helpers::repo_indexing::index_files(
-        client.as_ref(),
-        None, // onnx_model_path_opt
-        None, // onnx_tokenizer_path_opt
+    let total_chunks_indexed = vectordb_core::repo_helpers::repo_indexing::index_files(
+        client.clone(),
+        None,
+        None,
         config,
         &cwd,
         &relative_paths,
@@ -270,7 +270,7 @@ async fn handle_simple_index(
     println!("  Files Scanned:       {}", files_to_process.len());
     println!("  Files Processed:     {}", files_to_process.len()); // No skip logic here
     println!("  Files Skipped:       0");
-    println!("  Chunks Indexed:      (see logs)");
+    println!("  Chunks Indexed:      {}", total_chunks_indexed);
 
     Ok(())
 }
