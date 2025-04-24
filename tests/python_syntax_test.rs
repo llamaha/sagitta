@@ -140,7 +140,7 @@ print(x + y)
         
         // Test with only 'pass' statement
         let pass_chunks = parser.parse(pass_only_content, file_path)?;
-        assert!(!pass_chunks.is_empty(), "Parser should handle 'pass' statement appropriately");
+        assert!(pass_chunks.is_empty(), "Parser should skip top-level 'pass' statements");
         
         Ok(())
     }

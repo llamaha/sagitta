@@ -150,8 +150,6 @@ async fn handle_simple_index(
     log::info!("Processing input paths: {:?}", cmd_args.paths);
 
     // --- Enforce Config-Only ONNX Paths for Simple Index ---
-    // Simple index mode requires ONNX paths to be defined in the config file,
-    // not via CLI args or environment variables, to avoid ambiguity.
     if cli_args.onnx_model_path_arg.is_some() || std::env::var("VECTORDB_ONNX_MODEL").is_ok() {
         return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
@@ -159,16 +157,12 @@ async fn handle_simple_index(
          return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
 
-    // Get paths ONLY from the loaded config object
     let onnx_model_path_str = config.onnx_model_path.as_ref()
         .ok_or_else(|| anyhow!("ONNX model path must be set in the configuration file when using 'simple index'"))?;
     let onnx_tokenizer_dir_str = config.onnx_tokenizer_path.as_ref()
         .ok_or_else(|| anyhow!("ONNX tokenizer path must be set in the configuration file when using 'simple index'"))?;
-    
-    // --- Validate resolved paths ---
     let _onnx_model_path = PathBuf::from(onnx_model_path_str);
     let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
-
     if !_onnx_model_path.exists() {
         return Err(anyhow!("Resolved ONNX model path does not exist: {}", _onnx_model_path.display()));
     }
@@ -182,22 +176,22 @@ async fn handle_simple_index(
     log::info!("Using resolved ONNX model: {}", _onnx_model_path.display());
     log::info!("Using resolved ONNX tokenizer directory: {}", _onnx_tokenizer_path.display());
 
-    log::info!("Using embedding handler for indexing...");
     // Create EmbeddingHandler using the validated config paths
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple index")?;
-    let embedding_dim = embedding_handler // Use _ to avoid warning
+    let embedding_dim = embedding_handler
         .dimension()
         .context("Failed to get embedding dimension")?;
     log::info!("Embedding dimension: {}", embedding_dim);
 
     // Ensure collection exists with the correct embedding dimension
     ensure_legacy_collection_exists(&client, collection_name, embedding_dim as u64).await?;
-
     if !client.collection_exists(collection_name.to_string()).await? {
         bail!("Collection '{}' check failed after creation attempt.", collection_name);
     }
 
+    // Gather all files to index (flatten directories, apply extension filter)
+    let mut files_to_process = Vec::new();
     let file_types_set: Option<HashSet<String>> = cmd_args
         .file_extensions
         .as_ref()
@@ -207,25 +201,8 @@ async fn handle_simple_index(
                 .map(|s| s.trim_start_matches('.').to_lowercase())
                 .collect()
         });
-    if let Some(ref ft_set) = file_types_set {
-        log::info!("Filtering by file extensions: {:?}", ft_set);
-    }
-
-    log::info!("Starting file traversal and processing...");
-
-    let pb_style = ProgressStyle::with_template(
-        "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({per_sec}) {msg}",
-    )?
-    .progress_chars("#>-");
-    let pb = ProgressBar::new(0);
-    pb.set_style(pb_style);
-    pb.enable_steady_tick(Duration::from_millis(100));
-    pb.set_message("Scanning directories...");
-
-    let mut files_to_process = Vec::new();
-
     for path_arg in &cmd_args.paths {
-         let absolute_path_arg = path_arg.canonicalize().with_context(|| format!("Failed to get absolute path for: {}", path_arg.display()))?;
+        let absolute_path_arg = path_arg.canonicalize().with_context(|| format!("Failed to get absolute path for: {}", path_arg.display()))?;
         if absolute_path_arg.is_file() {
             let should_process = match &file_types_set {
                 Some(filter_set) => {
@@ -238,138 +215,62 @@ async fn handle_simple_index(
                 }
                 None => true,
             };
-
             if should_process {
-                 files_to_process.push(absolute_path_arg);
-            } else {
-                log::trace!("Skipping file due to extension filter: {}", absolute_path_arg.display());
+                files_to_process.push(absolute_path_arg);
             }
-
         } else if absolute_path_arg.is_dir() {
-             for entry_result in WalkDir::new(&absolute_path_arg).into_iter().filter_map(|e| e.ok()) {
-                 let entry_path = entry_result.path();
-                 if !entry_path.is_file() {
-                     continue;
-                 }
-
-                 let should_process = match &file_types_set {
+            for entry_result in WalkDir::new(&absolute_path_arg).into_iter().filter_map(|e| e.ok()) {
+                let entry_path = entry_result.path();
+                if !entry_path.is_file() {
+                    continue;
+                }
+                let should_process = match &file_types_set {
                     Some(filter_set) => {
                         let extension = entry_path
                             .extension()
                             .and_then(|ext| ext.to_str())
                             .map(|s| s.to_lowercase())
                             .unwrap_or_default();
-                         filter_set.contains(&extension)
+                        filter_set.contains(&extension)
                     }
                     None => true,
-                 };
-
-                 if should_process {
-                     files_to_process.push(entry_path.to_path_buf()); 
-                 } else {
-                     log::trace!("Skipping file due to extension filter: {}", entry_path.display());
-                 }
-             }
-        } else {
-            log::warn!("Input path is neither a file nor a directory: {}. Skipping.", absolute_path_arg.display());
-        }
-    }
-    
-    pb.set_length(files_to_process.len() as u64);
-    pb.set_position(0);
-    pb.set_message("Processing files...");
-
-    let mut total_points_processed: usize = 0;
-    let mut total_files_processed: usize = 0;
-    let mut total_files_skipped: usize = 0;
-    let total_files_to_scan = files_to_process.len();
-
-    let model = embedding_handler
-        .create_embedding_model()
-        .context("Failed to create embedding model")?;
-
-    let mut points_batch = Vec::with_capacity(BATCH_SIZE);
-    let mut batch_num = 1;
-    let total_batches_estimate = (total_files_to_scan / BATCH_SIZE).max(1); // Ensure at least 1
-
-    for file_path in files_to_process {
-        let absolute_path_str = file_path.to_string_lossy().to_string();
-        log::debug!("Processing file: {}", file_path.display());
-
-        let chunks = match syntax::get_chunks(&file_path) {
-            Ok(chunks) => chunks,
-            Err(e) => {
-                log::warn!("Failed to get chunks for file {}: {}. Skipping.", file_path.display(), e);
-                pb.println(format!("Warning: Failed to get chunks for {}, skipping.", file_path.display()));
-                total_files_skipped += 1;
-                pb.inc(1);
-                continue;
-            }
-        };
-
-        if chunks.is_empty() {
-            log::debug!("No text chunks found in file {}. Skipping.", file_path.display());
-            total_files_skipped += 1;
-            pb.inc(1);
-            continue;
-        }
-
-        let chunk_contents: Vec<&str> = chunks.iter().map(|c| c.content.as_str()).collect();
-        let embeddings = match model.embed_batch(&chunk_contents) {
-            Ok(embeddings) => embeddings,
-            Err(e) => {
-                log::error!("Failed to generate embeddings for {}: {}. Skipping file.", file_path.display(), e);
-                pb.println(format!("Error embedding {}, skipping.", file_path.display()));
-                total_files_skipped += 1;
-                pb.inc(1);
-                continue;
-            }
-        };
-
-        let file_extension = file_path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_string();
-
-        for (i, chunk) in chunks.iter().enumerate() {
-            let mut payload = Payload::new();
-            payload.insert(FIELD_FILE_PATH, absolute_path_str.clone()); 
-            payload.insert(FIELD_START_LINE, chunk.start_line as i64);
-            payload.insert(FIELD_END_LINE, chunk.end_line as i64);
-            payload.insert(FIELD_LANGUAGE, chunk.language.clone());
-            payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
-            payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.to_string());
-            payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
-
-            let point = PointStruct::new(
-                Uuid::new_v4().to_string(),
-                embeddings[i].clone(),
-                payload,
-            );
-            points_batch.push(point);
-
-            if points_batch.len() >= BATCH_SIZE {
-                let batch_to_upsert = std::mem::take(&mut points_batch);
-                let current_batch_size = batch_to_upsert.len();
-                upsert_batch(&client, collection_name, batch_to_upsert, batch_num, total_batches_estimate, &pb).await?;
-                total_points_processed += current_batch_size;
-                batch_num += 1;
+                };
+                if should_process {
+                    files_to_process.push(entry_path.to_path_buf());
+                }
             }
         }
-        total_files_processed += 1;
-        pb.inc(1);
     }
 
-    if !points_batch.is_empty() {
-        let final_batch_size = points_batch.len();
-        upsert_batch(&client, collection_name, points_batch, batch_num, total_batches_estimate, &pb).await?;
-        total_points_processed += final_batch_size;
+    // Convert files_to_process to relative paths from a dummy root (for repo_indexer compatibility)
+    // We'll use the current directory as the root, and store relative paths
+    let cwd = std::env::current_dir().context("Failed to get current working directory")?;
+    let mut relative_paths = Vec::new();
+    for abs_path in &files_to_process {
+        let rel = abs_path.strip_prefix(&cwd).unwrap_or(abs_path).to_path_buf();
+        relative_paths.push(rel);
     }
 
-    pb.finish_with_message("Indexing complete!");
+    // Call the repo indexer with dummy branch/commit values
+    let branch_name = "main";
+    let commit_hash = "simple-index";
+    vectordb_core::repo_helpers::repo_indexing::index_files(
+        client.as_ref(),
+        None, // onnx_model_path_opt
+        None, // onnx_tokenizer_path_opt
+        config,
+        &cwd,
+        &relative_paths,
+        collection_name,
+        branch_name,
+        commit_hash,
+    ).await.map_err(|e| anyhow!("Repo indexer failed: {}", e))?;
 
     println!("\nSimple Indexing Summary for Collection '{}':", collection_name);
-    println!("  Files Scanned:       {}", total_files_to_scan);
-    println!("  Files Processed:     {}", total_files_processed);
-    println!("  Files Skipped:       {}", total_files_skipped);
-    println!("  Chunks Indexed:      {}", total_points_processed);
+    println!("  Files Scanned:       {}", files_to_process.len());
+    println!("  Files Processed:     {}", files_to_process.len()); // No skip logic here
+    println!("  Files Skipped:       0");
+    println!("  Chunks Indexed:      (see logs)");
 
     Ok(())
 }

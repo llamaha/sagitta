@@ -17,6 +17,10 @@ use crate::embedding::EmbeddingHandler;
 use crate::syntax;
 use crate::QdrantClientTrait;
 use crate::repo_helpers::qdrant_utils::{custom_upsert_batch, ensure_repository_collection_exists};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use rayon::prelude::*;
+use std::cell::RefCell;
+use std::thread_local;
 
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -82,6 +86,110 @@ pub async fn update_sync_status_and_languages<
     Ok(())
 }
 
+fn prewarm_thread_local_models(config: &AppConfig) {
+    let n_threads = rayon::current_num_threads();
+    (0..n_threads).into_par_iter().for_each(|_| {
+        THREAD_EMBEDDING_HANDLER.with(|handler_cell| {
+            let mut handler_opt = handler_cell.borrow_mut();
+            if handler_opt.is_none() {
+                *handler_opt = Some(EmbeddingHandler::new(config).unwrap());
+            }
+        });
+    });
+}
+
+thread_local! {
+    static THREAD_EMBEDDING_HANDLER: RefCell<Option<EmbeddingHandler>> = RefCell::new(None);
+}
+
+fn process_files_parallel(
+    config: &AppConfig,
+    repo_root: &PathBuf,
+    relative_paths: &[PathBuf],
+    branch_name: &str,
+    commit_hash: &str,
+    pb: &ProgressBar,
+) -> Vec<Result<(Vec<PointStruct>, PathBuf), String>> {
+    relative_paths.par_iter().map(|relative_path| {
+        let full_path = repo_root.join(relative_path);
+        let result = THREAD_EMBEDDING_HANDLER.with(|handler_cell| {
+            let mut handler_opt = handler_cell.borrow_mut();
+            if handler_opt.is_none() {
+                *handler_opt = Some(EmbeddingHandler::new(config).map_err(|e| format!("Failed to initialize embedding handler: {}", e))?);
+            }
+            let handler = handler_opt.as_mut().unwrap();
+            // File size check
+            match std::fs::metadata(&full_path) {
+                Ok(metadata) => {
+                    if metadata.len() > MAX_FILE_SIZE_BYTES {
+                        Err(format!(
+                            "Skipping file larger than {} bytes: {}",
+                            MAX_FILE_SIZE_BYTES,
+                            full_path.display()
+                        ))
+                    } else {
+                        if !full_path.is_file() {
+                            Err(format!("Skipping non-file path found during indexing: {}", full_path.display()))
+                        } else {
+                            // Parse and embed
+                            match crate::syntax::get_chunks(&full_path) {
+                                Ok(chunks) => {
+                                    if chunks.is_empty() {
+                                        Ok((Vec::new(), relative_path.clone()))
+                                    } else {
+                                        let file_path_str = relative_path.to_string_lossy().to_string();
+                                        let file_extension = relative_path.extension()
+                                            .unwrap_or_default()
+                                            .to_string_lossy()
+                                            .to_string();
+                                        let mut points = Vec::new();
+                                        for chunk in &chunks {
+                                            let chunk_content = &chunk.content;
+                                            let embedding = match handler.embed(&[chunk_content]) {
+                                                Ok(mut result) => {
+                                                    if result.is_empty() {
+                                                        continue;
+                                                    }
+                                                    result.remove(0)
+                                                }
+                                                Err(_) => {
+                                                    continue;
+                                                }
+                                            };
+                                            let point_id_uuid = Uuid::new_v4().to_string();
+                                            let mut payload = Payload::new();
+                                            payload.insert(FIELD_FILE_PATH, file_path_str.clone());
+                                            payload.insert(FIELD_START_LINE, chunk.start_line as i64);
+                                            payload.insert(FIELD_END_LINE, chunk.end_line as i64);
+                                            payload.insert(FIELD_LANGUAGE, chunk.language.clone());
+                                            payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
+                                            payload.insert(FIELD_BRANCH, branch_name.to_string());
+                                            payload.insert(FIELD_COMMIT_HASH, commit_hash.to_string());
+                                            payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.to_string());
+                                            payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
+                                            points.push(PointStruct::new(point_id_uuid, embedding, payload));
+                                        }
+                                        Ok((points, relative_path.clone()))
+                                    }
+                                }
+                                Err(e) => Err(format!("Failed to parse file {}: {}", full_path.display(), e)),
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    Err(format!(
+                        "Failed to get metadata for file {}: {}. Skipping file.",
+                        full_path.display(), e
+                    ))
+                }
+            }
+        });
+        pb.inc(1);
+        result
+    }).collect()
+}
+
 pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
@@ -97,40 +205,9 @@ pub async fn index_files<
 ) -> Result<(), Error>
 {
     if relative_paths.is_empty() {
-        log::info!("No files provided for indexing in branch '{}' .", branch_name);
         return Ok(());
     }
-    log::info!("Indexing {} files for branch '{}' (commit: {}) into collection '{}'...", relative_paths.len(), branch_name, &commit_hash[..7], collection_name);
-    
-    // Determine model and tokenizer paths using Param -> Env -> Config priority
-    let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
-    let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
-
-    let onnx_model_path_str = onnx_model_path_opt.as_deref()
-        .or(model_env_var.as_deref())
-        .or(config.onnx_model_path.as_deref())
-        .ok_or_else(|| Error::Other("ONNX model path must be provided via parameter, VECTORDB_ONNX_MODEL, or config".to_string()))?;
-    
-    let onnx_tokenizer_dir_str = onnx_tokenizer_path_opt.as_deref()
-        .or(tokenizer_env_var.as_deref())
-        .or(config.onnx_tokenizer_path.as_deref())
-        .ok_or_else(|| Error::Other("ONNX tokenizer path must be provided via parameter, VECTORDB_ONNX_TOKENIZER_DIR, or config".to_string()))?;
-
-    let _model_path = PathBuf::from(onnx_model_path_str);
-    let _tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
-
-    // Construct VdbConfig for the handler
-    let embedding_handler = EmbeddingHandler::new(config)
-        .map_err(|e| Error::Other(format!("Failed to initialize embedding handler: {}", e)))?;
-    
-    // Pre-warm the embedding provider cache to load the model upfront
-    log::debug!("Pre-warming embedding provider cache...");
-    let embedding_dim = embedding_handler.dimension()? as u64;
-    log::debug!("Embedding provider cache warmed. Detected dimension: {}", embedding_dim);
-
-    // Ensure collection exists with the correct embedding dimension
-    ensure_repository_collection_exists(client, collection_name, embedding_dim).await?;
-
+    prewarm_thread_local_models(config);
     let pb = ProgressBar::new(relative_paths.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -139,93 +216,13 @@ pub async fn index_files<
             .progress_chars("#=-"),
     );
     let mut points_batch = Vec::new();
-    for relative_path in relative_paths {
-        let full_path = repo_root.join(relative_path);
-
-        // --- Add File Size Check --- 
-        match std::fs::metadata(&full_path) {
-            Ok(metadata) => {
-                if metadata.len() > MAX_FILE_SIZE_BYTES {
-                    log::warn!(
-                        "Skipping file larger than {} bytes: {}",
-                        MAX_FILE_SIZE_BYTES,
-                        full_path.display()
-                    );
-                    pb.println(format!(
-                        "Skipping large file ({}KB): {}",
-                        metadata.len() / 1024,
-                        relative_path.display()
-                    ));
-                    pb.inc(1); // Increment progress bar as we are skipping
-                    continue; // Skip this file
-                }
-            }
-            Err(e) => {
-                 log::error!(
-                    "Failed to get metadata for file {}: {}. Skipping file.",
-                    full_path.display(), e
-                );
-                 pb.println(format!(
-                    "Error getting metadata for {}, skipping: {}",
-                    relative_path.display(), e
-                ));
-                pb.inc(1); // Increment progress bar
-                continue; // Skip file if metadata fails
-            }
-        }
-        // --- End File Size Check ---
-
-        if !full_path.is_file() {
-            log::warn!("Skipping non-file path found during indexing: {}", full_path.display());
-            pb.inc(1);
-            continue;
-        }
-
-        // Use the new code-parser to parse the file
-        match crate::syntax::get_chunks(&full_path) {
-            Ok(chunks) => {
-                if chunks.is_empty() {
-                    pb.inc(1);
-                    continue;
-                }
-                let file_path_str = relative_path.to_string_lossy().to_string();
-                let file_extension = relative_path.extension()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                for chunk in &chunks {
-                    let chunk_content = &chunk.content;
-                    let embedding = match embedding_handler.embed(&[chunk_content]) {
-                        Ok(mut result) => {
-                            if result.is_empty() {
-                                log::warn!(
-                                    "Embedding returned empty result for chunk in file {} ({}:{}-{})", 
-                                    file_path_str, chunk.start_line, chunk.end_line, chunk.language
-                                );
-                                continue;
-                            }
-                            result.remove(0)
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "Skipping chunk due to embedding error in file '{}' (lines {}..{}): {}",
-                                file_path_str, chunk.start_line, chunk.end_line, e
-                            );
-                            continue;
-                        }
-                    };
-                    let point_id_uuid = Uuid::new_v4().to_string();
-                    let mut payload = Payload::new();
-                    payload.insert(FIELD_FILE_PATH, file_path_str.clone());
-                    payload.insert(FIELD_START_LINE, chunk.start_line as i64);
-                    payload.insert(FIELD_END_LINE, chunk.end_line as i64);
-                    payload.insert(FIELD_LANGUAGE, chunk.language.clone());
-                    payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
-                    payload.insert(FIELD_BRANCH, branch_name.to_string());
-                    payload.insert(FIELD_COMMIT_HASH, commit_hash.to_string());
-                    payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.to_string());
-                    payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
-                    points_batch.push(PointStruct::new(point_id_uuid, embedding, payload));
+    let mut errors = Vec::new();
+    let results = process_files_parallel(config, repo_root, relative_paths, branch_name, commit_hash, &pb);
+    for result in results {
+        match result {
+            Ok((points, _relative_path)) => {
+                for point in points {
+                    points_batch.push(point);
                     if points_batch.len() >= BATCH_SIZE {
                         crate::repo_helpers::qdrant_utils::custom_upsert_batch(client, collection_name, points_batch.clone(), &pb).await?;
                         points_batch.clear();
@@ -233,16 +230,17 @@ pub async fn index_files<
                 }
             }
             Err(e) => {
-                log::error!("Failed to parse file {}: {}", full_path.display(), e);
-                pb.println(format!("Error processing {}: {}", relative_path.display(), e));
+                errors.push(e);
             }
         }
-        pb.inc(1);
     }
     if !points_batch.is_empty() {
         crate::repo_helpers::qdrant_utils::custom_upsert_batch(client, collection_name, points_batch, &pb).await?;
     }
     pb.finish_with_message("Indexing complete");
+    if !errors.is_empty() {
+        for e in errors { log::error!("[index_files] {}", e); }
+    }
     Ok(())
 }
 
