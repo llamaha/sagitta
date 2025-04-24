@@ -1,6 +1,6 @@
 use anyhow::Result;
-use vectordb_lib::syntax::markdown::MarkdownParser;
-use vectordb_lib::syntax::parser::SyntaxParser;
+use vectordb_core::syntax::markdown::MarkdownParser;
+use vectordb_core::syntax::parser::SyntaxParser;
 
 #[cfg(test)]
 mod tests {

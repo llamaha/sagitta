@@ -13,4 +13,6 @@ pub const FIELD_COMMIT_HASH: &str = "commit_hash";
 
 // Other constants
 pub const BATCH_SIZE: usize = 128; // Example value, adjust if needed
-pub const COLLECTION_NAME_PREFIX: &str = "repo_"; // Example value, adjust if needed 
+pub const COLLECTION_NAME_PREFIX: &str = "repo_"; // Example value, adjust if needed
+pub const MAX_FILE_SIZE_BYTES: u64 = 5 * 1024 * 1024; // 5 MB default 
+pub const DEFAULT_VECTOR_DIMENSION: u64 = 384; 

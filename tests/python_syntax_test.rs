@@ -1,6 +1,6 @@
 use anyhow::Result;
-use vectordb_lib::syntax::python::PythonParser;
-use vectordb_lib::syntax::parser::SyntaxParser;
+use vectordb_core::syntax::python::PythonParser;
+use vectordb_core::syntax::parser::SyntaxParser;
 
 #[cfg(test)]
 mod tests {

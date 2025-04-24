@@ -24,11 +24,9 @@ use walkdir::WalkDir;
 
 use vectordb_core::config::AppConfig;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
-use crate::{
-    cli::CliArgs,
-    syntax,
-    vectordb::embedding_logic::EmbeddingHandler,
-};
+use crate::cli::CliArgs;
+use vectordb_core::syntax;
+use crate::vectordb::embedding_logic::EmbeddingHandler;
 use crate::cli::commands::{
     upsert_batch, BATCH_SIZE, LEGACY_INDEX_COLLECTION, // Import constants
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION,
