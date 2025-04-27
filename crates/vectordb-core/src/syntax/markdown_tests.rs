@@ -3,308 +3,315 @@
 mod tests {
     // Adjust import paths
     use crate::syntax::parser::{CodeChunk, SyntaxParser};
-    use crate::syntax::markdown::MarkdownParser;
+    use crate::syntax::markdown::{MarkdownParser, MAX_SECTION_SIZE}; // Import constant
     use anyhow::Result;
 
     fn create_parser() -> MarkdownParser {
         MarkdownParser::new()
     }
 
-    // Helper to assert chunk properties
-    fn assert_chunk(
-        chunk: &CodeChunk,
-        expected_content_contains: &str,
-        expected_start: usize,
-        expected_end: usize,
-        expected_element_type_contains: &str,
-    ) {
-        assert!(
-            chunk.content.contains(expected_content_contains),
-            "Expected chunk content to contain '{}', got '{}'",
-            expected_content_contains,
-            chunk.content
-        );
-        assert_eq!(chunk.start_line, expected_start, "Expected start line {} but got {}", expected_start, chunk.start_line);
-        assert_eq!(chunk.end_line, expected_end, "Expected end line {} but got {}", expected_end, chunk.end_line);
-        assert_eq!(chunk.language, "markdown", "Expected language 'markdown', got '{}'", chunk.language);
-        assert!(
-            chunk.element_type.contains(expected_element_type_contains),
-            "Expected element type to contain '{}', got '{}'",
-            expected_element_type_contains,
-            chunk.element_type
-        );
-        assert!(!chunk.file_path.is_empty(), "Expected non-empty file path");
+    // Helper to check if a chunk's content contains all expected substrings
+    fn assert_content_contains_all(content: &str, expected: &[&str]) {
+        for item in expected {
+            assert!(content.contains(item), "Expected content to contain '{}', got: \n{}", item, content);
+        }
+    }
+
+    // Helper to check if a chunk's content does NOT contain any unexpected substrings
+    fn assert_content_not_contains_any(content: &str, not_expected: &[&str]) {
+        for item in not_expected {
+            assert!(!content.contains(item), "Expected content NOT to contain '{}', got: \n{}", item, content);
+        }
     }
 
     #[test]
-    fn test_section_based_chunking() -> Result<()> {
+    fn test_basic_section_structure_and_context() -> Result<()> {
         let code = r#"
+Root content line 1.
+Root content line 2.
+
 # Heading 1
 
-This is a paragraph under heading 1.
+Paragraph under H1.
 
 ## Heading 1.1
 
-This is a paragraph under heading 1.1.
+Paragraph under H1.1.
+List:
+* Item A
+* Item B
 
 ### Heading 1.1.1
 
-This is a paragraph under heading 1.1.1.
+Paragraph under H1.1.1.
 
 ## Heading 1.2
 
-This is a paragraph under heading 1.2.
-
-```rust
-fn main() {
-    println!("Hello, world!");
-}
+Paragraph under H1.2.
+```python
+print("hello")
 ```
 
 # Heading 2
 
-This is a paragraph under heading 2.
+Paragraph under H2.
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.md")?;
 
-        // We should have sections for h1, h2 (under h1), h3 (under h2), h2 (under h1), and h1
-        assert!(chunks.len() >= 5, "Expected at least 5 chunks for sections, got {}", chunks.len());
+        assert_eq!(chunks.len(), 6, "Expected 6 chunks (root, H1, H1.1, H1.1.1, H1.2, H2)");
 
-        // Check for content from different sections
-        let has_h1_section = chunks.iter().any(|chunk| 
-            chunk.element_type.contains("h1_section") && 
-            chunk.content.contains("Heading 1") && 
-            chunk.content.contains("This is a paragraph under heading 1.")
-        );
-        assert!(has_h1_section, "Missing H1 section with its content");
+        // 1. Root Content Chunk
+        let chunk0 = &chunks[0];
+        assert_eq!(chunk0.element_type, "root_content");
+        assert_content_contains_all(&chunk0.content, &["Root content line 1.", "Root content line 2."]);
+        assert_content_not_contains_any(&chunk0.content, &["# Heading", "Paragraph under"]);
+        assert_eq!(chunk0.start_line, 1);
+        assert_eq!(chunk0.end_line, 2); // Ends before H1 starts
 
-        let has_h1_1_section = chunks.iter().any(|chunk| 
-            chunk.element_type.contains("h2_section") && 
-            chunk.content.contains("Heading 1.1") && 
-            chunk.content.contains("This is a paragraph under heading 1.1.")
-        );
-        assert!(has_h1_1_section, "Missing H1.1 section with its content");
-
-        let has_h1_1_1_section = chunks.iter().any(|chunk| 
-            chunk.element_type.contains("h3_section") && 
-            chunk.content.contains("Heading 1.1.1") && 
-            chunk.content.contains("This is a paragraph under heading 1.1.1.")
-        );
-        assert!(has_h1_1_1_section, "Missing H1.1.1 section with its content");
-
-        let has_code_block = chunks.iter().any(|chunk| 
-            chunk.content.contains("```rust") && 
-            chunk.content.contains("fn main()")
-        );
-        assert!(has_code_block, "Missing code block in sections");
-
-        // Check parent context is included in subsections
-        let has_parent_context = chunks.iter().any(|chunk| 
-            chunk.element_type.contains("h3_section") && 
-            chunk.content.contains("Heading 1") && 
-            chunk.content.contains("Heading 1.1") && 
-            chunk.content.contains("Heading 1.1.1")
-        );
-        assert!(has_parent_context, "Missing parent context in subsection");
+        // 2. H1 Section Chunk
+        let chunk1 = &chunks[1];
+        assert_eq!(chunk1.element_type, "h1_section");
+        assert_content_contains_all(&chunk1.content, &["# Heading 1", "Paragraph under H1."]);
+        assert_content_not_contains_any(&chunk1.content, &["Root content", "## Heading 1.1", "Paragraph under H1.1"]);
+        assert_eq!(chunk1.start_line, 4); // Starts at the heading
+        assert_eq!(chunk1.end_line, 6); // Ends before H1.1 starts
+        
+        // 3. H1.1 Section Chunk
+        let chunk2 = &chunks[2];
+        assert_eq!(chunk2.element_type, "h2_section");
+        assert_content_contains_all(&chunk2.content, &["# Heading 1", "## Heading 1.1", "Paragraph under H1.1.", "* Item A", "* Item B"]);
+        assert_content_not_contains_any(&chunk2.content, &["Root content", "Paragraph under H1.", "### Heading 1.1.1", "Paragraph under H1.1.1"]);
+        assert_eq!(chunk2.start_line, 8); // Starts at the H1.1 heading
+        assert_eq!(chunk2.end_line, 12); // Ends before H1.1.1 starts
+        
+        // 4. H1.1.1 Section Chunk
+        let chunk3 = &chunks[3];
+        assert_eq!(chunk3.element_type, "h3_section");
+        assert_content_contains_all(&chunk3.content, &["# Heading 1", "## Heading 1.1", "### Heading 1.1.1", "Paragraph under H1.1.1."]);
+        assert_content_not_contains_any(&chunk3.content, &["Root content", "Paragraph under H1.", "Paragraph under H1.1.", "## Heading 1.2", "Paragraph under H1.2"]);
+        assert_eq!(chunk3.start_line, 14); // Starts at the H1.1.1 heading
+        assert_eq!(chunk3.end_line, 16); // Ends before H1.2 starts
+        
+        // 5. H1.2 Section Chunk
+        let chunk4 = &chunks[4];
+        assert_eq!(chunk4.element_type, "h2_section");
+        assert_content_contains_all(&chunk4.content, &["# Heading 1", "## Heading 1.2", "Paragraph under H1.2.", "```python", "print(\"hello\")"]);
+        assert_content_not_contains_any(&chunk4.content, &["Root content", "Paragraph under H1.", "## Heading 1.1", "### Heading 1.1.1", "# Heading 2"]);
+        assert_eq!(chunk4.start_line, 18); // Starts at the H1.2 heading
+        assert_eq!(chunk4.end_line, 22); // Ends before H2 starts
+        
+        // 6. H2 Section Chunk (This index needs checking - likely index 5 if root counted)
+        // Re-check expected chunk count. If root + 5 sections = 6 chunks.
+        // Let's adjust assertion and indices assuming 6 chunks.
+        assert_eq!(chunks.len(), 6, "Expected 6 chunks (root, H1, H1.1, H1.1.1, H1.2, H2)");
+        let chunk5 = &chunks[5];
+        assert_eq!(chunk5.element_type, "h1_section"); // H2 is under root
+        assert_content_contains_all(&chunk5.content, &["# Heading 2", "Paragraph under H2."]);
+        assert_content_not_contains_any(&chunk5.content, &["Root content", "# Heading 1", "## Heading", "### Heading"]);
+        assert_eq!(chunk5.start_line, 24); // Starts at the H2 heading
+        assert_eq!(chunk5.end_line, 26); // Ends at EOF
 
         Ok(())
     }
 
     #[test]
-    fn test_parse_headings_and_paragraphs() -> Result<()> {
+    fn test_setext_headings() -> Result<()> {
         let code = r#"
-# H1 - Should be ignored by current query
+Root content.
 
-## H2 Section 1
+Heading 1 (Setext)
+=========
 
-This is the first paragraph.
+Paragraph under H1.
 
-### H3 Subsection
+Heading 2 (Setext)
+---------
 
-Another paragraph here.
-
-## H2 Section 2
-
-Final paragraph.
+Paragraph under H2.
 "#;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.md")?;
 
-        // Debug: Print the chunks we're getting
-        println!("Number of chunks: {}", chunks.len());
-        for (i, chunk) in chunks.iter().enumerate() {
-            println!("Chunk {}: type={}, content={}", i, chunk.element_type, chunk.content);
+        assert_eq!(chunks.len(), 3, "Expected 3 chunks (root, H1, H2)");
+
+        // Root
+        assert_eq!(chunks[0].element_type, "root_content");
+        assert_content_contains_all(&chunks[0].content, &["Root content."]);
+        assert_eq!(chunks[0].start_line, 1);
+        assert_eq!(chunks[0].end_line, 1);
+
+        // H1
+        assert_eq!(chunks[1].element_type, "h1_section");
+        assert_content_contains_all(&chunks[1].content, &["# Heading 1 (Setext)", "Paragraph under H1."]);
+        assert_content_not_contains_any(&chunks[1].content, &["Root content", "Heading 2", "Paragraph under H2"]);
+        assert_eq!(chunks[1].start_line, 3); // Heading starts on line 3
+        assert_eq!(chunks[1].end_line, 6); // Content ends on line 6
+
+        // H2 (under H1)
+        assert_eq!(chunks[2].element_type, "h2_section");
+        assert_content_contains_all(&chunks[2].content, &["# Heading 1 (Setext)", "## Heading 2 (Setext)", "Paragraph under H2."]);
+        assert_content_not_contains_any(&chunks[2].content, &["Root content", "Paragraph under H1."]);
+        assert_eq!(chunks[2].start_line, 8); // Heading starts on line 8
+        assert_eq!(chunks[2].end_line, 11); // Content ends on line 11
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adjacent_headings_no_content() -> Result<()> {
+        let code = r#"
+# H1
+## H1.1
+### H1.1.1
+Actual content here under H3.
+## H1.2
+More content.
+"#;
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.md")?;
+
+        // Expecting chunks for H1.1.1 and H1.2, as H1 and H1.1 have no direct content before the next heading.
+        // The logic *should* produce chunks for H1.1.1 and H1.2 which have content.
+        // If it skips H1/H1.1, that's acceptable for now, but the contentful ones should be present.
+        assert_eq!(chunks.len(), 2, "Expected 2 chunks (H1.1.1, H1.2) with content");
+
+        // Chunk 1: H1.1.1
+        if chunks.len() == 2 { // Only check contents if the count is right
+            assert_eq!(chunks[0].element_type, "h3_section", "First chunk should be H1.1.1");
+            assert_content_contains_all(&chunks[0].content, &["# H1", "## H1.1", "### H1.1.1", "Actual content here under H3."]);
+            assert_eq!(chunks[0].start_line, 3); // H1.1.1 starts line 3
+            assert_eq!(chunks[0].end_line, 4); // Content ends line 4
+
+            // Chunk 2: H1.2
+            assert_eq!(chunks[1].element_type, "h2_section", "Second chunk should be H1.2");
+            assert_content_contains_all(&chunks[1].content, &["# H1", "## H1.2", "More content."]);
+            assert_content_not_contains_any(&chunks[1].content, &["H1.1", "H1.1.1", "Actual content"]);
+            assert_eq!(chunks[1].start_line, 5); // H1.2 starts line 5
+            assert_eq!(chunks[1].end_line, 6); // Content ends line 6
         }
-
-        // With section-based chunking, we should have chunks for:
-        // - H1 section with its paragraph
-        // - H2 Section 1 with its paragraph (and H3 may be a subsection)
-        // - H3 Subsection with its paragraph
-        // - H2 Section 2 with its paragraph
-        assert!(!chunks.is_empty(), "Expected at least one section chunk");
-
-        // Update our expected content checks to be more flexible about what's in the content
-        // Since exact structure can vary in different implementations
-        let has_h1_text = chunks.iter().any(|chunk| 
-            chunk.content.contains("H1 - Should be ignored")
-        );
-        assert!(has_h1_text, "Missing H1 text in any chunk");
-
-        let has_h2_section1 = chunks.iter().any(|chunk| 
-            chunk.content.contains("H2 Section 1") && 
-            chunk.content.contains("This is the first paragraph")
-        );
-        assert!(has_h2_section1, "Missing H2 Section 1 with its paragraph");
-
-        let has_h2_section2 = chunks.iter().any(|chunk| 
-            chunk.content.contains("H2 Section 2") && 
-            chunk.content.contains("Final paragraph")
-        );
-        assert!(has_h2_section2, "Missing H2 Section 2 with its paragraph");
-
-        let has_h3_section = chunks.iter().any(|chunk| 
-            chunk.content.contains("H3 Subsection") && 
-            chunk.content.contains("Another paragraph here")
-        );
-        assert!(has_h3_section, "Missing H3 section with its paragraph");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_code_block() -> Result<()> {
-        let code = r#"
-# Code Example
-
-Some text before.
-
-```python
-def hello():
-    print("Hello")
-```
-
-Some text after.
-"#;
-        let mut parser = create_parser();
-        let chunks = parser.parse(code, "test.md")?;
-
-        // Should have a section containing the heading, text, code block, and text after
-        assert!(!chunks.is_empty(), "Expected at least one section");
-        
-        let full_section = chunks.iter().find(|chunk| 
-            chunk.content.contains("Code Example") && 
-            chunk.content.contains("Some text before") && 
-            chunk.content.contains("```python") && 
-            chunk.content.contains("def hello") && 
-            chunk.content.contains("Some text after")
-        );
-        
-        assert!(full_section.is_some(), "Missing complete section with code block");
-        
-        Ok(())
-    }
-
-    #[test]
-    fn test_parse_list() -> Result<()> {
-        let code = r#"
-# List Example
-
-My List:
-
-* Item 1
-  * Item 1.1
-* Item 2
-  - Item 2.1 (sublist with different marker)
-"#;
-        let mut parser = create_parser();
-        let chunks = parser.parse(code, "test.md")?;
-
-        // Should have a section with the heading, intro text, and all list items
-        assert!(!chunks.is_empty(), "Expected at least one section");
-        
-        let has_list_section = chunks.iter().any(|chunk| 
-            chunk.element_type.contains("section") && 
-            chunk.content.contains("List Example") && 
-            chunk.content.contains("My List:") && 
-            chunk.content.contains("Item 1") && 
-            chunk.content.contains("Item 1.1") && 
-            chunk.content.contains("Item 2") &&
-            chunk.content.contains("Item 2.1")
-        );
-        
-        assert!(has_list_section, "Missing complete list section");
 
         Ok(())
     }
     
     #[test]
     fn test_large_section_splitting() -> Result<()> {
-        // Create a very large markdown section that should be split
-        let mut large_section = String::from("# Very Large Section\n\n");
-        // Add a lot of paragraphs to exceed MAX_SECTION_SIZE
-        for i in 1..100 {
-            large_section.push_str(&format!("This is paragraph {} with some additional text to increase size. The quick brown fox jumps over the lazy dog. Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\n", i));
-        }
+        // Generate content designed to exceed MAX_SECTION_SIZE slightly when combined with headers
+        let header1 = "# Main Section\n\n";
+        let header2 = "## Subsection\n\n";
+        let base_content = "Paragraph with text. ".repeat(MAX_SECTION_SIZE / 20); // Make base large
+        
+        // Estimate header length (approximate)
+        let header_len = header1.len() + header2.len();
+        // Create content *guaranteed* to cause a split by making the total length >> MAX_SECTION_SIZE
+        let required_len = MAX_SECTION_SIZE * 2; // Aim for roughly double the max size
+        let repetitions = required_len / base_content.len() + 1;
+        let large_content = base_content.repeat(repetitions);
+        
+        // Split the large content notionally for assertion checking later
+        let approx_split_point = (MAX_SECTION_SIZE - header_len).min(large_content.len());
+        // Try to find a newline near the split point
+        let split_point = large_content[..approx_split_point].rfind('\n').map_or(approx_split_point, |p| p + 1);
+
+        let content1 = &large_content[..split_point];
+        let content2 = &large_content[split_point..];
+        
+        let code = format!("{}{}{}", header1, header2, large_content);
         
         let mut parser = create_parser();
-        let chunks = parser.parse(&large_section, "large.md")?;
-
-        // Expect multiple chunks due to splitting
-        assert!(chunks.len() > 1, "Expected section to be split into multiple chunks");
-
-        // Debug output for test analysis
-        println!("Total chunks: {}", chunks.len());
-        println!("First chunk element_type: {}", chunks[0].element_type);
-        println!("Last chunk element_type: {}", chunks.last().unwrap().element_type);
-
-        // Check if the first chunk has the heading and the split marker
-        let first_chunk = &chunks[0];
-        assert!(first_chunk.element_type.contains("h1_section_split_1"), "First chunk should be marked as split");
-        assert!(first_chunk.content.contains("# Very Large Section"), "First chunk should contain the heading");
-        assert!(first_chunk.content.contains("This is paragraph 1"), "First chunk should contain early content");
-
-        // Check if the last chunk is a valid part of the document
-        let last_chunk = chunks.last().unwrap();
+        let chunks = parser.parse(&code, "test_large.md")?;
         
-        // Instead of requiring an exact match with total chunks, just assert that:
-        // 1. The last chunk should either be properly marked as a section split OR have paragraph content
-        assert!(
-            last_chunk.element_type.contains("split_") || last_chunk.element_type == "paragraph", 
-            "Last chunk should either be marked as a split or be a paragraph. Got: {}", 
-            last_chunk.element_type
-        );
-        
-        // 2. The last chunk should contain later paragraph content
-        assert!(last_chunk.content.contains("This is paragraph"), "Last chunk should contain paragraph content");
-        
-        // 3. If it's a section split, it shouldn't repeat the heading
-        if last_chunk.element_type.contains("h1_section_split_") {
-            assert!(!last_chunk.content.contains("# Very Large Section"), 
-                "Last section chunk should not repeat the main heading");
+        println!("MAX_SECTION_SIZE: {}", MAX_SECTION_SIZE);
+        println!("Code length: {}", code.len());
+        for (i, chunk) in chunks.iter().enumerate() {
+            println!("Chunk {}: type={}, len={}, start={}, end={}, content_preview='{}'", 
+                     i, chunk.element_type, chunk.content.len(), chunk.start_line, chunk.end_line, chunk.content.chars().take(50).collect::<String>());
         }
 
+        assert!(chunks.len() > 1, "Expected section to be split into multiple chunks ({})", chunks.len());
+        assert_eq!(chunks[0].element_type, "h2_section_split_1", "First chunk should be marked as split_1");
+        assert!(chunks[0].content.len() <= MAX_SECTION_SIZE, "First chunk size should not exceed MAX_SECTION_SIZE");
+        assert_content_contains_all(&chunks[0].content, &["# Main Section", "## Subsection"]);
+        assert_eq!(chunks[0].start_line, 3); // Subsection starts line 3
+
+        assert_eq!(chunks[1].element_type, "h2_section_split_2", "Second chunk should be marked as split_2");
+        assert_content_contains_all(&chunks[1].content, &["# Main Section", "## Subsection"]);
+        assert!(chunks[1].start_line > chunks[0].end_line, "Second chunk start line should be after first chunk end line");
+        
         Ok(())
     }
 
     #[test]
-    fn test_markdown_plain_text() -> Result<()> {
-        let code = "Just some plain text\nwithout any markdown structure.";
+    fn test_plain_text_no_headings() -> Result<()> {
+        let code = r#"
+This is line one.
+This is line two.
+  Indented line three.
+
+Line five after blank.
+"#;
         let mut parser = create_parser();
-        let chunks = parser.parse(code, "test.md")?;
+        let chunks = parser.parse(code, "test_plain.md")?;
+
+        assert_eq!(chunks.len(), 1, "Expected 1 chunk for plain text");
+        println!("Plain text input:\n'{}'", code);
+        println!("Plain text lines detected: {}", code.lines().count());
+        println!("Chunk[0] details: start={}, end={}, type='{}'", chunks[0].start_line, chunks[0].end_line, chunks[0].element_type);
+        assert_eq!(chunks[0].element_type, "root_plain_text");
+        assert_content_contains_all(&chunks[0].content, &["line one", "line two", "line three", "Line five"]);
+        assert_eq!(chunks[0].start_line, 1);
+        assert_eq!(chunks[0].end_line, 6, "Expected end line 6 for raw string input with 6 lines");
+        Ok(())
+    }
+    
+    #[test]
+    fn test_plain_text_splitting_by_lines() -> Result<()> {
+        // Create text longer than MAX_CHUNK_LINES (assuming 500)
+        let mut lines = Vec::new();
+        for i in 1..=600 {
+            lines.push(format!("Line {}", i));
+        }
+        let code = lines.join("\n");
         
-        assert_eq!(chunks.len(), 1);
-        assert_chunk(&chunks[0], code, 1, 2, "root_plain_text_chunk");
+        let mut parser = create_parser();
+        let chunks = parser.parse(&code, "test_plain_split.md")?;
+        
+        assert_eq!(chunks.len(), 2, "Expected 2 chunks due to line limit");
+        
+        assert_eq!(chunks[0].element_type, "root_plain_text_split_1");
+        assert_content_contains_all(&chunks[0].content, &["Line 1", "Line 500"]);
+        assert_content_not_contains_any(&chunks[0].content, &["Line 501"]);
+        assert_eq!(chunks[0].start_line, 1);
+        assert_eq!(chunks[0].end_line, 500);
+        
+        assert_eq!(chunks[1].element_type, "root_plain_text_split_2");
+        assert_content_contains_all(&chunks[1].content, &["Line 501", "Line 600"]);
+        assert_content_not_contains_any(&chunks[1].content, &["Line 500"]);
+        assert_eq!(chunks[1].start_line, 501);
+        assert_eq!(chunks[1].end_line, 600);
+        
         Ok(())
     }
 
     #[test]
-    fn test_markdown_empty_content() -> Result<()> {
+    fn test_empty_content() -> Result<()> {
         let code = "";
         let mut parser = create_parser();
-        let chunks = parser.parse(code, "test.md")?;
-        
-        assert!(chunks.is_empty());
+        let chunks = parser.parse(code, "test_empty.md")?;
+        assert!(chunks.is_empty(), "Expected no chunks for empty input");
         Ok(())
     }
+
+    #[test]
+    fn test_whitespace_only_content() -> Result<()> {
+        let code = "  \n\t\n  ";
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test_whitespace.md")?;
+        assert!(chunks.is_empty(), "Expected no chunks for whitespace-only input");
+        Ok(())
+    }
+
+    // TODO: Add test for root content splitting if it exceeds MAX_SECTION_SIZE
+    // TODO: Add test for case where last section goes to EOF
+    // TODO: Add test with mixed ATX and Setext headings
 } 
