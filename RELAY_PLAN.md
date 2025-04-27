@@ -1,3 +1,121 @@
+# Relay Development Plan: Comprehensive Workflow
+
+This document outlines the planned workflow and capabilities for the Relay agent. It focuses on a task-oriented approach integrating context management, environment preparation, core execution with validation, and finalization steps.
+
+## Supported Languages
+
+Relay aims to provide robust support for languages recognized by `vectordb-core`:
+
+*   **Rust** (`rs`): `cargo` for init, build, test, format.
+*   **Python** (`py`): `python -m venv`, `pip` for deps, `python` for run, `unittest`/`pytest` for test.
+*   **Go** (`go`): `go mod init`, `go run`, `go build`, `go test`, `gofmt`.
+*   **JavaScript** (`js`, `jsx`): `npm`/`yarn` for init/deps, `node` for run, framework-specific test commands (e.g., `npm test`). Requires `prettier` for formatting.
+*   **TypeScript** (`ts`, `tsx`): As JS, plus `tsc` for build/check, `ts-node` for run. Requires `prettier` for formatting.
+*   **Ruby** (`rb`): `bundle gem` or manual setup, `ruby` for run, `rake test` or framework tests.
+*   **Markdown** (`md`) / **YAML** (`yaml`, `yml`): File creation/editing. Potential future linting.
+
+*(Fallback parsing exists for other file types)*
+
+## Core Workflow
+
+Relay follows these phases for handling user requests:
+
+### Phase 1: Context Initialization & Target Identification (In Progress)
+
+*   **Goal:** Understand the user's intent and identify the target codebase.
+*   **Steps:**
+    1.  **Parse Request:** Analyze prompt for goal (create, modify, query) and target repo name.
+    2.  **Identify Target:**
+        *   **Explicit Target:** If name provided, use `list_repositories`.
+            *   Found: `use_repository <target_name>`. Proceed.
+            *   Not Found: Inform user, suggest `add_repository`. Halt or await input.
+        *   **Implicit Target:** Check for existing active repo. Confirm usage with user or ask for target.
+        *   **New Project Request:** If prompt is "create new...", proceed to *Phase 2: New Project Path*.
+        *   **No Target:** If no target identified or confirmed, ask user to specify.
+
+### Phase 2: Environment Preparation
+
+This phase has two paths depending on whether we are working on a new or existing project.
+
+#### Path A: Existing Repository (In Progress)
+
+*   **Goal:** Prepare the identified existing repository for work.
+*   **Steps:**
+    1.  **Initial Sync:** `repo_sync` (Ensures index matches file state *before* changes).
+    2.  **Status Check (Recommended):** `run_command git status` (Requires user approval).
+    3.  **Initial Lint/Check (Optional):** `run_command [cargo check|tsc|...]` (User approval).
+
+#### Path B: New Project Creation (Planned)
+
+*   **Goal:** Create a new project based on user request and prepare it.
+*   **Steps:**
+    1.  **Standard Initialization:**
+        *   Determine language.
+        *   Formulate standard init command (`cargo new`, `npm init -y`, `go mod init`, etc.).
+        *   `run_command <init_command>` (User approval).
+    2.  **Initial Commit:**
+        *   `run_command git add .` (in new dir).
+        *   `run_command git commit -m "Initial project setup..."` (in new dir).
+    3.  **Add & Use Repository:**
+        *   `add_repository <path_to_new_project>`.
+        *   `use_repository <new_project_name>`.
+    4.  **Initial Sync:** `repo_sync` on the new repository.
+
+### Phase 3: Core Task Execution Loop (Partially Implemented, Needs Enhancement)
+
+*   **Goal:** Iteratively perform the user's requested task using appropriate tools and validation.
+*   **Steps (Loop):**
+    1.  **Understand Sub-Task:** Analyze the current specific instruction (e.g., "add function X", "find Y", "refactor Z").
+    2.  **Information Gathering:**
+        *   `semantic_search` (Preferred for finding relevant code).
+        *   `read_file` (For detail, often using search results).
+        *   `grep_search` (For specific patterns).
+    3.  **Code Modification & Validation:**
+        *   **Choose Edit Tool:**
+            *   Prefer `semantic_edit` (for intent-based changes).
+            *   Use `line_edit` (for precise line changes).
+            *   Use `write_file` (for new files / replacements).
+        *   **Perform Edit:** Execute chosen action.
+        *   **Format Code (Planned):** `run_command [cargo fmt|prettier|gofmt|...]` (User approval).
+        *   **Build/Test (Planned):**
+            *   Identify build/test command (`cargo test`, `npm test`, `go test`, etc.).
+            *   `run_command <build/test_command>` (User approval).
+            *   **Analyze:** Check exit code, stdout/stderr.
+                *   Success: Continue loop or proceed to Phase 4.
+                *   Failure: Feed error back to agent. Initiate debug sub-loop (back to Info Gathering -> Modify -> Validate). Report failure to user if unfixable.
+    4.  **Iteration:** Repeat for next sub-task or until goal achieved.
+
+### Phase 4: Finalization & Synchronization (Partially Implemented, Needs Enhancement)
+
+*   **Goal:** Ensure final code state is valid, committed, and synced.
+*   **Steps:**
+    1.  **Final Testing (Planned):** `run_command [cargo test|npm test|...]` one last time. Address failures via Phase 3 loop.
+    2.  **Staging:** `run_command git add .` (or specific files).
+    3.  **Commit:** `run_command git commit -m "Summary of changes..."`.
+    4.  **Final Sync:** `repo_sync` on the active repository.
+    5.  **Report Completion:** Inform user.
+
+### Phase 5: Ongoing Refinement (Meta)
+
+*   **Goal:** Continuously improve Relay based on usage and testing.
+*   **Areas:**
+    *   **Prompt Engineering:** Refine system prompts for better reasoning, tool use, and language-specific knowledge.
+    *   **Tool Integration:** Improve how tools are chosen and chained. Enhance error handling and recovery logic.
+    *   **Language Support:** Deepen understanding of idioms, standard libraries, and common frameworks for each supported language.
+    *   **Testing & Optimization:** Add comprehensive unit/integration tests for Relay itself. Optimize performance. Address warnings.
+    *   **User Experience:** Improve CLI output, progress indication, error reporting.
+    *   **Documentation:** Maintain this plan, document architecture, provide user examples.
+    *   **Safety & Security:** Containerization ("yolo mode"), security scanning, permissions.
+    *   **Extension System:** (Future) Plugin architecture.
+
+---
+
+*(Original Phase structure and implementation details below are kept for historical reference but should be considered superseded by the workflow above)*
+
+---
+
+## Original Plan (Historical Reference)
+
 ### Phase 1: Core Infrastructure
 *(Testing should be added for implemented core infrastructure)*
 
@@ -116,23 +234,18 @@
 
 ### Phase 5: Advanced Features
 
-17. **TUI Preparation** (Planned)
-    *   Design interface abstractions
-    *   Create rendering framework
-    *   Implement event handling system
-
-18. **Testing & Optimization** (In Progress)
+17. **Testing & Optimization** (In Progress)
     *   Write unit and integration tests (In Progress)
     *   Optimize performance (In Progress)
     *   Address edge cases (In Progress)
     *   Address compiler warnings (In Progress)
 
-19. **Extension System** (Planned)
+18. **Extension System** (Planned)
     *   Create plugin architecture
     *   Design extension points
     *   Document extension development
 
-20. **Safety & Security** (In Progress)
+19. **Safety & Security** (In Progress)
     *   Implement "yolo mode" with containerization (Planned)
     *   Add security scanning for generated code (Planned)
     *   Create permission management system (Completed for `run_command`)
@@ -320,7 +433,6 @@ The integration with `vectordb-core` focuses on:
 
 ## Future Extensions
 
-- **TUI Interface**: Rich terminal UI for better visualization and interaction
 - **Multiple LLM Support**: Ability to use different LLM providers
 - **Custom Tools**: User-defined actions for specialized workflows
 - **Persistent Memory**: Long-term learning across sessions
