@@ -10,7 +10,7 @@ use std::sync::Arc;
 use colored::*;
 use std::fmt::Debug;
 
-use qdrant_client::qdrant::{Filter, Condition, SearchResponse};
+use qdrant_client::qdrant::{Filter, Condition, SearchResponse, QueryResponse};
 
 use crate::{
     cli::{
@@ -111,7 +111,8 @@ where
     }
     let search_filter = Filter::must(filter_conditions);
 
-    let search_response_result: Result<SearchResponse, VectorDBError> = search_collection(
+    log::debug!("Calling core search_collection...");
+    let search_response_result: Result<QueryResponse, VectorDBError> = search_collection(
         client.clone(),
         &collection_name,
         &embedding_handler,
@@ -120,16 +121,14 @@ where
         Some(search_filter),
     ).await;
 
-    match search_response_result {
-        Ok(search_response) => {
-            print_search_results(&search_response.result, &args.query, args.json)?;
-        }
+    let search_response = match search_response_result {
+        Ok(resp) => resp,
         Err(e) => {
-            log::error!("Repository query failed: {}", e);
-            eprintln!("Error during search: {}", e);
-            return Err(anyhow!(e));
+            return Err(anyhow!(e).context("Search operation failed"));
         }
-    }
+    };
+
+    print_search_results(&search_response.result, &args.query, args.json)?;
 
     Ok(())
 } 
