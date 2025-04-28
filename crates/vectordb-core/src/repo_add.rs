@@ -16,7 +16,7 @@ use colored::*;
 use git2::Repository;
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
-use crate::config::IndexingConfig;
+use crate::IndexingConfig;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]

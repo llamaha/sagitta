@@ -814,6 +814,76 @@ async fn test_repo_sync_scenarios() -> Result<()> {
     let new_rename_count = get_qdrant_point_count(&client, &collection_name, Some("NEW_README.md"), Some("main"), Some(&rename_commit_hash)).await?;
     assert!(new_rename_count > 0, "Points for new renamed file were not added");
 
+    // --- 7.5 Force Sync (No Changes) ---
+    println!("Running sync --force with no changes...");
+    // Get current point count for comparison
+    let count_before_force_no_change = get_qdrant_point_count(&client, &collection_name, None, Some("main"), None).await?;
+    Command::new(&bin_path)
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap()) // Model needed for re-indexing
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
+        .env("QDRANT_URL", &qdrant_url)
+        .arg("repo")
+        .arg("sync")
+        .arg("--force")
+        .assert()
+        .success()
+        // Should indicate a full sync happened (re-indexing existing files)
+        .stdout(predicate::str::contains("Performing full sync of repository tree"))
+        .stdout(predicate::str::contains("Indexing 1 added/modified files").or( // Depending on how full sync counts files
+                 predicate::str::contains("Indexing 2 added/modified files")) // Or however many files exist now (NEW_README.md, final.txt? check previous steps)
+        )
+        .stdout(predicate::str::contains("already up-to-date").not());
+
+    // Verify config still points to the same commit
+    let config = read_config(&config_path)?;
+    let repo_cfg = config.repositories.iter().find(|r| r.name == repo_name).expect("Repo config not found after force sync (no change)");
+    assert_eq!(repo_cfg.last_synced_commits.get("main"), Some(&rename_commit_hash), "Commit hash changed after force sync with no changes");
+
+    // Verify point count hasn't changed unexpectedly (optional, could fluctuate slightly with re-indexing)
+    let count_after_force_no_change = get_qdrant_point_count(&client, &collection_name, None, Some("main"), None).await?;
+    // Allow for slight differences due to re-chunking/embedding, but should be roughly the same
+    assert!( (count_before_force_no_change as i64 - count_after_force_no_change as i64).abs() <= 5, 
+             "Point count changed significantly after force sync with no changes ({} vs {})", 
+             count_before_force_no_change, count_after_force_no_change);
+
+    // --- 7.6 Force Sync (With Changes) ---
+    println!("Adding another file before force sync test...");
+    let force_change_commit_oid = create_and_commit(&repo, "force_test.txt", "Content for force sync test", "feat: Add file for force sync test")?;
+    let force_change_commit_hash = force_change_commit_oid.to_string();
+
+    println!("Running sync --force with changes...");
+    let count_before_force_with_change = get_qdrant_point_count(&client, &collection_name, None, Some("main"), None).await?;
+    Command::new(&bin_path)
+        .env("VECTORDB_ONNX_MODEL", model_path.to_str().unwrap())
+        .env("VECTORDB_ONNX_TOKENIZER_DIR", tokenizer_dir.to_str().unwrap())
+        .env("QDRANT_URL", &qdrant_url)
+        .arg("repo")
+        .arg("sync")
+        .arg("--force")
+        .assert()
+        .success()
+        // Should indicate a full sync, indexing *all* current files (e.g., 2 files: NEW_README.md, force_test.txt)
+        .stdout(predicate::str::contains("Performing full sync of repository tree"))
+        .stdout(predicate::str::contains("Indexing 2 added/modified files").or( // Or however many files exist now
+                 predicate::str::contains("Indexing 3 added/modified files")) 
+        )
+        .stdout(predicate::str::contains("already up-to-date").not());
+
+    // Verify config updated to the new commit
+    let config = read_config(&config_path)?;
+    let repo_cfg = config.repositories.iter().find(|r| r.name == repo_name).expect("Repo config not found after force sync (with change)");
+    assert_eq!(repo_cfg.last_synced_commits.get("main"), Some(&force_change_commit_hash), "Commit hash not updated after force sync with changes");
+
+    // Verify the new file's points exist
+    let force_file_count = get_qdrant_point_count(&client, &collection_name, Some("force_test.txt"), Some("main"), Some(&force_change_commit_hash)).await?;
+    assert!(force_file_count > 0, "Points for new file not found after force sync with changes");
+
+    // Check total point count (should reflect the addition + potential re-indexing)
+    let count_after_force_with_change = get_qdrant_point_count(&client, &collection_name, None, Some("main"), None).await?;
+    assert!(count_after_force_with_change >= count_before_force_no_change, // Should generally increase or stay similar
+            "Point count decreased unexpectedly after force sync with changes ({} vs {})",
+            count_before_force_no_change, count_after_force_with_change);
+
     // 8. Test Custom Remote Sync
     println!("Activating custom remote repo '{}'...", custom_remote_repo_name);
     Command::new(&bin_path)

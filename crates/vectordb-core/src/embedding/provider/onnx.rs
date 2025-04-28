@@ -44,12 +44,21 @@ impl OnnxEmbeddingModel {
         );
 
         // Load tokenizer
-        // Assuming tokenizer_path is the directory containing tokenizer.json
-        let tokenizer_json_path = tokenizer_path.join("tokenizer.json"); 
-        debug!("Loading tokenizer from: {}", tokenizer_json_path.display());
+        // Handle tokenizer_path being either the JSON file itself or the directory containing it.
+        let tokenizer_json_path = if tokenizer_path.is_file() && tokenizer_path.file_name().map_or(false, |name| name == "tokenizer.json") {
+            tokenizer_path.to_path_buf()
+        } else if tokenizer_path.is_dir() {
+            tokenizer_path.join("tokenizer.json")
+        } else {
+            // If it's neither a file named tokenizer.json nor a directory, assume it's the intended file path
+            // This maintains previous behavior if the directory assumption was sometimes correct implicitly
+            tokenizer_path.to_path_buf() 
+        };
+
+        debug!("Attempting to load tokenizer from: {}", tokenizer_json_path.display());
 
         let tokenizer = Tokenizer::from_file(&tokenizer_json_path)
-            .map_err(|e| Error::msg(format!("Failed to load tokenizer: {}", e)))?;
+            .map_err(|e| Error::msg(format!("Failed to load tokenizer from {}: {}", tokenizer_json_path.display(), e)))?;
 
         debug!("Tokenizer loaded successfully");
 

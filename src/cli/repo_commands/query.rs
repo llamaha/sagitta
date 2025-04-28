@@ -10,13 +10,20 @@ use std::sync::Arc;
 use colored::*;
 use std::fmt::Debug;
 
-use qdrant_client::qdrant::{Filter, Condition, SearchPointsBuilder};
+use qdrant_client::qdrant::{Filter, Condition, SearchResponse};
 
 use crate::{
-    cli::formatters::print_search_results,
-    vectordb::embedding_logic::EmbeddingHandler,
-    cli::commands::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
+    cli::{
+        self as cli, // Alias cli for clarity
+        commands::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE}, // Import re-exported constants
+        formatters::print_search_results, // Correct path for formatters
+    },
 };
+
+// Core imports
+use vectordb_core::embedding::EmbeddingHandler;
+use vectordb_core::error::VectorDBError;
+use vectordb_core::search_collection;
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoQueryArgs {
@@ -73,7 +80,6 @@ where
 
     let collection_name = repo_helpers::get_collection_name(&repo_name);
 
-    // Determine ONNX paths (needed for embedding query)
     let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
 
@@ -87,7 +93,6 @@ where
         .or(config.onnx_tokenizer_path.as_deref())
         .ok_or_else(|| anyhow!("ONNX tokenizer dir not found. Provide via --onnx-tokenizer-dir, env var, or config."))?;
 
-    // Initialize embedding handler using the config
     let embedding_handler = EmbeddingHandler::new(config)?;
 
     println!(
@@ -97,33 +102,34 @@ where
         branch_name.cyan()
     );
 
-    // Get query embedding
-    let query_embedding = embedding_handler.embed(&[&args.query])?
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("Failed to generate embedding for the query"))?;
-
-    // Build search filter based on CLI args
     let mut filter_conditions = vec![Condition::matches(FIELD_BRANCH, branch_name)];
-    if let Some(lang) = args.lang {
-        filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang));
+    if let Some(lang) = &args.lang {
+        filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang.clone()));
     }
-    if let Some(element_type) = args.element_type {
-        filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type));
+    if let Some(element_type) = &args.element_type {
+        filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type.clone()));
     }
     let search_filter = Filter::must(filter_conditions);
 
-    // Build the search request
-    let search_request = SearchPointsBuilder::new(collection_name, query_embedding, args.limit)
-        .filter(search_filter)
-        .with_payload(true);
+    let search_response_result: Result<SearchResponse, VectorDBError> = search_collection(
+        client.clone(),
+        &collection_name,
+        &embedding_handler,
+        &args.query,
+        args.limit,
+        Some(search_filter),
+    ).await;
 
-    // Perform the search
-    let search_response = client.search_points(search_request.into()).await
-        .context("Failed to perform search query in Qdrant")?;
-
-    // Format and print results
-    print_search_results(&search_response.result, args.query.as_str(), args.json)?;
+    match search_response_result {
+        Ok(search_response) => {
+            print_search_results(&search_response.result, &args.query, args.json)?;
+        }
+        Err(e) => {
+            log::error!("Repository query failed: {}", e);
+            eprintln!("Error during search: {}", e);
+            return Err(anyhow!(e));
+        }
+    }
 
     Ok(())
 } 

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use std::error::Error as StdError;
 use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
@@ -228,35 +227,44 @@ impl MarkdownParser {
 
         // 1. Handle content before the first heading
         let first_heading_start_line = headings.first().map_or(usize::MAX, |h| h.start_line);
+        // Explicitly check if there are lines *before* the first heading (1-based)
         if first_heading_start_line > 1 {
-             // Calculate the end line (0-based index) for the root content
-             let root_end_line_idx = (first_heading_start_line - 1).min(total_lines);
-             if root_end_line_idx > current_pos {
-                 let root_content_lines = &code_lines[current_pos..root_end_line_idx];
-                 let root_content = root_content_lines.join("
-").trim().to_string();
-                 if !root_content.is_empty() {
-                     // Split root content if necessary
-                     self.split_and_add_chunk(
-                         &mut chunks,
-                         None, // No current heading for root content
-                         &root_content,
-                         file_path,
-                         1, // Root starts at line 1
-                         root_end_line_idx, // End line (1-based)
-                         "root_content".to_string(),
-                         &[], // No parent headings for root
-                     );
-                     current_pos = root_end_line_idx;
-                 }
-             }
-         } else if first_heading_start_line == usize::MAX && !code_lines.iter().all(|&s| s.is_empty()) {
-             // No headings at all, but there is content. The calling 'parse' should handle this via handle_plain_text,
-             // but as a safeguard, we could process it here too. Let's rely on 'parse'.
-             log::debug!("No headings found, build_section_chunks returning empty, expecting handle_plain_text fallback.");
-             return chunks; // Or call handle_plain_text directly? Let's stick to the plan.
-         }
+            // Root content exists on lines 1 to first_heading_start_line - 1
+            let root_end_line_idx = first_heading_start_line - 1; // 1-based end line
+            // Ensure we don't go past the actual number of lines (0-based index for slicing)
+            let slice_end_idx = root_end_line_idx.min(total_lines);
 
+            if slice_end_idx > current_pos { // Check if there are lines to slice
+                let root_content_lines = &code_lines[current_pos..slice_end_idx];
+                let root_content = root_content_lines.join("
+").trim().to_string();
+
+                if !root_content.is_empty() {
+                    log::debug!(
+                        "Creating root content chunk. Start: 1, End: {}, Len: {}",
+                        root_end_line_idx,
+                        root_content.len()
+                    );
+                    self.split_and_add_chunk(
+                        &mut chunks,
+                        None,
+                        &root_content,
+                        file_path,
+                        1,                 // Root starts at line 1
+                        root_end_line_idx, // Root ends at this line (1-based)
+                        "root_content".to_string(),
+                        &[],
+                    );
+                    current_pos = slice_end_idx; // Update position (0-based index)
+                } else {
+                     log::debug!("Content before first heading (lines 1-{}) is empty/whitespace, skipping root chunk.", root_end_line_idx);
+                     current_pos = slice_end_idx; // Still update position
+                }
+            }
+        } else {
+             log::debug!("No content before first heading (starts on line 1) or no headings found.");
+             // current_pos remains 0 if first heading is on line 1
+        }
 
         // 2. Process each heading and the content following it
         for (i, heading) in headings.iter().enumerate() {
@@ -303,10 +311,10 @@ impl MarkdownParser {
                      let section_content_lines = &code_lines[content_start_idx..content_end_idx];
                      let section_content = section_content_lines.join("
 ").trim().to_string();
-                     
+
                      // Only create a chunk if there's actual content in the section
-                     if !section_content.is_empty() {
-                          self.split_and_add_chunk(
+                     if !section_content.is_empty() { // Restore this check
+                         self.split_and_add_chunk(
                              &mut chunks,
                              Some(heading), // Pass the current heading
                              &section_content,

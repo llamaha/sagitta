@@ -174,13 +174,34 @@ async fn handle_apply_or_validate(
         preserve_documentation: !args.no_preserve_docs,
     };
 
+    // Validate the edit parameters before proceeding
+    {
+        let issues = validate_edit(
+            &file_path,
+            &target, // Pass target by reference
+            Some(&options) // Pass options by reference
+        )?;
+        if !issues.is_empty() {
+            println!("{}", format!("Validation found {} issues:", issues.len()).yellow());
+            for issue in issues {
+                println!(
+                    "- [{:?}] {}:{} - {}",
+                    issue.severity,
+                    file_path.display(),
+                    issue.line_number.unwrap_or(0),
+                    issue.message
+                );
+            }
+            return Err(anyhow!("Validation failed."));
+        }
+    }
+
     // --- Perform Action (Validate or Apply) ---
     if validate_only {
         println!("Validating edit...");
         let issues = validate_edit(
             &file_path,
             &target, // Pass target by reference
-            &args.edit_content,
             Some(&options), // Pass options by reference
         )?;
 
@@ -203,7 +224,7 @@ async fn handle_apply_or_validate(
         println!("Applying edit...");
         apply_edit(
             &file_path,
-            &target, // Pass target by reference
+            &target,
             &args.edit_content,
             Some(&options), // Pass options by reference
         ).context("Failed to apply edit")?;
