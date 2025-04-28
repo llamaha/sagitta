@@ -5,6 +5,7 @@ use qdrant_client::{
     qdrant::{ 
         Condition, Filter, 
         UpdateStatus, SearchResponse,
+        QueryResponse,
     },
     Qdrant,
 };
@@ -291,7 +292,7 @@ async fn handle_simple_query(
     );
 
     // Call the core search function with explicit type annotation
-    let search_response_result: Result<SearchResponse, VectorDBError> = search_collection(
+    let search_response_result: Result<QueryResponse, VectorDBError> = search_collection(
         client.clone(),
         collection_name,
         &embedding_handler,
@@ -301,10 +302,10 @@ async fn handle_simple_query(
     ).await;
 
     match search_response_result {
-        Ok(search_response) => {
+        Ok(response) => {
             if args.json {
                 // Output JSON
-                let output_results: Vec<_> = search_response.result.into_iter()
+                let output_results: Vec<_> = response.result.into_iter()
                     .map(|point| {
                         // Convert payload Map<String, Value> to serde_json::Value
                         let payload_json = serde_json::to_value(point.payload)
@@ -318,11 +319,11 @@ async fn handle_simple_query(
                 println!("{}", serde_json::to_string_pretty(&output_results)?);
             } else {
                 // Output human-readable
-                if search_response.result.is_empty() {
+                if response.result.is_empty() {
                     println!("No results found.");
                 } else {
                     println!("Search Results:");
-                    for (i, point) in search_response.result.iter().enumerate() {
+                    for (i, point) in response.result.iter().enumerate() {
                         println!("--- Result {} (Score: {:.4}) ---", i + 1, point.score);
                         // Pretty print payload fields
                         if let Some(path) = point.payload.get(FIELD_FILE_PATH).and_then(|v| v.as_str()) {
@@ -364,7 +365,7 @@ async fn handle_simple_query(
                  // Add other specific VectorDBError arms here if needed
                  _ => eprintln!("An error occurred during search: {}", e),
              }
-             return Err(anyhow!(e));
+             return Err(anyhow!(e).context("Search operation failed"));
         }
     }
 

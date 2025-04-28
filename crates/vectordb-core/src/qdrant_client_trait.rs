@@ -4,7 +4,7 @@ use qdrant_client::qdrant::{
     CollectionInfo, CountResponse, SearchResponse, PointsSelector, DeletePoints,
     ScrollPoints, ScrollResponse,
     UpsertPoints, PointsOperationResponse, CreateCollection, Distance,
-    VectorParamsBuilder
+    VectorParamsBuilder, QueryPoints, QueryResponse
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
@@ -25,6 +25,8 @@ pub trait QdrantClientTrait: Send + Sync {
     async fn upsert_points(&self, request: UpsertPoints) -> Result<PointsOperationResponse>;
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool>;
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse>;
+    async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse>;
+    async fn query(&self, request: QueryPoints) -> Result<QueryResponse>;
     // Add other methods used by the application as needed
 }
 
@@ -102,6 +104,14 @@ impl QdrantClientTrait for Qdrant {
     }
     
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse> {
-        self.delete_points(request).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.delete_points(request).await.map_err(VectorDBError::from)
+    }
+
+    async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse> {
+        self.query_points(request).await.map_err(VectorDBError::from)
+    }
+
+    async fn query(&self, request: QueryPoints) -> Result<QueryResponse> {
+        self.query(request).await.map_err(VectorDBError::from)
     }
 } 
