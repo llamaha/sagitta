@@ -79,21 +79,31 @@ Assuming you have configured model paths via environment variables or config fil
 
 1.  **Index a directory**:
     ```bash
-    vectordb-cli index /path/to/your/code
+    vectordb-cli simple index /path/to/your/code
     ```
 
 2.  **Search for code**:
     ```bash
-    vectordb-cli query "your search query about the code"
+    vectordb-cli simple query "your search query about the code"
     ```
 
 3.  **Explore other commands**:
     ```bash
     vectordb-cli --help
-    vectordb-cli index --help
+    vectordb-cli simple index --help
     vectordb-cli query --help
     # etc.
     ```
+
+4. **Manage repositories**:
+   ```bash
+   vectordb-cli repo add --url <url to repository>
+   vectordb-cli repo use <repo name>
+   vectordb-cli repo sync
+   vectordb-cli repo query <semantic search query>
+   ```
+
+Most of these commands have further options available under the help menus.
 
 ## Compilation Options and GPU Acceleration
 
@@ -263,8 +273,8 @@ Once generated, you **must** tell `vectordb-cli` to use the CodeBERT files inste
 
 **Important:** Different models often produce embeddings of different dimensions (e.g., MiniLM=384, CodeBERT=768). The vector index stored by Qdrant is **tied to a specific dimension**.
 
--   When you run `vectordb-cli index` using a model with a different dimension than the one used to create the existing index for a given codebase/collection, the tool **should automatically detect the mismatch**.
+-   When you run `vectordb-cli simple index` or `vectordb-cli repo sync <repo>`, using a model with a different dimension than the one used to create the existing index for a given codebase/collection, the tool **should automatically detect the mismatch**.
 -   It will likely **clear the existing incompatible embeddings and vector index** in Qdrant and create a new index compatible with the new model dimensions before proceeding with indexing.
--   To be safe, you can manually run `vectordb-cli clear --collection <collection_name>` (or similar command, check `--help`) before indexing with a new model to ensure a clean state for that specific index.
+-   To be safe, you can manually run `vectordb-cli clear` before indexing with a new model to ensure a clean state for that specific index.
 
 Failure to provide valid model and tokenizer paths for the *configured* model will result in errors. 
