@@ -50,8 +50,8 @@ pub mod cli;
 // pub mod config; // Moved to vectordb-core
 pub mod edit;
 pub mod git;
-pub mod utils;
-pub mod vectordb;
+// pub mod utils; // Remove this line
+// pub mod vectordb; // Remove this line
 
 // Re-export minimal set of items for CLI usage
 // pub use config::{AppConfig, load_config}; // Moved to vectordb-core re-export

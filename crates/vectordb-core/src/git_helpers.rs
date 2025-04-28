@@ -165,7 +165,6 @@ pub(crate) fn merge_local_branch<'repo>(
         .with_context(|| format!("Failed to find local branch reference: {}", branch_ref_name))?;
 
     // Get the commit object for the target commit
-    let target_commit_object = target_commit.as_object().clone(); // Clone the Object, not the Commit
 
     // Get the current HEAD reference
     let head = repo.head().with_context(|| "Failed to get HEAD reference")?;

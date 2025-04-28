@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 use tempfile::NamedTempFile;
 use anyhow::{Result, Context, bail, anyhow};
-use tree_sitter::{Parser, Language, Node, Point};
+use tree_sitter::{Parser, Language, Node};
 use regex::Regex;
 
 // --- Public Struct/Enum Definitions ---
@@ -72,7 +72,6 @@ pub fn apply_edit(
                 .with_context(|| format!("Failed to parse file: {}", file_path.display()))?;
             let (start, end) = find_semantic_element(
                 &tree, 
-                &language, 
                 element_query, 
                 original_content.as_bytes()
             ).with_context(|| format!("Failed to find semantic element '{}' in {}", element_query, file_path.display()))?;
@@ -120,7 +119,6 @@ pub fn apply_edit(
 pub fn validate_edit(
     file_path: &Path,
     target: &EditTarget,
-    new_content: &str,
     options: Option<&EngineEditOptions>,
 ) -> Result<Vec<EngineValidationIssue>, anyhow::Error> {
     // TODO: Replace println with logging
@@ -173,7 +171,7 @@ pub fn validate_edit(
         EditTarget::Semantic { element_query } => {
              match parse_content(&original_content, &language) {
                  Ok(tree) => {
-                     match find_semantic_element(&tree, &language, element_query, original_content.as_bytes()) {
+                     match find_semantic_element(&tree, element_query, original_content.as_bytes()) {
                          Ok((start_line, end_line)) => {
                              // TODO: Replace println with logging
                              println!("Semantic target '{}' found at lines {}-{} (validation step).", element_query, start_line + 1, end_line + 1);
@@ -211,7 +209,7 @@ pub fn validate_edit(
         Ok(content_tree) => {
             if content_tree.root_node().has_error() {
                 let first_error_pos = content_tree.root_node()
-                    .descendant_for_point_range(Point::new(0,0), Point::new(usize::MAX, usize::MAX))
+                    .descendant_for_point_range(Point::new(0,0)::new(usize::MAX, usize::MAX))
                     .filter(|n| n.is_error() || n.is_missing())
                     .map(|n| n.start_position());
 
@@ -303,7 +301,7 @@ fn expand_range_for_comments(node: Node) -> Result<(usize, usize)> {
     Ok((current_node.start_position().row, node.end_position().row))
 }
 
-fn find_direct_child_element<'a>(parent_node: &Node<'a>, language: &Language, element_query_part: &str, source_code: &[u8]) -> Result<Node<'a>> {
+fn find_direct_child_element<'a>(parent_node: &Node<'a>, element_query_part: &str, source_code: &[u8]) -> Result<Node<'a>> {
     let query_parts: Vec<&str> = element_query_part.splitn(2, ':').collect();
     if query_parts.len() != 2 {
         bail!("Invalid element query part format. Expected 'type:name', got '{}'", element_query_part);
@@ -340,12 +338,12 @@ fn find_direct_child_element<'a>(parent_node: &Node<'a>, language: &Language, el
     bail!("Could not find direct child element '{}:{}' under the current node.", element_type, element_name);
 }
 
-fn find_semantic_element(tree: &tree_sitter::Tree, language: &Language, element_query_str: &str, source_code: &[u8]) -> Result<(usize, usize)> {
+fn find_semantic_element(tree: &tree_sitter::Tree, element_query_str: &str, source_code: &[u8]) -> Result<(usize, usize)> {
     let parts: Vec<&str> = element_query_str.split('.').collect();
     let mut current_node = tree.root_node();
 
     for part in parts {
-         current_node = find_direct_child_element(&current_node, language, part, source_code)
+         current_node = find_direct_child_element(&current_node, part, source_code)
              .with_context(|| format!("Failed while searching for element part '{}'", part))?;
     }
 

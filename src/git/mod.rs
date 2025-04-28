@@ -19,7 +19,7 @@ use vectordb_core::{
 
 use crate::cli::CliArgs;
 
-use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption};
+use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, DiffFindOptions};
 
 pub struct SyncResult {
     pub success: bool,
@@ -33,7 +33,7 @@ pub async fn sync_repository<C>(
     repo_config: RepositoryConfig,
     options: SyncOptions,
     cli_args: &CliArgs,
-    app_config: &AppConfig,
+    config: &mut AppConfig,
 ) -> Result<SyncResult>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -65,7 +65,7 @@ where
     let active_branch_outside = active_branch.clone();
     
     // Step 1: Perform ALL git operations in a blocking thread since git2 isn't Send
-    let git_result = task::spawn_blocking(move || -> Result<(String, Vec<PathBuf>, bool)> {
+    let git_result = task::spawn_blocking(move || -> Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool)> {
         log::info!("Using branch '{}' for repository '{}'", active_branch, repo_name);
         
         // Open the repository
@@ -118,29 +118,72 @@ where
             commit_oid_str = branch_commit.id().to_string();
         }
         
-        // Check if we need a full sync (Compare target commit with last synced)
-        let mut full_sync_needed = force_sync;
-        if !force_sync {
-            // Direct HashMap access
-            if let Some(last_commit) = last_synced_commits.get(&active_branch) {
-                if last_commit == &commit_oid_str {
-                    log::info!("Repository already synced to commit: {}", commit_oid_str);
-                    // Return early with empty file list if no sync needed
-                    return Ok((commit_oid_str, Vec::new(), false));
+        // Check if we need a full sync or incremental sync
+        let mut sync_type = SyncType::None; // Default to no sync needed
+        let mut files_to_index = Vec::new();
+        let mut files_to_delete = Vec::new();
+
+        if force_sync {
+            sync_type = SyncType::Full;
+            log::info!("Force flag set, performing full sync.");
+        } else if let Some(last_commit_oid_str) = last_synced_commits.get(&active_branch) {
+            if last_commit_oid_str == &commit_oid_str {
+                log::info!("Repository already synced to commit: {}", commit_oid_str);
+                // sync_type remains SyncType::None
+            } else {
+                log::info!("Repository needs incremental syncing from {} to {}", last_commit_oid_str, commit_oid_str);
+                sync_type = SyncType::Incremental;
+                // Find the commit object for the last synced commit
+                let last_commit_oid = git2::Oid::from_str(last_commit_oid_str)?;
+                let last_commit = repo.find_commit(last_commit_oid)?;
+                
+                // Get trees for both commits
+                let old_tree = last_commit.tree()?;
+                let new_tree = branch_commit.tree()?;
+
+                // Calculate the diff
+                let mut diff_opts = DiffOptions::new();
+                // Include untracked files? Maybe not for sync. Consider options.
+                // diff_opts.include_untracked(true); 
+                let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut diff_opts))?;
+
+                // Find renames/copies to handle them correctly (optional but good)
+                // let mut find_opts = DiffFindOptions::new();
+                // find_opts.renames(true);
+                // diff.find_similar(Some(&mut find_opts))?; // This modifies the diff in place
+
+                // Process the deltas
+                for delta in diff.deltas() {
+                    match delta.status() {
+                        Delta::Added | Delta::Modified | Delta::Renamed | Delta::Copied | Delta::Typechange => {
+                             if let Some(new_file_path) = delta.new_file().path() {
+                                files_to_index.push(new_file_path.to_path_buf());
+                             }
+                        }
+                        Delta::Deleted => {
+                             if let Some(old_file_path) = delta.old_file().path() {
+                                files_to_delete.push(old_file_path.to_path_buf());
+                             }
+                        }
+                        Delta::Untracked | Delta::Unreadable | Delta::Ignored | Delta::Conflicted | Delta::Unmodified => {
+                            // Ignore these statuses for sync purposes
+                            log::trace!("Ignoring delta status {:?} for file: {:?}", delta.status(), delta.new_file().path());
+                        }
+                    }
                 }
-                log::info!("Repository needs syncing from {} to {}", last_commit, commit_oid_str);
+                log::info!("Incremental sync: {} files to index/update, {} files to delete.", files_to_index.len(), files_to_delete.len());
+
             }
-            full_sync_needed = true;
+        } else {
+            // No last synced commit found for this branch, treat as initial full sync
+            log::info!("No previous sync found for branch '{}'. Performing initial full sync.", active_branch);
+            sync_type = SyncType::Full;
         }
         
-        if full_sync_needed {
-            log::info!("Performing full sync of repository");
-            
-            // Get the tree for the commit
+        // If full sync is needed, get all files from the current tree
+        if sync_type == SyncType::Full {
+            log::info!("Performing full sync of repository tree");
             let tree = branch_commit.tree()?;
-            
-            // Collect all files from tree
-            let mut files_to_index = Vec::new();
             tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
                 if let Some(name) = entry.name() {
                     if let Some(kind) = entry.kind() {
@@ -150,23 +193,26 @@ where
                             } else {
                                 PathBuf::from(dir).join(name)
                             };
-                            files_to_index.push(path);
+                            files_to_index.push(path); // Add all files for full sync
                         }
                     }
                 }
                 git2::TreeWalkResult::Ok
             })?;
-            
-            Ok((commit_oid_str, files_to_index, true))
-        } else {
-            Ok((commit_oid_str, Vec::new(), false))
+            log::info!("Full sync: {} files to index.", files_to_index.len());
+            files_to_delete.clear(); // Ensure no deletions are processed on a full sync
         }
+        
+        // Return results: commit OID, files to index, files to delete, and whether any sync action is needed
+        Ok((commit_oid_str, files_to_index, files_to_delete, sync_type != SyncType::None))
+
     }).await??;  // Handle both the task JoinError and the Result
     
-    let (commit_oid_str, mut files_to_index, sync_performed) = git_result;
+    let (commit_oid_str, mut files_to_index, files_to_delete, sync_performed) = git_result;
     
-    // Return early if no files to index (no changes)
-    if !sync_performed || files_to_index.is_empty() {
+    // Return early if no sync action was performed
+    if !sync_performed {
+        // Message already logged inside the thread if up-to-date
         return Ok(SyncResult {
             success: true,
             message: format!("Repository '{}' already synced to the latest commit on branch '{}'", 
@@ -175,9 +221,10 @@ where
         });
     }
     
-    // Filter files by extension if specified
+    // Filter files by extension if specified (applies to added/modified files)
     if let Some(exts) = &extensions_filter {
-        log::info!("Filtering files by extensions: {:?}", exts);
+        log::info!("Filtering files to index by extensions: {:?}", exts);
+        let original_count = files_to_index.len();
         files_to_index = files_to_index.into_iter()
             .filter(|path| {
                 if let Some(ext) = path.extension() {
@@ -188,33 +235,78 @@ where
                 false
             })
             .collect::<Vec<_>>();
+        log::info!("Filtered files to index count: {} (from {})", files_to_index.len(), original_count);
     }
     
-    log::info!("Found {} files to index", files_to_index.len());
+    // Filter deleted files too? Probably not needed, delete based on path regardless of extension.
+    
+    log::info!("Files to index/update: {}, Files to delete: {}", files_to_index.len(), files_to_delete.len());
     
     // Create collection name
     let collection_name = repo_helpers::get_collection_name(&repo_name_outside);
     
-    // Ensure the collection exists before indexing
+    // Ensure the collection exists before indexing/deleting
     let default_dimension = repo_helpers::DEFAULT_VECTOR_DIMENSION;
     repo_helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, default_dimension).await?;
     
-    // Perform indexing using the passed cli_args and app_config
-    repo_helpers::index_files(
-        client.clone(),
-        None,
-        None,
-        app_config,
-        &repo_path_outside,
-        &files_to_index,
-        &collection_name,
-        &active_branch_outside,
-        &commit_oid_str,
-    ).await?;
+    // --- Handle Deletions ---
+    if !files_to_delete.is_empty() {
+        log::info!("Removing data for {} deleted files...", files_to_delete.len());
+        // Use the actual function name and correct arguments
+        repo_helpers::delete_points_for_files(
+            client.as_ref(), // Pass client reference
+            &collection_name, 
+            &active_branch_outside,
+            &files_to_delete, 
+        ).await?; 
+        log::info!("Finished removing data for deleted files.");
+    }
+
+    // --- Handle Indexing (Additions/Modifications) ---
+    if !files_to_index.is_empty() {
+        log::info!("Indexing {} added/modified files...", files_to_index.len());
+        // Perform indexing using the passed cli_args and app_config
+        repo_helpers::index_files(
+            client.clone(),
+            config,
+            &repo_path_outside,
+            &files_to_index,
+            &collection_name,
+            &active_branch_outside,
+            &commit_oid_str,
+        ).await?;
+        log::info!("Finished indexing added/modified files.");
+    } else {
+        log::info!("No new or modified files to index.");
+    }
     
-    log::info!("Repository '{}' synced successfully to commit {}", repo_name_outside, commit_oid_str);
-    
-    // Query for indexed languages
+    log::info!("Repository '{}' sync actions completed for commit {}", repo_name_outside, commit_oid_str);
+
+    // --- Update Sync Status in Config ---
+    // This should happen only if the sync operations were successful
+    // Let the caller (handle_repo_sync) handle saving the config.
+    // We just need to update the config object passed in mutably.
+    if let Some(repo_idx) = config.repositories.iter().position(|r| r.name == repo_name_outside) {
+        // No need to clone config, update it directly
+        repo_helpers::update_sync_status_and_languages(
+            config,
+            repo_idx,
+            &active_branch_outside,
+            &commit_oid_str,
+            client.as_ref(),
+            &collection_name,
+        ).await?;
+         log::info!("Updated sync status for branch '{}' to commit {}", active_branch_outside, commit_oid_str);
+
+    } else {
+        log::error!("Could not find repository '{}' in config to update sync status.", repo_name_outside);
+        // Return an error? Or just log?
+    }
+
+
+    // --- Query for indexed languages (after updates) ---
+    // Note: This query might be slow on large collections. Consider if needed every time.
+    log::info!("Querying for current set of indexed languages...");
     let mut indexed_languages = HashSet::new();
     let scroll_filter = repo_helpers::create_branch_filter(&active_branch_outside);
     
@@ -293,4 +385,12 @@ impl Default for SyncOptions {
             extensions: None,
         }
     }
+}
+
+// Helper enum for sync logic clarity
+#[derive(PartialEq, Debug)]
+enum SyncType {
+    None,
+    Incremental,
+    Full,
 } 

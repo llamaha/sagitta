@@ -94,25 +94,6 @@ pub async fn delete_points_for_files<
     Ok(())
 }
 
-pub async fn custom_upsert_batch<C: QdrantClientTrait + ?Sized>(
-    client: &C,
-    collection_name: &str,
-    points: Vec<PointStruct>,
-    progress_bar: &ProgressBar,
-) -> Result<(), Error> {
-    let request = UpsertPointsBuilder::new(collection_name, points.clone())
-        .wait(true)
-        .build();
-
-    client.upsert_points(request).await
-        .map_err(|e| Error::Other(format!("Failed to upsert points to Qdrant: {}", e)))?;
-    
-    if log::log_enabled!(log::Level::Debug) {
-        progress_bar.println(format!("Upserted batch of {} points", points.len()).cyan().to_string());
-    }
-    Ok(())
-}
-
 pub async fn ensure_repository_collection_exists<C>(
     client: &C,
     collection_name: &str,

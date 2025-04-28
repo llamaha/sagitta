@@ -3,27 +3,19 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::collections::HashSet;
+use crate::config::RepositoryConfig;
 use anyhow::{Context, Result};
 use log::{info, warn, error};
-use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use uuid::Uuid;
 use qdrant_client::qdrant::{PointStruct, Filter, Condition, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, PointId};
-use qdrant_client::Payload;
 use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_COMMIT_HASH, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, MAX_FILE_SIZE_BYTES};
-use crate::error::VectorDBError as Error;
-use crate::config::{AppConfig, RepositoryConfig};
+use crate::config::AppConfig;
 use crate::embedding::EmbeddingHandler;
-use crate::syntax;
 use crate::QdrantClientTrait;
-use crate::repo_helpers::qdrant_utils::{custom_upsert_batch, ensure_repository_collection_exists};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use rayon::prelude::*;
-use std::cell::RefCell;
-use std::thread_local;
-use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
-use futures::future::try_join_all;
+use crate::repo_helpers::qdrant_utils::{ensure_repository_collection_exists};
+use crate::indexing::{self, index_repo_files};
+use crate::error::VectorDBError as Error;
 
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -89,116 +81,10 @@ pub async fn update_sync_status_and_languages<
     Ok(())
 }
 
-fn prewarm_thread_local_models(config: &AppConfig) {
-    let n_threads = rayon::current_num_threads();
-    (0..n_threads).into_par_iter().for_each(|_| {
-        THREAD_EMBEDDING_HANDLER.with(|handler_cell| {
-            let mut handler_opt = handler_cell.borrow_mut();
-            if handler_opt.is_none() {
-                *handler_opt = Some(EmbeddingHandler::new(config).unwrap());
-            }
-        });
-    });
-}
-
-thread_local! {
-    static THREAD_EMBEDDING_HANDLER: RefCell<Option<EmbeddingHandler>> = RefCell::new(None);
-}
-
-fn process_files_parallel(
-    config: &AppConfig,
-    repo_root: &PathBuf,
-    relative_paths: &[PathBuf],
-    branch_name: &str,
-    commit_hash: &str,
-    pb: &ProgressBar,
-) -> Vec<Result<(Vec<PointStruct>, PathBuf), String>> {
-    relative_paths.par_iter().map(|relative_path| {
-        let full_path = repo_root.join(relative_path);
-        let result = THREAD_EMBEDDING_HANDLER.with(|handler_cell| {
-            let mut handler_opt = handler_cell.borrow_mut();
-            if handler_opt.is_none() {
-                *handler_opt = Some(EmbeddingHandler::new(config).map_err(|e| format!("Failed to initialize embedding handler: {}", e))?);
-            }
-            let handler = handler_opt.as_mut().unwrap();
-            // File size check
-            match std::fs::metadata(&full_path) {
-                Ok(metadata) => {
-                    if metadata.len() > MAX_FILE_SIZE_BYTES {
-                        Err(format!(
-                            "Skipping file larger than {} bytes: {}",
-                            MAX_FILE_SIZE_BYTES,
-                            full_path.display()
-                        ))
-                    } else {
-                        if !full_path.is_file() {
-                            Err(format!("Skipping non-file path found during indexing: {}", full_path.display()))
-                        } else {
-                            // Parse and embed
-                            match crate::syntax::get_chunks(&full_path) {
-                                Ok(chunks) => {
-                                    if chunks.is_empty() {
-                                        Ok((Vec::new(), relative_path.clone()))
-                                    } else {
-                                        let file_path_str = relative_path.to_string_lossy().to_string();
-                                        let file_extension = relative_path.extension()
-                                            .unwrap_or_default()
-                                            .to_string_lossy()
-                                            .to_string();
-                                        let mut points = Vec::new();
-                                        for chunk in &chunks {
-                                            let chunk_content = &chunk.content;
-                                            let embedding = match handler.embed(&[chunk_content]) {
-                                                Ok(mut result) => {
-                                                    if result.is_empty() {
-                                                        continue;
-                                                    }
-                                                    result.remove(0)
-                                                }
-                                                Err(_) => {
-                                                    continue;
-                                                }
-                                            };
-                                            let point_id_uuid = Uuid::new_v4().to_string();
-                                            let mut payload = Payload::new();
-                                            payload.insert(FIELD_FILE_PATH, file_path_str.clone());
-                                            payload.insert(FIELD_START_LINE, chunk.start_line as i64);
-                                            payload.insert(FIELD_END_LINE, chunk.end_line as i64);
-                                            payload.insert(FIELD_LANGUAGE, chunk.language.clone());
-                                            payload.insert(FIELD_CHUNK_CONTENT, chunk.content.clone());
-                                            payload.insert(FIELD_BRANCH, branch_name.to_string());
-                                            payload.insert(FIELD_COMMIT_HASH, commit_hash.to_string());
-                                            payload.insert(FIELD_ELEMENT_TYPE, chunk.element_type.to_string());
-                                            payload.insert(FIELD_FILE_EXTENSION, file_extension.clone());
-                                            points.push(PointStruct::new(point_id_uuid, embedding, payload));
-                                        }
-                                        Ok((points, relative_path.clone()))
-                                    }
-                                }
-                                Err(e) => Err(format!("Failed to parse file {}: {}", full_path.display(), e)),
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    Err(format!(
-                        "Failed to get metadata for file {}: {}. Skipping file.",
-                        full_path.display(), e
-                    ))
-                }
-            }
-        });
-        pb.inc(1);
-        result
-    }).collect()
-}
-
 pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
     client: Arc<C>,
-    onnx_model_path_opt: Option<String>,
-    onnx_tokenizer_path_opt: Option<String>,
     config: &AppConfig,
     repo_root: &PathBuf,
     relative_paths: &[PathBuf],
@@ -208,9 +94,16 @@ pub async fn index_files<
 ) -> Result<usize, Error>
 {
     if relative_paths.is_empty() {
+        log::info!("No files provided for indexing.");
         return Ok(0);
     }
-    prewarm_thread_local_models(config);
+
+    let embedding_handler = EmbeddingHandler::new(config)
+        .context("Failed to initialize embedding handler for repo indexing")?;
+    log::info!("Embedding dimension for repo: {}", embedding_handler.dimension()?);
+
+    let embedding_handler_arc = Arc::new(embedding_handler);
+
     let pb = ProgressBar::new(relative_paths.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -218,91 +111,20 @@ pub async fn index_files<
             .map_err(|e| Error::Other(e.to_string()))?
             .progress_chars("#=-"),
     );
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    let client = client.clone();
-    let collection_name = collection_name.to_string();
-
-    let max_concurrent_upserts = config.indexing.max_concurrent_upserts;
-    let semaphore = Arc::new(Semaphore::new(max_concurrent_upserts));
-    log::info!("Using max_concurrent_upserts: {}", max_concurrent_upserts);
-
-    let mut points_batch = Vec::with_capacity(BATCH_SIZE);
-    let mut processing_errors = Vec::new();
-    let mut upsert_tasks: Vec<JoinHandle<Result<(), Error>>> = Vec::new();
-    let mut total_points_processed = 0;
-
-    let results = process_files_parallel(config, repo_root, relative_paths, branch_name, commit_hash, &pb);
-
-    for result in results {
-        match result {
-            Ok((points, _relative_path)) => {
-                for point in points {
-                    points_batch.push(point);
-                    if points_batch.len() >= BATCH_SIZE {
-                        let batch_to_upsert = std::mem::replace(&mut points_batch, Vec::with_capacity(BATCH_SIZE));
-                        total_points_processed += batch_to_upsert.len();
-                        let client_clone = client.clone();
-                        let collection_name_clone = collection_name.clone();
-                        let pb_clone = pb.clone();
-                        let semaphore_clone = semaphore.clone();
-
-                        let task = tokio::spawn(async move {
-                            let _permit = semaphore_clone.acquire_owned().await.expect("Semaphore acquisition failed");
-                            custom_upsert_batch(&*client_clone, &collection_name_clone, batch_to_upsert, &pb_clone).await
-                        });
-                        upsert_tasks.push(task);
-                    }
-                }
-            }
-            Err(e) => {
-                processing_errors.push(e);
-            }
-        }
-    }
-
-    if !points_batch.is_empty() {
-        let final_batch_size = points_batch.len();
-        total_points_processed += final_batch_size;
-        let client_clone = client.clone();
-        let collection_name_clone = collection_name.clone();
-        let pb_clone = pb.clone();
-        let semaphore_clone = semaphore.clone();
-        let task = tokio::spawn(async move {
-            let _permit = semaphore_clone.acquire_owned().await.expect("Semaphore acquisition failed");
-            custom_upsert_batch(&*client_clone, &collection_name_clone, points_batch, &pb_clone).await
-        });
-        upsert_tasks.push(task);
-    }
-
-    pb.finish_with_message("File processing complete. Waiting for uploads...");
-
-    let upsert_results = try_join_all(upsert_tasks).await
-        .map_err(|e| Error::Other(format!("Tokio task join error: {}", e)))?;
-
-    let mut upsert_errors = Vec::new();
-    for result in upsert_results {
-        if let Err(e) = result {
-            upsert_errors.push(e);
-        }
-    }
-
-    if !processing_errors.is_empty() {
-        log::debug!("Encountered {} files that could not be processed (e.g., non-UTF8):", processing_errors.len());
-        for e in processing_errors {
-            log::debug!("  - {}", e);
-        }
-    }
-
-    if !upsert_errors.is_empty() {
-        log::error!("Encountered {} errors during batch upserts:", upsert_errors.len());
-        for e in &upsert_errors {
-             log::error!("  - {}", e);
-        }
-        return Err(upsert_errors.remove(0));
-    }
-
-    log::info!("All batches upserted successfully.");
-    Ok(total_points_processed)
+    index_repo_files(
+        config,
+        repo_root,
+        relative_paths,
+        collection_name,
+        branch_name,
+        commit_hash,
+        client.clone(),
+        embedding_handler_arc,
+        Some(&pb),
+        config.indexing.max_concurrent_upserts,
+    ).await
 }
 
 pub async fn prepare_repository<C>(
@@ -315,30 +137,26 @@ pub async fn prepare_repository<C>(
     ssh_passphrase_opt: Option<&str>,
     base_path_for_new_clones: &Path,
     client: Arc<C>,
-    embedding_dim: u64, // Pass dimension instead of full handler
+    embedding_dim: u64,
 ) -> Result<RepositoryConfig, Error>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    // Require either URL or existing local path
     if url.is_empty() && (local_path_opt.is_none() || !local_path_opt.unwrap().exists()) {
         return Err(Error::Other("Either URL or existing local repository path must be provided".to_string()));
     }
 
-    // Handle repository name
     let repo_name = match name_opt {
         Some(name) => name.to_string(),
         None => {
             if !url.is_empty() {
-                // If URL is provided, derive name from URL
                 PathBuf::from(url)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s.trim_end_matches(".git").to_string())
                     .ok_or_else(|| Error::Other("Could not derive repository name from URL".to_string()))?
             } else {
-                // If URL is not provided, derive name from local path directory name
-                local_path_opt.unwrap() // Safe because we checked is_none() above
+                local_path_opt.unwrap()
                     .file_name()
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
@@ -349,18 +167,14 @@ where
 
     let local_path = local_path_opt.map_or_else(|| base_path_for_new_clones.join(&repo_name), |p| p.clone());
 
-    // Handle URL extraction from existing repository
     let mut final_url = url.to_string();
 
-    // Check if repository path exists
     if local_path.exists() {
         info!("Repository directory '{}' already exists.", local_path.display());
         
-        // Attempt to open the repository
         let repo = git2::Repository::open(&local_path)
             .with_context(|| format!("Failed to open existing repository at {}", local_path.display()))?;
         
-        // If URL is empty, try to extract it from the repository's remote
         if final_url.is_empty() {
             let remote_name = remote_opt.unwrap_or("origin");
             match repo.find_remote(remote_name) {
@@ -378,7 +192,6 @@ where
             }
         }
         
-        // Determine branch
         let initial_branch_name = match branch_opt {
             Some(branch_name) => branch_name.to_string(),
             None => {
@@ -390,7 +203,6 @@ where
             }
         };
         
-        // Setup Collection
         let collection_name = format!("repo_{}", repo_name);
         info!("Ensuring Qdrant collection '{}' exists (dim={})...", collection_name, embedding_dim);
         if let Err(e) = ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await {
@@ -423,25 +235,20 @@ where
         return Ok(new_repo_config);
     }
     
-    // For new clones, URL is required and must not be empty
     if final_url.is_empty() {
         return Err(Error::Other("URL is required when adding a new repository (local directory doesn't exist).".to_string()));
     }
     
-    // Clone repository
     info!("Cloning repository '{}' from {}", repo_name, final_url);
-    // Create the directory first
     std::fs::create_dir_all(&local_path)
         .with_context(|| format!("Failed to create directory at {}", local_path.display()))?;
 
-    // Execute clone using std::process::Command
     let mut cmd = std::process::Command::new("git");
     cmd.arg("clone").arg(&final_url).arg(&local_path);
     if let Some(branch) = branch_opt {
         cmd.arg("-b").arg(branch);
     }
 
-    // Setup SSH command if keys provided
     let git_ssh_command = if let Some(key_path) = ssh_key_path_opt {
         let key_path_str = key_path.to_string_lossy();
         let base_ssh_cmd = format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", key_path_str);
@@ -470,7 +277,6 @@ where
     }
     
     info!("Repository cloned successfully to {}", local_path.display());
-    // Open the repo to determine the initial branch if not specified
     let repo = git2::Repository::open(&local_path)
             .with_context(|| format!("Failed to open newly cloned repository at {}", local_path.display()))?;
 
@@ -587,7 +393,6 @@ pub async fn sync_repository_branch(
     let repo_config = config.repositories.get(repo_config_index)
         .ok_or_else(|| Error::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
 
-    // Initialize embedding handler
     let _embedding_handler = EmbeddingHandler::new(config)
         .map_err(|e: Error| Error::Other(format!("Failed to initialize embedding handler for sync: {}", e)))?;
 

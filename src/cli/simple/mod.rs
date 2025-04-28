@@ -1,37 +1,39 @@
-// Add the index module
-pub mod index;
-
+// Third-party imports
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use qdrant_client::{
     qdrant::{ 
-        CreateCollectionBuilder, Distance, FieldType, VectorParamsBuilder, PointStruct, 
-        SearchPointsBuilder, Condition, Filter, PointsSelector, 
-        UpdateStatus, DeletePoints, 
+        Condition, Filter, 
+        UpdateStatus, SearchResponse,
     },
-    Payload,
     Qdrant,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     collections::HashSet,
     path::PathBuf, 
-    sync::Arc, 
+    sync::Arc,
     time::Duration,
 };
-use uuid::Uuid;
-use walkdir::WalkDir;
 
 use vectordb_core::config::AppConfig;
-use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use crate::cli::CliArgs;
-use vectordb_core::syntax;
-use crate::vectordb::embedding_logic::EmbeddingHandler;
-use crate::cli::commands::{
-    upsert_batch, BATCH_SIZE, LEGACY_INDEX_COLLECTION, // Import constants
-    FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE, FIELD_FILE_EXTENSION,
-    FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE, ensure_payload_index,
+use vectordb_core::embedding::EmbeddingHandler;
+use crate::cli::commands::{ // Only import necessary items from commands
+    LEGACY_INDEX_COLLECTION, 
+    FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
+    FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
 };
+use vectordb_core::search_collection;
+use vectordb_core::qdrant_ops::delete_all_points; // Import core helpers
+use vectordb_core::error::VectorDBError; // Import VectorDBError
+
+// Local module imports
+// pub mod index; // Remove index module
+// use index::handle_file_processing; // Remove usage
+
+// Constants
+// const SIMPLE_INDEX_COLLECTION: &str = \"simple_index\"; // REMOVED - Unused
 
 // Arguments for the main 'simple' command group
 #[derive(Args, Debug, Clone)] 
@@ -113,9 +115,7 @@ pub struct SimpleClearArgs {
     // No args needed
 }
 
-
 // --- Main Handler for 'simple' commands ---
-
 pub async fn handle_simple_command(
     args: SimpleArgs,
     cli_args: &CliArgs,
@@ -129,7 +129,7 @@ pub async fn handle_simple_command(
     }
 }
 
-// --- Simple Index Handler ---
+// --- Simple Index Handler (Refactored) ---
 
 async fn handle_simple_index(
     cmd_args: &SimpleIndexArgs,
@@ -140,59 +140,54 @@ async fn handle_simple_index(
     log::info!("Starting simple indexing process...");
 
     let collection_name = LEGACY_INDEX_COLLECTION;
-    log::info!("Indexing into default collection: '{}'", collection_name);
+    log::info!("Using default collection: '{}'", collection_name);
 
-    for path in &cmd_args.paths {
-        if !path.exists() {
-             bail!("Input path does not exist: {}", path.display());
+    // --- Clear existing collection before indexing ---
+    println!("Clearing default collection '{}' before indexing...", collection_name);
+    log::info!("Calling core delete_all_points for collection '{}'...", collection_name);
+    match delete_all_points(client.clone(), collection_name).await {
+        Ok(_) => {
+            log::info!("Successfully cleared collection '{}'.", collection_name);
+            println!("Collection cleared.");
+        }
+        Err(e) => {
+            // Log the error but proceed with indexing anyway
+            log::error!("Failed to clear collection '{}' before indexing: {}. Proceeding anyway.", collection_name, e);
+            eprintln!("Warning: Failed to clear collection '{}' before indexing: {}. Proceeding anyway.", collection_name, e);
+            // Consider if we should bail here instead?
+            // bail!("Failed to clear collection before indexing: {}", e);
         }
     }
-    log::info!("Processing input paths: {:?}", cmd_args.paths);
 
-    // --- Enforce Config-Only ONNX Paths for Simple Index ---
+    // Validate input paths exist (basic check)
+    for path in &cmd_args.paths {
+        if !path.exists() {
+            bail!("Input path does not exist: {}", path.display());
+        }
+    }
+    log::debug!("Input paths: {:?}", cmd_args.paths);
+
+    // --- Validate Config for ONNX paths for simple index ---
+    // For simple index, paths *must* come only from the config file.
     if cli_args.onnx_model_path_arg.is_some() || std::env::var("VECTORDB_ONNX_MODEL").is_ok() {
         return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
     if cli_args.onnx_tokenizer_dir_arg.is_some() || std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").is_ok() {
          return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
+    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+         return Err(anyhow!("ONNX model and tokenizer paths must be set in the configuration file when using 'simple index'"));
+    }
+    // Path existence/validity is checked later by EmbeddingHandler::new
+    log::info!("Using ONNX paths from configuration file for simple index.");
 
-    let onnx_model_path_str = config.onnx_model_path.as_ref()
-        .ok_or_else(|| anyhow!("ONNX model path must be set in the configuration file when using 'simple index'"))?;
-    let onnx_tokenizer_dir_str = config.onnx_tokenizer_path.as_ref()
-        .ok_or_else(|| anyhow!("ONNX tokenizer path must be set in the configuration file when using 'simple index'"))?;
-    let _onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
-    if !_onnx_model_path.exists() {
-        return Err(anyhow!("Resolved ONNX model path does not exist: {}", _onnx_model_path.display()));
-    }
-    if !_onnx_tokenizer_path.is_dir() {
-        return Err(anyhow!("Resolved ONNX tokenizer path is not a directory: {}", _onnx_tokenizer_path.display()));
-    }
-    let tokenizer_file = _onnx_tokenizer_path.join("tokenizer.json");
-    if !tokenizer_file.exists() {
-        return Err(anyhow!("tokenizer.json not found in the ONNX tokenizer directory: {}", _onnx_tokenizer_path.display()));
-    }
-    log::info!("Using resolved ONNX model: {}", _onnx_model_path.display());
-    log::info!("Using resolved ONNX tokenizer directory: {}", _onnx_tokenizer_path.display());
-
-    // Create EmbeddingHandler using the validated config paths
+    // --- Initialize Embedding Handler (uses paths from config) ---
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple index")?;
-    let embedding_dim = embedding_handler
-        .dimension()
-        .context("Failed to get embedding dimension")?;
-    log::info!("Embedding dimension: {}", embedding_dim);
+    log::info!("Embedding dimension: {}", embedding_handler.dimension()?);
 
-    // Ensure collection exists with the correct embedding dimension
-    ensure_legacy_collection_exists(&client, collection_name, embedding_dim as u64).await?;
-    if !client.collection_exists(collection_name.to_string()).await? {
-        bail!("Collection '{}' check failed after creation attempt.", collection_name);
-    }
-
-    // Gather all files to index (flatten directories, apply extension filter)
-    let mut files_to_process = Vec::new();
-    let file_types_set: Option<HashSet<String>> = cmd_args
+    // --- Prepare Filters ---
+    let file_extensions_set: Option<HashSet<String>> = cmd_args
         .file_extensions
         .as_ref()
         .map(|ft_vec| {
@@ -201,81 +196,62 @@ async fn handle_simple_index(
                 .map(|s| s.trim_start_matches('.').to_lowercase())
                 .collect()
         });
-    for path_arg in &cmd_args.paths {
-        let absolute_path_arg = path_arg.canonicalize().with_context(|| format!("Failed to get absolute path for: {}", path_arg.display()))?;
-        if absolute_path_arg.is_file() {
-            let should_process = match &file_types_set {
-                Some(filter_set) => {
-                    let extension = absolute_path_arg
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|s| s.to_lowercase())
-                        .unwrap_or_default();
-                    filter_set.contains(&extension)
+
+    // --- Setup Progress Bar ---
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .tick_strings(&["-", "\\", "|", "/", "-", "\\", "|", "/"])
+            .template("{spinner} {elapsed_precise} [{bar:40.cyan/blue}] {pos}/{len} ({msg})")?
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_message("Gathering files...");
+
+    // --- Call Core Indexing Logic ---
+    let index_result = vectordb_core::indexing::index_paths(
+        &cmd_args.paths, // Pass the raw paths from args
+        file_extensions_set,
+        collection_name,
+        client.clone(),
+        &embedding_handler,
+        Some(&pb),
+    ).await;
+
+    // --- Handle Result ---
+    pb.finish(); // Ensure spinner stops
+    match index_result {
+        Ok(_) => {
+            log::info!("Simple indexing completed successfully.");
+            println!("Indexing finished.");
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Simple indexing failed: {}", e);
+            // Print a user-friendly error based on VectorDBError type
+            match e {
+                vectordb_core::error::VectorDBError::ConfigurationError(ref msg) => {
+                    eprintln!("Configuration Error: {}", msg);
                 }
-                None => true,
-            };
-            if should_process {
-                files_to_process.push(absolute_path_arg);
+                vectordb_core::error::VectorDBError::EmbeddingError(ref msg) => {
+                    eprintln!("Embedding Error: {}", msg);
+                }
+                vectordb_core::error::VectorDBError::QdrantError(ref msg) => {
+                    eprintln!("Database Error: {}", msg);
+                }
+                 vectordb_core::error::VectorDBError::IOError(ref io_err) => {
+                     eprintln!("I/O Error during indexing: {}", io_err);
+                 }
+                _ => {
+                    eprintln!("An unexpected error occurred during indexing: {}", e);
+                }
             }
-        } else if absolute_path_arg.is_dir() {
-            for entry_result in WalkDir::new(&absolute_path_arg).into_iter().filter_map(|e| e.ok()) {
-                let entry_path = entry_result.path();
-                if !entry_path.is_file() {
-                    continue;
-                }
-                let should_process = match &file_types_set {
-                    Some(filter_set) => {
-                        let extension = entry_path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .map(|s| s.to_lowercase())
-                            .unwrap_or_default();
-                        filter_set.contains(&extension)
-                    }
-                    None => true,
-                };
-                if should_process {
-                    files_to_process.push(entry_path.to_path_buf());
-                }
-            }
+            // Convert the specific error back to a generic anyhow::Error for the CLI handler return type
+            Err(anyhow!(e))
         }
     }
-
-    // Convert files_to_process to relative paths from a dummy root (for repo_indexer compatibility)
-    // We'll use the current directory as the root, and store relative paths
-    let cwd = std::env::current_dir().context("Failed to get current working directory")?;
-    let mut relative_paths = Vec::new();
-    for abs_path in &files_to_process {
-        let rel = abs_path.strip_prefix(&cwd).unwrap_or(abs_path).to_path_buf();
-        relative_paths.push(rel);
-    }
-
-    // Call the repo indexer with dummy branch/commit values
-    let branch_name = "main";
-    let commit_hash = "simple-index";
-    let total_chunks_indexed = vectordb_core::repo_helpers::repo_indexing::index_files(
-        client.clone(),
-        None,
-        None,
-        config,
-        &cwd,
-        &relative_paths,
-        collection_name,
-        branch_name,
-        commit_hash,
-    ).await.map_err(|e| anyhow!("Repo indexer failed: {}", e))?;
-
-    println!("\nSimple Indexing Summary for Collection '{}':", collection_name);
-    println!("  Files Scanned:       {}", files_to_process.len());
-    println!("  Files Processed:     {}", files_to_process.len()); // No skip logic here
-    println!("  Files Skipped:       0");
-    println!("  Chunks Indexed:      {}", total_chunks_indexed);
-
-    Ok(())
 }
 
-// --- Simple Query Handler ---
+// --- Simple Query Handler (Refactored) ---
 
 async fn handle_simple_query(
     args: &SimpleQueryArgs,
@@ -283,102 +259,147 @@ async fn handle_simple_query(
     config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
-    log::info!("Starting simple query process...");
+    log::debug!("Handling simple query...");
 
-    let collection_name = LEGACY_INDEX_COLLECTION;
-    log::info!("Querying default collection: '{}'", collection_name);
-
-    if !client.collection_exists(collection_name).await? {
-        println!("Default collection '{}' does not exist or has not been indexed yet.", collection_name);
-        println!("Try running 'simple index <path>' first.");
-        return Ok(());
+    // Config validation and embedding handler initialization
+    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+        bail!("ONNX model and tokenizer paths must be set in the config for simple query");
     }
-
-    let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
-    let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();
-    let onnx_model_path_str = cli_args.onnx_model_path_arg.as_ref()
-        .or(model_env_var.as_ref())
-        .or(config.onnx_model_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX model path must be provided via --onnx-model, VECTORDB_ONNX_MODEL, or config"))?;
-    let onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_ref()
-        .or(tokenizer_env_var.as_ref())
-        .or(config.onnx_tokenizer_path.as_ref())
-        .ok_or_else(|| anyhow!("ONNX tokenizer path must be provided via --onnx-tokenizer-dir, VECTORDB_ONNX_TOKENIZER_DIR, or config"))?;
-    let _onnx_model_path = PathBuf::from(onnx_model_path_str);
-    let _onnx_tokenizer_path = PathBuf::from(onnx_tokenizer_dir_str);
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple query")?;
 
-    let embedding_results = embedding_handler.create_embedding_model()?.embed_batch(&[&args.query])?;
-    let query_embedding = embedding_results.into_iter().next()
-        .ok_or_else(|| anyhow!("Failed to generate embedding for query"))?;
-    log::info!("Query embedding generated.");
-
+    let collection_name = LEGACY_INDEX_COLLECTION;
+    
+    // Build filter directly here
     let mut filter_conditions = Vec::new();
     if let Some(lang_name) = &args.lang {
         filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang_name.clone()));
-        log::info!("Filtering by language: {}", lang_name);
+        log::debug!("Filtering by language: {}", lang_name);
     }
     if let Some(element_type) = &args.element_type {
         filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type.clone()));
-        log::info!("Filtering by element type: {}", element_type);
+        log::debug!("Filtering by element type: {}", element_type);
     }
-    let search_filter = if filter_conditions.is_empty() { None } else { Some(Filter::must(filter_conditions)) };
+    let filter = if filter_conditions.is_empty() { None } else { Some(Filter::must(filter_conditions)) };
 
-    log::info!("Executing search against collection: '{}'...", collection_name);
-    
-    let mut builder = SearchPointsBuilder::new(collection_name, query_embedding, args.limit)
-        .with_payload(true);
-    if let Some(filter) = search_filter {
-            builder = builder.filter(filter);
+    log::info!(
+        "Searching collection '{}' for query: '{}', limit: {}, filter: {:?}",
+        collection_name,
+        args.query,
+        args.limit,
+        filter
+    );
+
+    // Call the core search function with explicit type annotation
+    let search_response_result: Result<SearchResponse, VectorDBError> = search_collection(
+        client.clone(),
+        collection_name,
+        &embedding_handler,
+        &args.query,
+        args.limit,
+        filter,
+    ).await;
+
+    match search_response_result {
+        Ok(search_response) => {
+            if args.json {
+                // Output JSON
+                let output_results: Vec<_> = search_response.result.into_iter()
+                    .map(|point| {
+                        // Convert payload Map<String, Value> to serde_json::Value
+                        let payload_json = serde_json::to_value(point.payload)
+                            .unwrap_or(serde_json::Value::Null);
+                        serde_json::json!({
+                            "id": point.id.map(|id| format!("{:?}", id)).unwrap_or_default(),
+                            "score": point.score,
+                            "payload": payload_json
+                        })
+                    }).collect();
+                println!("{}", serde_json::to_string_pretty(&output_results)?);
+            } else {
+                // Output human-readable
+                if search_response.result.is_empty() {
+                    println!("No results found.");
+                } else {
+                    println!("Search Results:");
+                    for (i, point) in search_response.result.iter().enumerate() {
+                        println!("--- Result {} (Score: {:.4}) ---", i + 1, point.score);
+                        // Pretty print payload fields
+                        if let Some(path) = point.payload.get(FIELD_FILE_PATH).and_then(|v| v.as_str()) {
+                            println!("  File: {}", path);
+                        }
+                        if let Some(start) = point.payload.get(FIELD_START_LINE).and_then(|v| v.as_integer()) {
+                            if let Some(end) = point.payload.get(FIELD_END_LINE).and_then(|v| v.as_integer()) {
+                                println!("  Lines: {}-{}", start, end);
+                            }
+                        }
+                        if let Some(lang) = point.payload.get(FIELD_LANGUAGE).and_then(|v| v.as_str()) {
+                            println!("  Lang: {}", lang);
+                        }
+                        if let Some(elem_type) = point.payload.get(FIELD_ELEMENT_TYPE).and_then(|v| v.as_str()) {
+                            println!("  Type: {}", elem_type);
+                        }
+                        if let Some(content) = point.payload.get(FIELD_CHUNK_CONTENT).and_then(|v| v.as_str()) {
+                            println!("  Content:\n    {}", content.trim().replace('\n', "\n    "));
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            // Handle specific VectorDBError variants if needed, otherwise use anyhow
+            match &e {
+                 vectordb_core::error::VectorDBError::ConfigurationError(ref msg) => {
+                     eprintln!("Configuration Error: {}", msg);
+                 }
+                 vectordb_core::error::VectorDBError::EmbeddingError(ref msg) => {
+                     eprintln!("Embedding Error: {}", msg);
+                 }
+                 vectordb_core::error::VectorDBError::IOError(ref io_err) => {
+                     eprintln!("Error during search (IO): {}", io_err);
+                 }
+                 vectordb_core::error::VectorDBError::QdrantError(ref msg) => {
+                    eprintln!("Qdrant client error during search: {}", msg);
+                 }
+                 // Add other specific VectorDBError arms here if needed
+                 _ => eprintln!("An error occurred during search: {}", e),
+             }
+             return Err(anyhow!(e));
+        }
     }
-    let search_request = builder.build();
-    
-    let search_response = client.search_points(search_request).await
-        .with_context(|| format!("Qdrant search failed for collection '{}'", collection_name))?;
-
-    log::info!("Search returned {} results from collection {}", search_response.result.len(), collection_name);
-    
-    crate::cli::formatters::print_search_results(&search_response.result, &args.query, args.json)?;
 
     Ok(())
 }
 
-// --- Simple Clear Handler ---
+// --- Simple Clear Handler (Refactored) ---
 
 async fn handle_simple_clear(
     _args: &SimpleClearArgs,
-    _config: &AppConfig,
+    _config: &AppConfig, // config might not be needed now
     client: Arc<Qdrant>,
 ) -> Result<()> {
     let collection_name = LEGACY_INDEX_COLLECTION;
     log::info!("Starting simple clear process for collection: '{}'", collection_name);
 
+    // --- Check Collection Existence (CLI Logic) ---
     if !client.collection_exists(collection_name).await? {
         println!("Default collection '{}' does not exist. Nothing to clear.", collection_name);
         return Ok(());
     }
 
+    // --- Confirmation and Call Core Delete (CLI Logic) ---
     println!("Clearing all data from default collection '{}'...", collection_name);
-    log::info!("Deleting all points from collection '{}'...", collection_name);
+    log::info!("Calling core delete_all_points for collection '{}'...", collection_name);
 
-    let delete_filter: Option<Filter> = None; 
-    let points_selector = PointsSelector {
-        points_selector_one_of: Some(qdrant_client::qdrant::points_selector::PointsSelectorOneOf::Filter(delete_filter.unwrap_or_default())),
-    };
+    let delete_result = delete_all_points(client.clone(), collection_name).await;
 
-    let delete_request = DeletePoints {
-        collection_name: collection_name.to_string(),
-        wait: Some(true),
-        points: Some(points_selector),
-        ordering: None,
-        shard_key_selector: None,
-    };
-    
-    match client.delete_points(delete_request).await {
+    // --- Handle Result Status (CLI Logic) ---
+    match delete_result {
         Ok(response) => {
-             if let Some(result) = response.result {
-                 match UpdateStatus::try_from(result.status) {
+             // Access the UpdateResult within the response
+             if let Some(update_result) = response.result {
+                 // Now try_from on the status within UpdateResult
+                 match UpdateStatus::try_from(update_result.status) {
                      Ok(UpdateStatus::Completed) => {
                          println!("Successfully cleared all data from collection '{}'.", collection_name);
                          log::info!("Cleared all points from collection '{}'.", collection_name);
@@ -388,50 +409,23 @@ async fn handle_simple_clear(
                          log::warn!("Clear operation for '{}' finished with status: {:?}", collection_name, status);
                      }
                      Err(_) => {
-                         println!("Clear operation finished with unknown status: {}", result.status);
-                         log::warn!("Clear operation for '{}' finished with unknown status: {}", collection_name, result.status);
+                         // Use update_result.status for the unknown code
+                         println!("Clear operation finished with unknown status code: {}", update_result.status);
+                         log::warn!("Clear operation for '{}' finished with unknown status code: {}", collection_name, update_result.status);
                      }
                  }
              } else {
-                 println!("Clear operation response did not contain a result.");
-                 log::warn!("Clear operation response for '{}' did not contain a result.", collection_name);
+                 // Handle case where the response has no UpdateResult
+                 println!("Clear operation response did not contain result details.");
+                 log::warn!("Clear operation response for '{}' did not contain result details.", collection_name);
              }
         }
         Err(e) => {
-            let anyhow_err: anyhow::Error = anyhow!(e);
-            return Err(anyhow_err.context(format!("Failed to delete points from collection '{}'", collection_name)));
+            log::error!("Failed to clear collection '{}': {}", collection_name, e);
+            eprintln!("Error during clear operation: {}", e);
+            return Err(anyhow!(e)); // Convert to anyhow::Error
         }
     }
-
-    Ok(())
-}
-
-
-// --- Helper Function to Ensure Legacy Collection Exists ---
-async fn ensure_legacy_collection_exists(
-    client: &Qdrant,
-    collection_name: &str,
-    embedding_dimension: u64,
-) -> Result<()> {
-    if client.collection_exists(collection_name).await? {
-        log::info!("Collection '{}' already exists.", collection_name);
-    } else {
-        log::info!("Collection '{}' not found. Creating...", collection_name);
-        let create_request = CreateCollectionBuilder::new(collection_name)
-            .vectors_config(VectorParamsBuilder::new(embedding_dimension, Distance::Cosine));
-        
-        client.create_collection(create_request).await?;
-        log::info!("Collection '{}' created successfully.", collection_name);
-        
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-
-    ensure_payload_index(client, collection_name, FIELD_FILE_PATH, FieldType::Keyword, true, None).await?;
-    ensure_payload_index(client, collection_name, FIELD_LANGUAGE, FieldType::Keyword, true, None).await?;
-    ensure_payload_index(client, collection_name, FIELD_ELEMENT_TYPE, FieldType::Keyword, true, None).await?;
-    ensure_payload_index(client, collection_name, FIELD_START_LINE, FieldType::Integer, false, None).await?;
-    ensure_payload_index(client, collection_name, FIELD_END_LINE, FieldType::Integer, false, None).await?;
-    ensure_payload_index(client, collection_name, FIELD_FILE_EXTENSION, FieldType::Keyword, true, None).await?;
 
     Ok(())
 } 

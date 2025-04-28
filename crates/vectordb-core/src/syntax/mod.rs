@@ -15,6 +15,7 @@ pub mod ruby;
 pub mod rust;
 pub mod typescript;
 pub mod yaml;
+pub mod html;
 
 // Re-export the core trait and struct
 pub use parser::{CodeChunk, SyntaxParser};
@@ -47,6 +48,7 @@ pub fn get_chunks(file_path: &Path) -> Result<Vec<CodeChunk>> {
         "yaml" | "yml" => Box::new(yaml::YamlParser::new()),
         "rb" => Box::new(ruby::RubyParser::new()),
         "py" => Box::new(python::PythonParser::new()),
+        "html" => Box::new(html::HtmlParser::new()),
         _ => Box::new(fallback::FallbackParser::new()), // Fallback for unsupported/unknown
     };
 

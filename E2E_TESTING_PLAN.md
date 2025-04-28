@@ -5,229 +5,121 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
 ## Prerequisites
 
 1.  **Compiled Binary:** The `vectordb-cli` binary compiled in release mode (e.g., `./target/release/vectordb-cli`).
-2.  **ONNX Models:** Default embedding model (`all-minilm-l6-v2.onnx` or similar) and tokenizer (`tokenizer.json`) available in the `./onnx/` directory relative to where the CLI is run, OR configured correctly in the default config file (`~/.config/vectordb-cli/config.toml`).
+2.  **ONNX Models:** Default embedding model (`all-minilm-l6-v2.onnx` or similar) and tokenizer (`tokenizer.json`) available. The CLI will look for them via config file (`~/.config/vectordb-cli/config.toml`), environment variables (`VECTORDB_ONNX_MODEL`, `VECTORDB_ONNX_TOKENIZER_DIR`), or command-line flags (`-m`/`--onnx-model`, `-t`/`--onnx-tokenizer-dir`). Ensure they are accessible.
 3.  **Git:** Git command-line tool installed.
-4.  **Qdrant:** A running Qdrant instance accessible (web UI on port 6333, service for the tool on port 6334 by default config).
-5.  **Test Repository:** A git repository to use for testing (e.g., `https://github.com/octocat/Spoon-Knife`).
+4.  **Qdrant:** A running Qdrant instance accessible (default GRPC on port 6334). Use `curl http://localhost:6334/readyz` to check.
+5.  **Test Repositories:** Internet access to clone `https://github.com/octocat/Spoon-Knife` and `https://github.com/rust-lang/book`.
 
-## Phase 1: CLI Testing
+## Test Script
 
-**Goal:** Test the core repository management and query commands via the CLI binary.
+A script `e2e_test.sh` automates most of these steps. Run it from the project root:
 
-**Setup:**
-1.  **Create Temp Directory & Clone Repo:**
     ```bash
-    # Create temp dir, clone test repo, export path
-    TEMP_DIR=$(mktemp -d)
-    echo "TEMP_DIR=$TEMP_DIR"
-    git clone https://github.com/octocat/Spoon-Knife "$TEMP_DIR/Spoon-Knife" # Replace URL if needed
-    export TEST_TEMP_DIR="$TEMP_DIR"
-    echo "Cloned repo to $TEST_TEMP_DIR/Spoon-Knife"
-    ```
-2.  **Generate Unique Name:**
-    ```bash
-    export UNIQUE_NAME="e2e-test-$(date +%s)"
-    echo "Unique name: $UNIQUE_NAME"
-    ```
-3.  **Configure Environment (Optional - if not using default config):**
-    *   *Note:* During testing, using a temporary config via `XDG_CONFIG_HOME` failed. It's recommended to rely on the default config `~/.config/vectordb-cli/config.toml` and ensure ONNX paths are correctly set there. If needed, backup and temporarily modify the default config.
-    ```bash
-    # Example of using temporary config (use with caution - may not work as expected)
-    # export XDG_CONFIG_HOME="$TEST_TEMP_DIR/config"
-    # mkdir -p "$XDG_CONFIG_HOME/vectordb"
-    # echo -e "[onnx]\nonnx_model_path = \"/path/to/your/model.onnx\"\nonnx_tokenizer_path = \"/path/to/your/tokenizer.json\"" > "$XDG_CONFIG_HOME/vectordb/config.toml"
-    # echo "Using config dir: $XDG_CONFIG_HOME"
+./e2e_test.sh
+```
 
-    # Recommended: Ensure ~/.config/vectordb-cli/config.toml has correct [onnx] paths
-    ```
+The script includes basic checks for prerequisites and performs the tests described below. It uses `set -x` to show commands being executed and includes basic `grep` checks for expected output.
 
-**Test Steps:**
-1.  **Add Repository:** Add the cloned local repository.
-    ```bash
-    ./target/release/vectordb-cli repo add --name "$UNIQUE_NAME" -p "$TEST_TEMP_DIR/Spoon-Knife" | cat
-    # Expected: Success message, repo added, collection created.
-    ```
-2.  **Sync Repository:** Index the content of the added repository.
-    ```bash
-    ./target/release/vectordb-cli repo sync "$UNIQUE_NAME" | cat
-    # Expected: Success message, files processed.
-    ```
-3.  **List Repositories:** Verify the new repository is listed.
-    ```bash
-    ./target/release/vectordb-cli repo list | cat
-    # Expected: Output includes the $UNIQUE_NAME repo. Initially, it will show "No active repository set.".
-    ```
-4.  **Use Repository:** Switch to the test repository. This is required before querying without a specific repo name.
-    ```bash
-    ./target/release/vectordb-cli repo use "$UNIQUE_NAME" | cat
-    # Expected: Success message, repo set as active.
-    ```
-5.  **Query Repository (Initial):** Query for known content in the active repo.
-    ```bash
-    ./target/release/vectordb-cli repo query "Spoon-Knife" | cat
-    # Expected: Search results including chunks from the repo's files. Assumes active repo is set via 'repo use'.
-    ```
-6.  **Simulate Change:** Add a new file and commit it.
-    ```bash
-    cd "$TEST_TEMP_DIR/Spoon-Knife"
-    echo "This is different content." > another_file.md # Use a recognized extension like .md
-    git add another_file.md
-    git -c user.name='Test User' -c user.email='test@example.com' commit -m 'Add another_file.md'
-    cd - # Return to original directory
-    echo "Added and committed new file."
-    ```
-7.  **Sync Repository (Again):** Index the newly committed changes.
-    ```bash
-    ./target/release/vectordb-cli repo sync "$UNIQUE_NAME" | cat
-    # Expected: Success message.
-    ```
-8.  **Query Repository (Updated):** Query for content in the new file (in the active repo).
-    ```bash
-    ./target/release/vectordb-cli repo query "different content" | cat
-    # Expected: Search results including chunks from the new file (another_file.md). Assumes active repo is set.
-    # Note: Previous testing showed issues indexing simple .txt files; use recognized extensions.
-    ```
-9.  **Repository Stats:** Get statistics about the active repository.
-    ```bash
-    ./target/release/vectordb-cli repo stats | cat
-    # Expected: Output includes number of points, segments, etc. for the active repository. Assumes active repo is set.
-    ```
-10. **Clear Repository:** Clear the content of the active repository.
-    ```bash
-    ./target/release/vectordb-cli repo clear -y | cat
-    # Expected: Success message, repository content cleared. Assumes active repo is set.
-    ```
-11. **Remove Repository:** Remove the test repository config and its data.
-    ```bash
-    ./target/release/vectordb-cli repo remove "$UNIQUE_NAME" -y | cat
-    # Expected: Success message, repo removed, active repo possibly reset.
-    ```
+## Phase 1: Repo Commands Testing
 
-**Cleanup:**
-1.  **Remove Temp Directory:**
-    ```bash
-    rm -rf "$TEST_TEMP_DIR"
-    unset TEST_TEMP_DIR
-    unset UNIQUE_NAME
-    # unset XDG_CONFIG_HOME # If it was set earlier
-    echo "Cleaned up CLI test temporary directory."
-    ```
+**Goal:** Test repository management (`add`, `list`, `use`, `sync`, `stats`, `clear`, `remove`) and querying (`query`).
 
-## Phase 2: Simple Index Testing
+**Setup (Automated by `e2e_test.sh`):**
+1.  Create a temporary directory.
+2.  Clone test repositories (`octocat/Spoon-Knife`, `rust-lang/book`) into the temp directory.
+3.  Generate unique names for the test repositories based on the current timestamp.
 
-**Goal:** Test the non-repository based index commands.
+**Test Steps (Automated by `e2e_test.sh`):**
+1.  **Basic CLI:** Check `--help` and `--version` flags.
+2.  **Add Repositories:** Add both cloned repositories using unique names.
+    *   Verify success messages.
+    *   Test error handling for missing `--name` or `-p` arguments.
+3.  **List Repositories:** Verify both added repositories are listed.
+    *   Test plain text and `--json` output.
+4.  **Use Repository:** Set one repository (`Spoon-Knife`) as active.
+    *   Verify success message.
+    *   Verify `(active)` marker in `repo list` output.
+    *   Test error handling for missing repository name.
+5.  **Sync Repositories:** Sync content for both repositories.
+    *   Sync the non-active repository (`rust-lang/book`) by name.
+    *   Sync the active repository (`Spoon-Knife`).
+    *   Sync the active repository again using `--force` and `--extensions` flags.
+6.  **Repository Stats:** Get statistics for the active repository.
+    *   Verify command runs and outputs stats-related text.
+7.  **Query Repositories:** Query both repositories.
+    *   Query the active repository (`Spoon-Knife`) for relevant content.
+    *   Query the non-active repository (`rust-lang/book`) by name using `--name`, filter flags (`--lang`), and `--json` output.
+    *   **Manual Step:** The script will output the results for each query, clearly marked with `--- Query X Results --- RATE THIS (1-10) ---`. Manually review these results and assess their relevance on a scale of 1-10.
+    *   Test error handling for missing query text.
+8.  **Clear Repositories:** Clear the indexed content for both repositories.
+    *   Clear the active repository using `-y` flag.
+    *   Clear the non-active repository using `--name` and `-y` flags.
+9.  **Remove Repositories:** Remove the configuration for both repositories.
+    *   Remove both repositories by name using `-y` flag.
+    *   Verify success messages.
+    *   Test error handling for missing repository name.
 
-**Setup:**
-1.  **Create Test File:**
-    ```bash
-    echo "Simple index content for E2E test." > "$TEST_TEMP_DIR/simple_test.txt"
-    echo "Created simple test file: $TEST_TEMP_DIR/simple_test.txt"
-    ```
+## Phase 2: Simple Commands Testing
 
-**Test Steps:**
-1.  **Index File:** Index the created test file.
-    ```bash
-    ./target/release/vectordb-cli simple index "$TEST_TEMP_DIR/simple_test.txt" | cat
-    # Expected: Success message, file indexed.
-    ```
-2.  **Query Index:** Query for content in the indexed file.
-    ```bash
-    ./target/release/vectordb-cli simple query "E2E test" | cat
-    # Expected: Search results including the chunk from simple_test.txt.
-    ```
-3.  **Clear Index:** Clear the simple index.
-    ```bash
-    # NOTE: The -y flag is not supported for this command.
-    ./target/release/vectordb-cli simple clear | cat
-    # Expected: Success message, index cleared.
-    ```
-4.  **Query Index (After Clear):** Verify the index is empty.
-    ```bash
-    ./target/release/vectordb-cli simple query "E2E test" | cat
-    # Expected: No results found or error indicating empty collection.
-    ```
+**Goal:** Test the non-repository index commands (`simple index`, `simple query`, `simple clear`).
 
-**Cleanup:** (Covered by main cleanup)
+**Setup (Automated by `e2e_test.sh`):**
+1.  Create a simple text file (`simple_test.txt`) with test content in the temp directory.
 
-## Phase 3: Edit Command Testing (Basic)
+**Test Steps (Automated by `e2e_test.sh`):**
+1.  **Index File:** Index the test file using `simple index`.
+    *   Index with an `--extension` flag.
+    *   Index again without the flag (should be idempotent or update).
+    *   Test error handling for missing file path.
+2.  **Query Index:** Query the simple index for content from the test file.
+    *   Query using plain text output.
+    *   Query using `--json` and filter flags (`--lang`, `--type`, `--limit`).
+    *   **Manual Step:** The script will output the results, marked for manual rating (1-10).
+    *   Test error handling for missing query text.
+3.  **Clear Index:** Clear the simple index using `simple clear`.
+    *   Verify success message.
+    *   *Note:* The script assumes `simple clear` doesn't require interactive confirmation. If it does, the script might need adjustment (e.g., `echo 'y' | ...`).
 
-**Goal:** Test the basic functionality of the edit command.
+## Phase 3: Edit Command Testing
 
-**Setup:**
-1.  **Ensure Repo Added and Synced:** Assumes Phase 1 (Repo testing) completed successfully up to the sync step.
-2.  **Create Target File:**
-    ```bash
-    # Use the existing cloned repo from Phase 1
-    echo -e "def hello():\\n    print(\"Hello World\")" > "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
-    echo "Created edit test file: $TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
-    # Add and commit this file so it's known to the index
-    (cd "$TEST_TEMP_DIR/Spoon-Knife" && git add edit_test.py && git -c user.name='Test User' -c user.email='test@example.com' commit -m 'Add edit_test.py')
-    ./target/release/vectordb-cli repo sync "$UNIQUE_NAME" | cat
-    ```
+**Goal:** Test the basic functionality of the `edit validate` and `edit apply` commands.
 
-**Test Steps:**
-1.  **Validate Edit Function:** Use the edit validate command to check the modification.
-    ```bash
-    # NOTE: Shell escaping for REPLACEMENT_CONTENT might be needed depending on the shell and content.
-    REPLACEMENT_CONTENT='    print("Hello E2E Test")'
-    ./target/release/vectordb-cli edit validate --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --edit-content "$REPLACEMENT_CONTENT" --start-line 2 --end-line 2 | cat
-    # Expected: Success message, indicating validation passed.
-    ```
-2.  **Apply Edit Function:** Use the edit apply command to modify the function using line numbers.
-    ```bash
-    # NOTE: Shell escaping for REPLACEMENT_CONTENT might be needed depending on the shell and content.
-    REPLACEMENT_CONTENT='    print("Hello E2E Test")'
-    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --edit-content "$REPLACEMENT_CONTENT" --start-line 2 --end-line 2 | cat
-    # Expected: Success message, indicating the file was edited.
-    ```
-3.  **Verify Edit:** Check the content of the file.
-    ```bash
-    cat "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
-    # Expected: Content should show print("Hello E2E Test").
-    ```
-4.  **Test Semantic Target (Validate):** Validate an edit using a semantic query with `type:name` format.
-    ```bash
-    # Ensure edit_test.py exists and is committed/synced
-    # Use tree-sitter type:name format, e.g., function_definition for python 'def'
-    ./target/release/vectordb-cli edit validate --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --element-query "function_definition:hello" --edit-content "    # Semantic edit target" | cat
-    # Expected: Validation success, indicating the element was found.
-    ```
-5.  **Test Semantic Target (Apply):** Apply an edit using a semantic query with `type:name` format.
-    ```bash
-    # Ensure edit_test.py exists and is committed/synced
-    # Use tree-sitter type:name format. Note shell escaping for --edit-content.
-    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --element-query "function_definition:hello" --edit-content '    print("Semantic Edit Applied")' | cat
-    # Expected: Success message, indicating the file was edited.
-    ```
-6.  **Verify Semantic Edit:** Check the content of the file.
-    ```bash
-    cat "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py"
-    # Expected: Content should be exactly '    print("Semantic Edit Applied")'.
-    # Note: The current implementation replaces the *entire* matched element.
-    ```
-7.  **Test Feature Flags (Apply):** Run apply with unimplemented feature flags.
-    ```bash
-    # Ensure edit_test.py exists and is committed/synced
-    ./target/release/vectordb-cli edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --start-line 1 --end-line 1 --edit-content "# Flag Test" --no-format --update-references --no-preserve-docs | cat
-    # Expected: Success message, potentially with "Note: ... option is set (not implemented yet)." messages.
-    ```
-8.  **Test ONNX Flags (Apply):** Run apply with ONNX flags (should have no effect).
-    ```bash
-    # Ensure edit_test.py exists and is committed/synced
-    ./target/release/vectordb-cli -m ./onnx/all-minilm-l6-v2.onnx -t ./onnx edit apply --file "$TEST_TEMP_DIR/Spoon-Knife/edit_test.py" --start-line 1 --end-line 1 --edit-content "# ONNX Flag Test" | cat
-    # Expected: Success message. ONNX flags are parsed but ignored by edit logic.
-    ```
+**Setup (Automated by `e2e_test.sh`):**
+1.  Create a Python file (`edit_test.py`) with simple content within the `Spoon-Knife` repository clone.
+2.  Add and commit this file to the `Spoon-Knife` git repository.
+3.  Run `repo sync` for the `Spoon-Knife` repository to ensure the new file is indexed.
 
-**Cleanup:** (Covered by main cleanup)
+**Test Steps (Automated by `e2e_test.sh`):**
+1.  **Validate Edit (Lines):** Use `edit validate` with `--start-line`/`--end-line` to check a line-based modification.
+    *   Verify validation passes.
+2.  **Apply Edit (Lines):** Use `edit apply` with `--start-line`/`--end-line` to perform the modification.
+    *   Verify edit is applied.
+    *   Verify file content using `grep`.
+3.  **Validate Edit (Semantic):** Use `edit validate` with `--element-query` using the `type:name` format (e.g., `function_definition:hello`).
+    *   Verify validation passes.
+4.  **Apply Edit (Semantic):** Use `edit apply` with `--element-query`.
+    *   Verify edit is applied.
+    *   Verify file content using `grep`.
+5.  **Apply Edit (ONNX Flags):** Run `edit apply` while providing global ONNX flags (`-m`, `-t`).
+    *   Verify edit is applied (flags should be accepted but not affect edit logic).
+    *   Verify file content using `grep`.
 
-## Phase 4: Agent Command Testing (Obsolete)
+## Cleanup (Automated by `e2e_test.sh`)
 
-**Goal:** Test the agent interaction commands.
+1.  Remove the temporary directory containing cloned repos and test files.
+2.  Unset temporary environment variables.
 
-**Status:** Obsolete. The `agent` subcommand has been removed from the CLI.
+## Manual Rating
 
-## Phase 5: Config Command Testing (Obsolete)
+During the `repo query` and `simple query` steps, the script will print the search results and prompt for a manual rating (1-10). Review the output at these points:
 
-**Goal:** Test the configuration management commands.
+*   **Repo Query 1:** Results for "Spoon-Knife" in the Spoon-Knife repo.
+*   **Repo Query 2:** Results for "borrow checker" in the rust-lang/book repo.
+*   **Simple Query 1 & 2:** Results for "E2E test" in the simple index.
 
-**Status:** Obsolete. The `config` subcommand has been removed from the CLI. Configuration is managed via flags, environment variables, and the config file (`~/.config/vectordb-cli/config.toml`).
+Assess the quality and relevance of the returned chunks based on the query. This provides a qualitative measure of search performance.
+
+## Obsolete Phases
+
+*   **Phase 4: Agent Command Testing:** Removed as the `agent` subcommand is obsolete.
+*   **Phase 5: Config Command Testing:** Removed as the `config` subcommand is obsolete (config handled by file/flags/env vars).

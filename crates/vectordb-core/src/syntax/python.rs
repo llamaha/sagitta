@@ -130,15 +130,17 @@ impl SyntaxParser for PythonParser {
                 let node = capture.node;
                 let capture_name = self.query.capture_names()[capture.index as usize];
 
-                // ** Filter: Ensure the node's parent is the module **
-                if node.parent().map_or(true, |p| p.kind() != "module") {
-                    continue; // Skip nodes not directly under the module
-                }
+                // ** REMOVED Filter: Ensure the node's parent is the module **
+                // if node.parent().map_or(true, |p| p.kind() != "module") {
+                //     continue; // Skip nodes not directly under the module
+                // }
 
-                // Apply filters based on node type and content for module children
-                if capture_name == "expr_stmt" {
-                    if is_docstring(node) || is_pass_stmt(node, code_bytes) {
-                        continue; // Skip docstrings and top-level 'pass'
+                // Apply filters based on node type and content (e.g., for top-level items)
+                if node.parent().map_or(false, |p| p.kind() == "module") {
+                    if capture_name == "expr_stmt" {
+                        if is_docstring(node) || is_pass_stmt(node, code_bytes) {
+                            continue; // Skip docstrings and top-level 'pass'
+                        }
                     }
                 }
 

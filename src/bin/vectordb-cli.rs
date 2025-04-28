@@ -16,16 +16,13 @@ use vectordb_core::config::{AppConfig as CoreAppConfig, load_config as core_load
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logger from RUST_LOG env var or default to warn
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // Initialize logger from RUST_LOG env var or default to error
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
 
     // Parse command-line arguments
     let args = CliArgs::parse();
 
-    // setup_logging(args.verbose); // E0609: no field `verbose` - Keep commented out for now
-    
     // Determine configuration path
-    // let config_path_override = args.config.clone(); // E0609: no field `config`
     let config_path_override: Option<PathBuf> = None; // Placeholder, fix if needed
 
     // Load configuration using core_load_config
@@ -70,7 +67,6 @@ async fn main() -> Result<()> {
         args,
         &mut config, // Pass config mutably
         qdrant_client,
-       // config_path_override.as_ref() // Remove extra argument (E0061)
     ).await;
 
     // Handle potential errors from command execution

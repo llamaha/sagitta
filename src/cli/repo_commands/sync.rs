@@ -9,7 +9,6 @@ use vectordb_core::{AppConfig, save_config};
 use crate::cli::commands::CliArgs;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
-use futures::StreamExt;
 use crate::git::SyncOptions;
 
 #[derive(Args, Debug)]
@@ -39,7 +38,8 @@ where
 {
     let start_time = Instant::now();
     let repo_name = args.name.as_ref().or(config.active_repository.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("No active repository set and no repository name provided with --name."))?;
+        .ok_or_else(|| anyhow::anyhow!("No active repository set and no repository name provided with --name."))?
+        .clone();
 
     let repo_config_index = config
         .repositories
@@ -79,7 +79,6 @@ where
                 );
                 if !sync_result.indexed_languages.is_empty() {
                     println!("Detected/updated languages: {}", sync_result.indexed_languages.join(", ").blue());
-                    config.repositories[repo_config_index].indexed_languages = Some(sync_result.indexed_languages);
                 }
                 if let Err(e) = save_config(config, override_path) {
                     error!("Failed to save config after sync: {}", e);
@@ -115,9 +114,6 @@ where
                         .yellow(),
                     }
                 );
-                if let Err(e) = save_config(config, override_path) {
-                    error!("Failed to save config after sync message: {}", e);
-                }
             }
         }
         Err(e) => {

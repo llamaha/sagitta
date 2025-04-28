@@ -18,8 +18,8 @@ impl RustParser {
             .set_language(&language)
             .expect("Error loading Rust grammar");
 
-        // Query to find top-level items like functions, structs, impls, traits, enums, modules
-        // We capture the entire node for these items.
+        // Query to find top-level items AND items within certain containers (like methods in impls).
+        // Capture the entire node for these items.
         let query = Query::new(
             &language,
             r#"
@@ -39,9 +39,16 @@ impl RustParser {
                 (static_item) @item
                 (const_item) @item
             ]
+
             "#,
         )
         .expect("Error creating Rust query");
+
+        // Helper query to prevent capturing items that are children of other captured items 
+        // (e.g., don't capture a function if it's already part of a captured impl function)
+        // Note: Tree-sitter queries for checking parent/child relationships can be complex.
+        // We might need a post-processing step instead if this isn't robust.
+        // Let's try a simpler approach first: process captures and skip if already covered.
 
         RustParser { parser, query }
     }
@@ -78,27 +85,92 @@ impl SyntaxParser for RustParser {
             .parse(code, None)
             .context("Failed to parse Rust code")?;
         let root_node = tree.root_node();
-
-        let mut chunks = Vec::new();
-        let mut cursor = QueryCursor::new();
-
         let code_bytes = code.as_bytes();
 
-        let matches = cursor.matches(&self.query, root_node, code_bytes);
+        let mut chunks = Vec::new();
+        let mut query_cursor = QueryCursor::new();
+
+        let mut covered_ranges: Vec<(usize, usize)> = Vec::new();
+        let matches = query_cursor.matches(&self.query, root_node, code_bytes);
 
         for mat in matches {
-            for capture in mat.captures {
+            if let Some(capture) = mat.captures.iter().find(|c| self.query.capture_names()[c.index as usize] == "item") {
                 let node = capture.node;
+                let start_byte = node.start_byte();
+                let end_byte = node.end_byte();
                 let kind = node.kind();
 
-                // Map the tree-sitter node kind to our element_type string
+                let is_contained = covered_ranges.iter().any(|(start, end)| {
+                    start_byte >= *start && end_byte <= *end
+                });
+                if is_contained {
+                    continue;
+                }
+
+                if kind == "impl_item" {
+                    // --- Get impl signature --- 
+                    let mut impl_signature = "";
+                    // Find the body node (declaration_list or associated_type) to get signature end
+                    let body_start_byte = node.children(&mut node.walk())
+                        .find(|n| n.kind() == "declaration_list" || n.kind() == "associated_type")
+                        .map(|n| n.start_byte())
+                        .unwrap_or(end_byte); // Fallback to end of impl if no body found
+                    
+                    // Extract text from start of impl node up to the start of the body
+                    impl_signature = code.get(start_byte..body_start_byte).unwrap_or("").trim_end();
+                    // Ensure it ends cleanly, trim trailing whitespace or '{'
+                    impl_signature = impl_signature.trim_end_matches(|c: char| c.is_whitespace() || c == '{').trim_end();
+
+                    // Iterate children and create chunks for functions, prepending signature
+                    let mut tree_cursor = node.walk();
+                    for child_node in node.children(&mut tree_cursor) {
+                        if child_node.kind() == "function_item" {
+                            let func_start = child_node.start_byte();
+                            let func_end = child_node.end_byte();
+                            let func_is_covered = covered_ranges.iter().any(|(start, end)| {
+                                func_start >= *start && func_end <= *end
+                            });
+                            
+                            if !func_is_covered {
+                                let func_content = code.get(func_start..func_end).unwrap_or("");
+                                let combined_content = format!("{}\n...\n{}", impl_signature, func_content);
+
+                                // Use node_to_chunk logic but with modified content
+                                let start_line = child_node.start_position().row + 1;
+                                let end_line = child_node.end_position().row + 1;
+
+                                chunks.push(CodeChunk {
+                                    content: combined_content,
+                                    file_path: file_path.to_string(),
+                                    start_line,
+                                    end_line,
+                                    language: "rust".to_string(),
+                                    element_type: "function".to_string(),
+                                });
+
+                                covered_ranges.push((func_start, func_end));
+                            }
+                        }
+                    }
+                    // Mark entire impl range covered
+                    covered_ranges.push((start_byte, end_byte)); 
+                    continue; // Skip impl_item itself
+                }
+
+                // --- Handling for other item types (including standalone functions) ---
+                let already_covered = covered_ranges.iter().any(|(start, end)| {
+                    start_byte >= *start && end_byte <= *end
+                 });
+                 if already_covered {
+                    continue;
+                 }
+
                 let element_type = match kind {
                     "function_item" => "function",
                     "struct_item" => "struct",
                     "enum_item" => "enum",
-                    "impl_item" => "impl",
                     "trait_item" => "trait",
-                    "mod_item" => "module", // Use 'module' for mod_item
+                    "mod_item" => "module",
                     "macro_definition" => "macro_definition",
                     "macro_invocation" => "macro_invocation",
                     "use_declaration" => "use",
@@ -107,22 +179,30 @@ impl SyntaxParser for RustParser {
                     "union_item" => "union",
                     "static_item" => "static",
                     "const_item" => "const",
-                    _ => "unknown", // Should not happen with the current query
+                    _ => "unknown",
                 };
 
-                if let Some(chunk) = self.node_to_chunk(
-                    node,
-                    code,
-                    file_path,
-                    "rust",
-                    element_type,
-                ) {
-                    chunks.push(chunk);
+                if element_type != "unknown" {
+                    // Create chunk normally for non-impl items
+                    if let Some(chunk) = self.node_to_chunk(
+                        node,
+                        code,
+                        file_path,
+                        "rust",
+                        element_type,
+                    ) {
+                        covered_ranges.push((start_byte, end_byte));
+                        chunks.push(chunk);
+                    }
                 }
             }
         }
 
-        // Fallback: If no chunks found, split into smaller fixed-size chunks
+        covered_ranges.sort_by_key(|k| k.0);
+
+        // Fallback: If no chunks found OR significant code remains uncovered
+        // We need a more robust way to check for uncovered code.
+        // For now, keep the simple fallback logic.
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
                 "No top-level Rust items found in {}, splitting into smaller chunks.",

@@ -110,6 +110,10 @@ pub enum VectorDBError {
     #[error("Qdrant client error: {0}")]
     QdrantError(#[from] qdrant_client::QdrantError),
 
+    /// Custom error during a Qdrant operation (e.g., unexpected response)
+    #[error("Qdrant operation error: {0}")]
+    QdrantOperationError(String),
+
     /// Error related to Git operations
     #[error("Git error: {0}")]
     GitError(#[from] git2::Error),
@@ -202,13 +206,14 @@ impl Clone for VectorDBError {
             Self::IndexNotFound => Self::IndexNotFound,
             Self::OperationCancelled => Self::OperationCancelled,
             Self::MutexLockError(s) => Self::MutexLockError(s.clone()),
-            Self::QdrantError(e) => Self::GeneralError(format!("Cannot clone QdrantError: {}", e)),
-            Self::GitError(_) => Self::GeneralError("Cannot clone git2::Error".to_string()),
+            Self::QdrantError(e) => Self::Other(format!("QdrantError (cloned): {}", e)),
+            Self::QdrantOperationError(s) => Self::QdrantOperationError(s.clone()),
+            Self::GitError(e) => Self::Other(format!("GitError (cloned): {}", e)),
             Self::NotImplemented(s) => Self::NotImplemented(s.clone()),
             #[cfg(feature = "ort")]
-            Self::OrtSession(e) => Self::Other(format!("OrtSession Error: {}", e)),
+            Self::OrtSession(e) => Self::Other(format!("OrtSession Error (cloned): {}", e)),
             #[cfg(feature = "ort")]
-            Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error: {}", e)),
+            Self::OrtInitialization(e) => Self::Other(format!("OrtInitialization Error (cloned): {}", e)),
             Self::FeatureNotEnabled(s) => Self::FeatureNotEnabled(s.clone()),
             Self::GitMessageError(s) => Self::GitMessageError(s.clone()),
             Self::ConfigError(s) => Self::ConfigError(s.clone()),

@@ -5,10 +5,12 @@ use qdrant_client::qdrant::ScoredPoint;
 use serde_json;
 use serde::Serialize;
 
-use super::commands::{ // Use super::commands path
-    FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
-    // New repo fields might be useful here later
-    // FIELD_BRANCH, FIELD_COMMIT_HASH
+use crate::cli::{
+    commands::{ // Import constants directly from commands where they are re-exported
+        FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
+        // New repo fields might be useful here later
+        // FIELD_BRANCH, FIELD_COMMIT_HASH
+    }
 };
 
 // Create a serializable struct to represent search results
@@ -21,6 +23,9 @@ struct SearchResult {
     element_type: String,
     content: String,
 }
+
+/// Formats search results for display, handling both JSON and human-readable output.
+///
 
 pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_output: bool) -> Result<()> {
     if results.is_empty() {
