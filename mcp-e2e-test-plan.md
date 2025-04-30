@@ -181,11 +181,169 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 *   Verify `file_path`, line numbers, and `content` seem correct.
 *   Verify the number of results matches the `limit` requested (or fewer if less results available).
 
-### 5. Remove Repository (`repository_remove`)
+### 5. Add Repository with Target Ref (`repository_add`)
 
-**Goal:** Remove the repository configuration and associated data (local files, Qdrant data).
+**Goal:** Add a repository configuration targeting a specific tag or commit.
 
-**Request (Note: parameter is `name`):**
+**Repository Details:**
+*   Name: `test-basic-tag`
+*   URL: `https://github.com/git-fixtures/basic.git`
+*   Target Ref: `b029517f6300c2da0f4b651b8642506cd6aaf45d` (Commit hash for v1.0.0 tag)
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "repository/add",
+  "params": {
+    "url": "https://github.com/git-fixtures/basic.git",
+    "name": "test-basic-tag",
+    "target_ref": "b029517f6300c2da0f4b651b8642506cd6aaf45d" 
+  },
+  "id": 6
+}
+```
+
+**Expected Response (Success):**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "name": "test-basic-tag",
+    "url": "https://github.com/git-fixtures/basic.git",
+    "local_path": "/path/to/your/repositories/test-basic-tag", // Actual path will vary
+    "default_branch": "b029517f6300c2da0f4b651b8642506cd6aaf45d", // Should reflect the target ref
+    "active_branch": "b029517f6300c2da0f4b651b8642506cd6aaf45d"  // Should reflect the target ref
+  },
+  "id": 6
+}
+```
+
+**Verification:**
+*   Check server logs for successful clone and checkout messages.
+*   Verify the repository files exist in the `local_path`.
+*   Run `git -C /path/to/your/repositories/test-basic-tag rev-parse HEAD` and verify it matches the `target_ref`.
+*   Verify the Qdrant collection `test-basic-tag` exists.
+*   Run `repository/list` and verify `test-basic-tag` appears with the `target_ref` as its `active_branch`.
+
+### 6. Sync Repository with Target Ref (`repository_sync`)
+
+**Goal:** Ensure syncing a repository with a `target_ref` checks out the correct ref and indexes its content without fetching/pulling.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "repository/sync",
+  "params": {
+    "name": "test-basic-tag"
+  },
+  "id": 7
+}
+```
+
+**Expected Response (Success):**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "name": "test-basic-tag",
+    "status": "Indexed static ref 'b029517f6300c2da0f4b651b8642506cd6aaf45d'", // Status reflects static ref
+    "commit_hash": "b029517f6300c2da0f4b651b8642506cd6aaf45d" // Commit hash matches the target ref
+  },
+  "id": 7
+}
+```
+
+**Verification:**
+*   Check server logs: Verify `git checkout` and `git rev-parse` messages appear, but **NO** `git fetch` or `git pull` messages.
+*   Verify logs show parsing, embedding, and upsert operations for the content at the specified commit.
+*   Verify the Qdrant collection `test-basic-tag` contains points corresponding to the code at the target commit.
+
+### 7. Query Repository with Target Ref (`query`)
+
+**Goal:** Query the specifically indexed static version of the repository.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "query",
+  "params": {
+    "repository_name": "test-basic-tag",
+    "query_text": "file content", // Query relevant to the content at the specific tag
+    "limit": 3
+  },
+  "id": 8
+}
+```
+
+**Expected Response (Success):**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "results": [
+      // Results should reflect content present *only* at the target commit/tag,
+      // NOT content added in later commits on the main branch.
+      {
+        "file_path": ".gitignore", // Example from v1.0.0
+        "start_line": 1,
+        "end_line": 1,
+        "score": 0.7, // Example score
+        "content": "*.rbc"
+      }
+      // ... other relevant results ...
+    ]
+  },
+  "id": 8
+}
+```
+
+**Verification:**
+*   Verify the results are relevant to the code state at the `target_ref` (`b029517...`).
+*   Verify results *do not* include content added after that commit (e.g., changes in the `master` branch of `git-fixtures/basic.git`).
+
+### 8. Remove Repository with Target Ref (`repository_remove`)
+
+**Goal:** Remove the tagged repository configuration and data.
+
+**Request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "repository/remove",
+  "params": {
+    "name": "test-basic-tag"
+  },
+  "id": 9
+}
+```
+
+**Expected Response (Success):**
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "name": "test-basic-tag",
+    "status": "Removed"
+  },
+  "id": 9
+}
+```
+
+**Verification:**
+*   Run `repository_list` again; `test-basic-tag` should no longer be listed.
+*   Verify the local directory `/path/to/your/repositories/test-basic-tag` is deleted.
+*   Verify the Qdrant collection `test-basic-tag` is deleted.
+
+### 9. Remove Repository (`repository_remove`)
+
+(Renumbering the original remove test case)
+
+**Goal:** Remove the original `test-basic` repository configuration and associated data.
+
+**Request:**
 ```json
 {
   "jsonrpc": "2.0",
@@ -193,7 +351,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "params": {
     "name": "test-basic"
   },
-  "id": 5
+  "id": 9
 }
 ```
 
@@ -205,13 +363,13 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
     "name": "test-basic",
     "status": "Removed"
   },
-  "id": 5
+  "id": 9
 }
 ```
 
 **Verification:**
 *   Run `repository_list` again; `test-basic` should no longer be listed.
 *   Check the server logs for deletion messages.
-*   Verify the local repository directory (`/path/to/your/repositories/test-basic`) has been deleted (Note: Deletion might be skipped for safety if the path seems sensitive, e.g., directly under user home or a non-nested path in the configured base path).
-*   Verify the Qdrant collection `test-basic` has been deleted or cleared. 
+*   Verify the local repository directory (`/path/to/your/repositories/test-basic`) has been deleted.
+*   Verify the Qdrant collection `test-basic` has been deleted or cleared.
 

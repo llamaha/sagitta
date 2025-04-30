@@ -219,7 +219,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                 let result = handle_initialize(params).await?;
                 ok_some(result)
             }
-            "initialized" => {
+            "initialized" | "notifications/initialized" => {
                 let _params: InitializedNotificationParams = deserialize_params(request.params, "initialized")?;
                 info!("Received initialized notification");
                 Ok(None)
@@ -254,15 +254,16 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                 let result = handle_repository_sync(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
-            "tool/list" => {
+            "tools/list" => {
                 let _params: ListToolsParams = deserialize_params(request.params, "tool/list")?;
-                Err(ErrorObject {
-                    code: error_codes::METHOD_NOT_FOUND,
-                    message: "Method 'tool/list' not yet implemented".to_string(),
-                    data: None,
-                })
+                
+                let tools = get_tool_definitions();
+                
+                let result = ListToolsResult { tools };
+                
+                ok_some(result)
             }
-            "tool/call" => {
+            "tools/call" => {
                 let params: CallToolParams = deserialize_params(request.params, "tool/call")?;
                 handle_tools_call(params, config, qdrant_client, embedding_handler).await
             }

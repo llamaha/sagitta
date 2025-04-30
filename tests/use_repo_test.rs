@@ -18,14 +18,15 @@ mod tests {
             url: "https://github.com/test/repo1.git".to_string(),
             local_path: PathBuf::from("/tmp/test-repo-1"),
             default_branch: "main".to_string(),
-            tracked_branches: vec!["main".to_string(), "develop".to_string()],
-            indexed_languages: Some(vec!["rust".to_string(), "python".to_string()]),
-            active_branch: Some("main".to_string()),
+            tracked_branches: vec!["main".to_string()],
             remote_name: Some("origin".to_string()),
+            active_branch: Some("main".to_string()),
             ssh_key_path: None,
             ssh_key_passphrase: None,
             last_synced_commits: HashMap::new(),
+            indexed_languages: None,
             added_as_local_path: false,
+            target_ref: None,
         };
         
         let repo2 = RepositoryConfig {
@@ -34,13 +35,14 @@ mod tests {
             local_path: PathBuf::from("/tmp/test-repo-2"),
             default_branch: "master".to_string(),
             tracked_branches: vec!["master".to_string()],
-            indexed_languages: None,
-            active_branch: Some("master".to_string()),
             remote_name: Some("origin".to_string()),
+            active_branch: Some("master".to_string()),
             ssh_key_path: None,
             ssh_key_passphrase: None,
             last_synced_commits: HashMap::new(),
+            indexed_languages: None,
             added_as_local_path: false,
+            target_ref: None,
         };
         
         config.repositories.push(repo1);

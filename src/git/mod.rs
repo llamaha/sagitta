@@ -74,49 +74,65 @@ where
         let commit_oid_str: String;
         let branch_commit: git2::Commit;
 
-        if !repo_config.added_as_local_path {
-            log::debug!("Repository '{}' is treated as remote (added_as_local_path=false).", repo_name);
-            // --- Remote Repo Logic (Fetch and check remote ref) ---
-            
-            // Set up the fetch options
-            let mut fetch_opts = FetchOptions::new();
-            let mut callbacks = RemoteCallbacks::new();
-            callbacks.update_tips(|name, old, new| {
-                log::info!("[{}] {} -> {}", name, old, new);
-                true
-            });
-            fetch_opts.remote_callbacks(callbacks);
-            fetch_opts.download_tags(AutotagOption::All);
-            
-            // Fetch updates from the remote
-            let mut remote = repo.find_remote(&remote_name)?;
-            // Fetch only the active branch if possible, fall back to fetching all if specific fails?
-            // Using `fetch(&[&active_branch], ...)` might be restrictive if branch name format differs (e.g. no refs/heads prefix)
-            // Consider fetching all refs: remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)?;
-             match remote.fetch(&[&active_branch], Some(&mut fetch_opts), None) {
-                Ok(_) => log::info!("Fetched remote '{}' for branch '{}'", remote_name, active_branch),
-                Err(e) => log::warn!("Failed to fetch specific branch '{}' from remote '{}': {}. Consider checking remote config or branch name.", active_branch, remote_name, e),
-            };
-
-            // Find the remote branch reference
-            let branch_ref_name = format!("refs/remotes/{}/{}", remote_name, active_branch);
-            let branch_ref = repo.find_reference(&branch_ref_name)
-                .with_context(|| format!("Could not find remote-tracking reference '{}'. Was the fetch successful?", branch_ref_name))?;
-            branch_commit = branch_ref.peel_to_commit()
-                .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
+        // --- Add target_ref handling ---
+        if let Some(target_ref) = repo_config.target_ref {
+            log::info!("Repository configured with target_ref: '{}'. Syncing static commit.", target_ref);
+            // Attempt to find the commit object directly using the target_ref
+            let object = repo.revparse_single(&target_ref)
+                .with_context(|| format!("Could not find commit object for target_ref '{}'", target_ref))?;
+            branch_commit = object.peel_to_commit()
+                .with_context(|| format!("Target ref '{}' did not resolve to a commit.", target_ref))?;
             commit_oid_str = branch_commit.id().to_string();
-
+             log::debug!("Found commit {} for target_ref '{}'", commit_oid_str, target_ref);
+            // Note: For target_ref, we don't fetch or compare against remote typically.
+            // Sync will either be Full (initial/forced) or None (already synced to this commit).
         } else {
-             log::debug!("Repository '{}' is treated as local-only (added_as_local_path=true).", repo_name);
-            // --- Local Repo Logic (Check local head) ---
-            // Find the local branch reference
-            let branch_ref_name = format!("refs/heads/{}", active_branch);
-            let branch_ref = repo.find_reference(&branch_ref_name)
-                 .with_context(|| format!("Could not find local branch reference '{}'. Does the branch exist locally?", branch_ref_name))?;
-            branch_commit = branch_ref.peel_to_commit()
-                 .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
-            commit_oid_str = branch_commit.id().to_string();
+             // --- Original Branch Logic (Remote or Local) ---
+            if !repo_config.added_as_local_path {
+                log::debug!("Repository '{}' is treated as remote (added_as_local_path=false).", repo_name);
+                // --- Remote Repo Logic (Fetch and check remote ref) ---
+                
+                // Set up the fetch options
+                let mut fetch_opts = FetchOptions::new();
+                let mut callbacks = RemoteCallbacks::new();
+                callbacks.update_tips(|name, old, new| {
+                    log::info!("[{}] {} -> {}", name, old, new);
+                    true
+                });
+                fetch_opts.remote_callbacks(callbacks);
+                fetch_opts.download_tags(AutotagOption::All);
+                
+                // Fetch updates from the remote
+                let mut remote = repo.find_remote(&remote_name)?;
+                // Fetch only the active branch if possible, fall back to fetching all if specific fails?
+                // Using `fetch(&[&active_branch], ...)` might be restrictive if branch name format differs (e.g. no refs/heads prefix)
+                // Consider fetching all refs: remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)?;
+                 match remote.fetch(&[&active_branch], Some(&mut fetch_opts), None) {
+                    Ok(_) => log::info!("Fetched remote '{}' for branch '{}'", remote_name, active_branch),
+                    Err(e) => log::warn!("Failed to fetch specific branch '{}' from remote '{}': {}. Consider checking remote config or branch name.", active_branch, remote_name, e),
+                };
+
+                // Find the remote branch reference
+                let branch_ref_name = format!("refs/remotes/{}/{}", remote_name, active_branch);
+                let branch_ref = repo.find_reference(&branch_ref_name)
+                    .with_context(|| format!("Could not find remote-tracking reference '{}'. Was the fetch successful?", branch_ref_name))?;
+                branch_commit = branch_ref.peel_to_commit()
+                    .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
+                commit_oid_str = branch_commit.id().to_string();
+
+            } else {
+                 log::debug!("Repository '{}' is treated as local-only (added_as_local_path=true).", repo_name);
+                // --- Local Repo Logic (Check local head) ---
+                // Find the local branch reference
+                let branch_ref_name = format!("refs/heads/{}", active_branch);
+                let branch_ref = repo.find_reference(&branch_ref_name)
+                     .with_context(|| format!("Could not find local branch reference '{}'. Does the branch exist locally?", branch_ref_name))?;
+                branch_commit = branch_ref.peel_to_commit()
+                     .with_context(|| format!("Could not peel reference '{}' to a commit.", branch_ref_name))?;
+                commit_oid_str = branch_commit.id().to_string();
+            }
         }
+        // --- End target_ref handling ---
         
         // Check if we need a full sync or incremental sync
         let mut sync_type = SyncType::None; // Default to no sync needed

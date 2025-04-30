@@ -4,6 +4,8 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 use vectordb_core::config::AppConfig;
 use vectordb_core::load_config;
+// Import File for logging
+// use std::fs::File;
 
 // Remove mod declarations, they are in lib.rs now
 // mod protocol; // Assuming this should have been mcp
