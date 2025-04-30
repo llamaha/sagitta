@@ -3474,6 +3474,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "vectordb-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "hyper",
+ "log",
+ "mockall",
+ "qdrant-client",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vectordb_core",
+]
+
+[[package]]
 name = "vectordb_core"
 version = "0.1.0"
 dependencies = [
