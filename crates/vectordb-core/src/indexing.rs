@@ -396,13 +396,14 @@ pub async fn index_repo_files<
     Ok(total_points_attempted_upsert) // Return total points attempted to upsert
 }
 
-/// Gathers all files to be processed from the input paths, filtering by extension.
-/// Returns a Vec of absolute PathBufs.
-fn gather_files(
+/// Gathers file paths from a list of starting paths, respecting ignore rules and file extensions.
+/// Recursively walks directories.
+pub fn gather_files(
     paths: &[PathBuf],
     file_extensions: Option<HashSet<String>>,
 ) -> Result<Vec<PathBuf>> {
-    let mut files_to_process = Vec::new();
+    let mut collected_files = Vec::new();
+
     for path_arg in paths {
         // Ensure paths are absolute before processing
         let absolute_path_arg = if path_arg.is_absolute() {
@@ -433,7 +434,7 @@ fn gather_files(
                 None => true, // No filter means include all
             };
             if should_process {
-                files_to_process.push(absolute_path_arg);
+                collected_files.push(absolute_path_arg);
             } else {
                 log::debug!("Skipping file due to extension filter: {}", absolute_path_arg.display());
             }
@@ -461,14 +462,14 @@ fn gather_files(
                 };
                 if should_process {
                     // Store absolute path directly
-                    files_to_process.push(entry_path.to_path_buf());
+                    collected_files.push(entry_path.to_path_buf());
                 } else {
                      log::trace!("Skipping file in dir due to extension filter: {}", entry_path.display());
                 }
             }
         }
     }
-    Ok(files_to_process)
+    Ok(collected_files)
 }
 
 /// Ensures a Qdrant collection exists with the specified dimension.

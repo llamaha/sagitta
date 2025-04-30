@@ -30,7 +30,8 @@ exclude = [
 [workspace]
 members = [
     ".",
-    "crates/vectordb-core"
+    "crates/vectordb-core",
+    "crates/vectordb-mcp"
 ]
 
 [features]

@@ -389,7 +389,7 @@ pub async fn sync_repository_branch(
     repo_config_index: usize,
     _client: Arc<impl QdrantClientTrait + Send + Sync + 'static>,
     _fetch_and_merge: bool,
-) -> Result<(), Error> {
+) -> Result<String, Error> {
     let repo_config = config.repositories.get(repo_config_index)
         .ok_or_else(|| Error::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
 
@@ -399,5 +399,6 @@ pub async fn sync_repository_branch(
     let _repo_root = PathBuf::from(&repo_config.local_path);
 
     // TODO: Implement the full sync logic here as needed for your application.
-    Ok(())
+    // For now, return a placeholder commit hash to satisfy the type checker.
+    Ok("placeholder_commit_hash".to_string())
 } 
