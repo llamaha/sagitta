@@ -239,23 +239,28 @@ pub struct PingResult {
     pub message: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+/// Parameters for the `repository/add` method.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryAddParams {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub local_path: Option<PathBuf>,
+    pub local_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh_key: Option<PathBuf>,
+    pub ssh_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_passphrase: Option<String>,
-    // Add other fields like description, config etc. if needed
+    /// The specific Git ref (commit, tag, branch) to check out and index permanently.
+    /// If set, the repository will not be synced later, only indexed at this ref.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<String>,
 }
 
+/// Result of the `repository/add` method.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryAddResult {
@@ -263,6 +268,8 @@ pub struct RepositoryAddResult {
     pub url: String,
     pub local_path: PathBuf,
     pub default_branch: String,
+    /// The branch/ref the repository is currently checked out to. 
+    /// Will be the `target_ref` if one was provided during add, otherwise the default branch.
     pub active_branch: Option<String>, // Can be None initially
 }
 
@@ -286,7 +293,9 @@ pub struct RepositorySyncParams {
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncResult {
     pub name: String,
+    /// Description of the sync status (e.g., "Synced and Indexed", "Indexed static ref ...").
     pub status: String,
+    /// The commit hash that was indexed (either the HEAD of the synced branch or the static `target_ref`).
     pub commit_hash: String,
 }
 
@@ -305,11 +314,14 @@ pub struct RepositoryRemoveResult {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct QueryParams {
+    #[serde(rename = "repositoryName")]
     pub repository_name: String,
+    #[serde(rename = "queryText")]
     pub query_text: String,
     #[serde(default = "default_limit")]
     pub limit: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "branchName")]
     pub branch_name: Option<String>,
 }
 

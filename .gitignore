@@ -14,9 +14,7 @@ target/
 .vscode/
 
 # Project Specific Files
-db.json
-cache.json
-hnsw_index.json
+mcp_stderr.log
 
 # Large model files (should be managed separately)
 onnx/

@@ -11,7 +11,8 @@ After adding repositories and running `repo sync`, execute the queries below to 
 1.  The `vectordb-cli` binary is compiled.
 2.  Qdrant is running.
 3.  The following repositories (or similar representative repos) have been added using `repo add --name <name> --url <url>`:
-    *   `e2e-query-rustbook`: `https://github.com/rust-lang/book` (Rust, Markdown, YAML)
+    *   `e2e-query-ripgrep`: `https://github.com/BurntSushi/ripgrep` (Rust)
+    *   `e2e-query-rustbook`: `https://github.com/rust-lang/book` (Markdown, YAML - Keep for non-Rust tests)
     *   `e2e-query-flask`: `https://github.com/pallets/flask` (Python)
     *   `e2e-query-gin`: `https://github.com/gin-gonic/gin` (Go)
     *   `e2e-query-tsnode`: `https://github.com/microsoft/TypeScript-Node-Starter` (TypeScript)
@@ -26,12 +27,12 @@ After adding repositories and running `repo sync`, execute the queries below to 
 
 Execute each command and evaluate the relevance of the top results (e.g., top 2).
 
-**1. Rust (Target: Rust Book)**
+**1. Rust (Target: ripgrep)**
 
 *   **Concept:** Implementing a specific trait (`From`).
 *   **Command:**
     ```bash
-    ./target/release/vectordb-cli repo query 'implementing the From trait' --name e2e-query-rustbook --lang rust --limit 2
+    ./target/release/vectordb-cli repo query 'implementing the From trait' --name e2e-query-ripgrep --lang rust --limit 2
     ```
 *   **Expected:** Code snippets showing `impl From<...> for ...` or related discussions.
 

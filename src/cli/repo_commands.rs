@@ -205,8 +205,36 @@ mod tests {
     fn create_test_config_data() -> AppConfig {
         AppConfig {
             repositories: vec![
-                RepositoryConfig { name: "repo1".to_string(), url: "url1".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo1"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false },
-                RepositoryConfig { name: "repo2".to_string(), url: "url2".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo2"), default_branch: "dev".to_string(), tracked_branches: vec!["dev".to_string()], active_branch: Some("dev".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false },
+                RepositoryConfig {
+                    name: "repo1".to_string(),
+                    url: "url1".to_string(),
+                    local_path: PathBuf::from("/tmp/vectordb_test_repo1"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                },
+                RepositoryConfig {
+                    name: "repo2".to_string(),
+                    url: "url2".to_string(),
+                    local_path: PathBuf::from("/tmp/vectordb_test_repo2"),
+                    default_branch: "dev".to_string(),
+                    tracked_branches: vec!["dev".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("dev".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                },
             ],
             active_repository: None,
             qdrant_url: "http://localhost:6334".to_string(),
@@ -270,6 +298,7 @@ mod tests {
                  last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit".to_string())]), // Add some dummy sync state
                  indexed_languages: Some(vec!["rust".to_string()]),
                  added_as_local_path: false,
+                 target_ref: None,
             });
             config.active_repository = Some("other_repo".to_string()); // Ensure it clears the specified one
             save_config(&config, Some(&temp_path)).unwrap(); // Save initial state
@@ -327,6 +356,7 @@ mod tests {
                  last_synced_commits: HashMap::from([("main".to_string(), "dummy_commit_2".to_string())]),
                  indexed_languages: Some(vec!["python".to_string()]),
                  added_as_local_path: false,
+                 target_ref: None,
              });
              config.active_repository = Some(active_repo_name.clone());
              save_config(&config, Some(&temp_path)).unwrap(); // Save initial state
@@ -470,7 +500,21 @@ mod tests {
 
               let mut config = create_test_config_data();
               config.active_repository = Some("repo2".to_string());
-              config.repositories.push(RepositoryConfig { name: "repo3".to_string(), url: "url3".to_string(), local_path: PathBuf::from("/tmp/vectordb_test_repo3"), default_branch: "main".to_string(), tracked_branches: vec!["main".to_string()], active_branch: Some("main".to_string()), remote_name: Some("origin".to_string()), ssh_key_path: None, ssh_key_passphrase: None, last_synced_commits: HashMap::new(), indexed_languages: None, added_as_local_path: false });
+              config.repositories.push(RepositoryConfig {
+                  name: "repo3".to_string(),
+                  url: "url3".to_string(),
+                  local_path: PathBuf::from("/tmp/vectordb_test_repo3"),
+                  default_branch: "main".to_string(),
+                  tracked_branches: vec!["main".to_string()],
+                  remote_name: Some("origin".to_string()),
+                  active_branch: Some("main".to_string()),
+                  ssh_key_path: None,
+                  ssh_key_passphrase: None,
+                  last_synced_commits: HashMap::new(),
+                  indexed_languages: None,
+                  added_as_local_path: false,
+                  target_ref: None,
+              });
               save_config(&config, Some(&temp_path)).unwrap();
               let initial_repo_count = config.repositories.len();
 

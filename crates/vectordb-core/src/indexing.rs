@@ -474,7 +474,7 @@ pub fn gather_files(
 
 /// Ensures a Qdrant collection exists with the specified dimension.
 /// TODO: Move payload index creation logic here from src/cli/commands/mod.rs
-async fn ensure_collection_exists<
+pub async fn ensure_collection_exists<
     C: QdrantClientTrait // Make generic
 >(
     client: &C, // Use generic client trait ref

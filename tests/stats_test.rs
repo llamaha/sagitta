@@ -15,22 +15,24 @@ mod tests {
         
         // Add a test repository
         let repo = RepositoryConfig {
-            name: "test-repo-1".to_string(),
-            url: "https://github.com/test/repo1.git".to_string(),
-            local_path: PathBuf::from("/tmp/test-repo-1"),
+            name: "test-repo".to_string(),
+            url: "file:///tmp/test-repo".to_string(), // Use file URL for local test repo
+            local_path: PathBuf::from("/tmp/test-repo"),
             default_branch: "main".to_string(),
             tracked_branches: vec!["main".to_string()],
-            indexed_languages: Some(vec!["rust".to_string()]),
-            active_branch: Some("main".to_string()),
             remote_name: Some("origin".to_string()),
+            active_branch: Some("main".to_string()),
             ssh_key_path: None,
             ssh_key_passphrase: None,
+            // Initialize last_synced_commits as empty
             last_synced_commits: HashMap::new(),
-            added_as_local_path: false,
+            indexed_languages: Some(vec!["rust".to_string()]), // Assuming Rust is indexed
+            added_as_local_path: false, // Assuming added via URL/clone initially
+            target_ref: None,
         };
         
         config.repositories.push(repo);
-        config.active_repository = Some("test-repo-1".to_string());
+        config.active_repository = Some("test-repo".to_string());
         
         config
     }
@@ -78,18 +80,20 @@ mod tests {
 
             // Add a second repository to trigger the specific error
             let repo2 = RepositoryConfig {
-                name: "test-repo-2".to_string(),
-                url: "https://github.com/test/repo2.git".to_string(),
-                local_path: PathBuf::from("/tmp/test-repo-2"),
-                default_branch: "main".to_string(),
-                tracked_branches: vec!["main".to_string()],
-                indexed_languages: None,
-                active_branch: None,
-                remote_name: None,
+                name: "repo2".to_string(),
+                url: "url2".to_string(),
+                local_path: PathBuf::from("/tmp/repo2"),
+                default_branch: "dev".to_string(),
+                tracked_branches: vec!["dev".to_string()],
+                remote_name: Some("origin".to_string()),
+                active_branch: Some("dev".to_string()),
                 ssh_key_path: None,
                 ssh_key_passphrase: None,
+                // Add missing fields
                 last_synced_commits: HashMap::new(),
+                indexed_languages: None,
                 added_as_local_path: false,
+                target_ref: None,
             };
             config.repositories.push(repo2);
 

@@ -35,8 +35,12 @@ pub struct RepositoryConfig {
     // Indexed languages/extensions
     #[serde(default)]
     pub indexed_languages: Option<Vec<String>>,
-    #[serde(default)]
+    /// If true, the repository was added via a local path rather than a URL.
     pub added_as_local_path: bool,
+    /// Optional specific Git ref (tag, commit hash, branch name) to check out and index.
+    /// If set, `repo sync` will index this specific ref statically and will *not* pull updates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -300,6 +304,7 @@ mod tests {
             ssh_key_passphrase: None,
             indexed_languages: Some(vec!["rs".to_string()]),
             added_as_local_path: false,
+            target_ref: None,
         };
 
         let repo2_path = data_path.join("repo2");
@@ -316,6 +321,7 @@ mod tests {
             ssh_key_passphrase: None,
             indexed_languages: None,
             added_as_local_path: false,
+            target_ref: None,
         };
 
         let config = AppConfig {
@@ -399,6 +405,7 @@ mod tests {
             ssh_key_passphrase: None,
             indexed_languages: None,
             added_as_local_path: false,
+            target_ref: None,
         };
         assert_eq!(repo_config.local_path, PathBuf::from("/fake/data/vectordb-cli/repositories/my-test-repo"));
     }

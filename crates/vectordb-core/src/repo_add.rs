@@ -17,6 +17,7 @@ use git2::Repository;
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
 use crate::IndexingConfig;
+use log::{info, error};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -53,6 +54,12 @@ pub struct AddRepoArgs {
     /// Optional base path for the repository
     #[arg(long)]
     pub repositories_base_path: Option<PathBuf>,
+
+    /// Optional specific Git ref (tag, commit hash, branch name) to check out initially.
+    /// If provided, this ref will be checked out instead of the default branch after cloning.
+    /// It will also be stored in the RepositoryConfig.
+    #[arg(long)]
+    pub target_ref: Option<String>,
 }
 
 // Define a specific error type for this operation
@@ -215,17 +222,64 @@ where
             .map_err(|e| AddRepoError::RepoOpenError(local_path.clone(), e.into()))?
     };
 
+    // --- Add Git Checkout Logic --- 
+    if let Some(ref_name) = &args.target_ref {
+        println!("Attempting to checkout target ref: {}", ref_name.cyan());
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&local_path) // Run checkout in the repo directory
+           .arg("checkout")
+           .arg(ref_name);
+        
+        // Add GIT_SSH_COMMAND env var if SSH key was provided, needed for checkout if ref involves remote objects
+        if let Some(ssh_key) = &args.ssh_key {
+            let ssh_cmd = if args.ssh_passphrase.is_some() {
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            } else {
+                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
+            };
+            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+        }
+
+        let checkout_output = cmd.output()
+            .map_err(|e| AddRepoError::GitError(anyhow!("Failed to execute git checkout command: {}", e)))?;
+        
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+            let stdout = String::from_utf8_lossy(&checkout_output.stdout);
+            error!(
+                "Git checkout command failed for ref '{}'. Status: {}. Stderr: {}. Stdout: {}", 
+                ref_name, checkout_output.status, stderr, stdout
+            );
+            return Err(AddRepoError::GitError(anyhow!(
+                "Git checkout command failed for ref '{}'. Status: {}. Stderr: {}. Stdout: {}",
+                ref_name, checkout_output.status, stderr, stdout
+            )));
+        }
+        println!("Successfully checked out ref: {}", ref_name.green());
+    }
+    // --- End Git Checkout Logic ---
+
     let initial_branch_name = match args.branch {
         Some(branch_name) => branch_name.clone(),
         None => {
-            let head_ref = repo.find_reference("HEAD").map_err(|e| AddRepoError::GitError(e.into()))?;
-            let head_ref_resolved = head_ref.resolve().map_err(|e| AddRepoError::GitError(e.into()))?;
-            head_ref_resolved.shorthand()
-                .ok_or_else(|| AddRepoError::BranchDetectionError(anyhow!("Could not determine default branch name from HEAD")))?
-                .to_string()
+            // If target_ref was specified, we might be in detached HEAD, 
+            // so finding the default branch via HEAD might not be reliable or desired.
+            // Let's prioritize target_ref if provided, otherwise determine from HEAD.
+            if let Some(ref_name) = &args.target_ref {
+                 ref_name.clone() // Use target_ref as the initial "branch" identifier
+            } else {
+                 let head_ref = repo.find_reference("HEAD").map_err(|e| AddRepoError::GitError(e.into()))?;
+                 let head_ref_resolved = head_ref.resolve().map_err(|e| AddRepoError::GitError(e.into()))?;
+                 head_ref_resolved.shorthand()
+                     .ok_or_else(|| AddRepoError::BranchDetectionError(anyhow!("Could not determine default branch name from HEAD")))?
+                     .to_string()
+            }
         }
     };
-    println!("Default/Initial branch detected: {}", initial_branch_name.cyan());
+    // Only print if we didn't use target_ref above
+    if args.target_ref.is_none() {
+        println!("Default/Initial branch detected: {}", initial_branch_name.cyan());
+    }
 
     println!("\n{}", 
         format!("STEP 2/2: Setting up vector database infrastructure for '{}'", repo_name).bold().cyan()
@@ -246,20 +300,24 @@ where
     // Ensure we have the final URL
     let final_url = repo_url.ok_or(AddRepoError::UrlDeterminationError)?;
     
+    // Determine active_branch based on target_ref presence
+    let final_active_branch = args.target_ref.clone().unwrap_or_else(|| initial_branch_name.clone());
+
     // Use RepositoryConfig from crate::config
     let new_repo_config = RepositoryConfig {
         name: repo_name.clone(),
         url: final_url,
         local_path: local_path.clone(),
-        default_branch: initial_branch_name.clone(),
-        tracked_branches: vec![initial_branch_name.clone()],
-        active_branch: Some(initial_branch_name.clone()),
+        default_branch: initial_branch_name.clone(), // Keep initial/default branch info
+        tracked_branches: vec![initial_branch_name.clone()], // Only track initial for now
+        active_branch: Some(final_active_branch), // Store target_ref or initial branch
         remote_name: Some(args.remote.clone().unwrap_or_else(|| "origin".to_string())),
         ssh_key_path: args.ssh_key.clone(),
         ssh_key_passphrase: args.ssh_passphrase.clone(),
         last_synced_commits: HashMap::new(),
         indexed_languages: None,
         added_as_local_path: added_as_local_path_flag,
+        target_ref: args.target_ref.clone(), // Store the target_ref
     };
 
     // Keep informative print statements for now
@@ -328,6 +386,7 @@ mod tests {
             ssh_passphrase: None,
             // Pass the base path for clone destination
             repositories_base_path: Some(base_path.clone()), // Keep this arg for now, even if handle_repo_add doesn't use it directly
+            target_ref: None,
         };
 
         // Use the mock generated by mockall

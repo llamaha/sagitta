@@ -22,7 +22,7 @@ use vectordb_core::{
 };
 use crate::server::map_core_error_to_user_message; // Import helper from server for now
 
-#[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = %params.name, url = ?params.url))]
+#[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
     params: RepositoryAddParams,
     config: Arc<RwLock<AppConfig>>,
@@ -50,17 +50,21 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         data: None,
     })? as u64;
 
+    // Map MCP params (String paths) to core AddRepoArgs (PathBuf paths)
+    let args = AddRepoArgs {
+        url: params.url,
+        local_path: params.local_path.map(std::path::PathBuf::from), // Convert Option<String> to Option<PathBuf>
+        name: Some(params.name), // Core expects Option<String>, MCP has required String
+        branch: params.branch,
+        remote: None, // Remote name is determined by core logic if not specified
+        repositories_base_path: None, // Base path is passed separately
+        ssh_key: params.ssh_key.map(std::path::PathBuf::from), // Convert Option<String> to Option<PathBuf>
+        ssh_passphrase: params.ssh_passphrase,
+        target_ref: params.target_ref, // Pass through the target_ref
+    };
+
     let new_repo_config_result = handle_repo_add(
-        AddRepoArgs {
-            url: params.url,
-            local_path: params.local_path,
-            name: Some(params.name),
-            branch: params.branch,
-            remote: None,
-            repositories_base_path: None,
-            ssh_key: params.ssh_key,
-            ssh_passphrase: params.ssh_passphrase,
-        },
+        args, // Use the mapped args
         initial_base_path,
         embedding_dim,
         qdrant_client.clone(),
@@ -191,12 +195,14 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     qdrant_client: Arc<C>,
     embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<RepositorySyncResult, ErrorObject> {
-    let commit_hash: String;
     let repo_name = params.name.clone();
-    let repo_config_clone: RepositoryConfig;
-    let app_config_clone: AppConfig;
+    let commit_hash: String;
+    let status_message: String;
+    let target_ref_name: Option<String>; // To store the target ref name if it exists
 
+    // --- Sync Stage (Calls core function that handles both static ref and dynamic branch) ---
     {
+        // Acquire write lock for sync_repository_branch and config save
         let mut config_write_guard = config.write().await;
 
         let repo_index = config_write_guard
@@ -205,35 +211,65 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             .position(|r| r.name == repo_name)
             .ok_or_else(|| ErrorObject {
                 code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' not found", repo_name),
+                message: format!("Repository '{}' not found during sync", repo_name),
                 data: None,
             })?;
 
-        // Pass config_write_guard directly, but it needs to be AppConfig, not &mut AppConfig
-        // Also, sync_repository_branch now takes &AppConfig
-        let sync_result = sync_repository_branch(&*config_write_guard, repo_index, qdrant_client.clone(), true).await;
+        // Store target_ref value before calling sync, as config might change
+        target_ref_name = config_write_guard.repositories[repo_index].target_ref.clone();
+
+        // Call the core sync function - it handles static vs dynamic internally
+        let sync_result = sync_repository_branch(
+            &*config_write_guard,
+            repo_index,
+            qdrant_client.clone(),
+            true, // fetch_and_merge flag (currently unused in core func but kept)
+        )
+        .await;
 
         match sync_result {
-            Ok(hash) => {
-                commit_hash = hash;
-                repo_config_clone = config_write_guard.repositories[repo_index].clone();
-                app_config_clone = (*config_write_guard).clone();
-                if let Err(e) = save_config(&*config_write_guard, None) {
-                    error!(error = %e, "Failed to save config after repository sync attempt");
-                    return Err(ErrorObject {
-                        code: error_codes::CONFIG_SAVE_FAILED,
-                        message: format!("Failed to save configuration after sync: {}", e),
-                        data: None,
+            Ok(sync_output) => {
+                // sync_repository_branch returns the commit hash for static refs
+                // or the new HEAD commit hash for successfully merged dynamic branches
+                // or a status message string for non-fast-forward cases (ahead, diverged)
+                
+                // Check if the output looks like a commit hash (e.g., 40 hex chars)
+                if sync_output.len() == 40 && sync_output.chars().all(|c| c.is_ascii_hexdigit()) {
+                    commit_hash = sync_output;
+                    info!(repo_name=%repo_name, commit=%commit_hash, "Sync successful, proceeding to index.");
+                    
+                    // Save config (sync_repository_branch might update last_synced_commit for dynamic branches)
+                    if let Err(e) = save_config(&*config_write_guard, None) {
+                        error!(error = %e, "Failed to save config after repository sync");
+                        return Err(ErrorObject {
+                            code: error_codes::CONFIG_SAVE_FAILED,
+                            message: format!("Failed to save configuration after sync: {}", e),
+                            data: None,
+                        });
+                    }
+                } else {
+                    // Output is likely a status message (up-to-date, ahead, diverged, etc.)
+                    info!(repo_name=%repo_name, status=%sync_output, "Sync resulted in status message, no new commit to index.");
+                    // Save config anyway, as fetch might have updated things
+                    if let Err(e) = save_config(&*config_write_guard, None) {
+                        error!(error = %e, "Failed to save config after repository sync resulted in status message");
+                        // Don't error out here, just log, as the sync itself didn't fail
+                    }
+                    // Return a specific result indicating no indexing occurred
+                    return Ok(RepositorySyncResult {
+                        name: repo_name,
+                        status: sync_output, // Pass the status message through
+                        commit_hash: "N/A".to_string(), // Indicate no specific commit was indexed now
                     });
                 }
             }
             Err(e) => {
-                // Save config even on sync failure (maybe sync status changed)
-                if let Err(save_err) = save_config(&*config_write_guard, None) {
-                    error!(error = %save_err, "Failed to save config after failed repository sync attempt");
-                }
-                error!(repo_name = %repo_name, error = %e, "Repository sync failed (git stage)");
-                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Sync failed (git stage)"); // Use imported helper
+                error!(repo_name = %repo_name, error = %e, "Core repository sync failed");
+                // Save config even on sync failure
+                 if let Err(save_err) = save_config(&*config_write_guard, None) {
+                     error!(error = %save_err, "Failed to save config after failed repository sync attempt");
+                 }
+                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Sync failed");
                 return Err(ErrorObject {
                     code: error_codes::CORE_LOGIC_ERROR,
                      message: user_message,
@@ -243,12 +279,41 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         }
     } // config_write_guard dropped here
 
-    info!(repo_name = %repo_name, commit = %commit_hash, "Starting indexing stage after successful sync.");
+    // Determine status message based on whether it was a static ref sync
+    if let Some(ref_name) = target_ref_name {
+        status_message = format!("Indexed static ref '{}'", ref_name);
+    } else {
+        status_message = "Synced and Indexed".to_string();
+    }
+
+    // --- Indexing Stage (Only runs if sync resulted in a commit hash) ---
+    info!(repo_name = %repo_name, commit = %commit_hash, "Starting indexing stage.");
+
+    // Get fresh clones of config needed for indexing (config might have been updated)
+    let repo_config_clone: RepositoryConfig = {
+        let config_read_guard = config.read().await;
+         config_read_guard
+            .repositories
+            .iter()
+            .find(|r| r.name == repo_name)
+            .cloned()
+            .ok_or_else(|| ErrorObject {
+                code: error_codes::REPO_NOT_FOUND,
+                message: format!("Repository '{}' disappeared unexpectedly before indexing", repo_name),
+                data: None,
+            })?
+    };
+     let app_config_clone: AppConfig = {
+         let config_read_guard = config.read().await;
+         (*config_read_guard).clone()
+     };
 
     let repo_root = &repo_config_clone.local_path;
-    let branch_name = repo_config_clone
-        .active_branch
+    // Use target_ref as branch context if available, otherwise use active/default branch
+    let context_identifier = repo_config_clone
+        .target_ref
         .as_deref()
+        .or(repo_config_clone.active_branch.as_deref())
         .unwrap_or(&repo_config_clone.default_branch);
     let collection_name = get_collection_name(&repo_name);
 
@@ -275,16 +340,16 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         info!(repo_name = %repo_name, count = files_to_index_rel.len(), "Found files to index");
 
         match indexing::index_repo_files(
-            &app_config_clone, // Pass cloned config
+            &app_config_clone, // Use cloned config (safe for both paths)
             repo_root,
             &files_to_index_rel,
             &collection_name,
-            branch_name,
+            context_identifier, // Use target_ref or branch name here
             &commit_hash,
             qdrant_client.clone(),
             embedding_handler.clone(),
             None,
-            app_config_clone.indexing.max_concurrent_upserts, // Use cloned config
+            app_config_clone.indexing.max_concurrent_upserts,
         )
         .await
         {
@@ -293,7 +358,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             }
             Err(e) => {
                 error!(repo_name = %repo_name, error = %e, "Indexing failed during sync");
-                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Indexing failed"); // Use imported helper
+                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Indexing failed");
                 return Err(ErrorObject {
                     code: error_codes::CORE_LOGIC_ERROR,
                     message: user_message,
@@ -305,7 +370,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
 
     Ok(RepositorySyncResult {
         name: repo_name,
-        status: "Synced and Indexed".to_string(),
+        status: status_message, // Use dynamic status message
         commit_hash,
     })
 }
@@ -326,34 +391,36 @@ mod tests {
         let repo1 = RepositoryConfig {
             name: "repo1".to_string(),
             url: "url1".to_string(),
-            local_path: PathBuf::from("/path/to/repo1"),
+            local_path: PathBuf::from("/tmp/repo1"),
             default_branch: "main".to_string(),
-            active_branch: Some("main".to_string()),
             tracked_branches: vec!["main".to_string()],
             remote_name: Some("origin".to_string()),
-            last_synced_commits: HashMap::new(),
+            active_branch: Some("main".to_string()),
             ssh_key_path: None,
             ssh_key_passphrase: None,
+            last_synced_commits: HashMap::new(),
             indexed_languages: None,
             added_as_local_path: false,
+            target_ref: None, // Standard repo tracking a branch
         };
         let repo2 = RepositoryConfig {
             name: "repo2".to_string(),
             url: "url2".to_string(),
-            local_path: PathBuf::from("/path/to/repo2"),
-            default_branch: "dev".to_string(),
-            active_branch: Some("dev".to_string()),
-            tracked_branches: vec!["dev".to_string()],
+            local_path: PathBuf::from("/tmp/repo2"),
+            default_branch: "main".to_string(), // Default is main
+            tracked_branches: vec!["main".to_string()],
             remote_name: Some("origin".to_string()),
-            last_synced_commits: HashMap::new(),
+            active_branch: Some("v1.0.0".to_string()), // But active is the target ref
             ssh_key_path: None,
             ssh_key_passphrase: None,
+            last_synced_commits: HashMap::new(),
             indexed_languages: None,
             added_as_local_path: false,
+            target_ref: Some("v1.0.0".to_string()), // Repo tracking a specific tag
         };
         let config = AppConfig {
             qdrant_url: "dummy".to_string(),
-            repositories_base_path: Some(PathBuf::from("/base")), 
+            repositories_base_path: Some(PathBuf::from("/base")),
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
             indexing: IndexingConfig { max_concurrent_upserts: 1 },
@@ -372,18 +439,18 @@ mod tests {
 
         // 4. Assertions
         assert!(result.is_ok());
-        let list_result = result.unwrap(); // Correct: Just unwrap the Result
+        let list_result = result.unwrap();
 
         assert_eq!(list_result.repositories.len(), 2);
 
-        // Check repo1 details (adjust fields based on RepositoryInfo definition)
+        // Check repo1 details (standard branch tracking)
         let res_repo1 = list_result.repositories.iter().find(|r| r.name == "repo1").expect("repo1 not found");
         assert_eq!(res_repo1.remote, "url1");
-        assert_eq!(res_repo1.branch, Some("main".to_string())); // Assuming RepositoryInfo has 'branch' field mapped from active_branch
+        assert_eq!(res_repo1.branch, Some("main".to_string())); // Branch field shows active branch
 
-        // Check repo2 details
+        // Check repo2 details (static target ref tracking)
         let res_repo2 = list_result.repositories.iter().find(|r| r.name == "repo2").expect("repo2 not found");
         assert_eq!(res_repo2.remote, "url2");
-        assert_eq!(res_repo2.branch, Some("dev".to_string()));
+        assert_eq!(res_repo2.branch, Some("v1.0.0".to_string())); // Branch field correctly shows target_ref as active branch
     }
 } 
