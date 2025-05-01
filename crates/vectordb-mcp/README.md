@@ -31,7 +31,7 @@ The server needs a configuration file named `mcp.json` located in the project's 
 *   **`repositories_base_path`**: **(Required)** Sets the directory (relative to the project root) where cloned Git repositories will be stored. Make sure this directory exists or is writable.
 *   **`model_source`**: Hints to the server which embedding model you intend to use (ensure the corresponding model files were downloaded during setup).
 
-*(Note: The server primarily locates model files using environment variables or paths defined in the main CLI config (`~/.config/vectordb-cli/config.toml`). The included wrapper script helps manage this - see Running the Server.)*
+*(Note: The server primarily locates model files using environment variables or paths defined in the main CLI config (`~/.config/vectordb/vectordb-cli/config.toml`). The included wrapper script helps manage this - see Running the Server.)*
 
 ## Running the Server
 
@@ -39,7 +39,7 @@ The easiest way to run the server for testing or development is using the provid
 
 **Recommended Method: Wrapper Script**
 
-A wrapper script (e.g., `run_mcp_server_with_logging.sh` in the project root) is included to simplify running the server. It automatically handles:
+A wrapper script (e.g., `run_mcp_wrapper.sh` in the project root) is included to simplify running the server. It automatically handles:
 *   Setting up detailed logging to a file (e.g., `mcp_stderr.log`).
 *   Configuring the environment (like `LD_LIBRARY_PATH`) so the server can find the ONNX Runtime libraries if needed.
 *   Launching the `vectordb-mcp` executable.
@@ -48,11 +48,11 @@ A wrapper script (e.g., `run_mcp_server_with_logging.sh` in the project root) is
 
 1.  Make the script executable (run this once):
     ```bash
-    chmod +x ./run_mcp_server_with_logging.sh 
+    chmod +x ./run_mcp_wrapper.sh 
     ```
 2.  Pipe your JSON-RPC request to the script:
     ```bash
-    echo '<JSON_REQUEST>' | ./run_mcp_server_with_logging.sh | cat
+    echo '<JSON_REQUEST>' | ./run_mcp_wrapper.sh | cat
     ```
     Replace `<JSON_REQUEST>` with your request (e.g., from the [Test Plan](./mcp-e2e-test-plan.md)).
 3.  Check the output in your terminal and view detailed logs in `mcp_stderr.log`.
