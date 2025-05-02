@@ -61,6 +61,8 @@ pub mod indexing; // Added indexing module
 pub mod repo_add;
 pub mod repo_helpers;
 pub mod snippet_extractor;
+pub mod tokenizer;
+pub mod vocabulary;
 
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 pub use embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};

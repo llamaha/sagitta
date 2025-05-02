@@ -28,6 +28,7 @@ use crate::cli::commands::{ // Only import necessary items from commands
 use vectordb_core::search_collection;
 use vectordb_core::qdrant_ops::delete_all_points; // Import core helpers
 use vectordb_core::error::VectorDBError; // Import VectorDBError
+use vectordb_core::config::load_config; // Import load_config
 
 // Local module imports
 // pub mod index; // Remove index module
@@ -209,6 +210,7 @@ async fn handle_simple_index(
     pb.set_message("Gathering files...");
 
     // --- Call Core Indexing Logic ---
+    let app_config = load_config(None)?;
     let index_result = vectordb_core::indexing::index_paths(
         &cmd_args.paths, // Pass the raw paths from args
         file_extensions_set,
@@ -216,6 +218,7 @@ async fn handle_simple_index(
         client.clone(),
         &embedding_handler,
         Some(&pb),
+        &app_config, // <-- Pass the loaded config
     ).await;
 
     // --- Handle Result ---
@@ -291,7 +294,11 @@ async fn handle_simple_query(
         filter
     );
 
-    // Call the core search function with explicit type annotation
+    // 5. Perform Search
+    // Need the full AppConfig here
+    let app_config = load_config(None)?;
+    
+    let start_time = std::time::Instant::now(); // Define start_time here
     let search_response_result: Result<QueryResponse, VectorDBError> = search_collection(
         client.clone(),
         collection_name,
@@ -299,7 +306,10 @@ async fn handle_simple_query(
         &args.query,
         args.limit,
         filter,
+        &app_config, // <-- Pass the loaded config
     ).await;
+
+    let duration = start_time.elapsed();
 
     match search_response_result {
         Ok(response) => {

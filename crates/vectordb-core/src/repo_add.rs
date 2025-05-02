@@ -18,6 +18,7 @@ use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
 use crate::IndexingConfig;
 use log::{info, error};
+use crate::config::AppConfig;
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -357,6 +358,7 @@ mod tests {
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories_base_path: None, // Use default
+            vocabulary_base_path: None, // Add missing field (use default)
             repositories: vec![],
             active_repository: None,
             indexing: IndexingConfig::default(), // Add missing field
@@ -441,4 +443,24 @@ mod tests {
     // e.g., test_handle_repo_add_invalid_args()
     // e.g., test_handle_repo_add_git_error()
     // e.g., test_handle_repo_add_qdrant_error()
+
+    fn create_test_config() -> AppConfig {
+        let temp_dir = tempdir().unwrap();
+        let repo_base = temp_dir.path().join("repos");
+        let vocab_base = temp_dir.path().join("vocab");
+        fs::create_dir_all(&repo_base).unwrap();
+        fs::create_dir_all(&vocab_base).unwrap();
+
+        AppConfig {
+            repositories: vec![],
+            active_repository: None,
+            qdrant_url: "http://localhost:6333".to_string(),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
+            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
+            indexing: Default::default(),
+        }
+    }
 } 

@@ -183,32 +183,47 @@ mod tests {
 
     // Helper function to create a default AppConfig for tests
     fn default_test_config() -> AppConfig {
-        // Use a unique temp directory for each test run if possible, 
-        // or ensure cleanup in tests that modify the filesystem.
         let temp_dir = tempdir().expect("Failed to create temp dir for test config");
-        let base_path = temp_dir.path().to_path_buf();
-        temp_dir.into_path(); // Prevent immediate deletion
-
-        AppConfig {
-            qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some("default_model_path".to_string()),
-            onnx_tokenizer_path: Some("default_tokenizer_path".to_string()),
-            repositories: vec![],
-            active_repository: None,
-            repositories_base_path: Some(base_path), // Use temp path
-            server_api_key_path: None,
-            indexing: IndexingConfig::default(),
-        }
+        let base_path = temp_dir.path().join("repositories");
+        fs::create_dir_all(&base_path).unwrap();
+        let vocab_base = temp_dir.path().join("vocab_def"); // Unique name
+        fs::create_dir_all(&vocab_base).unwrap();
+        let config = AppConfig {
+            qdrant_url: "http://localhost:6333".to_string(),
+            onnx_model_path: None, // Correct field name
+            onnx_tokenizer_path: None, // Correct field name
+            server_api_key_path: None, // Correct field name
+            repositories_base_path: Some(base_path.to_string_lossy().into_owned()), // Use temp path
+            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()), // Added temp vocab path
+            repositories: vec![], // Added default
+            active_repository: None, // Added default
+            indexing: Default::default(), // Added default
+        };
+        config
     }
 
     // Helper function to create a default AppConfig for tests
     fn create_test_config_data() -> AppConfig {
+        // Use tempdir for base paths in test config data
+        let temp_dir = tempdir().expect("Failed to create temp dir for test config data");
+        let repo_base = temp_dir.path().join("repos");
+        fs::create_dir_all(&repo_base).unwrap();
+        let vocab_base = temp_dir.path().join("vocab_data");
+        fs::create_dir_all(&vocab_base).unwrap();
+        let model_base = temp_dir.path().join("models"); // For dummy paths
+        fs::create_dir_all(&model_base).unwrap();
+        let dummy_model = model_base.join("model.onnx");
+        let dummy_tokenizer_dir = model_base.join("tokenizer");
+        fs::write(&dummy_model, "dummy").unwrap();
+        fs::create_dir(&dummy_tokenizer_dir).unwrap();
+        fs::write(dummy_tokenizer_dir.join("tokenizer.json"), "{}").unwrap();
+
         AppConfig {
             repositories: vec![
                 RepositoryConfig {
                     name: "repo1".to_string(),
                     url: "url1".to_string(),
-                    local_path: PathBuf::from("/tmp/vectordb_test_repo1"),
+                    local_path: repo_base.join("repo1"),
                     default_branch: "main".to_string(),
                     tracked_branches: vec!["main".to_string()],
                     remote_name: Some("origin".to_string()),
@@ -223,7 +238,7 @@ mod tests {
                 RepositoryConfig {
                     name: "repo2".to_string(),
                     url: "url2".to_string(),
-                    local_path: PathBuf::from("/tmp/vectordb_test_repo2"),
+                    local_path: repo_base.join("repo2"),
                     default_branch: "dev".to_string(),
                     tracked_branches: vec!["dev".to_string()],
                     remote_name: Some("origin".to_string()),
@@ -237,11 +252,12 @@ mod tests {
                 },
             ],
             active_repository: None,
-            qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: None,
-            onnx_tokenizer_path: None,
-            server_api_key_path: None,
-            repositories_base_path: None,
+            qdrant_url: "http://localhost:6334".to_string(), // Keep distinct port for tests if needed
+            onnx_model_path: Some(dummy_model.to_string_lossy().into_owned()), // Correct field name
+            onnx_tokenizer_path: Some(dummy_tokenizer_dir.to_string_lossy().into_owned()), // Correct field name
+            server_api_key_path: None, // Correct field name
+            repositories_base_path: Some(repo_base.to_string_lossy().into_owned()), // Use temp path
+            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()), // Use temp path
             indexing: IndexingConfig::default(),
         }
     }

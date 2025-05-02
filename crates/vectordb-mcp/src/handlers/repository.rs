@@ -21,6 +21,7 @@ use vectordb_core::{
     repo_helpers::{delete_repository_data, get_collection_name, sync_repository_branch},
 };
 use crate::server::map_core_error_to_user_message; // Import helper from server for now
+use tempdir;
 
 #[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -420,14 +421,14 @@ mod tests {
         };
         let config = AppConfig {
             qdrant_url: "dummy".to_string(),
-            repositories_base_path: Some(PathBuf::from("/base")),
+            repositories_base_path: Some(PathBuf::from("/base").to_string_lossy().into_owned()),
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
             indexing: IndexingConfig { max_concurrent_upserts: 1 },
-            // Other fields can be default or None as they aren't used by list
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
+            vocabulary_base_path: Some(PathBuf::from("/vocab").to_string_lossy().into_owned()),
         };
         let config_arc = Arc::new(RwLock::new(config));
 
