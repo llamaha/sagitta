@@ -4,7 +4,9 @@ use qdrant_client::qdrant::{
     CollectionInfo, CountResponse, SearchResponse, PointsSelector, DeletePoints,
     ScrollPoints, ScrollResponse,
     UpsertPoints, PointsOperationResponse, CreateCollection, Distance,
-    VectorParamsBuilder, QueryPoints, QueryResponse
+    VectorParamsBuilder, QueryPoints, QueryResponse,
+    VectorsConfig, VectorParamsMap, vectors_config::Config as VectorsConfig_oneof_config,
+    SparseVectorParams, SparseVectorConfig, Modifier
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
@@ -90,12 +92,34 @@ impl QdrantClientTrait for Qdrant {
     }
     
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool> {
-        let vector_params = VectorParamsBuilder::new(vector_dimension, Distance::Cosine).build();
+        // Define dense vector parameters (naming it "dense")
+        let dense_params = VectorParamsBuilder::new(vector_dimension, Distance::Cosine).build();
+        let vectors_config = VectorsConfig { 
+            config: Some(VectorsConfig_oneof_config::ParamsMap(VectorParamsMap {
+                map: std::collections::HashMap::from([( 
+                    "dense".to_string(), 
+                    dense_params.into(),
+                )])
+            }))
+        };
+
+        // Define sparse vector parameters (naming it "sparse_tf" and enabling IDF)
+        let sparse_params = SparseVectorParams {
+            index: None, // Use default index for now
+            modifier: Some(Modifier::Idf as i32),
+        };
+        let sparse_vectors_config = SparseVectorConfig {
+            map: std::collections::HashMap::from([(
+                "sparse_tf".to_string(), // Name the sparse vector
+                sparse_params,
+            )])
+        };
         
         let request = CreateCollection {
             collection_name: collection_name.to_string(),
-            vectors_config: Some(vector_params.into()),
-            // Add any other parameters needed
+            vectors_config: Some(vectors_config),
+            sparse_vectors_config: Some(sparse_vectors_config),
+            // Add other parameters like hnsw_config, optimizers_config, etc. if needed
             ..Default::default()
         };
         

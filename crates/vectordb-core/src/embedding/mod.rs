@@ -100,6 +100,7 @@ pub mod types;
 pub mod provider;
 
 // Function previously in embedding_logic.rs
+#[derive(Debug)]
 pub struct EmbeddingHandler {
     embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
@@ -273,19 +274,31 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn create_test_config(
-        model_path: Option<String>,
-        tokenizer_path: Option<String>,
-    ) -> AppConfig {
+    fn create_test_config() -> AppConfig {
+        let temp_dir = tempdir().unwrap();
+        let model_base = temp_dir.path().join("models");
+        let vocab_base = temp_dir.path().join("vocab");
+        fs::create_dir_all(&model_base).unwrap();
+        fs::create_dir_all(&vocab_base).unwrap();
+
+        // Create dummy model/tokenizer files needed by the handler
+        let dummy_model = model_base.join("model.onnx");
+        let dummy_tokenizer_dir = model_base.join("tokenizer");
+        let dummy_tokenizer_file = dummy_tokenizer_dir.join("tokenizer.json");
+        fs::write(&dummy_model, "dummy model data").unwrap();
+        fs::create_dir(&dummy_tokenizer_dir).unwrap();
+        fs::write(&dummy_tokenizer_file, "{}").unwrap(); // Minimal valid JSON
+
         AppConfig {
-            qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: model_path,
-            onnx_tokenizer_path: tokenizer_path,
-            server_api_key_path: None,
             repositories: vec![],
             active_repository: None,
+            qdrant_url: "http://localhost:6333".to_string(),
+            onnx_model_path: Some(dummy_model.to_string_lossy().into_owned()), // Correct field name
+            onnx_tokenizer_path: Some(dummy_tokenizer_dir.to_string_lossy().into_owned()), // Correct field name
+            server_api_key_path: None, // Correct field name
             repositories_base_path: None,
-            indexing: IndexingConfig::default(),
+            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
+            indexing: Default::default(),
         }
     }
 
@@ -301,10 +314,7 @@ mod tests {
         // Minimal valid tokenizer JSON
         fs::write(&tokenizer_path, r#"{"model": {"vocab": {}}}"#).unwrap(); 
 
-        let config = create_test_config(
-            Some(model_path.to_str().unwrap().to_string()),
-            Some(tokenizer_dir.to_str().unwrap().to_string()), // Pass dir path
-        );
+        let config = create_test_config();
         
         // This might still fail if ORT libs aren't found or the dummy model is invalid
         let result = EmbeddingHandler::new(&config);
@@ -317,9 +327,14 @@ mod tests {
 
     #[test]
     fn test_embedding_handler_new_onnx_missing_paths() {
-        let config = create_test_config(None, None); 
-        let result = EmbeddingHandler::new(&config);
-        assert!(matches!(result, Err(VectorDBError::ConfigurationError(_))));
+        // Create a config *without* setting the ONNX paths
+        let mut config = AppConfig::default();
+        config.onnx_model_path = None;
+        config.onnx_tokenizer_path = None;
+
+        let result = EmbeddingHandler::new(&config); 
+        // Now, this assertion should correctly expect a ConfigurationError
+        assert!(matches!(result, Err(VectorDBError::ConfigurationError(_))), "Expected ConfigurationError when ONNX paths are None, but got: {:?}", result);
     }
 
     #[cfg(feature = "ort")]

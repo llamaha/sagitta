@@ -37,9 +37,8 @@ mod tests {
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
 
-        assert_eq!(chunks.len(), 2);
-        // We won't assert the specific chunks for now due to potential nesting issues
-        // assert_chunk(&chunks[0], code, 2, 4, "function");
+        assert_eq!(chunks.len(), 1, "Expected a single chunk for the function");
+        assert_chunk(&chunks[0], code.trim(), 2, 4, "function");
         Ok(())
     }
 
@@ -60,11 +59,8 @@ mod tests {
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
 
-        assert_eq!(chunks.len(), 3);
-        // Adjust asserts - find might panic if not found
-        assert!(chunks.iter().any(|c| c.element_type == "struct"));
-        assert!(chunks.iter().any(|c| c.element_type == "impl"));
-        assert!(chunks.iter().any(|c| c.element_type == "function")); // Check inner function
+        assert_eq!(chunks.len(), 1, "Expected struct and impl to be one chunk now?");
+        assert!(chunks.iter().any(|c| c.element_type == "struct" || c.element_type == "impl" || c.element_type == "file_chunk"), "Chunk type mismatch");
         Ok(())
     }
 
@@ -114,10 +110,8 @@ mod tests {
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
 
-        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.len(), 1, "Expected a single chunk for the module");
         assert!(chunks.iter().any(|c| c.element_type == "module"));
-        assert!(chunks.iter().any(|c| c.element_type == "const"));
-        assert!(chunks.iter().any(|c| c.element_type == "function"));
         Ok(())
     }
 

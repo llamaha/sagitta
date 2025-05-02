@@ -63,7 +63,7 @@ fn handle_set_repo_base_path(
     }
 
     // Set the config value
-    config.repositories_base_path = Some(args.path.clone());
+    config.repositories_base_path = Some(args.path.to_string_lossy().to_string());
     
     // Save the config using the core function
     vectordb_core::config::save_config(config, override_path)?;
@@ -89,6 +89,7 @@ fn get_default_config() -> AppConfig {
         repositories_base_path: None,
         server_api_key_path: None,
         indexing: IndexingConfig::default(),
+        vocabulary_base_path: None,
     }
 }
 
@@ -120,6 +121,7 @@ mod tests {
             repositories: Vec::new(),
             active_repository: None,
             indexing: IndexingConfig::default(),
+            vocabulary_base_path: None,
         };
         
         // Set repo base path
@@ -131,7 +133,7 @@ mod tests {
         assert!(result.is_ok());
         
         // Check config was updated
-        assert_eq!(config.repositories_base_path, Some(repos_dir.clone()));
+        assert_eq!(config.repositories_base_path, Some(repos_dir.to_string_lossy().to_string()));
         
         // Check directory was created
         assert!(repos_dir.exists());
@@ -139,7 +141,7 @@ mod tests {
         // Load config back from disk to verify it was saved
         if config_path.exists() {
             let loaded_config = load_config(Some(&config_path)).unwrap();
-            assert_eq!(loaded_config.repositories_base_path, Some(repos_dir));
+            assert_eq!(loaded_config.repositories_base_path, Some(repos_dir.to_string_lossy().to_string()));
         }
     }
 
@@ -158,6 +160,7 @@ mod tests {
             active_repository: None,
             repositories_base_path: None,
             indexing: IndexingConfig::default(),
+            vocabulary_base_path: None,
         };
         save_config(&config, Some(&config_path)).unwrap();
 
@@ -181,7 +184,7 @@ mod tests {
 
         let loaded_config_base = load_config(Some(&config_path)).unwrap();
         assert!(loaded_config_base.repositories_base_path.is_some());
-        assert_eq!(loaded_config_base.repositories_base_path.unwrap(), repo_base_path);
+        assert_eq!(loaded_config_base.repositories_base_path.unwrap(), repo_base_path.to_string_lossy().to_string());
     }
     
     #[test]
@@ -200,6 +203,7 @@ mod tests {
             active_repository: None,
             repositories_base_path: None,
             indexing: IndexingConfig::default(),
+            vocabulary_base_path: None,
         };
         save_config(&config, Some(&config_path)).unwrap();
 
@@ -216,6 +220,6 @@ mod tests {
         assert!(result.is_ok(), "handle_config failed: {:?}", result.err());
 
         config = load_config(Some(&config_path)).unwrap();
-        assert_eq!(config.repositories_base_path, Some(base_path));
+        assert_eq!(config.repositories_base_path, Some(base_path.to_string_lossy().to_string()));
     }
 } 

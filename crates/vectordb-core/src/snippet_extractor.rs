@@ -69,8 +69,39 @@ pub fn extract_snippet(file_path: &str, chunk_start_line: usize, chunk_end_line:
     Ok(final_snippet.trim_end().to_string())
 }
 
-// Remove the SnippetExtractor struct, its impl, and related tests.
-// Keep file-level tests if desired, adapted to the new function.
+/// Represents the type of code element a snippet corresponds to.
+/// TODO: Align this with the string element_types used by SyntaxParser implementations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElementType {
+    Function,
+    Struct,
+    Class,
+    Method,
+    Interface,
+    Enum,
+    TypeAlias,
+    Const,
+    Static,
+    Module,
+    Trait,
+    Impl,
+    Macro,
+    Use,
+    ExternCrate,
+    Test,
+    FileChunk, // For fallback or whole-file chunks
+    Unknown,
+}
+
+/// Represents a code snippet extracted by the syntax parser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snippet {
+    pub content: String,
+    pub language: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub element_type: ElementType,
+}
 
 #[cfg(test)]
 mod tests {

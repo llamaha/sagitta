@@ -57,8 +57,6 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         branch_name.to_string(),
     )]));
     
-    drop(config_read_guard);
-
     let search_response = search_collection(
         qdrant_client,
         &collection_name,
@@ -66,6 +64,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         &query_text,
         limit,
         filter,
+        &config_read_guard,
     )
     .await
     .map_err(|e| {

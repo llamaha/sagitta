@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 use anyhow::anyhow;
+use crate::error::{Result as VectorDBResult, VectorDBError};
+use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "vectordb-cli";
 const CONFIG_FILE_NAME: &str = "config.toml";
@@ -63,53 +65,54 @@ fn default_max_concurrent_upserts() -> usize {
     8 // Default to 8 concurrent uploads
 }
 
+/// Main application configuration structure.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-/// Represents the application configuration, loaded from a `config.toml` file.
 pub struct AppConfig {
-    /// The URL for the Qdrant gRPC endpoint.
-    #[serde(default = "default_qdrant_url")]
+    /// URL for the Qdrant instance.
     pub qdrant_url: String,
-    /// Optional path to the ONNX model file.
+    /// Path to the ONNX embedding model file.
     pub onnx_model_path: Option<String>,
-    /// Optional path to the directory containing the ONNX tokenizer files.
+    /// Path to the ONNX tokenizer configuration directory or file.
     pub onnx_tokenizer_path: Option<String>,
-    /// Optional path to the API key file for server authentication.
-    #[serde(default)]
+    /// Optional path to a file containing the server API key.
     pub server_api_key_path: Option<String>,
-
+    /// Base path where repositories are cloned/managed by default.
+    pub repositories_base_path: Option<String>,
+    /// Optional base path for storing vocabulary files.
+    /// If None, a default platform-specific data directory will be used.
+    pub vocabulary_base_path: Option<String>,
+    /// List of configured repositories.
     #[serde(default)]
     pub repositories: Vec<RepositoryConfig>,
-
-    #[serde(default)]
+    /// Name of the currently active repository context.
     pub active_repository: Option<String>,
-    
-    /// Optional base path where all repositories will be stored.
-    /// If not provided, uses the default XDG data directory.
-    #[serde(default)]
-    pub repositories_base_path: Option<PathBuf>,
-
-    /// Indexing specific configuration.
+    /// Indexing configuration settings.
     #[serde(default)]
     pub indexing: IndexingConfig,
 }
 
+/// Configuration specific to a single repository.
+// ... (RepositoryConfig remains the same) ...
+
+/// Configuration settings related to indexing.
+// ... (IndexingConfig remains the same) ...
+
+
+// --- Default Implementation ---
 impl Default for AppConfig {
     fn default() -> Self {
-        AppConfig {
-            qdrant_url: default_qdrant_url(),
+        Self {
+            qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
+            repositories_base_path: None, // Default to None
+            vocabulary_base_path: None, // Default to None
             repositories: Vec::new(),
             active_repository: None,
-            repositories_base_path: None,
             indexing: IndexingConfig::default(),
         }
     }
-}
-
-fn default_qdrant_url() -> String {
-    DEFAULT_QDRANT_URL.to_string()
 }
 
 /// Returns the default path to the configuration file.
@@ -120,22 +123,74 @@ pub fn get_config_path() -> Result<PathBuf> {
     Ok(config_dir.join(APP_NAME).join(CONFIG_FILE_NAME))
 }
 
-/// Returns the base directory where local repository clones should be stored.
-///
-/// If a repositories_base_path is configured in AppConfig, uses that.
-/// Otherwise, falls back to XDG base directory specification (e.g., `~/.local/share/vectordb-cli/repositories`).
+/// Returns the default base path for vocabulary files based on OS conventions.
+/// Uses $XDG_DATA_HOME/vectordb-cli/vocabularies or equivalent.
+fn get_default_vocabulary_base_path() -> Result<PathBuf> {
+    let base_dirs = dirs::data_dir()
+        .ok_or_else(|| VectorDBError::ConfigurationError("Could not determine user data directory".to_string()))?;
+    let app_data_dir = base_dirs.join(APP_NAME).join("vocabularies");
+    // Create the directory if it doesn't exist
+    fs::create_dir_all(&app_data_dir).map_err(|e| {
+        VectorDBError::DirectoryCreationError {
+            path: app_data_dir.clone(),
+            source: e,
+        }
+    })?;
+    Ok(app_data_dir)
+}
+
+/// Gets the full path for a specific collection's vocabulary file.
+/// Uses the `vocabulary_base_path` from the config if set, otherwise derives a default path.
+pub fn get_vocabulary_path(config: &AppConfig, collection_name: &str) -> Result<PathBuf> {
+    let base_path = match &config.vocabulary_base_path {
+        Some(p) => PathBuf::from(p),
+        None => get_default_vocabulary_base_path()?,
+    };
+    // Ensure base directory exists if explicitly configured
+    if config.vocabulary_base_path.is_some() {
+         fs::create_dir_all(&base_path).map_err(|e| {
+            VectorDBError::DirectoryCreationError {
+                path: base_path.clone(),
+                source: e,
+            }
+        })?;
+    }
+
+    // Derive filename from collection name (e.g., repo_my-repo -> my-repo_vocab.json)
+    let vocab_filename = format!(
+        "{}_vocab.json", 
+        collection_name.strip_prefix(COLLECTION_NAME_PREFIX).unwrap_or(collection_name)
+    );
+    Ok(base_path.join(vocab_filename))
+}
+
+/// Returns the base path where repositories should be stored.
+/// Uses `repositories_base_path` from config if set, otherwise XDG data directory.
 pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
-    // First check if there's a configured base path
     if let Some(cfg) = config {
         if let Some(base_path) = &cfg.repositories_base_path {
-            return Ok(base_path.clone());
+            let path = PathBuf::from(base_path);
+             // Ensure base directory exists if explicitly configured
+            fs::create_dir_all(&path).map_err(|e| {
+                VectorDBError::DirectoryCreationError {
+                    path: path.clone(),
+                    source: e,
+                }
+            })?;
+            return Ok(path);
         }
     }
-    
-    // Fall back to default XDG location
-    dirs::data_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not find data directory"))
-        .map(|data_dir| data_dir.join(APP_NAME).join(REPO_DIR_NAME))
+    // Default path calculation (as before)
+    let base_dirs = dirs::data_dir()
+        .ok_or_else(|| VectorDBError::ConfigurationError("Could not determine user data directory".to_string()))?;
+    let app_data_dir = base_dirs.join(APP_NAME).join("repositories");
+    fs::create_dir_all(&app_data_dir).map_err(|e| {
+        VectorDBError::DirectoryCreationError {
+            path: app_data_dir.clone(),
+            source: e,
+        }
+    })?;
+    Ok(app_data_dir)
 }
 
 /// Gets the configuration path by checking ENV, override, or default XDG.
@@ -331,7 +386,8 @@ mod tests {
             server_api_key_path: None,
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
-            repositories_base_path: Some(data_path.clone()),
+            repositories_base_path: Some(data_path.to_string_lossy().to_string()),
+            vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
         };
 
@@ -369,29 +425,38 @@ mod tests {
 
     #[test]
     fn test_repo_path_generation() {
-        let base_path = PathBuf::from("/fake/data/vectordb-cli/repositories");
+        // Use tempdir for testing filesystem interactions
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path().join("my_repo_base");
+        // NOTE: get_repo_base_path will create the directory if needed
         
         // Test with explicit config path
         let config = AppConfig {
-            repositories_base_path: Some(PathBuf::from("/custom/repos")),
+            repositories_base_path: Some(base_path.to_string_lossy().to_string()),
             qdrant_url: "test".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
+            vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
         };
         
         // Should use the custom path from config
         let repo_path = get_repo_base_path(Some(&config)).unwrap();
-        assert_eq!(repo_path, PathBuf::from("/custom/repos"));
+        assert_eq!(repo_path, base_path);
+        assert!(base_path.exists()); // Verify get_repo_base_path created it
         
         // Test with None config (should use default XDG path)
-        let default_repo_path = get_repo_base_path(None).unwrap();
+        // We cannot easily assert the exact default path, but we can check it works
+        let default_repo_path_result = get_repo_base_path(None);
+        assert!(default_repo_path_result.is_ok());
+        let default_repo_path = default_repo_path_result.unwrap();
         assert!(default_repo_path.to_string_lossy().contains("vectordb-cli/repositories"));
+        assert!(default_repo_path.exists()); // Verify it created the default dir
         
-        // Create a repo config with a local path based on the base_path
+        // Create a repo config with a local path based on the temp base_path
         let repo_config = RepositoryConfig {
             name: "my-test-repo".to_string(),
             url: "some_url".to_string(),
@@ -407,6 +472,29 @@ mod tests {
             added_as_local_path: false,
             target_ref: None,
         };
-        assert_eq!(repo_config.local_path, PathBuf::from("/fake/data/vectordb-cli/repositories/my-test-repo"));
+        assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
+    }
+
+    #[test]
+    fn test_get_vocabulary_path() {
+        let collection_name = "repo_test-collection";
+
+        // Test with default path
+        let mut default_config = AppConfig::default();
+        default_config.vocabulary_base_path = None;
+        let default_path = get_vocabulary_path(&default_config, collection_name).unwrap();
+        println!("Default vocab path: {}", default_path.display());
+        assert!(default_path.ends_with("vectordb-cli/vocabularies/test-collection_vocab.json"));
+        assert!(default_path.parent().unwrap().exists()); // Check directory created
+
+        // Test with custom path
+        let temp_dir = tempdir().unwrap();
+        let custom_base = temp_dir.path().join("my_vocabs");
+        let mut custom_config = AppConfig::default();
+        custom_config.vocabulary_base_path = Some(custom_base.to_str().unwrap().to_string());
+        let custom_path = get_vocabulary_path(&custom_config, collection_name).unwrap();
+        println!("Custom vocab path: {}", custom_path.display());
+        assert_eq!(custom_path, custom_base.join("test-collection_vocab.json"));
+        assert!(custom_base.exists()); // Check directory created
     }
 } 
