@@ -15,9 +15,7 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
 **Goal:** Test repository management (`add`, `list`, `use`, `sync`, `stats`, `clear`, `remove`) and querying (`query`).
 
 **Setup:**
-1.  Create a temporary directory.
-2.  Clone test repositories (`octocat/Spoon-Knife`, `rust-lang/book`) into the temp directory.
-3.  Generate unique names for the test repositories based on the current timestamp (e.g., `spoon_knife_$(date +%s)`, `rust_book_$(date +%s)`).
+1.  **Generate unique names:** Generate unique names for the test repositories based on the current timestamp (e.g., `spoon_knife_$(date +%s)`, `rust_book_$(date +%s)`). The `repo add` command will clone these into the default CLI repository base path (often `~/.local/share/vectordb-cli/repositories/`).
 
 **Test Steps (Execute these commands manually):**
 1.  **Basic CLI:** Check `--help` and `--version` flags.
@@ -25,20 +23,20 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ./target/release/vectordb-cli --help
     ./target/release/vectordb-cli --version
     ```
-2.  **Add Repositories:** Add both cloned repositories using their unique names. Use the appropriate path to your cloned repo.
+2.  **Add Repositories:** Add both repositories using their unique names and URLs. The CLI will clone them.
     ```bash
-    # Example, replace with your generated names and paths
-    ./target/release/vectordb-cli repo add --name <unique_spoon_knife_name> -p /path/to/Spoon-Knife
-    ./target/release/vectordb-cli repo add --name <unique_rust_book_name> -p /path/to/book
+    # Example, replace with your generated names
+    ./target/release/vectordb-cli repo add --name <unique_spoon_knife_name> --url https://github.com/octocat/Spoon-Knife.git
+    ./target/release/vectordb-cli repo add --name <unique_rust_book_name> --url https://github.com/rust-lang/book.git
     ```
-    *   Verify success messages.
-    *   Test error handling by omitting `--name` or `-p`. (*Note:* Omitting `--name` might default to using the path as the name instead of erroring).
+    *   Verify success messages (including the clone path).
+    *   Test error handling by omitting `--name` or `--url`.
 3.  **List Repositories:** Verify both added repositories are listed.
     ```bash
     ./target/release/vectordb-cli repo list
     ./target/release/vectordb-cli repo list --json
     ```
-    *   Test plain text and `--json` output.
+    *   Test plain text and `--json` output. Check reported local paths.
 4.  **Use Repository:** Set one repository (`Spoon-Knife`) as active using its unique name.
     ```bash
     ./target/release/vectordb-cli repo use <unique_spoon_knife_name>
@@ -78,7 +76,7 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     ./target/release/vectordb-cli repo clear --name <unique_rust_book_name> -y
     ```
     *   Verify success messages.
-9.  **Remove Repositories:** Remove the configuration for both repositories. (*Note:* `remove` uses a positional argument for the name, unlike `clear`).
+9.  **Remove Repositories:** Remove the configuration for both repositories. This should also remove the cloned directories from the repository base path. (*Note:* `remove` uses a positional argument for the name, unlike `clear`).
     ```bash
     # Remove by name (positional argument)
     ./target/release/vectordb-cli repo remove <unique_spoon_knife_name> -y
@@ -92,13 +90,16 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
 **Goal:** Test the non-repository index commands (`simple index`, `simple query`, `simple clear`).
 
 **Setup:**
-1.  Create a simple text file (`simple_test.txt`) with test content in the temp directory. Example content: "This is a file for the E2E test."
+1.  Create a simple text file (`simple_test.txt`) in the current workspace directory. Example content: "This is a file for the E2E test."
+    ```bash
+    echo "This is a file for the E2E test." > simple_test.txt
+    ```
 
 **Test Steps (Execute these commands manually):**
 1.  **Index File:** Index the test file using `simple index`. (*Note:* This command clears the index before running).
     ```bash
-    ./target/release/vectordb-cli simple index /path/to/simple_test.txt --extension txt
-    ./target/release/vectordb-cli simple index /path/to/simple_test.txt
+    ./target/release/vectordb-cli simple index ./simple_test.txt --extension txt
+    ./target/release/vectordb-cli simple index ./simple_test.txt
     ```
     *   Verify command runs successfully.
     *   Test error handling by providing a non-existent file path.
@@ -121,7 +122,8 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
 **Goal:** Test the basic functionality of the `edit validate` and `edit apply` commands.
 
 **Setup:**
-1.  Create a Python file (`edit_test.py`) with simple content within the `Spoon-Knife` repository clone (use the path from Phase 1 Setup). Example:
+1.  **Determine Repo Path:** Identify the path where the `<unique_spoon_knife_name>` repository was cloned by the `repo add` command in Phase 1 (check the output of `repo add` or `repo list`). Let's call this `<spoon_knife_path>`.
+2.  Create a Python file (`edit_test.py`) in the current workspace directory. Example:
     ```python
     # edit_test.py
     def hello():
@@ -130,73 +132,86 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
     def goodbye():
         print("Goodbye, world!")
     ```
-2.  Navigate to the `Spoon-Knife` directory and commit the file:
     ```bash
-    cd /path/to/Spoon-Knife
+    cat << EOF > edit_test.py
+    # edit_test.py
+    def hello():
+        print("Hello, world!")
+
+    def goodbye():
+        print("Goodbye, world!")
+    EOF
+    ```
+3.  **Add and Commit:** Copy the test file into the managed repository, navigate there, commit it, and return.
+    ```bash
+    cp ./edit_test.py <spoon_knife_path>/edit_test.py
+    cd <spoon_knife_path>
     git add edit_test.py
     git commit -m "Add edit_test.py for E2E testing"
     cd - # Return to previous directory
     ```
-3.  Run `repo add`, `repo use`, and `repo sync` for the `Spoon-Knife` repository (using its unique name) to ensure the new file is indexed.
+    *   **Note:** Replace `<spoon_knife_path>` with the actual path identified in step 1.
+4.  **Re-Sync:** Run `repo sync` for the `Spoon-Knife` repository (using its unique name) to ensure the new file is indexed.
     ```bash
-    # Assuming repo was removed in Phase 1 cleanup
-    ./target/release/vectordb-cli repo add --name <unique_spoon_knife_name> -p /path/to/Spoon-Knife
+    # Sync by name (positional argument)
+    ./target/release/vectordb-cli repo sync <unique_spoon_knife_name>
+    # Ensure it's the active repo if applying edits without --name
     ./target/release/vectordb-cli repo use <unique_spoon_knife_name>
-    ./target/release/vectordb-cli repo sync
     ```
 
 **Test Steps (Execute these commands manually):**
 (*Note:* `--target-file` should be `--file`, `--replacement` should be `--edit-content`. The `-y` flag is not supported for `edit apply`. Verification with `grep` may be unreliable depending on shell.)
 (*Note:* Applying multi-line edits via `--edit-content` might treat newlines literally. Using `@file` syntax is not supported.)
+(*Note:* Replace `<spoon_knife_path>` with the actual path identified in Setup step 1.)
 
 1.  **Validate Edit (Lines):** Use `edit validate` with line numbers. (Modify the print statement in `hello`).
     ```bash
     # Corrected arguments: --file, --edit-content
-    ./target/release/vectordb-cli edit validate --file /path/to/Spoon-Knife/edit_test.py --start-line 3 --end-line 3 --edit-content '    print("Hello, E2E test!")'
+    ./target/release/vectordb-cli edit validate --file <spoon_knife_path>/edit_test.py --start-line 3 --end-line 3 --edit-content '    print("Hello, E2E test!")'
     ```
     *   Verify validation passes.
 2.  **Apply Edit (Lines):** Use `edit apply` with line numbers.
     ```bash
     # Corrected arguments, no -y
-    ./target/release/vectordb-cli edit apply --file /path/to/Spoon-Knife/edit_test.py --start-line 3 --end-line 3 --edit-content '    print("Hello, E2E test!")'
+    ./target/release/vectordb-cli edit apply --file <spoon_knife_path>/edit_test.py --start-line 3 --end-line 3 --edit-content '    print("Hello, E2E test!")'
     ```
     *   Verify edit is applied using `cat`.
     ```bash
-    cat /path/to/Spoon-Knife/edit_test.py
+    cat <spoon_knife_path>/edit_test.py
     ```
 3.  **Validate Edit (Semantic):** Use `edit validate` with `--element-query` (modify the `goodbye` function). (Use shell quoting like `$'...'` for newlines if needed, though effectiveness may vary).
     ```bash
     # Corrected arguments
-    ./target/release/vectordb-cli edit validate --file /path/to/Spoon-Knife/edit_test.py --element-query 'function_definition:goodbye' --edit-content $'def goodbye():\\n    print("Farewell, E2E test!")'
+    ./target/release/vectordb-cli edit validate --file <spoon_knife_path>/edit_test.py --element-query 'function_definition:goodbye' --edit-content $'def goodbye():\\n    print("Farewell, E2E test!")'
     ```
     *   Verify validation passes.
 4.  **Apply Edit (Semantic):** Use `edit apply` with `--element-query`.
     ```bash
     # Corrected arguments, no -y
-    ./target/release/vectordb-cli edit apply --file /path/to/Spoon-Knife/edit_test.py --element-query 'function_definition:goodbye' --edit-content $'def goodbye():\\n    print("Farewell, E2E test!")'
+    ./target/release/vectordb-cli edit apply --file <spoon_knife_path>/edit_test.py --element-query 'function_definition:goodbye' --edit-content $'def goodbye():\\n    print("Farewell, E2E test!")'
     ```
     *   Verify edit is applied using `cat`. (*Note:* Check if newline was applied correctly).
     ```bash
-    cat /path/to/Spoon-Knife/edit_test.py
+    cat <spoon_knife_path>/edit_test.py
     ```
 5.  **Apply Edit (ONNX Flags):** Run `edit apply` while providing global ONNX flags (`-m`, `-t`). (Change `hello` back).
     ```bash
-    # Corrected arguments, no -y
-    ./target/release/vectordb-cli -m /path/to/model.onnx -t /path/to/tokenizer/dir edit apply --file /path/to/Spoon-Knife/edit_test.py --element-query 'function_definition:hello' --edit-content $'def hello():\\n    print("Hello, world!")'
+    # Corrected arguments, no -y. Use correct paths for your models.
+    ./target/release/vectordb-cli -m /path/to/model.onnx -t /path/to/tokenizer/dir edit apply --file <spoon_knife_path>/edit_test.py --element-query 'function_definition:hello' --edit-content $'def hello():\\n    print("Hello, world!")'
     ```
     *   Verify edit is applied (flags should be accepted but not affect edit logic).
     *   Verify file content using `cat`.
 
 ## Cleanup
 
-1.  Remove the temporary directory containing cloned repos and test files.
+1.  Remove the test files created in the workspace.
     ```bash
-    rm -rf /path/to/temp_directory
+    rm ./simple_test.txt ./edit_test.py
     ```
 2.  If you set temporary environment variables, unset them.
-3.  Clean up any remaining `vectordb-cli` config/data if desired (check `~/.config/vectordb-cli/` and `~/.local/share/vectordb-cli/`).
+3.  Clean up any remaining `vectordb-cli` config/data if desired (check `~/.config/vectordb-cli/` and `~/.local/share/vectordb-cli/`). The repositories added during the test should have been removed by the `repo remove` steps.
 4.  Optionally remove the test repositories from the CLI config if they weren't cleaned up by the test itself (e.g., if `repo remove` failed).
 
 ## Manual Rating
 
-During the `repo query` and `
+During the `repo query` and `simple query` steps, manually rate the relevance of the returned results on a scale of 1 (irrelevant) to 10 (perfect match). Record these ratings for feedback.

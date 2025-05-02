@@ -111,34 +111,6 @@ pub fn create_fetch_options<'a>(
     Ok(fetch_opts)
 }
 
-/// Perform a fast-forward merge if possible
-pub fn merge_local_branch<'repo>(
-    repo: &'repo Repository,
-    branch_name: &str,
-    target_commit: &git2::Commit<'repo>,
-) -> Result<()> {
-    log::debug!("Attempting merge for branch '{}' to commit {}", branch_name, target_commit.id());
-    let branch_ref_name = format!("refs/heads/{}", branch_name);
-    let mut branch_ref = repo.find_reference(&branch_ref_name)
-        .with_context(|| format!("Failed to find local branch reference '{}'", branch_ref_name))?;
-    let target_annotated_commit = repo.find_annotated_commit(target_commit.id())?;
-    let analysis = repo.merge_analysis(&[&target_annotated_commit])?;
-    if analysis.0.is_fast_forward() {
-        log::info!("Branch '{}' can be fast-forwarded.", branch_name);
-        branch_ref.set_target(target_commit.id(), "Fast-forward merge")
-            .with_context(|| format!("Failed to fast-forward branch '{}'", branch_name))?;
-        log::debug!("Branch '{}' successfully fast-forwarded to {}", branch_name, target_commit.id());
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-            .with_context(|| format!("Failed to checkout head after fast-forwarding branch '{}'", branch_name))?;
-        log::debug!("Checked out head for branch '{}' after fast-forward.", branch_name);
-    } else if analysis.0.is_up_to_date() {
-        log::info!("Branch '{}' is already up-to-date with commit {}", branch_name, target_commit.id());
-    } else {
-        log::warn!("Branch '{}' cannot be fast-forwarded to {}. Merge commit needed (not implemented automatically).", branch_name, target_commit.id());
-    }
-    Ok(())
-}
-
 /// Recursively collect files from a Git tree
 pub fn collect_files_from_tree(
     repo: &Repository,

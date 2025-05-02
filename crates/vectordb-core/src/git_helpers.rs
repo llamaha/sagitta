@@ -5,6 +5,7 @@ use log::{info, warn, debug};
 use anyhow::{Context, Result};
 use std::io::{Write};
 use std::path::PathBuf;
+use crate::repo_helpers::create_fetch_options;
 
 /// Switches the current HEAD of the repository to the specified branch.
 pub fn switch_branch_impl(
@@ -75,83 +76,6 @@ pub fn fetch_remote_impl(
          repo_config.name
     );
     Ok(())
-}
-
-pub(crate) fn create_fetch_options<'a>(
-    _repo_configs: Vec<RepositoryConfig>, // Mark unused for now
-    repo_url: &'a str,
-    ssh_key_path: Option<&'a PathBuf>,
-    ssh_key_passphrase: Option<&'a str>,
-) -> Result<FetchOptions<'a>> {
-    let mut callbacks = RemoteCallbacks::new();
-
-    // --- Start setup_credentials logic replacement ---
-    callbacks.credentials(move |_url, username_from_url, allowed_types| {
-        debug!(
-            "Git credential callback: url={}, username={}, allowed={:?}",
-            _url,
-            username_from_url.unwrap_or("<None>"),
-            allowed_types
-        );
-
-        // Try SSH key first if allowed and path provided
-        if allowed_types.contains(CredentialType::SSH_KEY) && ssh_key_path.is_some() {
-            let key_path = ssh_key_path.unwrap(); // Safe due to is_some check
-            let username = username_from_url.unwrap_or("git"); // Default SSH username
-            debug!("Attempting SSH key auth: user={}, key={}", username, key_path.display());
-            match Cred::ssh_key(
-                username,
-                None, // No public key path needed, infer from private
-                key_path,
-                ssh_key_passphrase
-            ) {
-                Ok(cred) => return Ok(cred),
-                Err(e) => {
-                    warn!("Failed to create SSH credential from key {}: {}. Falling back.", key_path.display(), e);
-                }
-            }
-        }
-
-        // Try git-credential helper (if configured)
-        if allowed_types.contains(CredentialType::DEFAULT) {
-             debug!("Attempting default git credential helper.");
-             match Cred::default() {
-                Ok(cred) => return Ok(cred),
-                Err(e) => {
-                     warn!("Failed to get default git credentials: {}. No auth method succeeded.", e);
-                }
-             }
-        }
-        
-        // If no other method works, return an error
-        Err(git2::Error::new(
-            ErrorCode::Auth,
-            git2::ErrorClass::Ssh,
-            format!("Authentication failed for {}: no suitable credential method found or succeeded.", repo_url)
-        ))
-    });
-    // --- End setup_credentials logic replacement ---
-    
-    // Progress tracking callback
-    callbacks.transfer_progress(|progress| {
-        let received = progress.received_objects();
-        let total = progress.total_objects();
-        let indexed = progress.indexed_deltas();
-        let total_deltas = progress.total_deltas();
-        print!(
-            "Fetching objects: {}/{} | Indexing deltas: {}/{}   ",
-            received, total, indexed, total_deltas
-        );
-        std::io::stdout().flush().unwrap_or_default(); // Flush stdout to show progress
-        true
-    });
-
-    // Create FetchOptions and set callbacks
-    let mut fo = FetchOptions::new();
-    fo.remote_callbacks(callbacks);
-    fo.download_tags(AutotagOption::All); // Example: ensure tags are downloaded
-
-    Ok(fo)
 }
 
 pub(crate) fn merge_local_branch<'repo>(

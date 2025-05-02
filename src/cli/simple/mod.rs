@@ -33,6 +33,8 @@ use vectordb_core::config::load_config; // Import load_config
 // Local module imports
 // pub mod index; // Remove index module
 // use index::handle_file_processing; // Remove usage
+pub mod search_file; // Added
+pub mod view_file; // Added
 
 // Constants
 // const SIMPLE_INDEX_COLLECTION: &str = \"simple_index\"; // REMOVED - Unused
@@ -62,6 +64,10 @@ pub enum SimpleCommand {
     Query(SimpleQueryArgs),
     /// Clear the default collection used by 'simple index'.
     Clear(SimpleClearArgs),
+    /// Search for files within the current directory (or specified paths) using glob patterns.
+    SearchFile(search_file::SearchFileArgs),
+    /// View the content of a specific file.
+    ViewFile(view_file::ViewFileArgs),
 }
 
 // Implement Default for SimpleCommand
@@ -128,6 +134,8 @@ pub async fn handle_simple_command(
         SimpleCommand::Index(index_args) => handle_simple_index(&index_args, cli_args, &config, client).await,
         SimpleCommand::Query(query_args) => handle_simple_query(&query_args, cli_args, &config, client).await,
         SimpleCommand::Clear(clear_args) => handle_simple_clear(&clear_args, &config, client).await,
+        SimpleCommand::SearchFile(search_args) => search_file::handle_simple_search_file(&search_args).await,
+        SimpleCommand::ViewFile(view_args) => view_file::handle_simple_view_file(&view_args).await,
     }
 }
 

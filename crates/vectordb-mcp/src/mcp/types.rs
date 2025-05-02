@@ -282,21 +282,22 @@ pub struct RepositoryListResult {
     pub repositories: Vec<RepositoryInfo>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncParams {
+    /// The name of the repository to sync.
     pub name: String,
-    // pub branch: Option<String>, // Add if needed
+    /// Force re-indexing even if commit hasn't changed.
+    pub force: Option<bool>,
+    /// Optional list of file extensions to filter indexing by.
+    pub extensions: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySyncResult {
-    pub name: String,
-    /// Description of the sync status (e.g., "Synced and Indexed", "Indexed static ref ...").
-    pub status: String,
-    /// The commit hash that was indexed (either the HEAD of the synced branch or the static `target_ref`).
-    pub commit_hash: String,
+    // Result might just be a message string or more structured info
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -383,4 +384,57 @@ pub struct CallToolResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
     pub content: Vec<ContentBlock>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositorySearchFileParams {
+    /// Glob pattern to search for files (e.g., "*.rs", "src/**/*.toml").
+    pub pattern: String,
+    /// Optional: Specify the repository name to search in (overrides active repo concept if used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
+    /// Optional: Perform case-sensitive matching (defaults to false).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub case_sensitive: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositorySearchFileResult {
+    /// List of relative file paths matching the pattern.
+    pub matching_files: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryViewFileParams {
+    /// Relative path to the file within the repository.
+    pub file_path: String, // Using String for JSON compatibility
+    /// Optional: Specify the repository name (overrides active repo concept if used).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_name: Option<String>,
+    /// Optional: Start line number (1-based, inclusive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<usize>,
+    /// Optional: End line number (1-based, inclusive).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryViewFileResult {
+    /// The content of the requested file range.
+    pub content: String,
+    /// The repository the file belongs to.
+    pub repository_name: String,
+    /// The relative path provided in the request.
+    pub relative_path: String,
+    /// The resolved absolute path on the server.
+    pub absolute_path: String, 
+    /// The start line used (if any).
+    pub start_line: Option<usize>,
+    /// The end line used (if any).
+    pub end_line: Option<usize>,
 } 

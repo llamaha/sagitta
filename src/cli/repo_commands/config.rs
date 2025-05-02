@@ -96,7 +96,6 @@ fn get_default_config() -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::tempdir;
     use vectordb_core::config::{AppConfig, save_config, get_config_path_or_default, IndexingConfig, load_config};
     use crate::cli::CliArgs;

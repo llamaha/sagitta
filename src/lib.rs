@@ -44,17 +44,40 @@
 //! 
 //! For library usage, see the [`edit`](edit) module documentation.
 
-// Public modules that can be used when importing the crate
+// Public CLI module
 pub mod cli;
-// pub mod client; // Removed - likely refers to workspace crate
-// pub mod config; // Moved to vectordb-core
+// Public Edit module (contains CLI subcommands)
 pub mod edit;
-pub mod git;
-// pub mod utils; // Remove this line
-// pub mod vectordb; // Remove this line
 
-// Re-export minimal set of items for CLI usage
-// pub use config::{AppConfig, load_config}; // Moved to vectordb-core re-export
+// Re-export key components from the core library for convenience
+pub use vectordb_core::config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
+pub use vectordb_core::embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
+pub use vectordb_core::error::{VectorDBError, Result as CoreResult}; // Alias CoreResult to avoid clash
+pub use vectordb_core::qdrant_client_trait::QdrantClientTrait;
+pub use vectordb_core::constants::*;
+pub use vectordb_core::cache::EmbeddingCache;
+pub use vectordb_core::snippet_extractor::extract_snippet;
+pub use vectordb_core::edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationIssue, EngineValidationSeverity};
+pub use vectordb_core::repo_helpers::{delete_repository_data, switch_repository_branch, get_collection_name, ensure_repository_collection_exists};
+pub use vectordb_core::repo_add::{handle_repo_add, AddRepoArgs, AddRepoError};
+pub use vectordb_core::sync::{sync_repository, SyncOptions, SyncResult};
+pub use vectordb_core::fs_utils::{find_files_matching_pattern, read_file_range};
 
-// Use the re-exports from vectordb_core (with underscore)
-pub use vectordb_core::{AppConfig, load_config};
+// Expose necessary Qdrant types if needed by consumers
+pub use qdrant_client::Qdrant;
+
+// Example function (optional)
+pub fn add(left: u64, right: u64) -> u64 {
+    left + right
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let result = add(2, 2);
+        assert_eq!(result, 4);
+    }
+}

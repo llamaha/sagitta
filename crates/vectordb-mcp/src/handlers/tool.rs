@@ -4,6 +4,7 @@ use crate::mcp::{
         CallToolParams, CallToolResult, ContentBlock, ErrorObject, PingParams, QueryParams,
         RepositoryAddParams, RepositoryListParams, RepositoryRemoveParams, RepositorySyncParams,
         ToolAnnotations, ToolDefinition,
+        RepositorySearchFileParams, RepositoryViewFileParams,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
@@ -71,6 +72,20 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
             let query_params: QueryParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
             match handle_query(query_params, config, qdrant_client, embedding_handler).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "repository_search_file" => {
+            let search_params: RepositorySearchFileParams = deserialize_value(arguments, tool_name)?;
+             match handle_repository_search_file(search_params, config).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "repository_view_file" => {
+            let view_params: RepositoryViewFileParams = deserialize_value(arguments, tool_name)?;
+             match handle_repository_view_file(view_params, config).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -208,6 +223,49 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             }),
              annotations: Some(ToolAnnotations {
                 title: Some("Query Repository".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        // --- Repository Search File ---
+        ToolDefinition {
+            name: "repository_search_file".to_string(),
+            description: Some("Searches for files within a repository using a glob pattern.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "Name of the repository to search within." },
+                    "pattern": { "type": "string", "description": "Glob pattern to search for (e.g., \"*.rs\")." },
+                    "caseSensitive": { "type": "boolean", "description": "Perform case-sensitive matching (default: false)." }
+                },
+                "required": ["repositoryName", "pattern"]
+            }),
+             annotations: Some(ToolAnnotations {
+                title: Some("Search Repository Files".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        // --- Repository View File ---
+        ToolDefinition {
+            name: "repository_view_file".to_string(),
+            description: Some("Views the content of a specific file within a repository, optionally within a line range.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "Name of the repository containing the file." },
+                    "filePath": { "type": "string", "description": "Relative path of the file within the repository." },
+                    "startLine": { "type": "integer", "description": "Optional start line number (1-based)." },
+                    "endLine": { "type": "integer", "description": "Optional end line number (1-based)." }
+                },
+                "required": ["repositoryName", "filePath"]
+            }),
+             annotations: Some(ToolAnnotations {
+                title: Some("View Repository File".to_string()),
                 read_only_hint: Some(true),
                 destructive_hint: Some(false),
                 idempotent_hint: Some(true),

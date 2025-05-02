@@ -1,16 +1,25 @@
 use anyhow::Result;
 use anyhow::Context;
 use colored::*;
+use clap::Args;
 
 // Use config types and the list helper from vectordb_core
 use vectordb_core::{AppConfig, get_managed_repos_from_config};
 
-// Modify function signature to accept json flag
-pub fn list_repositories(config: &AppConfig, json_output: bool) -> Result<()> {
+// Define ListArgs struct
+#[derive(Args, Debug, Clone)]
+pub struct ListArgs {
+    /// Output the list of repositories in JSON format.
+    #[arg(long)]
+    pub json: bool,
+}
+
+// Modify function signature to accept ListArgs
+pub fn list_repositories(config: &AppConfig, args: ListArgs) -> Result<()> {
     // Use the function from vectordb_core
     let data = get_managed_repos_from_config(config);
 
-    if json_output {
+    if args.json {
         // Serialize the entire ManagedRepositories struct
         let json_output = serde_json::to_string_pretty(&data)
             .context("Failed to serialize repository list to JSON")?;

@@ -59,6 +59,7 @@ where
     // --- Load Vocabulary --- 
     // Use helper function to get the correct path
     let vocab_path = config::get_vocabulary_path(config, collection_name)?;
+    log::info!("Attempting to load vocabulary for collection '{}' from path: {}", collection_name, vocab_path.display());
     let vocabulary_manager = match VocabularyManager::load(&vocab_path) {
         Ok(vm) => vm,
         Err(e) => {

@@ -3,7 +3,7 @@ use crate::mcp::{
     types::{
         ErrorObject, RepositoryAddParams, RepositoryAddResult, RepositoryInfo, RepositoryListParams,
         RepositoryListResult, RepositoryRemoveParams, RepositoryRemoveResult, RepositorySyncParams,
-        RepositorySyncResult,
+        RepositorySyncResult, RepositorySearchFileParams, RepositorySearchFileResult, RepositoryViewFileParams, RepositoryViewFileResult,
     },
 };
 use crate::server::map_add_repo_error; // Import helper from server for now
@@ -18,10 +18,16 @@ use vectordb_core::{
     indexing::{self, gather_files},
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{handle_repo_add, AddRepoArgs},
-    repo_helpers::{delete_repository_data, get_collection_name, sync_repository_branch},
+    repo_helpers::{delete_repository_data, get_collection_name, switch_repository_branch},
+    error::{VectorDBError, Result as CoreResult},
+    sync::{sync_repository, SyncOptions},
+    fs_utils::{find_files_matching_pattern, read_file_range},
 };
 use crate::server::map_core_error_to_user_message; // Import helper from server for now
 use tempdir;
+use std::path::PathBuf;
+use git2::Repository; // Import git2
+use vectordb_core::config; // Add imports
 
 #[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -197,182 +203,371 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<RepositorySyncResult, ErrorObject> {
     let repo_name = params.name.clone();
-    let commit_hash: String;
-    let status_message: String;
+    let mut commit_hash: String; // Make mutable
     let target_ref_name: Option<String>; // To store the target ref name if it exists
 
-    // --- Sync Stage (Calls core function that handles both static ref and dynamic branch) ---
-    {
-        // Acquire write lock for sync_repository_branch and config save
-        let mut config_write_guard = config.write().await;
+    // --- Get Vocabulary Path BEFORE sync ---
+    let (vocab_path, vocab_exists_before_sync) = {
+        let config_read = config.read().await;
+        let collection_name_for_vocab = get_collection_name(&repo_name);
+        let path_result = config::get_vocabulary_path(&*config_read, &collection_name_for_vocab);
+        match path_result {
+            Ok(p) => {
+                let exists = p.exists();
+                info!(repo_name=%repo_name, vocab_path=%p.display(), vocab_exists=%exists, "Checked vocabulary existence before sync");
+                (p, exists)
+            },
+            Err(e) => {
+                error!(error = %e, collection=%collection_name_for_vocab, "Failed to determine vocabulary path before sync");
+                // Return error immediately if we can't even determine the path
+                return Err(ErrorObject {
+                    code: error_codes::CONFIG_LOAD_FAILED,
+                    message: format!("Failed to determine vocabulary path: {}", e),
+                    data: None,
+                });
+            }
+        }
+    };
+    // --- End Vocabulary Path Check ---
 
-        let repo_index = config_write_guard
-            .repositories
-            .iter()
-            .position(|r| r.name == repo_name)
-            .ok_or_else(|| ErrorObject {
-                code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' not found during sync", repo_name),
-                data: None,
-            })?;
+    // Drop the write lock before calling sync, which might take time
+    // drop(config.write().await); // Drop seems incorrect here, should be read lock?
 
-        // Store target_ref value before calling sync, as config might change
-        target_ref_name = config_write_guard.repositories[repo_index].target_ref.clone();
+    // Prepare sync options
+    let options = SyncOptions {
+        force: params.force.unwrap_or(false),
+        extensions: params.extensions,
+    };
+    
+    // Clone AppConfig before sync to avoid holding lock across await (like CLI)
+    let app_config_clone: AppConfig = {
+        let config_read = config.read().await;
+        (*config_read).clone()
+    };
 
-        // Call the core sync function - it handles static vs dynamic internally
-        let sync_result = sync_repository_branch(
-            &*config_write_guard,
-            repo_index,
-            qdrant_client.clone(),
-            true, // fetch_and_merge flag (currently unused in core func but kept)
-        )
-        .await;
+    let repo_index = app_config_clone // Use the clone to find the index
+        .repositories
+        .iter()
+        .position(|r| r.name == repo_name)
+        .ok_or_else(|| ErrorObject {
+            code: error_codes::REPO_NOT_FOUND,
+            message: format!("Repository '{}' not found during sync", repo_name),
+            data: None,
+        })?;
 
-        match sync_result {
-            Ok(sync_output) => {
-                // sync_repository_branch returns the commit hash for static refs
-                // or the new HEAD commit hash for successfully merged dynamic branches
-                // or a status message string for non-fast-forward cases (ahead, diverged)
-                
-                // Check if the output looks like a commit hash (e.g., 40 hex chars)
-                if sync_output.len() == 40 && sync_output.chars().all(|c| c.is_ascii_hexdigit()) {
-                    commit_hash = sync_output;
-                    info!(repo_name=%repo_name, commit=%commit_hash, "Sync successful, proceeding to index.");
-                    
-                    // Save config (sync_repository_branch might update last_synced_commit for dynamic branches)
-                    if let Err(e) = save_config(&*config_write_guard, None) {
-                        error!(error = %e, "Failed to save config after repository sync");
-                        return Err(ErrorObject {
-                            code: error_codes::CONFIG_SAVE_FAILED,
-                            message: format!("Failed to save configuration after sync: {}", e),
-                            data: None,
-                        });
+    // Store target_ref value before calling sync, as config might change
+    target_ref_name = app_config_clone.repositories[repo_index].target_ref.clone();
+
+    // Call core function and map the Result<vectordb_core::sync::SyncResult, VectorDBError> 
+    // to Result<RepositorySyncResult, ErrorObject> (Note: Core SyncResult structure differs from MCP)
+    let core_sync_result = sync_repository(
+        qdrant_client.clone(),
+        &app_config_clone.repositories[repo_index], // Pass ref from clone
+        options,
+        &app_config_clone, // Pass ref to clone
+    ).await;
+    
+    // No longer need to explicitly drop the lock here
+
+    let sync_message: String;
+
+    match core_sync_result {
+        Ok(sync_result) => {
+            sync_message = sync_result.message.clone(); // Store message for final result
+            if sync_result.success {
+                if let Some(commit) = sync_result.last_synced_commit {
+                    commit_hash = commit; // Store commit for potential indexing stage
+                    info!(repo_name=%repo_name, commit=%commit_hash, "Sync successful, proceeding to update config.");
+                    // Update config immediately
+                    let mut config_write = config.write().await;
+                    if let Some(repo_mut) = config_write.repositories.iter_mut().find(|r| r.name == repo_name) {
+                        let branch_or_ref = target_ref_name.as_deref().or(repo_mut.active_branch.as_deref()).unwrap_or("main");
+                        repo_mut.last_synced_commits.insert(branch_or_ref.to_string(), commit_hash.clone());
+                        repo_mut.indexed_languages = Some(sync_result.indexed_languages.clone()); // Clone languages
+                        // Save config right after updating it, propagating error
+                        vectordb_core::config::save_config(&*config_write, None).map_err(|e| {
+                            error!(error = %e, "Failed to save config after repository sync update");
+                            // Decide if this should be a hard error for the sync operation? Yes.
+                            ErrorObject {
+                                code: error_codes::CONFIG_SAVE_FAILED,
+                                message: format!("Failed to save config after sync update: {}", e),
+                                data: None,
+                            }
+                        })?; // Use ? to propagate error
+                    } else {
+                         error!("Failed to find repository '{}' to update sync status after successful sync.", repo_name);
                     }
                 } else {
-                    // Output is likely a status message (up-to-date, ahead, diverged, etc.)
-                    info!(repo_name=%repo_name, status=%sync_output, "Sync resulted in status message, no new commit to index.");
-                    // Save config anyway, as fetch might have updated things
-                    if let Err(e) = save_config(&*config_write_guard, None) {
-                        error!(error = %e, "Failed to save config after repository sync resulted in status message");
-                        // Don't error out here, just log, as the sync itself didn't fail
-                    }
-                    // Return a specific result indicating no indexing occurred
-                    return Ok(RepositorySyncResult {
-                        name: repo_name,
-                        status: sync_output, // Pass the status message through
-                        commit_hash: "N/A".to_string(), // Indicate no specific commit was indexed now
+                    // Sync reported success but no commit hash (e.g., up-to-date message)
+                    info!(repo_name=%repo_name, status=%sync_result.message, "Sync resulted in status message, no new commit hash from sync.");
+                    commit_hash = String::new(); 
+                }
+            } else {
+                // Sync reported failure
+                error!(repo_name = %repo_name, error = %sync_result.message, "Core repository sync reported failure");
+                return Err(ErrorObject {
+                    code: error_codes::CORE_LOGIC_ERROR,
+                    message: sync_result.message,
+                    data: None,
+                });
+            }
+        },
+        Err(core_error) => { // Explicitly map the error
+            error!(repo_name= %repo_name, error = %core_error, "Core sync function failed");
+            let user_message = map_core_error_to_user_message(&anyhow!(core_error), "Sync failed");
+            return Err(ErrorObject { 
+                code: error_codes::INTERNAL_ERROR, // Or map core_error type to specific MCP code
+                message: user_message, 
+                data: None 
+            });
+        }
+    }
+    // --- End of Sync Stage Logic ---
+    
+    // --- Indexing Stage ---
+    // Determine if indexing should run:
+    // 1. Sync produced a commit hash (even if it's the same as before) OR
+    // 2. Vocabulary file didn't exist before the sync started (force initial index)
+    let should_index = !commit_hash.is_empty() || !vocab_exists_before_sync;
+
+    if !should_index {
+        info!(repo_name = %repo_name, commit = %commit_hash, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
+    } else {
+        // Get fresh repo config clone needed for indexing (config might have been updated)
+        let repo_config_clone: RepositoryConfig = {
+            let config_read_guard = config.read().await; // Read lock again
+            config_read_guard
+                .repositories
+                .iter()
+                .find(|r| r.name == repo_name)
+                .cloned()
+                .ok_or_else(|| ErrorObject {
+                    code: error_codes::REPO_NOT_FOUND,
+                    message: format!("Repository '{}' disappeared unexpectedly before indexing", repo_name),
+                    data: None,
+                })?
+        };
+        // Clone entire app config needed by index_repo_files
+        let app_config_clone: AppConfig = {
+            let config_read_guard = config.read().await;
+            (*config_read_guard).clone()
+        };
+
+        let repo_root = &repo_config_clone.local_path;
+
+        // Determine the commit hash to use for indexing
+        let indexing_commit_hash = if commit_hash.is_empty() {
+            // If sync reported no change but we force index (vocab missing),
+            // get the current HEAD commit of the local repo.
+            info!(repo_name=%repo_name, "Fetching current HEAD commit for forced indexing.");
+            match Repository::open(repo_root) {
+                Ok(repo) => repo.head()
+                    .and_then(|head_ref| head_ref.resolve())
+                    .and_then(|resolved_ref| resolved_ref.target().ok_or_else(|| git2::Error::from_str("HEAD has no target OID")))
+                    .map(|oid| oid.to_string())
+                    .map_err(|e| {
+                        error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to get current commit hash from local repo");
+                        e // Propagate git2 error for logging maybe?
+                    })
+                    .unwrap_or_else(|_| String::new()) // Fallback to empty on error
+                ,
+                Err(e) => {
+                    error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to open local git repository");
+                    String::new() // Fallback to empty if repo open fails
+                }
+            }
+        } else {
+            // Use the commit hash reported by the sync operation
+            commit_hash.clone()
+        };
+
+        // Ensure we don't try indexing with an empty commit hash if it was derived or passed incorrectly
+        if indexing_commit_hash.is_empty() {
+             error!(repo_name=%repo_name, "Resolved commit hash for indexing is empty. Aborting indexing stage.");
+             // Return an error if we can't get a commit hash when indexing is required
+             return Err(ErrorObject {
+                 code: error_codes::GIT_OPERATION_FAILED, // Or a new specific code?
+                 message: "Failed to determine commit hash required for indexing.".to_string(),
+                 data: None,
+             });
+        } else {
+             info!(repo_name = %repo_name, commit = %indexing_commit_hash, "Starting indexing stage.");
+        }
+
+        // Now proceed with indexing logic using indexing_commit_hash
+        let context_identifier = repo_config_clone
+            .target_ref
+            .as_deref()
+            .or(repo_config_clone.active_branch.as_deref())
+            .unwrap_or(&repo_config_clone.default_branch);
+        let collection_name = get_collection_name(&repo_name);
+
+        let files_to_index_abs = match gather_files(&[repo_root.clone()], None) {
+            Ok(files) => files,
+            Err(e) => {
+                error!(repo_name = %repo_name, error = %e, "Failed to list files for indexing");
+                return Err(ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("Failed to gather files in {}: {}", repo_root.display(), e),
+                    data: None,
+                });
+            }
+        };
+
+        let files_to_index_rel: Vec<std::path::PathBuf> = files_to_index_abs
+            .iter()
+            .filter_map(|abs_path| abs_path.strip_prefix(repo_root).ok().map(|p| p.to_path_buf()))
+            .collect();
+
+        if files_to_index_rel.is_empty() {
+            warn!(repo_name = %repo_name, "No supported files found to index in repository.");
+        } else {
+            info!(repo_name = %repo_name, count = files_to_index_rel.len(), commit=%indexing_commit_hash, "Found files to index, calling index_repo_files");
+
+            match indexing::index_repo_files(
+                &app_config_clone, 
+                repo_root,
+                &files_to_index_rel,
+                &collection_name,
+                context_identifier, 
+                &indexing_commit_hash, // Use the potentially derived commit hash
+                qdrant_client.clone(),
+                embedding_handler.clone(),
+                None,
+                app_config_clone.indexing.max_concurrent_upserts,
+            )
+            .await
+            {
+                Ok(count) => {
+                    info!(repo_name = %repo_name, count = count, "Successfully indexed files.");
+                }
+                Err(e) => {
+                    error!(repo_name = %repo_name, error = %e, "Indexing failed during sync");
+                    let user_message = map_core_error_to_user_message(&anyhow!(e), "Indexing failed");
+                    return Err(ErrorObject {
+                        code: error_codes::CORE_LOGIC_ERROR,
+                        message: user_message,
+                        data: None,
                     });
                 }
             }
-            Err(e) => {
-                error!(repo_name = %repo_name, error = %e, "Core repository sync failed");
-                // Save config even on sync failure
-                 if let Err(save_err) = save_config(&*config_write_guard, None) {
-                     error!(error = %save_err, "Failed to save config after failed repository sync attempt");
-                 }
-                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Sync failed");
-                return Err(ErrorObject {
-                    code: error_codes::CORE_LOGIC_ERROR,
-                     message: user_message,
-                    data: None,
-                });
-            }
         }
-    } // config_write_guard dropped here
+    } // End of indexing stage
 
-    // Determine status message based on whether it was a static ref sync
-    if let Some(ref_name) = target_ref_name {
-        status_message = format!("Indexed static ref '{}'", ref_name);
-    } else {
-        status_message = "Synced and Indexed".to_string();
-    }
+    // Return the message from the core sync result
+    Ok(RepositorySyncResult {
+        message: sync_message, // Use the stored message
+        // NOTE: MCP SyncResult doesn't have commit hash or name fields like core
+        // These were part of the previous draft but not the MCP struct definition
+        // name: repo_name, 
+        // commit_hash: Some(indexing_commit_hash), // Should we return the hash used for indexing?
+    })
+}
 
-    // --- Indexing Stage (Only runs if sync resulted in a commit hash) ---
-    info!(repo_name = %repo_name, commit = %commit_hash, "Starting indexing stage.");
+/// Helper to get RepositoryConfig based on MCP params (name or active)
+/// Note: This differs slightly from CLI utils as MCP doesn't have a global active repo state directly.
+/// Clients usually specify the repo per request, or it might be implied by context (not handled here yet).
+fn get_repo_config_mcp<'a>(
+    config: &'a AppConfig,
+    repo_name_param: Option<&str>,
+) -> Result<&'a RepositoryConfig, ErrorObject> {
+    let repo_name = repo_name_param.ok_or_else(|| ErrorObject {
+        code: error_codes::INVALID_PARAMS,
+        message: "Repository name must be provided in repository_name parameter.".to_string(),
+        data: None,
+    })?;
 
-    // Get fresh clones of config needed for indexing (config might have been updated)
-    let repo_config_clone: RepositoryConfig = {
-        let config_read_guard = config.read().await;
-         config_read_guard
-            .repositories
-            .iter()
-            .find(|r| r.name == repo_name)
-            .cloned()
-            .ok_or_else(|| ErrorObject {
-                code: error_codes::REPO_NOT_FOUND,
-                message: format!("Repository '{}' disappeared unexpectedly before indexing", repo_name),
-                data: None,
-            })?
-    };
-     let app_config_clone: AppConfig = {
-         let config_read_guard = config.read().await;
-         (*config_read_guard).clone()
-     };
-
-    let repo_root = &repo_config_clone.local_path;
-    // Use target_ref as branch context if available, otherwise use active/default branch
-    let context_identifier = repo_config_clone
-        .target_ref
-        .as_deref()
-        .or(repo_config_clone.active_branch.as_deref())
-        .unwrap_or(&repo_config_clone.default_branch);
-    let collection_name = get_collection_name(&repo_name);
-
-    let files_to_index_abs = match gather_files(&[repo_root.clone()], None) {
-        Ok(files) => files,
-        Err(e) => {
-            error!(repo_name = %repo_name, error = %e, "Failed to list files for indexing");
-            return Err(ErrorObject {
-                code: error_codes::INTERNAL_ERROR,
-                message: format!("Failed to gather files in {}: {}", repo_root.display(), e),
-                data: None,
-            });
-        }
-    };
-
-    let files_to_index_rel: Vec<std::path::PathBuf> = files_to_index_abs
+    config
+        .repositories
         .iter()
-        .filter_map(|abs_path| abs_path.strip_prefix(repo_root).ok().map(|p| p.to_path_buf()))
+        .find(|r| r.name == repo_name)
+        .ok_or_else(|| ErrorObject {
+            code: error_codes::REPO_NOT_FOUND,
+            message: format!("Repository '{}' not found in configuration.", repo_name),
+            data: None,
+        })
+}
+
+#[instrument(skip(config), fields(repo_name = ?params.repository_name, pattern = %params.pattern))]
+pub async fn handle_repository_search_file(
+    params: RepositorySearchFileParams,
+    config: Arc<RwLock<AppConfig>>,
+) -> Result<RepositorySearchFileResult, ErrorObject> {
+    let config_read = config.read().await;
+    let repo_config = get_repo_config_mcp(&config_read, params.repository_name.as_deref())?;
+    let search_path = &repo_config.local_path;
+    let case_sensitive = params.case_sensitive.unwrap_or(false);
+
+    let matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
+        .map_err(|e| {
+            let user_message = map_core_error_to_user_message(&anyhow!(e), "File search failed");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: user_message,
+                data: None,
+            }
+        })?;
+
+    // Convert PathBufs to Strings for JSON response
+    let matching_files_str = matching_paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().to_string())
         .collect();
 
-    if files_to_index_rel.is_empty() {
-        warn!(repo_name = %repo_name, "No supported files found to index in repository.");
-    } else {
-        info!(repo_name = %repo_name, count = files_to_index_rel.len(), "Found files to index");
+    Ok(RepositorySearchFileResult { matching_files: matching_files_str })
+}
 
-        match indexing::index_repo_files(
-            &app_config_clone, // Use cloned config (safe for both paths)
-            repo_root,
-            &files_to_index_rel,
-            &collection_name,
-            context_identifier, // Use target_ref or branch name here
-            &commit_hash,
-            qdrant_client.clone(),
-            embedding_handler.clone(),
-            None,
-            app_config_clone.indexing.max_concurrent_upserts,
-        )
-        .await
-        {
-            Ok(count) => {
-                info!(repo_name = %repo_name, count = count, "Successfully indexed files.");
-            }
-            Err(e) => {
-                error!(repo_name = %repo_name, error = %e, "Indexing failed during sync");
-                 let user_message = map_core_error_to_user_message(&anyhow!(e), "Indexing failed");
-                return Err(ErrorObject {
-                    code: error_codes::CORE_LOGIC_ERROR,
-                    message: user_message,
-                    data: None,
-                });
-            }
-        }
+#[instrument(skip(config), fields(repo_name = ?params.repository_name, file_path = %params.file_path))]
+pub async fn handle_repository_view_file(
+    params: RepositoryViewFileParams,
+    config: Arc<RwLock<AppConfig>>,
+) -> Result<RepositoryViewFileResult, ErrorObject> {
+    let config_read = config.read().await;
+    let repo_config = get_repo_config_mcp(&config_read, params.repository_name.as_deref())?;
+    let base_path = &repo_config.local_path;
+    let relative_path = PathBuf::from(&params.file_path); // Convert String to PathBuf
+
+    let absolute_path = base_path.join(&relative_path);
+
+    // Canonicalize and check for path traversal
+     let canonical_base = base_path.canonicalize()
+        .map_err(|e| ErrorObject { 
+            code: error_codes::INTERNAL_ERROR, 
+            message: format!("Failed to canonicalize base path {}: {}", base_path.display(), e), 
+            data: None 
+        })?;
+    let canonical_target = absolute_path.canonicalize()
+        .map_err(|e| ErrorObject { 
+            code: error_codes::FILE_NOT_FOUND, // Use file not found if canonicalization fails for target 
+            message: format!("File not found or failed to access: {} (from {}): {}", absolute_path.display(), params.file_path, e), 
+            data: None 
+        })?;
+
+    if !canonical_target.starts_with(&canonical_base) {
+         return Err(ErrorObject {
+             code: error_codes::INVALID_PARAMS,
+             message: "Attempted path traversal detected. Target path is outside the repository root.".to_string(),
+             data: None,
+         });
     }
 
-    Ok(RepositorySyncResult {
-        name: repo_name,
-        status: status_message, // Use dynamic status message
-        commit_hash,
+    let content = read_file_range(&canonical_target, params.start_line, params.end_line)
+         .map_err(|e| {
+            let user_message = map_core_error_to_user_message(&anyhow!(e), "File view failed");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR, // Or FILE_NOT_FOUND?
+                message: user_message,
+                data: None,
+            }
+        })?;
+    
+    Ok(RepositoryViewFileResult {
+        content,
+        repository_name: repo_config.name.clone(),
+        relative_path: params.file_path.clone(),
+        absolute_path: canonical_target.to_string_lossy().to_string(),
+        start_line: params.start_line,
+        end_line: params.end_line,
     })
 }
 
