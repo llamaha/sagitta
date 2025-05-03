@@ -208,4 +208,7 @@ pub mod error_codes {
     // Query Errors
     pub const INVALID_QUERY_PARAMS: i64 = -32020;
     pub const QUERY_EXECUTION_FAILED: i64 = -32021;
+
+    // File System Errors
+    pub const FILE_NOT_FOUND: i64 = -32022;
 }

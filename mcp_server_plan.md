@@ -2,7 +2,7 @@
 
 This document outlines the plan for creating the `vectordb-mcp` crate, which will act as an MCP (Multi-purpose Cooperative Protocol) server leveraging the `vectordb-core` library.
 
-**Goal:** Provide access to vector database operations (add repository, list repositories, sync repository, query code) via an MCP interface, potentially usable by tools like Cursor.
+**Goal:** Provide access to vector database operations (add repository, list repositories, sync repository, query code, search files, view files) via an MCP interface, potentially usable by tools like Cursor.
 
 ## Phase 1: Project Setup & Basic Structure - Complete
 
@@ -52,32 +52,32 @@ This document outlines the plan for creating the `vectordb-mcp` crate, which wil
 4.  **Basic Health Check:** - **DONE (ping)**
     *   Implement a simple MCP command (e.g., `ping` or `health`) to verify the server is responsive. - *(ping handler implemented in `server.rs`)*
 
-## Phase 3: Implement Core Repository Management Handlers - Complete
+## Phase 3: Implement Core Repository Management & File Tools Handlers - In Progress
 
-*Status: All handlers (`repository_add`, `repository_list`, `repository_sync`, `repository_remove`, `query`) implemented in `server.rs`. Errors mapped.* 
+*Status: Repository handlers (`add`, `list`, `sync`, `remove`, `query`) implemented. File tool handlers (`search_file`, `view_file`) need implementation. Errors mapped.* 
 
 1.  **Define `AppConfig` Structure:** - DONE
     *   Define `AppConfig` in `vectordb-core` (e.g., `crates/vectordb-core/src/config.rs`) to hold global settings and a list of `RepositoryConfig`.
     *   Define `RepositoryConfig` to store details for each repository (name, URL, local path, active branch, sync status, etc.).
     *   Implement functions to load/save `AppConfig` (e.g., from/to a TOML file).
-2.  **Implement `repository_add` Handler:** - DONE
+2.  **Implement `repository/add` Handler:** - DONE
     *   Define MCP request/response for adding a repository (`RepositoryAddParams`, `RepositoryAddResult`).
     *   Create handler function in `server.rs` taking request parameters (e.g., repository path/URL).
     *   Call `vectordb_core::repo_add::handle_repo_add` function.
     *   Map the result/error to the MCP response format.
-3.  **Implement `repository_list` Handler:** - DONE
+3.  **Implement `repository/list` Handler:** - DONE
     *   Define MCP request/response (`RepositoryListParams` - likely empty, `RepositoryListResult` - list of repository info).
     *   Create handler function in `server.rs`.
     *   Read the `repositories` field from `AppConfig`.
     *   Format the list of `RepositoryConfig` into the MCP response format (include key info: name, url, local path, active branch).
-4.  **Implement `repository_sync` Handler:** - DONE
+4.  **Implement `repository/sync` Handler:** - DONE
     *   Define MCP request/response (`RepositorySyncParams` - repo name, maybe branch, sync options; `RepositorySyncResult` - status/success).
     *   Create handler function in `server.rs`.
     *   Find the specified `RepositoryConfig` in `AppConfig`.
-    *   Call a core function (e.g., `vectordb_core::repo_sync::sync_repository`) to perform the git pull/fetch and potentially re-index changed files.
+    *   Call a core function (e.g., `vectordb_core::sync::sync_repository`) to perform the git pull/fetch and potentially re-index changed files.
     *   Update the sync status in `AppConfig` and save it.
     *   Return success/failure/status in the MCP response.
-5.  **`repository_remove` Handler:** - DONE
+5.  **`repository/remove` Handler:** - DONE
     *   Define the MCP request/response for removing a repository.
     *   Create a handler function that takes the repository name/ID.
     *   Load `AppConfig`.
@@ -93,7 +93,19 @@ This document outlines the plan for creating the `vectordb-mcp` crate, which wil
     *   Initialize `EmbeddingHandler` and `QdrantClientTrait`.
     *   Call `vectordb_core::search_impl::search_collection`. - *(DONE in `handle_query`)*
     *   Format the search results into the MCP response. - *(DONE in `handle_query`)*
-7.  **Error Handling:** - DONE
+7.  **Implement `repository/search_file` Handler:** - **TODO**
+    *   Define MCP request/response (`RepositorySearchFileParams`, `RepositorySearchFileResult`).
+    *   Create handler function in `server.rs`.
+    *   Find target `RepositoryConfig`.
+    *   Call `vectordb_core::fs_utils::find_files_matching_pattern`.
+    *   Map the `Vec<PathBuf>` result to the MCP response format (likely a list of strings).
+8.  **Implement `repository/view_file` Handler:** - **TODO**
+    *   Define MCP request/response (`RepositoryViewFileParams`, `RepositoryViewFileResult`).
+    *   Create handler function in `server.rs`.
+    *   Find target `RepositoryConfig` and construct absolute path.
+    *   Call `vectordb_core::fs_utils::read_file_range`.
+    *   Map the `String` content result to the MCP response format.
+9.  **Error Handling:** - DONE
     *   Ensure errors from `vectordb-core` (which uses `anyhow::Result` and `VectorDBError`) are properly caught and translated into meaningful MCP error responses.
 
 ## Phase 4: Refinement & Testing - In Progress
@@ -105,19 +117,20 @@ This document outlines the plan for creating the `vectordb-mcp` crate, which wil
 2.  **Logging & Tracing:** - DONE (Basic tracing added, output fixed to stderr)
     *   Ensure informative logs are emitted for requests, responses, errors, and key operations using the `tracing` crate.
     *   Logs correctly directed to stderr.
-3.  **MCP `initialize` Handler:** - **NEW**
+3.  **MCP `initialize` Handler:** - **IN PROGRESS**
     *   Define `InitializeParams` and `InitializeResult` structs in `mcp/types.rs` based on MCP spec/observed request.
-    *   The `InitializeResult` must declare the server's capabilities, specifically listing the available methods (`ping`, `repository_add`, `repository_list`, `repository_sync`, `repository_remove`, `query`) as MCP "tools" with appropriate names/descriptions.
+    *   The `InitializeResult` must declare the server's capabilities, specifically listing the available methods (`ping`, `repository/add`, `repository/list`, `repository/sync`, `repository/remove`, `query`, `repository/search_file`, `repository/view_file`) as MCP "tools" with appropriate names/descriptions.
     *   Implement the `initialize` method handler within `Server::handle_request` (`server.rs`).
 4.  **Server Persistence (for stdio MCP):** - DONE 
     *   The main server loop (`server.rs`) correctly handles multiple requests and EOF.
 5.  **Integration Testing:** - **IN PROGRESS**
     *   Develop integration tests (potentially in a separate test suite or using `#[tokio::test]`) that start the server and send MCP commands to verify end-to-end functionality.
     *   Include testing the `initialize` sequence.
-    *   *Current state: `tests/mcp_integration_test.rs` created with mocks. `cargo test -p vectordb-mcp` fails with multiple errors related to trait implementation signatures, mock setup (invalid `impl EmbeddingHandler`), filter access in mock, Server instantiation, and private method access.* 
+    *   Include tests for `repository/search_file` and `repository/view_file`.
+    *   *Current state: `tests/mcp_integration_test.rs` exists but has build errors related to mocks and signatures.* 
     *   *Next step: Fix the test setup issues.* 
 6.  **Documentation:** - TODO
-    *   Document the MCP protocol (commands, request/response formats) within the crate's README or code comments, including the `initialize` step.
+    *   Document the MCP protocol (commands, request/response formats) within the crate's README or code comments, including the `initialize` step and new file tools.
     *   Document how to run and configure the server.
 7.  **Code Quality:** - TODO (Skipped for now)
     *   Run `cargo fmt` and `cargo clippy`.

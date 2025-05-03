@@ -346,15 +346,9 @@ where
         warn!("No .git directory found at '{}'. This may not be a git repository. Skipping removal for safety.", local_path.display());
         return Ok(());
     }
-    let dangerous_paths = ["/", "/home", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
+    let dangerous_paths = ["/", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
     if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{}/", p))) {
         error!("Path '{path_str}' appears to be a system directory. Refusing to delete for safety.");
-        return Ok(());
-    }
-    let is_in_repos_dir = path_str.contains("/repositories/") || path_str.contains("/vectordb-cli/") || path_str.contains("/repos/");
-    if !is_in_repos_dir {
-        warn!("Repository path '{path_str}' doesn't appear to be in a standard repositories directory. Skipping automatic removal for safety.");
-        warn!("If you want to delete this directory, please do so manually.");
         return Ok(());
     }
     info!("Removing local repository directory '{}'...", local_path.display());

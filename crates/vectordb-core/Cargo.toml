@@ -16,6 +16,7 @@ async-trait = "0.1"
 colored = "2.1.0"
 env_logger = "0.11"
 filetime = "0.2"
+glob = "0.3.1" # Added glob
 indicatif = "0.17.8"
 log = "0.4"
 # qdrant-client = { version = "1.8.0", features = ["serde", "tonic-tls"] } # Keeping commented for now
@@ -77,9 +78,9 @@ tree-sitter-yaml = "0.6.1"
 
 # --- Dependencies for edit module --- 
 regex = "1.10.3"
-tempfile = "3.5"
+tempfile = "3.10.1" # Moved from dev-dependencies
 # Note: tree-sitter and language crates already added above for syntax module
-# --- End dependencies for edit module ---
+# --- End dependencies for edit module ---\
 
 num_cpus = "1.16"
 
@@ -89,7 +90,7 @@ num_cpus = "1.16"
 # walkdir = "2.5.0" # Removed this one
 
 [dev-dependencies] # Add dev dependencies if needed for tests in core
-tempfile = "3.10.1"
+# tempfile = "3.10.1" # Moved to main dependencies
 serde_json = "1.0.117"
 mockall = "0.12.1"
 

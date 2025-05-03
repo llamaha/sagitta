@@ -3,7 +3,7 @@ use crate::mcp::types::{
     QueryResult, RepositoryAddParams, RepositoryAddResult, RepositoryInfo, RepositoryListParams,
     RepositoryListResult, RepositorySyncParams, RepositorySyncResult, RepositoryRemoveParams, RepositoryRemoveResult, SearchResultItem,
     Request, Response, ServerInfo, ServerCapabilities, ListToolsParams, ListToolsResult, ToolDefinition, InitializedNotificationParams, ToolAnnotations,
-    CallToolParams, CallToolResult, ContentBlock
+    CallToolParams, CallToolResult, ContentBlock, RepositorySearchFileParams, RepositoryViewFileParams
 };
 use crate::mcp::error_codes;
 use anyhow::{anyhow, Context, Result};
@@ -24,10 +24,11 @@ use vectordb_core::{
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{AddRepoArgs, handle_repo_add, AddRepoError},
     repo_helpers::{
-        get_collection_name, delete_repository_data, sync_repository_branch, index_files,
+        get_collection_name, delete_repository_data, switch_repository_branch, index_files,
     },
     search_collection,
     indexing::{self, index_repo_files, gather_files},
+    sync::{sync_repository, SyncOptions},
 };
 use qdrant_client::{
     qdrant::{Filter, Condition, value::Kind, FieldCondition, Match, Value as QdrantValue},
@@ -41,7 +42,9 @@ use crate::handlers::repository::{
     handle_repository_add,
     handle_repository_list,
     handle_repository_remove,
-    handle_repository_sync
+    handle_repository_sync,
+    handle_repository_search_file,
+    handle_repository_view_file
 };
 use crate::handlers::tool::{handle_tools_call, get_tool_definitions};
 use crate::handlers::initialize::handle_initialize;
@@ -214,47 +217,57 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         }
 
         match request.method.as_str() {
-            "initialize" => {
+            "initialize" | "mcp_vectordb_mcp_initialize" => {
                 let params: InitializeParams = deserialize_params(request.params, "initialize")?;
                 let result = handle_initialize(params).await?;
                 ok_some(result)
             }
-            "initialized" | "notifications/initialized" => {
+            "initialized" | "notifications/initialized" | "mcp_vectordb_mcp_initialized" => {
                 let _params: InitializedNotificationParams = deserialize_params(request.params, "initialized")?;
                 info!("Received initialized notification");
                 Ok(None)
             }
-            "ping" => {
+            "ping" | "mcp_vectordb_mcp_ping" => {
                 let params: PingParams = deserialize_params(request.params, "ping")?;
                 let result = handle_ping(params).await?;
                 ok_some(result)
             }
-            "query" => {
+            "query" | "mcp_vectordb_mcp_query" => {
                 let params: QueryParams = deserialize_params(request.params, "query")?;
                 let result = handle_query(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
-            "repository/add" => {
+            "repository/add" | "mcp_vectordb_mcp_repository_add" => {
                 let params: RepositoryAddParams = deserialize_params(request.params, "repository/add")?;
                 let result = handle_repository_add(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
-            "repository/list" => {
+            "repository/list" | "mcp_vectordb_mcp_repository_list" => {
                 let params: RepositoryListParams = deserialize_params(request.params, "repository/list")?;
                 let result = handle_repository_list(params, config).await?;
                 ok_some(result)
             }
-            "repository/remove" => {
+            "repository/remove" | "mcp_vectordb_mcp_repository_remove" => {
                 let params: RepositoryRemoveParams = deserialize_params(request.params, "repository/remove")?;
                 let result = handle_repository_remove(params, config, qdrant_client).await?;
                 ok_some(result)
             }
-            "repository/sync" => {
+            "repository/sync" | "mcp_vectordb_mcp_repository_sync" => {
                 let params: RepositorySyncParams = deserialize_params(request.params, "repository/sync")?;
                 let result = handle_repository_sync(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
-            "tools/list" => {
+            "repository/search_file" | "mcp_vectordb_mcp_repository_search_file" => {
+                let params: RepositorySearchFileParams = deserialize_params(request.params, "repository/search_file")?;
+                let result = handle_repository_search_file(params, config).await?;
+                ok_some(result)
+            }
+            "repository/view_file" | "mcp_vectordb_mcp_repository_view_file" => {
+                let params: RepositoryViewFileParams = deserialize_params(request.params, "repository/view_file")?;
+                let result = handle_repository_view_file(params, config).await?;
+                ok_some(result)
+            }
+            "tools/list" | "mcp_vectordb_mcp_tools_list" => {
                 let _params: ListToolsParams = deserialize_params(request.params, "tool/list")?;
                 
                 let tools = get_tool_definitions();

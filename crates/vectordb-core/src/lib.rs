@@ -63,6 +63,8 @@ pub mod repo_helpers;
 pub mod snippet_extractor;
 pub mod tokenizer;
 pub mod vocabulary;
+pub mod fs_utils; // Added fs_utils module
+pub mod sync; // Added sync module
 
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 pub use embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
@@ -79,8 +81,9 @@ pub use qdrant_ops::delete_all_points;
 
 // Re-export other necessary items if needed by CLI directly
 pub use edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationIssue, EngineValidationSeverity};
-pub use repo_helpers::{delete_repository_data, sync_repository_branch, switch_repository_branch, get_collection_name, ensure_repository_collection_exists};
+pub use repo_helpers::{delete_repository_data, switch_repository_branch, get_collection_name, ensure_repository_collection_exists};
 pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo_add is needed by CLI
+pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 
 // Keep the basic add function and test for now
 pub fn add(left: u64, right: u64) -> u64 {

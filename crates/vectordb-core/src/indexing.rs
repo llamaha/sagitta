@@ -522,14 +522,27 @@ pub async fn index_repo_files<
     let final_vocab_size = vocabulary_manager.len();
     log::info!("Vocabulary updated. Size: {} -> {}", initial_vocab_size, final_vocab_size);
 
-    // Save the updated vocabulary
-    if let Err(e) = vocabulary_manager.save(&vocab_path) {
-        log::error!("Failed to save updated vocabulary to {}: {}", vocab_path.display(), e);
-        // Decide if this is a fatal error for indexing?
-    } else {
-        log::info!("Updated vocabulary saved to {}", vocab_path.display());
-    }
+    // Save the updated vocabulary, regardless of whether files were processed
+    log::info!("Attempting to save vocabulary for collection '{}' to path: {}", collection_name, vocab_path.display());
+    vocabulary_manager.save(&vocab_path).map_err(|e| {
+        log::error!("FATAL: Failed to save updated vocabulary to {}: {}", vocab_path.display(), e);
+        // Convert the vocabulary error into a VectorDBError
+        VectorDBError::Other(format!("Failed to save vocabulary: {}", e)) 
+    })?; // Use ? to return error immediately if save fails
+
+    log::info!("Updated vocabulary saved to {}", vocab_path.display());
     // --- End Vocabulary ---
+
+    // Check if there are any points to construct/upload before proceeding
+    if all_intermediate_data.is_empty() {
+        log::info!("No intermediate data generated (likely no indexable files found or processed). Skipping point construction and upload.");
+        // Ensure progress bar finishes cleanly if it exists
+        if let Some(pb) = progress {
+            pb.finish_with_message(format!("No indexable files found in {} files checked", relative_paths.len()));
+        }
+        // Return Ok(0) because no points were indexed, but the process (incl. vocab save) was successful
+        return Ok(0); 
+    }
 
     // --- 4. Construct Final Points (Sequential) ---
     if let Some(pb) = progress {

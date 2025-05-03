@@ -8,6 +8,7 @@ pub mod stats;
 pub mod clear;
 pub mod repo_commands;
 pub mod simple;
+pub mod utils;
 // Add mods for stats, clear, list, remove when created
 
 // Re-export the main handler and the command enum
