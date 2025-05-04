@@ -1,9 +1,0 @@
-{
-  "qdrant_url": "http://localhost:6334",
-  "repositories_base_path": "repositories",
-  "model_dir": null,
-  "model_source": {
-      "model_type": "sentence-transformers",
-      "model_name": "all-MiniLM-L6-v2"
-  }
-} 

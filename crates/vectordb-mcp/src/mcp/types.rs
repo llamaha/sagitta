@@ -241,7 +241,6 @@ pub struct PingResult {
 
 /// Parameters for the `repository/add` method.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
-#[serde(rename_all = "camelCase")]
 pub struct RepositoryAddParams {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,8 +253,8 @@ pub struct RepositoryAddParams {
     pub ssh_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_passphrase: Option<String>,
-    /// The specific Git ref (commit, tag, branch) to check out and index permanently.
-    /// If set, the repository will not be synced later, only indexed at this ref.
+    /// Optional specific Git ref (tag, commit hash, branch name) to check out initially.
+    /// If provided, this ref will be checked out instead of the default branch after cloning.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_ref: Option<String>,
 }

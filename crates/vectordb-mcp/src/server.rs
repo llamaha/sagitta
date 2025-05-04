@@ -290,62 +290,32 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
 }
 
 pub fn map_add_repo_error(e: AddRepoError) -> ErrorObject {
-    match e {
-        AddRepoError::InvalidArgs(msg) => ErrorObject {
-            code: error_codes::INVALID_PARAMS,
-            message: msg,
-            data: None,
-        },
-        AddRepoError::RepoExists(name) => ErrorObject {
-            code: error_codes::REPO_ALREADY_EXISTS,
-            message: format!("Repository '{}' already exists.", name),
-            data: None,
-        },
-        AddRepoError::NameDerivationError(from) => ErrorObject {
-            code: error_codes::NAME_DERIVATION_FAILED,
-            message: format!("Could not derive repository name from {}", from),
-            data: None,
-        },
-        AddRepoError::IoError(io_err) => ErrorObject {
-            code: error_codes::INTERNAL_ERROR,
-            message: format!("Filesystem error: {}", io_err),
-            data: None,
-        },
-        AddRepoError::ConfigError(cfg_err) => ErrorObject {
-            code: error_codes::CONFIG_SAVE_FAILED,
-            message: format!("Configuration error: {}", cfg_err),
-            data: None,
-        },
-        AddRepoError::GitError(git_err) => ErrorObject {
-            code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Git operation failed: {}", git_err),
-            data: None,
-        },
-        AddRepoError::RepoOpenError(path, open_err) => ErrorObject {
-            code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to open repository at {}: {}", path.display(), open_err),
-            data: None,
-        },
-        AddRepoError::BranchDetectionError(branch_err) => ErrorObject {
-            code: error_codes::BRANCH_DETECTION_FAILED,
-            message: format!("Failed to determine default branch: {}", branch_err),
-            data: None,
-        },
-        AddRepoError::QdrantError(q_err) => ErrorObject {
-            code: error_codes::QDRANT_OPERATION_FAILED,
-            message: format!("Qdrant operation failed: {}", q_err),
-            data: None,
-        },
-        AddRepoError::EmbeddingError(emb_err) => ErrorObject {
-            code: error_codes::EMBEDDING_ERROR,
-            message: format!("Embedding logic error: {}", emb_err),
-            data: None,
-        },
-        AddRepoError::UrlDeterminationError => ErrorObject {
-            code: error_codes::URL_DETERMINATION_FAILED,
-            message: "Failed to determine repository URL.".to_string(),
-            data: None,
-        },
+    let (code, message) = match &e {
+        AddRepoError::InvalidArgs(msg) => (error_codes::INVALID_PARAMS, msg.clone()),
+        AddRepoError::RepoExists(name) => (error_codes::REPO_ALREADY_EXISTS, format!("Repository '{}' already exists.", name)),
+        AddRepoError::NameDerivationError(from) => (error_codes::NAME_DERIVATION_FAILED, format!("Could not derive repository name from {}", from)),
+        AddRepoError::IoError(io_err) => (error_codes::INTERNAL_ERROR, format!("Filesystem error: {}", io_err)),
+        AddRepoError::ConfigError(cfg_err) => (error_codes::CONFIG_SAVE_FAILED, format!("Configuration error: {}", cfg_err)),
+        AddRepoError::GitError(git_err) => (error_codes::GIT_OPERATION_FAILED, format!("Git operation failed: {}", git_err)),
+        AddRepoError::RepoOpenError(path, open_err) => (error_codes::INTERNAL_ERROR, format!("Failed to open repository at {}: {}", path.display(), open_err)),
+        AddRepoError::BranchDetectionError(branch_err) => (error_codes::BRANCH_DETECTION_FAILED, format!("Failed to determine default branch: {}", branch_err)),
+        AddRepoError::QdrantError(q_err) => (error_codes::QDRANT_OPERATION_FAILED, format!("Qdrant operation failed: {}", q_err)),
+        AddRepoError::EmbeddingError(emb_err) => (error_codes::EMBEDDING_ERROR, format!("Embedding logic error: {}", emb_err)),
+        AddRepoError::UrlDeterminationError => (error_codes::URL_DETERMINATION_FAILED, "Failed to determine repository URL.".to_string()),
+    };
+    
+    // Create detailed error data using the original error `e`
+    let error_data = json!({
+        "error_type": format!("{:?}", e), // Use Debug representation for the specific AddRepoError variant
+        "details": e.to_string(),
+        // Add source if available (AddRepoError might wrap other errors)
+        "source": e.source().map(|s| s.to_string()), 
+    });
+
+    ErrorObject {
+        code,
+        message, // Use the concise message derived above
+        data: Some(error_data), // Add structured data
     }
 }
 
@@ -395,20 +365,22 @@ pub fn result_to_call_result<T: serde::Serialize>(result: T) -> Result<CallToolR
     }
 }
 
-pub fn map_core_error_to_user_message(e: &anyhow::Error, context: &str) -> String {
-    if let Some(specific_error) = e.source().and_then(|source| source.downcast_ref::<VectorDBError>()) {
-        match specific_error {
-            VectorDBError::GitError(msg) => format!("{}: Git operation failed - {}", context, msg),
-            VectorDBError::RepositoryNotFound(name) => format!("{}: Repository '{}' configuration issue or not found locally.", context, name),
-            VectorDBError::IndexingError(msg) => format!("{}: Indexing failed - {}", context, msg),
-            VectorDBError::IOError(io_err) => format!("{}: I/O error - {}", context, io_err),
-            VectorDBError::QdrantError(msg) => format!("{}: Database error - {}", context, msg),
-            VectorDBError::EmbeddingError(msg) => format!("{}: Embedding error - {}", context, msg),
-            VectorDBError::DatabaseError(msg) => format!("{}: Database error - {}", context, msg),
-            VectorDBError::ParserError(msg) => format!("{}: Code parsing error - {}", context, msg),
-            _ => format!("{}: {} (Source: {:#})", context, e, specific_error),
-        }
-    } else {
-        format!("{}: {} (Cause: {:#})", context, e, e.root_cause())
+/// Creates a structured JSON Value containing details about the error chain.
+pub fn create_error_data(e: &anyhow::Error) -> serde_json::Value {
+    let mut sources = Vec::new();
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(e.as_ref());
+    while let Some(err) = current {
+        sources.push(err.to_string());
+        current = err.source();
     }
+
+    json!({
+        "message": e.to_string(),
+        "root_cause": e.root_cause().to_string(),
+        "sources": sources,
+        // Add specific VectorDBError type if applicable
+        "vectordb_error_type": e.source()
+            .and_then(|source| source.downcast_ref::<VectorDBError>())
+            .map(|specific| format!("{:?}", specific)), // Use Debug representation for type
+    })
 }

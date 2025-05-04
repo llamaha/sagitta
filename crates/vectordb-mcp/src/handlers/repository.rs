@@ -6,7 +6,6 @@ use crate::mcp::{
         RepositorySyncResult, RepositorySearchFileParams, RepositorySearchFileResult, RepositoryViewFileParams, RepositoryViewFileResult,
     },
 };
-use crate::server::map_add_repo_error; // Import helper from server for now
 use anyhow::{anyhow, Result};
 use std::fs;
 use std::sync::Arc;
@@ -23,7 +22,7 @@ use vectordb_core::{
     sync::{sync_repository, SyncOptions},
     fs_utils::{find_files_matching_pattern, read_file_range},
 };
-use crate::server::map_core_error_to_user_message; // Import helper from server for now
+use crate::server::{map_add_repo_error, create_error_data}; // Import updated helpers
 use tempdir;
 use std::path::PathBuf;
 use git2::Repository; // Import git2
@@ -36,6 +35,9 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
     qdrant_client: Arc<C>,
     embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<RepositoryAddResult, ErrorObject> {
+    // Log the received target_ref immediately
+    info!(received_target_ref = ?params.target_ref, "Handling repository/add request");
+
     let initial_base_path = get_repo_base_path(Some(&*config.read().await)).map_err(|e| ErrorObject {
         code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to determine repository base path: {}", e),
@@ -62,12 +64,12 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         url: params.url,
         local_path: params.local_path.map(std::path::PathBuf::from), // Convert Option<String> to Option<PathBuf>
         name: Some(params.name), // Core expects Option<String>, MCP has required String
-        branch: params.branch,
+        branch: params.branch, // Pass branch as well, core logic might use it if target_ref is None
         remote: None, // Remote name is determined by core logic if not specified
         repositories_base_path: None, // Base path is passed separately
         ssh_key: params.ssh_key.map(std::path::PathBuf::from), // Convert Option<String> to Option<PathBuf>
         ssh_passphrase: params.ssh_passphrase,
-        target_ref: params.target_ref, // Pass through the target_ref
+        target_ref: params.target_ref, // Pass through the target_ref from MCP params
     };
 
     let new_repo_config_result = handle_repo_add(
@@ -314,11 +316,11 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         },
         Err(core_error) => { // Explicitly map the error
             error!(repo_name= %repo_name, error = %core_error, "Core sync function failed");
-            let user_message = map_core_error_to_user_message(&anyhow!(core_error), "Sync failed");
+            let error_data = create_error_data(&anyhow!(core_error));
             return Err(ErrorObject { 
                 code: error_codes::INTERNAL_ERROR, // Or map core_error type to specific MCP code
-                message: user_message, 
-                data: None 
+                message: "Core sync function failed.".to_string(), // Concise message 
+                data: Some(error_data), // Add detailed data
             });
         }
     }
@@ -443,11 +445,11 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                 }
                 Err(e) => {
                     error!(repo_name = %repo_name, error = %e, "Indexing failed during sync");
-                    let user_message = map_core_error_to_user_message(&anyhow!(e), "Indexing failed");
+                    let error_data = create_error_data(&anyhow!(e));
                     return Err(ErrorObject {
                         code: error_codes::CORE_LOGIC_ERROR,
-                        message: user_message,
-                        data: None,
+                        message: "Indexing failed during sync.".to_string(), // Concise message
+                        data: Some(error_data), // Add detailed data
                     });
                 }
             }
@@ -500,11 +502,11 @@ pub async fn handle_repository_search_file(
 
     let matching_paths = find_files_matching_pattern(search_path, &params.pattern, case_sensitive)
         .map_err(|e| {
-            let user_message = map_core_error_to_user_message(&anyhow!(e), "File search failed");
+            let error_data = create_error_data(&anyhow!(e));
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR,
-                message: user_message,
-                data: None,
+                message: "File search failed.".to_string(), // Concise message
+                data: Some(error_data), // Add detailed data
             }
         })?;
 
@@ -553,11 +555,11 @@ pub async fn handle_repository_view_file(
 
     let content = read_file_range(&canonical_target, params.start_line, params.end_line)
          .map_err(|e| {
-            let user_message = map_core_error_to_user_message(&anyhow!(e), "File view failed");
+            let error_data = create_error_data(&anyhow!(e));
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR, // Or FILE_NOT_FOUND?
-                message: user_message,
-                data: None,
+                message: "File view failed.".to_string(), // Concise message
+                data: Some(error_data), // Add detailed data
             }
         })?;
     

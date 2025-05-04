@@ -115,6 +115,7 @@ pub async fn index_files<
             .map_err(|e| Error::Other(e.to_string()))?
             .progress_chars("#=-"),
     );
+    pb.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
     index_repo_files(
@@ -294,8 +295,12 @@ where
         name: repo_name.to_string(),
         url: url_str,
         local_path: final_local_path,
-        default_branch: final_branch.to_string(),
-        tracked_branches: vec![final_branch.to_string()],
+        default_branch: final_active_branch.clone(),
+        tracked_branches: if final_active_branch != final_branch {
+             vec![final_branch.to_string(), final_active_branch.clone()]
+        } else {
+            vec![final_branch.to_string()]
+        },
         active_branch: Some(final_active_branch),
         remote_name: Some(final_remote.to_string()),
         last_synced_commits: HashMap::new(),

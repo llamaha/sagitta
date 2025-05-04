@@ -7,7 +7,7 @@ This document outlines the steps for end-to-end testing of the `vectordb-cli` bi
 1.  **Compiled Binary:** The `vectordb-cli` binary compiled in release mode (e.g., `./target/release/vectordb-cli`).
 2.  **ONNX Models:** Default embedding model (`all-minilm-l6-v2.onnx` or similar) and tokenizer (`tokenizer.json`) available. The CLI will look for them via config file (`~/.config/vectordb-cli/config.toml`), environment variables (`VECTORDB_ONNX_MODEL`, `VECTORDB_ONNX_TOKENIZER_DIR`), or command-line flags (`-m`/`--onnx-model`, `-t`/`--onnx-tokenizer-dir`). Ensure they are accessible.
 3.  **Git:** Git command-line tool installed.
-4.  **Qdrant:** A running Qdrant instance accessible (default GRPC on port 6334). Use `curl http://localhost:6334/readyz` to check.
+4.  **Qdrant:** A running Qdrant instance accessible (default GRPC on port 6334). Use `curl http://localhost:6333/readyz` to check.
 5.  **Test Repositories:** Internet access to clone `https://github.com/octocat/Spoon-Knife` and `https://github.com/rust-lang/book`.
 
 ## Phase 1: Repo Commands Testing

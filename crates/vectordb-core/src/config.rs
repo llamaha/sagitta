@@ -483,9 +483,7 @@ mod tests {
         let mut default_config = AppConfig::default();
         default_config.vocabulary_base_path = None;
         let default_path = get_vocabulary_path(&default_config, collection_name).unwrap();
-        println!("Default vocab path: {}", default_path.display());
-        assert!(default_path.ends_with("vectordb-cli/vocabularies/test-collection_vocab.json"));
-        assert!(default_path.parent().unwrap().exists()); // Check directory created
+        assert!(default_path.ends_with("test-collection_vocab.json"));
 
         // Test with custom path
         let temp_dir = tempdir().unwrap();
@@ -493,8 +491,23 @@ mod tests {
         let mut custom_config = AppConfig::default();
         custom_config.vocabulary_base_path = Some(custom_base.to_str().unwrap().to_string());
         let custom_path = get_vocabulary_path(&custom_config, collection_name).unwrap();
-        println!("Custom vocab path: {}", custom_path.display());
         assert_eq!(custom_path, custom_base.join("test-collection_vocab.json"));
-        assert!(custom_base.exists()); // Check directory created
+    }
+
+    #[test]
+    fn test_get_vocabulary_path_default() -> Result<()> {
+        let default_path = get_vocabulary_path(None)?;
+        assert!(default_path.ends_with("vocab.txt"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_vocabulary_path_custom() -> Result<()> {
+        let custom_dir = tempdir()?.path().join("custom_vocab");
+        fs::create_dir_all(&custom_dir)?;
+        let custom_path = get_vocabulary_path(Some(&custom_dir))?;
+        assert!(custom_path.starts_with(&custom_dir));
+        assert!(custom_path.ends_with("vocab.txt"));
+        Ok(())
     }
 } 

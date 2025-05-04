@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "vectordb-mcp": {
-      "command": "./run_mcp_wrapper.sh",
-      "args": [],
-      "cwd": "/home/adam/repos/vectordb-cli"
-    }
-  }
-}

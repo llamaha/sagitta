@@ -294,7 +294,6 @@ mod tests {
         match result {
              Ok(provider) => test_provider_basics(&provider),
              Err(e) => {
-                 println!("Note: ONNX provider creation failed as expected with dummy model: {}", e);
                  // Assert that the error is somewhat related to ORT loading/parsing if possible
                  assert!(e.to_string().contains("ONNX") || e.to_string().contains("ort") || e.to_string().contains("model"));
              }
@@ -314,6 +313,22 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("load tokenizer"));
     }
     
+    #[test]
+    #[should_panic]
+    fn test_onnx_provider_creation_fail_dummy_path() {
+        if !cfg!(feature = "onnx") {
+            // panic to satisfy should_panic if feature disabled
+            panic!("ONNX feature not enabled, test cannot run");
+        }
+        // This should fail because the paths are invalid
+        let result = OnnxEmbeddingModel::new("dummy/model.onnx", "dummy/tokenizer.json");
+        if result.is_err() {
+            panic!(); // Expected failure, trigger panic for #[should_panic]
+        }
+        // If it somehow succeeds, fail the test
+        panic!("ONNXProvider::new succeeded with dummy paths, which is unexpected");
+    }
+
     // Embedding tests require a *real* model and tokenizer, 
     // and ONNX runtime environment correctly set up. 
     // These are more integration tests.

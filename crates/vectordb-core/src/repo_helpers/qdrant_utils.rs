@@ -113,13 +113,10 @@ where
                 // Create collection using the trait method
                 client.create_collection(collection_name, vector_dim).await
                     .map_err(|e| Error::Other(format!("Failed to create collection '{}': {}", collection_name, e.to_string())))?;
-                println!(
-                    "{}",
-                    format!(
-                        "Created Qdrant collection '{}' with dimension {}.",
-                        collection_name.cyan(),
-                        vector_dim
-                    ).green()
+                log::info!(
+                    "Created Qdrant collection '{}' with dimension {}.",
+                    collection_name,
+                    vector_dim
                 );
                 Ok(())
             }
