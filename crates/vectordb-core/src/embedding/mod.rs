@@ -11,7 +11,7 @@ use crate::config::AppConfig; // Use config from core
 use self::provider::EmbeddingProvider; // Use internal provider trait
 
 // These need dependencies in vectordb_core
-use std::sync::{Arc}; // Removed unused Mutex, MutexGuard
+use std::sync::{Arc, Mutex}; // Removed unused Mutex, MutexGuard
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
 use log;
@@ -100,13 +100,12 @@ pub mod types;
 pub mod provider;
 
 // Function previously in embedding_logic.rs
-#[derive(Debug)]
 pub struct EmbeddingHandler {
     embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
     onnx_tokenizer_path: Option<PathBuf>,
     #[cfg(feature = "ort")]
-    onnx_provider: Option<Arc<provider::onnx::OnnxEmbeddingModel>>,
+    onnx_provider: Option<Arc<Mutex<provider::onnx::OnnxEmbeddingModel>>>,
 }
 
 impl EmbeddingHandler {
@@ -125,6 +124,7 @@ impl EmbeddingHandler {
                 let tokenizer_path = PathBuf::from(tokenizer_path_str);
 
                 provider::onnx::OnnxEmbeddingModel::new(&model_path, &tokenizer_path)
+                    .map(|p| Arc::new(Mutex::new(p)))
                     .map_err(VectorDBError::from) // Map anyhow::Error
             },
         };
@@ -137,82 +137,8 @@ impl EmbeddingHandler {
             onnx_model_path: config.onnx_model_path.clone().map(PathBuf::from),
             onnx_tokenizer_path: config.onnx_tokenizer_path.clone().map(PathBuf::from),
             #[cfg(feature = "ort")]
-            onnx_provider: onnx_provider_result.ok().map(Arc::new),
+            onnx_provider: onnx_provider_result.ok(),
         })
-    }
-
-    #[cfg(feature="ort")]
-    pub fn create_embedding_model(&self) -> Result<Arc<provider::onnx::OnnxEmbeddingModel>> {
-        match self.embedding_model_type {
-            EmbeddingModelType::Onnx => {
-                let model_path = self.onnx_model_path.as_ref().ok_or_else(|| {
-                    VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
-                })?;
-                let tokenizer_path = self.onnx_tokenizer_path.as_ref().ok_or_else(|| {
-                    VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
-                })?;
-                let provider = Arc::new(provider::onnx::OnnxEmbeddingModel::new(
-                    model_path,
-                    tokenizer_path,
-                )?);
-                Ok(provider)
-            }
-            EmbeddingModelType::Default => {
-                 Err(VectorDBError::NotImplemented("Default embedding model provider not yet implemented".to_string()))
-            }
-        }
-    }
-
-    #[cfg(not(feature="ort"))]
-    pub fn create_embedding_model(&self) -> Result<Arc<provider::onnx::OnnxEmbeddingModel>> {
-        Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
-    }
-
-    pub fn set_onnx_paths(
-        &mut self,
-        model_path: Option<PathBuf>,
-        tokenizer_path: Option<PathBuf>,
-    ) -> Result<()> {
-        if let Some(model_p) = &model_path {
-            if !model_p.exists() {
-                return Err(VectorDBError::EmbeddingError(format!(
-                    "ONNX model file not found: {}",
-                    model_p.display()
-                )));
-            }
-        }
-        // Removed check for tokenizer path existence as it might be a directory
-
-        if model_path.is_some() || tokenizer_path.is_some() {
-            self.embedding_model_type = EmbeddingModelType::Onnx;
-        }
-
-        self.onnx_model_path = model_path;
-        self.onnx_tokenizer_path = tokenizer_path;
-        #[cfg(feature = "ort")]
-        {
-            self.onnx_provider = None; // Clear existing provider
-            if let (Some(model_p), Some(tok_p)) = (&self.onnx_model_path, &self.onnx_tokenizer_path) {
-                match provider::onnx::OnnxEmbeddingModel::new(model_p, tok_p) {
-                    Ok(p) => self.onnx_provider = Some(Arc::new(p)),
-                    Err(e) => log::error!("Failed to re-initialize ONNX provider after path change: {}", e),
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Get the type of the model currently handled.
-    pub fn get_model_type(&self) -> EmbeddingModelType {
-        self.embedding_model_type.clone()
-    }
-
-    pub fn onnx_model_path(&self) -> Option<&PathBuf> {
-        self.onnx_model_path.as_ref()
-    }
-
-    pub fn onnx_tokenizer_path(&self) -> Option<&PathBuf> {
-        self.onnx_tokenizer_path.as_ref()
     }
 
     pub fn dimension(&self) -> Result<usize> {
@@ -248,17 +174,97 @@ impl EmbeddingHandler {
         }
     }
 
+    #[cfg(feature="ort")]
+    pub fn create_embedding_model(&self) -> Result<Arc<Mutex<provider::onnx::OnnxEmbeddingModel>>> {
+        match self.embedding_model_type {
+            EmbeddingModelType::Onnx => {
+                let model_path = self.onnx_model_path.as_ref().ok_or_else(|| {
+                    VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+                })?;
+                let tokenizer_path = self.onnx_tokenizer_path.as_ref().ok_or_else(|| {
+                    VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+                })?;
+                let provider = Arc::new(Mutex::new(provider::onnx::OnnxEmbeddingModel::new(
+                    model_path,
+                    tokenizer_path,
+                )?));
+                Ok(provider)
+            }
+            EmbeddingModelType::Default => {
+                 Err(VectorDBError::NotImplemented("Default embedding model provider not yet implemented".to_string()))
+            }
+        }
+    }
+
+    #[cfg(not(feature="ort"))]
+    pub fn create_embedding_model(&self) -> Result<Arc<Mutex<provider::onnx::OnnxEmbeddingModel>>> {
+        Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+    }
+
+    pub fn set_onnx_paths(
+        &mut self,
+        model_path: Option<PathBuf>,
+        tokenizer_path: Option<PathBuf>,
+    ) -> Result<()> {
+        if let Some(model_p) = &model_path {
+            if !model_p.exists() {
+                return Err(VectorDBError::EmbeddingError(format!(
+                    "ONNX model file not found: {}",
+                    model_p.display()
+                )));
+            }
+        }
+        // Removed check for tokenizer path existence as it might be a directory
+
+        if model_path.is_some() || tokenizer_path.is_some() {
+            self.embedding_model_type = EmbeddingModelType::Onnx;
+        }
+
+        self.onnx_model_path = model_path;
+        self.onnx_tokenizer_path = tokenizer_path;
+        #[cfg(feature = "ort")]
+        {
+            self.onnx_provider = None; // Clear existing provider
+            if let (Some(model_p), Some(tok_p)) = (&self.onnx_model_path, &self.onnx_tokenizer_path) {
+                match provider::onnx::OnnxEmbeddingModel::new(model_p, tok_p) {
+                    Ok(p) => self.onnx_provider = Some(Arc::new(Mutex::new(p))),
+                    Err(e) => log::error!("Failed to re-initialize ONNX provider after path change: {}", e),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Get the type of the model currently handled.
+    pub fn get_model_type(&self) -> EmbeddingModelType {
+        self.embedding_model_type.clone()
+    }
+
+    pub fn onnx_model_path(&self) -> Option<&PathBuf> {
+        self.onnx_model_path.as_ref()
+    }
+
+    pub fn onnx_tokenizer_path(&self) -> Option<&PathBuf> {
+        self.onnx_tokenizer_path.as_ref()
+    }
+
     /// Gets direct, shareable access to the ONNX provider (if available).
     #[cfg(feature = "ort")]
-    pub fn get_onnx_provider(&self) -> Result<Arc<provider::onnx::OnnxEmbeddingModel>> {
-        self.onnx_provider.clone().ok_or_else(|| {
+    pub fn get_onnx_provider(&self) -> Result<Arc<dyn EmbeddingProvider + Send + Sync>> {
+        self.onnx_provider.clone().map(|p| {
+            let model = {
+                let guard = p.lock().expect("Failed to lock provider");
+                (*guard).clone()
+            };
+            Arc::new(provider::onnx::ThreadSafeOnnxProvider::new(model)) as Arc<dyn EmbeddingProvider + Send + Sync>
+        }).ok_or_else(|| {
             log::error!("Attempted to get ONNX provider, but it was not initialized.");
             VectorDBError::EmbeddingError("ONNX provider not initialized".to_string())
         })
     }
 
     #[cfg(not(feature = "ort"))]
-    pub fn get_onnx_provider(&self) -> Result<Arc<provider::onnx::OnnxEmbeddingModel>> {
+    pub fn get_onnx_provider(&self) -> Result<Arc<dyn EmbeddingProvider + Send + Sync>> {
         Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
     }
 }

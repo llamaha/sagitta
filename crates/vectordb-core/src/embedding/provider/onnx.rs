@@ -6,13 +6,14 @@ use crate::error::{Result as VectorDBResult, VectorDBError};
 
 // Keep external dependencies (ensure they are in vectordb_core's Cargo.toml)
 use anyhow::{anyhow, Error, Result};
-use log::{debug};
+use log::{debug, warn};
 use ndarray::{Array};
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::{Value};
 use ort::execution_providers::{CUDAExecutionProvider};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokenizers::Tokenizer;
 
 // Remove imports for types defined elsewhere or unused
@@ -22,7 +23,7 @@ use tokenizers::Tokenizer;
 // use crate::vectordb::embedding::EmbeddingResult; // Not used here
 // use crate::syntax::SyntaxElement; // Not used here
 
-/// ONNX-based embedding model
+/// ONNX-based embedding model with memory management
 #[derive(Debug)]
 pub struct OnnxEmbeddingModel {
     /// The tokenizer for preprocessing input text
@@ -33,6 +34,55 @@ pub struct OnnxEmbeddingModel {
     session: Session,
     /// The actual dimension of the loaded model's embeddings
     dimension: usize,
+    /// Last time the session was used
+    last_used: Instant,
+    /// Model path for recreation
+    model_path: PathBuf,
+}
+
+impl Clone for OnnxEmbeddingModel {
+    fn clone(&self) -> Self {
+        // Create a new session from the same model path
+        let session = Self::create_session(&self.model_path)
+            .expect("Failed to create new session while cloning");
+            
+        Self {
+            tokenizer: self.tokenizer.clone(),
+            max_seq_length: self.max_seq_length,
+            session,
+            dimension: self.dimension,
+            last_used: Instant::now(), // Reset the last_used time for the new instance
+            model_path: self.model_path.clone(),
+        }
+    }
+}
+
+/// A thread-safe wrapper around OnnxEmbeddingModel
+#[derive(Debug)]
+pub struct ThreadSafeOnnxProvider(Arc<Mutex<OnnxEmbeddingModel>>);
+
+impl ThreadSafeOnnxProvider {
+    pub fn new(model: OnnxEmbeddingModel) -> Self {
+        Self(Arc::new(Mutex::new(model)))
+    }
+
+    pub fn into_inner(self) -> Arc<Mutex<OnnxEmbeddingModel>> {
+        self.0
+    }
+}
+
+impl EmbeddingProvider for ThreadSafeOnnxProvider {
+    fn dimension(&self) -> usize {
+        self.0.lock().expect("Failed to lock OnnxEmbeddingModel mutex").dimension()
+    }
+
+    fn model_type(&self) -> EmbeddingModelType {
+        self.0.lock().expect("Failed to lock OnnxEmbeddingModel mutex").model_type()
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
+        self.0.lock().expect("Failed to lock OnnxEmbeddingModel mutex").embed_batch(texts)
+    }
 }
 
 impl OnnxEmbeddingModel {
@@ -50,8 +100,6 @@ impl OnnxEmbeddingModel {
         } else if tokenizer_path.is_dir() {
             tokenizer_path.join("tokenizer.json")
         } else {
-            // If it's neither a file named tokenizer.json nor a directory, assume it's the intended file path
-            // This maintains previous behavior if the directory assumption was sometimes correct implicitly
             tokenizer_path.to_path_buf() 
         };
 
@@ -62,30 +110,8 @@ impl OnnxEmbeddingModel {
 
         debug!("Tokenizer loaded successfully");
 
-        // Initialize Environment using ort::init()
-        let cuda_provider = CUDAExecutionProvider::default();
-        let _ = ort::init()
-            .with_name("vectordb-onnx")
-            .with_execution_providers([cuda_provider.build()]) // Configure EPs here
-            .commit();
-
-        // Build session using Session::builder() - EPs are global now
-        let session = Session::builder()? 
-            .with_optimization_level(GraphOptimizationLevel::Level1)?
-            .commit_from_file(model_path)?;
-
-        // Determine dimension from the loaded session
-        let dimension = session
-            .outputs
-            .iter()
-            .find(|output| output.name == "pooler_output")
-            .and_then(|output| match output.output_type {
-                ort::value::ValueType::Tensor { ref dimensions, .. } => {
-                    dimensions.last().map(|&d| d as usize)
-                }
-                _ => None,
-            })
-            .ok_or_else(|| anyhow!("Failed to get model dimension from pooler_output"))?;
+        let session = Self::create_session(model_path)?;
+        let dimension = Self::get_dimension_from_session(&session)?;
 
         debug!(
             "ONNX model loaded successfully from {}, determined embedding dimension: {}",
@@ -98,9 +124,61 @@ impl OnnxEmbeddingModel {
         Ok(Self {
             session,
             tokenizer,
-            max_seq_length: 128, // TODO: Make this configurable or detect from model?
+            max_seq_length: 128,
             dimension,
+            last_used: Instant::now(),
+            model_path: model_path.to_path_buf(),
         })
+    }
+
+    /// Creates a new ONNX session with CUDA provider
+    fn create_session(model_path: &Path) -> Result<Session> {
+        // Initialize Environment using ort::init()
+        let cuda_provider = CUDAExecutionProvider::default();
+        let _ = ort::init()
+            .with_name("vectordb-onnx")
+            .with_execution_providers([cuda_provider.build()]) // Configure EPs here
+            .commit();
+
+        // Build session using Session::builder()
+        Ok(Session::builder()? 
+            .with_optimization_level(GraphOptimizationLevel::Level1)?
+            .commit_from_file(model_path)?)
+    }
+
+    /// Gets dimension from an ONNX session
+    fn get_dimension_from_session(session: &Session) -> Result<usize> {
+        session
+            .outputs
+            .iter()
+            .find(|output| output.name == "pooler_output")
+            .and_then(|output| match output.output_type {
+                ort::value::ValueType::Tensor { ref dimensions, .. } => {
+                    dimensions.last().map(|&d| d as usize)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| anyhow!("Failed to get model dimension from pooler_output"))
+    }
+
+    /// Checks if the session needs cleanup (idle for too long)
+    fn needs_cleanup(&self) -> bool {
+        self.last_used.elapsed() > Duration::from_secs(300) // 5 minutes
+    }
+
+    /// Recreates the session if needed
+    fn ensure_fresh_session(&mut self) -> Result<()> {
+        if self.needs_cleanup() {
+            warn!("Session idle for too long, recreating to free CUDA memory");
+            // Drop the old session explicitly
+            std::mem::drop(std::mem::replace(&mut self.session, Self::create_session(&self.model_path)?));
+            // Force CUDA memory cleanup
+            unsafe {
+                ort::sys::OrtSessionOptionsAppendExecutionProvider_CUDA(std::ptr::null_mut(), 0);
+            }
+        }
+        self.last_used = Instant::now();
+        Ok(())
     }
 
     /// Tokenizes input text and prepares model inputs
@@ -133,6 +211,21 @@ impl OnnxEmbeddingModel {
     }
 }
 
+impl EmbeddingProvider for Arc<Mutex<OnnxEmbeddingModel>> {
+    fn dimension(&self) -> usize {
+        // We know this won't fail since we're the only ones with access to the mutex
+        self.lock().expect("Failed to lock OnnxEmbeddingModel mutex").dimension()
+    }
+
+    fn model_type(&self) -> EmbeddingModelType {
+        self.lock().expect("Failed to lock OnnxEmbeddingModel mutex").model_type()
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
+        self.lock().expect("Failed to lock OnnxEmbeddingModel mutex").embed_batch(texts)
+    }
+}
+
 impl EmbeddingProvider for OnnxEmbeddingModel {
     fn dimension(&self) -> usize {
         self.dimension
@@ -145,6 +238,14 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
     fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
+        }
+
+        // Ensure session is fresh before use
+        // Note: We need to cast away the const to modify the session
+        unsafe {
+            let this = self as *const _ as *mut OnnxEmbeddingModel;
+            (*this).ensure_fresh_session()
+                .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to ensure fresh session: {}", e)))?;
         }
 
         let batch_size = texts.len();
@@ -199,40 +300,11 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         }
 
         let mut embeddings = Vec::with_capacity(batch_size);
-        // Handle potential 3D output (like last_hidden_state) by taking the first token ([CLS]) embedding
-        if shape.len() == 3 && shape[1] > 0 { 
-            let seq_len = shape[1] as usize;
-            for i in 0..batch_size {
-                 // Calculate slice based on shape [batch_size, seq_len, dim]
-                 let start = i * seq_len * expected_dim; // Start of batch item i
-                 let end = start + expected_dim; // End of the first token embedding for item i
-                 let embedding_slice = &data[start..end]; // Use data slice directly
-                 let mut embedding = embedding_slice.to_vec();
-                 let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-                 if norm > 0.0 {
-                     for x in &mut embedding {
-                         *x /= norm;
-                     }
-                 }
-                 embeddings.push(embedding);
-             }
-        } else if shape.len() == 2 { // Handle 2D output (like pooler_output)
-            for i in 0..batch_size {
-                 // Calculate slice based on shape [batch_size, dim]
-                 let start = i * expected_dim;
-                 let end = start + expected_dim;
-                 let embedding_slice = &data[start..end]; // Use data slice directly
-                 let mut embedding = embedding_slice.to_vec();
-                 let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-                 if norm > 0.0 {
-                     for x in &mut embedding {
-                         *x /= norm;
-                     }
-                 }
-                 embeddings.push(embedding);
-             }
-        } else {
-            return Err(VectorDBError::EmbeddingError(format!("Unsupported output tensor shape: {:?}", shape)));
+        let stride = shape.iter().skip(1).product::<i64>() as usize;
+        for i in 0..batch_size {
+            let start = i * stride;
+            let end = start + expected_dim;
+            embeddings.push(data[start..end].to_vec());
         }
 
         Ok(embeddings)
