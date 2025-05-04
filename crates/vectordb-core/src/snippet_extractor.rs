@@ -121,7 +121,6 @@ mod tests {
         let file = create_temp_file(content);
         let snippet = extract_snippet(file.path().to_str().unwrap(), 3, 4)?;
 
-        println!("Snippet (3-4):\n{}", snippet);
         assert!(snippet.contains(" 3 | Line 3 - Core"));
         assert!(snippet.contains(" 4 | Line 4 - Core"));
         // Check context lines (default 3)
@@ -144,19 +143,16 @@ mod tests {
 
         // Check start truncation
         let snippet_start = extract_snippet(&file_path, 1, 2)?;
-        println!("Snippet (1-2):\n{}", snippet_start); // Debug print
         assert!(!snippet_start.starts_with("..."), "Snippet start should not start with ...");
         assert!(snippet_start.ends_with("\n  ..."), "Snippet start should end with truncation marker");
 
         // Check end truncation
         let snippet_end = extract_snippet(&file_path, 19, 20)?;
-        println!("Snippet (19-20):\n{}", snippet_end); // Debug print
         assert!(snippet_end.starts_with("  ..."), "Snippet end should start with truncation marker");
         assert!(!snippet_end.ends_with("..."), "Snippet end should not have extra trailing marker");
 
         // Check middle (both truncations)
         let snippet_middle = extract_snippet(&file_path, 8, 10)?;
-        println!("Snippet (8-10):\n{}", snippet_middle); // Debug print
         assert!(snippet_middle.starts_with("  ..."), "Snippet middle should start with truncation marker");
         assert!(snippet_middle.ends_with("\n  ..."), "Snippet middle should end with truncation marker");
 

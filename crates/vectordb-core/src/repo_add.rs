@@ -17,7 +17,7 @@ use git2::Repository;
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
 use crate::IndexingConfig;
-use log::{info, error};
+use log::{info, error, warn};
 use crate::config::AppConfig;
 
 #[derive(Args, Debug)]
@@ -144,12 +144,9 @@ where
     let added_as_local_path_flag = args.local_path.is_some();
 
     let repo = if local_path.exists() {
-         println!(
-            "{}",
-            format!(
-                "Local directory '{}' already exists. Assuming it's the intended clone. Skipping clone.",
-                local_path.display()
-            ).yellow()
+         info!(
+            "Local directory '{}' already exists. Assuming it's the intended clone. Skipping clone.",
+            local_path.display()
         );
         let git_repo = Repository::open(&local_path)
             .map_err(|e| AddRepoError::RepoOpenError(local_path.clone(), e.into()))?;
@@ -160,10 +157,9 @@ where
             match git_repo.find_remote(remote_name) {
                 Ok(remote) => {
                     if let Some(url) = remote.url() {
-                        println!("Found remote URL for '{remote_name}': {url}");
                         repo_url = Some(url.to_string());
                     } else {
-                        return Err(AddRepoError::InvalidArgs(format!("Remote '{remote_name}' exists but has no URL. Please specify --url.")));
+                        warn!("Remote '{remote_name}' found but has no URL configured.");
                     }
                 }
                 Err(_) => {
@@ -181,9 +177,7 @@ where
         
         let url = repo_url.as_ref().unwrap(); // Safe because we checked above
         
-        println!("{}",
-            format!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, url).bold().cyan()
-        );
+        info!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, url);
         
         // Create the directory if it doesn't exist
         fs::create_dir_all(&local_path)
@@ -206,7 +200,8 @@ where
                 format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
             };
             cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-            println!("Using SSH key: {}", ssh_key.display());
+            let key_path_display = ssh_key.display();
+            info!("Using SSH key: {}", key_path_display);
         }
             
         let status = cmd.status()
@@ -216,7 +211,7 @@ where
             return Err(AddRepoError::GitError(anyhow!("Git clone command failed with exit code: {}", status)));
         }
         
-        println!("\nRepository cloned successfully to {}", local_path.display());
+        info!("\nRepository cloned successfully to {}", local_path.display());
         
         // Open the repository after cloning
         Repository::open(&local_path)
@@ -225,7 +220,7 @@ where
 
     // --- Add Git Checkout Logic --- 
     if let Some(ref_name) = &args.target_ref {
-        println!("Attempting to checkout target ref: {}", ref_name.cyan());
+        info!("Attempting to checkout target ref: {}", ref_name);
         let mut cmd = std::process::Command::new("git");
         cmd.current_dir(&local_path) // Run checkout in the repo directory
            .arg("checkout")
@@ -256,7 +251,7 @@ where
                 ref_name, checkout_output.status, stderr, stdout
             )));
         }
-        println!("Successfully checked out ref: {}", ref_name.green());
+        info!("Successfully checked out ref: {}", ref_name);
     }
     // --- End Git Checkout Logic ---
 
@@ -279,24 +274,23 @@ where
     };
     // Only print if we didn't use target_ref above
     if args.target_ref.is_none() {
-        println!("Default/Initial branch detected: {}", initial_branch_name.cyan());
+        info!("Default/Initial branch detected: {}", initial_branch_name);
     }
 
-    println!("\n{}", 
+    info!("\n{}", 
         format!("STEP 2/2: Setting up vector database infrastructure for '{}'", repo_name).bold().cyan()
     );
     
     // Use helpers from crate::repo_helpers
     let collection_name = helpers::get_collection_name(&repo_name);
-    println!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
+    info!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
     
     // Use the passed-in embedding_dim
-    println!("Using embedding dimension: {}", embedding_dim);
+    info!("Using embedding dimension: {}", embedding_dim);
     
     // Use helpers from crate::repo_helpers
     helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await
         .map_err(|e| AddRepoError::QdrantError(e.into()))?;
-    println!("Qdrant collection ensured.");
 
     // Ensure we have the final URL
     let final_url = repo_url.ok_or(AddRepoError::UrlDeterminationError)?;
@@ -320,21 +314,6 @@ where
         added_as_local_path: added_as_local_path_flag,
         target_ref: args.target_ref.clone(), // Store the target_ref
     };
-
-    // Keep informative print statements for now
-    println!("{}", "Successfully prepared repository configuration.".green());
-
-    // Keep the enhanced final message
-    println!("\n{}", "=".repeat(80).yellow());
-    println!("{}", "Repository added successfully! What's next?".bold().green());
-    println!("{}", "=".repeat(80).yellow());
-    println!("{}", format!("1. Repository '{}' has been cloned and configured", repo_name).bold());
-    println!("{}", "2. To make the code searchable, you need to index it:".bold());
-    println!("\n   Run this command to index the repository:\n");
-    println!("   {}", format!("vectordb-cli repo sync {}", repo_name).cyan().bold());
-    println!("\n   Note: Indexing large repositories may take several minutes to complete.");
-    println!("         For very large repos, this could take 10-20 minutes or more with GPU.");
-    println!("{}", "=".repeat(80).yellow());
 
     Ok(new_repo_config)
 }

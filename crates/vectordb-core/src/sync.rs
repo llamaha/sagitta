@@ -136,8 +136,9 @@ where
                 let mut callbacks = RemoteCallbacks::new();
                 // Basic progress logging
                 callbacks.transfer_progress(|progress| {
-                    print!("Fetching objects: {}/{} \r", progress.received_objects(), progress.total_objects());
-                    let _ = std::io::stdout().flush(); // Ignore error
+                    // Write progress to stderr
+                    eprint!("Fetching objects: {}/{} \r", progress.received_objects(), progress.total_objects());
+                    let _ = std::io::stderr().flush(); // Flush stderr
                     true
                 });
                 // Add credential callback if needed (requires passing config info)
@@ -151,7 +152,7 @@ where
                         // Don't error out, maybe remote is unavailable but local is ok?
                     }
                 };
-                println!(); // Newline after fetch progress
+                eprintln!(); // Newline to stderr after fetch progress
 
                 // Find the remote-tracking branch reference
                 let ref_name = format!("refs/remotes/{}/{}", remote_name_clone, branch_name);

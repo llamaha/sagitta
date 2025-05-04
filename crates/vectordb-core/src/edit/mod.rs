@@ -8,6 +8,8 @@ use tempfile::NamedTempFile;
 use anyhow::{Result, Context, bail, anyhow};
 use tree_sitter::{Parser, Language, Node};
 use regex::Regex;
+use log;
+use tracing::{info, trace};
 
 // --- Public Struct/Enum Definitions ---
 
@@ -25,7 +27,7 @@ pub struct EngineValidationIssue {
     pub line_number: Option<usize>, // Line number where the issue occurs (1-based)
 }
 
-#[derive(Debug, Clone)] // Added derive for potential future use
+#[derive(Debug, Clone, Default)] // <-- Added Default derive
 pub struct EngineEditOptions {
     pub format_code: bool, // Placeholder for future formatting feature
     pub update_references: bool, // Placeholder for future reference updating
@@ -48,11 +50,12 @@ pub fn apply_edit(
     new_content: &str,
     options: Option<&EngineEditOptions>,
 ) -> Result<()> {
-    if let Some(opts) = options {
-        if opts.format_code { println!("Note: Formatting option is set (not implemented yet)."); }
-        if opts.update_references { println!("Note: Update references option is set (not implemented yet)."); }
-        if !opts.preserve_documentation { println!("Note: No preserve docs option is set (not implemented yet)."); }
-    }
+    let opts = options.cloned().unwrap_or_default();
+    trace!("Applying edit to target: {:?}", target);
+    trace!("Using engine options: {:?}", opts);
+    if opts.format_code { trace!("Note: Formatting option is set (not implemented yet)."); }
+    if opts.update_references { trace!("Note: Update references option is set (not implemented yet)."); }
+    if !opts.preserve_documentation { trace!("Note: No preserve docs option is set (not implemented yet)."); }
 
     let original_content = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
@@ -76,10 +79,12 @@ pub fn apply_edit(
                 original_content.as_bytes()
             ).with_context(|| format!("Failed to find semantic element '{}' in {}", element_query, file_path.display()))?;
             
-            // TODO: Replace println with logging
-            println!(
-                "Found semantic element '{}' spanning lines {} to {}.", 
-                element_query, start + 1, end + 1
+            trace!(
+                "Applying edit to semantic target '{}' ({} bytes) found at lines {}-{}",
+                element_query,
+                new_content.len(),
+                start + 1,
+                end + 1
             );
             (start, end)
         }
@@ -121,12 +126,9 @@ pub fn validate_edit(
     target: &EditTarget,
     options: Option<&EngineEditOptions>,
 ) -> Result<Vec<EngineValidationIssue>, anyhow::Error> {
-    // TODO: Replace println with logging
-    println!("Validating edit for target: {:?}", target);
-    if let Some(opts) = options {
-        println!("Note: Validation called with options: {:?}", opts);
-        // Add specific checks for options if needed in the future
-    }
+    let opts = options.cloned().unwrap_or_default();
+    trace!("Validating edit for target: {:?}", target);
+    trace!("Note: Validation called with options: {:?}", opts);
 
     let mut issues: Vec<EngineValidationIssue> = Vec::new();
 
@@ -173,8 +175,7 @@ pub fn validate_edit(
                  Ok(tree) => {
                      match find_semantic_element(&tree, element_query, original_content.as_bytes()) {
                          Ok((start_line, end_line)) => {
-                             // TODO: Replace println with logging
-                             println!("Semantic target '{}' found at lines {}-{} (validation step).", element_query, start_line + 1, end_line + 1);
+                             trace!("Semantic target '{}' found at lines {}-{} (validation step).", element_query, start_line + 1, end_line + 1);
                          }
                          Err(e) => { 
                              issues.push(EngineValidationIssue {
@@ -196,49 +197,8 @@ pub fn validate_edit(
         }
     }
     
-    /*
-    // Skipping isolated syntax check for new_content.
-    // This check can be unreliable for single lines or fragments that are valid
-    // within a larger context but might be flagged as errors by the parser
-    // when parsed in isolation (e.g., missing EOF). 
-    // The `apply_edit` function implicitly validates the syntax when writing the
-    // final combined content, which is sufficient for line range edits.
-    // For semantic edits, the structure is more likely to be self-contained, 
-    // but this check might still be too simplistic.
-    match parse_content(new_content, &language) {
-        Ok(content_tree) => {
-            if content_tree.root_node().has_error() {
-                let first_error_pos = content_tree.root_node()
-                    .descendant_for_point_range(Point::new(0,0)::new(usize::MAX, usize::MAX))
-                    .filter(|n| n.is_error() || n.is_missing())
-                    .map(|n| n.start_position());
-
-                let line_number = first_error_pos.map(|p| p.row + 1);
-                let message = format!("The new content has syntax errors near line {}.", line_number.unwrap_or(0)); 
-
-                issues.push(EngineValidationIssue {
-                    severity: EngineValidationSeverity::Error,
-                    message,
-                    line_number,
-                });
-            } else {
-                // TODO: Replace println with logging
-                println!("Basic syntax check of new content passed.");
-            }
-        }
-        Err(e) => { 
-            issues.push(EngineValidationIssue {
-                severity: EngineValidationSeverity::Error,
-                message: format!("Could not perform syntax check on new content: {}", e),
-                line_number: None,
-            });
-        }
-    }
-    */
-    
     if issues.is_empty() {
-        // TODO: Replace println with logging
-         println!("Validation checks passed (target existence and basic content syntax).");
+        info!("Validation checks passed (target existence and basic content syntax).");
     }
     Ok(issues)
 }

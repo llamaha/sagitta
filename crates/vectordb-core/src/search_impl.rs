@@ -324,7 +324,7 @@ mod tests {
                 err_string.contains("Failed to create dummy EmbeddingHandler"), // If handler creation failed
                 "search_collection failed with unexpected error: {:?}", e
             );
-            println!("Note: search_collection test returned an expected ONNX/IO error: {}", err_string);
+            warn!("Note: search_collection test returned an expected setup error (ONNX/IO/Qdrant): {}", err_string);
         } else {
              // If it passed, verify the mock method was called
              assert!(manual_mock_client.verify_query_called(), "query should have been called");
