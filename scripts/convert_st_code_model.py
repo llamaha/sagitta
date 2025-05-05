@@ -8,6 +8,12 @@ from transformers import AutoModel, AutoTokenizer
 from pathlib import Path
 import sys
 import argparse
+# Add quantization import
+try:
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+except ImportError:
+    quantize_dynamic = None
+    QuantType = None
 
 # Define the model we want to convert
 DEFAULT_MODEL_NAME = "flax-sentence-embeddings/st-codesearch-distilroberta-base"
@@ -38,16 +44,19 @@ class SentenceTransformerONNX(torch.nn.Module):
 # --- Sentence Transformer specific changes END ---
 
 
-def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_name=DEFAULT_MODEL_NAME):
+def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_name=DEFAULT_MODEL_NAME, quantize=False, quantized_model_path=None):
     """
     Downloads a Sentence Transformer model and converts it to ONNX format
+    Optionally quantizes the ONNX model.
 
     Args:
         output_dir (str): Directory to save the ONNX model and tokenizer
         model_name (str): Name of the Sentence Transformer model to download
+        quantize (bool): Whether to quantize the ONNX model
+        quantized_model_path (str): Path to save the quantized ONNX model
 
     Returns:
-        Path to the saved ONNX model
+        Path to the saved ONNX model (quantized if quantize=True)
     """
     print(f"Downloading and loading {model_name} model...")
 
@@ -110,8 +119,27 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
          print("This might be due to unsupported operations in the model or opset version.", file=sys.stderr)
          sys.exit(1)
 
-
     print(f"Model successfully converted and saved to: {onnx_path}")
+
+    # Quantize if requested
+    if quantize:
+        if quantize_dynamic is None:
+            print("onnxruntime.quantization is not installed. Please install onnxruntime and onnxruntime-tools.", file=sys.stderr)
+            sys.exit(1)
+        if quantized_model_path is None:
+            quantized_model_path = os.path.join(output_dir, "model_quantized.onnx")
+        print(f"Quantizing ONNX model and saving to: {quantized_model_path}")
+        try:
+            quantize_dynamic(
+                onnx_path,
+                quantized_model_path,
+                weight_type=QuantType.QInt8
+            )
+            print(f"Quantized model saved to: {quantized_model_path}")
+            onnx_path = quantized_model_path
+        except Exception as e:
+            print(f"Error during quantization: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Save tokenizer using save_pretrained - this saves necessary files
     # like tokenizer.json, vocab.txt/merges.txt etc.
@@ -220,6 +248,17 @@ def main():
         action="store_true",
         help="Skip the ONNX model verification step."
     )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Quantize the ONNX model after export."
+    )
+    parser.add_argument(
+        "--quantized_model_path",
+        type=str,
+        default=None,
+        help="Path to save the quantized ONNX model (default: <output_dir>/model_quantized.onnx)"
+    )
 
     args = parser.parse_args()
 
@@ -229,10 +268,12 @@ def main():
 
     print(f"--- Starting ONNX Conversion for {model_to_convert} ---")
 
-    # Download and convert the model to ONNX
+    # Download and convert the model to ONNX (and quantize if requested)
     onnx_path = download_and_convert_st_model_to_onnx(
         output_dir=output_directory_name,
-        model_name=model_to_convert
+        model_name=model_to_convert,
+        quantize=args.quantize,
+        quantized_model_path=args.quantized_model_path
     )
 
     # Verify the ONNX model unless skipped
@@ -245,7 +286,11 @@ def main():
     print("------------------------------------------")
     print(f"The ONNX model and tokenizer files have been saved to the '{output_directory_name}' directory.")
     print("The primary files are:")
-    print(f"  - Model: {os.path.join(output_directory_name, 'model.onnx')}")
+    if args.quantize:
+        model_file = args.quantized_model_path or os.path.join(output_directory_name, 'model_quantized.onnx')
+    else:
+        model_file = os.path.join(output_directory_name, 'model.onnx')
+    print(f"  - Model: {model_file}")
     print(f"  - Tokenizer Config: {os.path.join(output_directory_name, 'tokenizer.json')}")
     print(f"  - Other tokenizer files (vocab.txt, merges.txt etc. depending on model type)")
     print("\nTo use this model with vectordb-cli:")
@@ -253,21 +298,25 @@ def main():
     print("  detection logic matches the new model if it differs from the previous one.")
     print("\nMethod 1: Command Line Arguments")
     print("  Provide the paths directly during indexing:")
-    print(f"    ./target/debug/vectordb-cli index <your_code_dir> \\")
-    print(f"        --onnx-model {os.path.abspath(os.path.join(output_directory_name, 'model.onnx'))} \\")
+    print("    ./target/release/vectordb-cli index <your_code_dir> ")
+    print(f"        --onnx-model {os.path.abspath(model_file)} ")
     print(f"        --onnx-tokenizer {os.path.abspath(output_directory_name)}")
     print("\nMethod 2: Environment Variables")
     print("  Set the following environment variables before running vectordb-cli:")
-    abs_model_path = os.path.abspath(os.path.join(output_directory_name, 'model.onnx'))
+    abs_model_path = os.path.abspath(model_file)
     abs_tokenizer_path = os.path.abspath(output_directory_name)
     print(f"    export VECTORDB_ONNX_MODEL=\"{abs_model_path}\"")
     print(f"    export VECTORDB_ONNX_TOKENIZER=\"{abs_tokenizer_path}\"")
     print("  Then run indexing normally:")
-    print("    ./target/debug/vectordb-cli index <your_code_dir>")
+    print("    ./target/release/vectordb-cli index <your_code_dir>")
+    print("\nMethod 3: config.toml Example")
+    print("  Add the following to your ~/.config/vectordb-cli/config.toml (use absolute paths):")
+    print("\n    onnx_model_path = \"{}\"".format(abs_model_path))
+    print("    onnx_tokenizer_path = \"{}\"".format(abs_tokenizer_path))
     print("\nImportant Note on Re-indexing:")
     print("  When switching embedding models, the vector index MUST be rebuilt.")
     print("  The 'index' command should automatically handle clearing incompatible data.")
-    print("  Alternatively, run './target/debug/vectordb-cli clear' manually first.")
+    print("  Alternatively, run './target/release/vectordb-cli clear' manually first.")
     print("------------------------------------------")
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ vectordb-cli is powered by the [vectordb-core](./crates/vectordb-core/README.md)
 
 ## Getting Started
 
-See the [Setup Guide](./docs/SETUP.md) for instructions on building and running the project.
+See the [Setup Guide](./docs/SETUP.md) for instructions on building, running, and generating the ONNX model and tokenizer files required for vectordb-cli. The ONNX model and tokenizer are now generated locally using scripts/setup_onnx_model.sh and are not stored in the repository.
 
 ## Contributing
 

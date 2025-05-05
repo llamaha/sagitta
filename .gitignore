@@ -17,7 +17,6 @@ target/
 mcp_stderr.log
 
 # Large model files (should be managed separately)
-onnx/
 
 # Test/Output files
 vectordb_search_results.txt
@@ -27,3 +26,5 @@ qdrant_storage/
 
 # Test repos
 repo-collection/
+
+onnx/
