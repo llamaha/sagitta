@@ -11,8 +11,8 @@ This guide provides instructions to build, install, and configure `vectordb-cli`
   ```
 
 - **Build Dependencies**:
-  - **Linux**: `sudo apt-get update && sudo apt-get install build-essential git-lfs libssl-dev pkg-config`
-  - **macOS**: `xcode-select --install && brew install git-lfs pkg-config`
+  - **Linux**: `sudo apt-get update && sudo apt-get install build-essential libssl-dev pkg-config`
+  - **macOS**: `xcode-select --install && brew install pkg-config`
 
 - **Qdrant (Vector Database)**: Run via Docker is recommended:
   ```bash
@@ -31,13 +31,12 @@ This guide provides instructions to build, install, and configure `vectordb-cli`
     cd vectordb-cli
     ```
 
-2.  **Pull ONNX Model Files**: The default embedding model files are stored using Git LFS.
+2.  **Generate the ONNX Model and Tokenizer**: The default embedding model is now generated locally (not stored in the repo).
     ```bash
-    # Ensure Git LFS is installed (see Build Dependencies above)
-    git lfs install --system # Optional: install system-wide if not already
-    git lfs pull
+    # This script will download, convert, and quantize the default model and place it in ./onnx
+    bash scripts/setup_onnx_model.sh
     ```
-    This downloads the necessary model and tokenizer files into the `onnx/` directory.
+    This will create `onnx/model_quantized.onnx` and the necessary tokenizer files in the `onnx/` directory.
 
 3.  **Build (CPU-only)**:
     ```bash
@@ -49,21 +48,21 @@ This guide provides instructions to build, install, and configure `vectordb-cli`
 
     *   **Environment Variables**: Set these in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.)
         ```bash
-        export VECTORDB_ONNX_MODEL="$PWD/onnx/all-minilm-l6-v2.onnx" # Adjust if using a different model
-        export VECTORDB_ONNX_TOKENIZER_DIR="$PWD/onnx" # Adjust if using a different model/location
+        export VECTORDB_ONNX_MODEL="$PWD/onnx/model_quantized.onnx"
+        export VECTORDB_ONNX_TOKENIZER_DIR="$PWD/onnx"
         # Remember to source your profile or restart your shell
         ```
 
     *   **Configuration File**: Create `~/.config/vectordb-cli/config.toml` with the following content (use absolute paths):
         ```toml
         # Example: ~/.config/vectordb-cli/config.toml
-        onnx_model_path = "/absolute/path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx"
+        onnx_model_path = "/absolute/path/to/vectordb-cli/onnx/model_quantized.onnx"
         onnx_tokenizer_path = "/absolute/path/to/vectordb-cli/onnx"
         ```
 
     *   **Command-Line Arguments**: Specify the paths directly when running commands (this overrides environment variables and config files):
         ```bash
-        ./target/release/vectordb-cli --onnx-model="$PWD/onnx/all-minilm-l6-v2.onnx" --onnx-tokenizer-dir="$PWD/onnx" [command...]
+        ./target/release/vectordb-cli --onnx-model="$PWD/onnx/model_quantized.onnx" --onnx-tokenizer-dir="$PWD/onnx" [command...]
         ```
 
 5.  **Optional: Add to PATH**:
@@ -265,7 +264,7 @@ Once generated, you **must** tell `vectordb-cli` to use the CodeBERT files inste
 | **Dimension**       | 384                                      | 768                                          |
 | **Index Size**      | Smaller                                  | Larger (due to higher dimension)           |
 | **Memory Usage**    | Lower                                    | Higher                                       |
-| **Setup**           | Included (via Git LFS)                   | Requires generation script (`scripts/codebert.py`) |
+| **Setup**           | Generated locally via setup script       | Requires generation script (`scripts/codebert.py`) |
 
 **Recommendation:** Start with the default MiniLM model. If you primarily work with the languages CodeBERT supports and find MiniLM's code-specific results lacking, try generating and using CodeBERT. Note that the performance difference within this tool's hybrid search may vary.
 

@@ -16,6 +16,7 @@ use crate::tokenizer::{self, TokenKind, TokenizerConfig}; // Import TokenizerCon
 use crate::vocabulary::VocabularyManager; // Import vocabulary manager
 use std::{path::PathBuf, collections::HashMap}; // Add HashMap
 use log;
+use log::warn;
 use crate::config::AppConfig; // Import AppConfig
 use crate::config; // Import config module
 use std::fs; // <-- Add this line
