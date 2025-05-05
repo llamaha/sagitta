@@ -52,10 +52,23 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
 
     info!(collection=%collection_name, branch=%branch_name, limit=%limit, "Preparing query");
 
-    let filter = Some(Filter::must([Condition::matches(
+    let mut filter_conditions = vec![Condition::matches(
         FIELD_BRANCH,
         branch_name.to_string(),
-    )]));
+    )];
+    if let Some(ref element_type) = params.element_type {
+        filter_conditions.push(Condition::matches(
+            vectordb_core::constants::FIELD_ELEMENT_TYPE,
+            element_type.clone(),
+        ));
+    }
+    if let Some(ref lang) = params.lang {
+        filter_conditions.push(Condition::matches(
+            vectordb_core::constants::FIELD_LANGUAGE,
+            lang.clone(),
+        ));
+    }
+    let filter = Some(Filter::must(filter_conditions));
     
     let search_response = search_collection(
         qdrant_client,

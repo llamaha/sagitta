@@ -195,4 +195,41 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_parse_struct_with_doc_comment() -> Result<()> {
+        let code = r#"
+        /// This is a Point struct
+        /// with two fields
+        struct Point {
+            x: i32,
+            y: i32,
+        }
+        "#;
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.rs")?;
+        assert_eq!(chunks.len(), 1, "Expected a single chunk for the struct");
+        let chunk = &chunks[0];
+        assert!(chunk.content.contains("/// This is a Point struct"), "Doc comment missing");
+        assert!(chunk.content.contains("struct Point"), "Struct definition missing");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_function_with_doc_comment() -> Result<()> {
+        let code = r#"
+        /// Adds two numbers
+        /// Returns the sum
+        fn add(a: i32, b: i32) -> i32 {
+            a + b
+        }
+        "#;
+        let mut parser = create_parser();
+        let chunks = parser.parse(code, "test.rs")?;
+        assert_eq!(chunks.len(), 1, "Expected a single chunk for the function");
+        let chunk = &chunks[0];
+        assert!(chunk.content.contains("/// Adds two numbers"), "Doc comment missing");
+        assert!(chunk.content.contains("fn add"), "Function definition missing");
+        Ok(())
+    }
+
 } 

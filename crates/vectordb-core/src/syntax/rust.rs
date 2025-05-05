@@ -53,6 +53,37 @@ impl RustParser {
         RustParser { parser, query }
     }
 
+    /// Extracts doc comments immediately preceding the given node.
+    fn extract_doc_comments(&self, node: &Node, code: &str) -> String {
+        let mut doc_lines = Vec::new();
+        let mut cur = node.prev_sibling();
+        let mut node_start_row = node.start_position().row;
+        // Only look at siblings that are comments and directly above
+        while let Some(sib) = cur {
+            let kind = sib.kind();
+            let end_row = sib.end_position().row;
+            if (kind == "line_comment" || kind == "block_comment") && end_row + 1 == node_start_row {
+                let text = code.get(sib.start_byte()..sib.end_byte()).unwrap_or("");
+                // Only include doc comments (/// or /** ... */)
+                if text.trim_start().starts_with("///") || text.trim_start().starts_with("/**") {
+                    doc_lines.push(text.trim_end().to_string());
+                }
+                cur = sib.prev_sibling();
+                // Update node_start_row to allow for stacked comments
+                // (e.g., multiple /// lines)
+                node_start_row = sib.start_position().row;
+            } else {
+                break;
+            }
+        }
+        doc_lines.reverse();
+        if !doc_lines.is_empty() {
+            format!("{}\n", doc_lines.join("\n"))
+        } else {
+            String::new()
+        }
+    }
+
     fn node_to_chunk(
         &self,
         node: Node,
@@ -63,9 +94,17 @@ impl RustParser {
     ) -> Option<CodeChunk> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
-        let content = code.get(start_byte..end_byte)?.to_string();
+        let mut content = code.get(start_byte..end_byte)?.to_string();
         let start_line = node.start_position().row + 1; // tree-sitter is 0-indexed
         let end_line = node.end_position().row + 1;
+
+        // Prepend doc comments for struct, enum, trait, function
+        if matches!(element_type, "struct" | "enum" | "trait" | "function") {
+            let doc = self.extract_doc_comments(&node, code);
+            if !doc.is_empty() {
+                content = format!("{}\n{}", doc, content);
+            }
+        }
 
         Some(CodeChunk {
             content,

@@ -4,6 +4,8 @@
 use crate::error::{VectorDBError, Result};
 use std::fmt;
 use crate::config::AppConfig; // Use config from core
+use crate::config::load_config;
+use crate::config::get_vocabulary_path;
 
 // Provider related imports will need adjustment
 #[cfg(feature = "ort")]
@@ -100,6 +102,7 @@ pub mod types;
 pub mod provider;
 
 // Function previously in embedding_logic.rs
+#[derive(Debug)]
 pub struct EmbeddingHandler {
     embedding_model_type: EmbeddingModelType,
     onnx_model_path: Option<PathBuf>,
@@ -493,21 +496,27 @@ mod tests {
 
     #[test]
     #[ignore] // Needs actual model files and ONNX runtime
-    fn test_onnx_embedding() {
+    fn test_onnx_embedding() -> crate::error::Result<()> {
         if !cfg!(feature = "onnx") {
             // Removed: println!("Skipping ONNX test because 'ort' feature is not enabled for vectordb-core");
-            return;
+            return Ok(());
         }
         // Assume model paths are correctly set via environment or config for this test
-        let config = load_config(None).expect("Failed to load config for ONNX test");
-        let handler = EmbeddingHandler::new(&config).expect("Failed to create ONNX handler");
+        let config = load_config(None)?;
+        let collection_name = "repo_test";
+        let _default_path = get_vocabulary_path(&config, collection_name)?;
+        let custom_config = config.clone();
+        let _custom_path = get_vocabulary_path(&custom_config, collection_name)?;
+        let handler = EmbeddingHandler::new(&config)?;
 
         // Removed: println!("Using Model Path: {:?}", config.onnx_model_path.as_ref().unwrap());
         // Removed: println!("Using Tokenizer Path: {:?}", config.onnx_tokenizer_path.as_ref().unwrap());
 
-        let embeddings = handler.embed(vec!["this is a test".to_string()]).unwrap();
+        let texts = ["this is a test"];
+        let embeddings = handler.embed(&texts)?;
         assert_eq!(embeddings.len(), 1);
         // Placeholder assert - check dimension or non-zero values if possible
         assert!(!embeddings[0].is_empty());
+        Ok(())
     }
 } 

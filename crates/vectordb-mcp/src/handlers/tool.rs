@@ -210,14 +210,27 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Query ---
         ToolDefinition {
             name: "query".to_string(),
-            description: Some("Performs semantic search on an indexed repository.".to_string()),
+            description: Some(
+                "Performs semantic search on an indexed repository.\n\
+\n**Best Practices for Effective Queries:**\n\
+- This system uses hybrid (dense + sparse vector) search. Combine natural language and code terms for best results (e.g., `jwt middleware function`, `How is authentication handled?`).\n\
+- Use the `elementType` argument (e.g., `function`, `struct`, `enum`) to restrict results to specific code elements.\n\
+- For API/code navigation, use `elementType` and include function/struct names or signatures in your query.\n\
+- For conceptual, documentation, or workflow/config queries, *omit* `elementType` to surface doc comments, config files, and broader context.\n\
+- For maximum recall, start broad (no `elementType`), then narrow with `elementType` if needed.\n\
+- For conceptual/documentation queries, omitting `elementType` or using a more targeted query may be necessary.\n\
+- For code block and workflow/config queries, omitting `elementType` surfaces relevant results.\n\
+".to_string()
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "repositoryName": { "type": "string", "description": "Name of the repository to query" },
                     "queryText": { "type": "string", "description": "The natural language query text" },
                     "limit": { "type": "integer", "description": "Maximum number of results to return" },
-                    "branchName": { "type": "string", "description": "Optional branch to query (defaults to active)" }
+                    "branchName": { "type": "string", "description": "Optional branch to query (defaults to active)" },
+                    "elementType": { "type": "string", "description": "Optional: Filter by code element type (e.g., function, struct, enum, etc.). For conceptual/documentation queries, omitting this or using a more targeted query may be necessary. For code block and workflow/config queries, omitting this surfaces relevant results." },
+                    "lang": { "type": "string", "description": "Optional: Filter by programming language (e.g., \"rust\", \"python\"). **Highly recommended** for code queries to improve relevance." }
                 },
                 "required": ["repositoryName", "queryText", "limit"]
             }),

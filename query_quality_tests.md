@@ -1,91 +1,130 @@
-# Query Quality & Relevance Tests
+# Query Quality & Relevance Tests (Revised)
 
-This document contains a set of targeted queries designed to manually assess the quality and relevance of search results for different supported languages within the `vectordb-cli`.
+This document contains human-like search queries designed to assess the quality and relevance of search results for different programming languages within `vectordb-cli`. These queries are optimized for hybrid (dense + sparse vector) search capabilities and test a variety of element types with appropriate language specifications.
 
 ## Purpose
 
-After adding repositories and running `repo sync`, execute the queries below to verify that the tool returns meaningful and contextually relevant results for code-specific concepts in each language. This helps identify areas where parsing, chunking, embedding, or search logic might need improvement.
+After adding repositories and running `repo sync`, execute these queries to verify that the tool returns meaningful and contextually relevant results for specific features in each codebase. Each concept includes multiple query variations to exercise both semantic and keyword-based retrieval, with explicit testing of different element types and language specifications.
 
 ## Prerequisites
 
-1.  The `vectordb-cli` binary is compiled.
-2.  Qdrant is running.
-3.  The following repositories (or similar representative repos) have been added using `repo add --name <name> --url <url>`:
-    *   `e2e-query-ripgrep`: `https://github.com/BurntSushi/ripgrep` (Rust)
-    *   `e2e-query-rustbook`: `https://github.com/rust-lang/book` (Markdown, YAML - Keep for non-Rust tests)
-    *   `e2e-query-flask`: `https://github.com/pallets/flask` (Python)
-    *   `e2e-query-gin`: `https://github.com/gin-gonic/gin` (Go)
-    *   `e2e-query-tsnode`: `https://github.com/microsoft/TypeScript-Node-Starter` (TypeScript)
-    *   `e2e-query-sinatra`: `https://github.com/sinatra/sinatra` (Ruby)
-    *   *(Optional: `e2e-xxxx-spoon` from main E2E test for fallback/HTML)*
-4.  **Important:** Clean and sync the repositories **before** running the queries below, especially after changes to the parser or indexing logic:
-    *   First, clear each repository's index: `repo clear --name <repo_name> -y`
-    *   Then, sync each repository: `repo sync <repo_name>`
-    *   *(Alternatively, script the clear and sync steps for all test repos)*
+1. The `vectordb-cli` binary is compiled.
+2. Qdrant is running.
+3. The following repositories have been added using `repo add --name <name> --url <url>`:
+   * `ripgrep-mcp-test`: `https://github.com/BurntSushi/ripgrep` (Rust)
+   * `e2e-query-rustbook`: `https://github.com/rust-lang/book` (Markdown, YAML)
+   * `e2e-query-flask`: `https://github.com/pallets/flask` (Python)
+   * `e2e-query-gin`: `https://github.com/gin-gonic/gin` (Go)
+   * `e2e-query-tsnode`: `https://github.com/microsoft/TypeScript-Node-Starter` (TypeScript)
+   * `e2e-query-sinatra`: `https://github.com/sinatra/sinatra` (Ruby)
+4. **Important:** Clean and sync repositories before running the queries:
+   * `repo clear --name <repo_name> -y`
+   * `repo sync <repo_name>`
 
-## Test Queries
+## Test Queries (Optimized for Human-Like Hybrid Search)
 
-Execute each command and evaluate the relevance of the top results (e.g., top 2).
+### 1. Rust (Target: ripgrep)
+**Feature:** regex handling in ripgrep
 
-**1. Rust (Target: ripgrep)**
+- `how does ripgrep handle large regex patterns?` --lang rust
+- `regex size limit` --type constant --lang rust
+- `Grep struct implementation` --type struct --lang rust
+- `regex matching trait` --type trait --lang rust
+- `pattern matching functions` --type function --lang rust
+- `regex error handling` --type enum --lang rust
+- `impl Matcher for RegexMatcher` --type impl --lang rust
+- `what happens when my regex is too big for ripgrep?` --lang rust
 
-*   **Concept:** Implementing a specific trait (`From`).
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'implementing the From trait' --name e2e-query-ripgrep --lang rust --limit 2
-    ```
-*   **Expected:** Code snippets showing `impl From<...> for ...` or related discussions.
+### 2. Markdown (Target: Rust Book)
+**Feature:** Error handling patterns in Rust
 
-**2. Markdown (Target: Rust Book)**
+- `what's the best way to handle errors in Rust?` --lang markdown
+- `custom error types` --type file_chunk --lang markdown
+- `implementing Error trait` --type code_block --lang markdown
+- `Result enum examples` --type heading --lang markdown
+- `propagating errors` --type section --lang markdown
+- `when should I use unwrap in Rust?` --lang markdown
+- `? operator usage` --type paragraph --lang markdown
+- `error handling best practices Rust` --lang markdown
 
-*   **Concept:** Explanation of a core language feature (Ownership).
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'what is ownership in rust?' --name e2e-query-rustbook --lang markdown --limit 2
-    ```
-*   **Expected:** Sections from the book defining or explaining ownership.
+### 3. Python (Target: Flask)
+**Feature:** Blueprint functionality in Flask
 
-**3. Python (Target: Flask)**
+- `how do Flask blueprints work?` --lang python
+- `Blueprint class definition` --type class --lang python
+- `register_blueprint method` --type method --lang python
+- `blueprint decorator implementation` --type function --lang python
+- `Blueprint.route` --type decorator --lang python
+- `blueprint error handlers` --type method --lang python
+- `Blueprint.__init__` --type method --lang python
+- `nested blueprints in Flask` --lang python
 
-*   **Concept:** Usage or explanation of the Flask request context.
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'flask request context' --name e2e-query-flask --lang python --limit 2
-    ```
-*   **Expected:** Code snippets showing `from flask import request`, `request.`, or functions handling request context.
+### 4. Go (Target: Gin)
+**Feature:** Middleware and routing in Gin
 
-**4. Go (Target: Gin)**
+- `how to write custom middleware in Gin?` --lang go
+- `Engine struct` --type struct --lang go
+- `RouterGroup interface` --type interface --lang go
+- `Handler method implementation` --type method --lang go
+- `Context struct fields` --type struct --lang go
+- `middleware chain execution` --type function --lang go
+- `middleware.Auth` --type function --lang go
+- `route parameter handling` --type method --lang go
 
-*   **Concept:** Using router groups in the Gin framework.
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'gin router group' --name e2e-query-gin --lang go --limit 2
-    ```
-*   **Expected:** Code showing `router.Group(...)` or related functions/methods.
+### 5. TypeScript (Target: TS Node Starter)
+**Feature:** Authentication and type system
 
-**5. TypeScript (Target: TS Node Starter)**
+- `how is authentication implemented in this TypeScript starter?` --lang typescript
+- `User interface definition` --type interface --lang typescript
+- `UserDocument type` --type type --lang typescript
+- `AuthController class` --type class --lang typescript
+- `passport strategy` --type variable --lang typescript
+- `authenticate middleware` --type function --lang typescript
+- `login form validation` --type method --lang typescript
+- `JWT implementation` --type class --lang typescript
 
-*   **Concept:** Defining or using Express.js controllers.
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'express controller' --name e2e-query-tsnode --lang typescript --limit 2
-    ```
-*   **Expected:** TypeScript code defining classes or functions used as controllers (e.g., handling `req, res`).
+### 6. JavaScript (Target: TS Node Starter)
+**Feature:** Express routing and controllers
 
-**6. Ruby (Target: Sinatra)**
+- `express route handlers` --lang javascript
+- `app.use middleware chain` --type function --lang javascript
+- `router.get implementation` --type function --lang javascript
+- `controller error handling` --type function --lang javascript
+- `request validation` --type function --lang javascript
+- `response formatting` --type method --lang javascript
+- `async route handler` --type function --lang javascript
+- `how are express routes organized in this project?` --lang javascript
 
-*   **Concept:** How Sinatra handles request routing.
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'sinatra request routing' --name e2e-query-sinatra --lang ruby --limit 2
-    ```
-*   **Expected:** Ruby code showing `get '/' do ... end`, `post ...`, or modules related to routing/requests.
+### 7. YAML (Target: Rust Book or Any CI Config)
+**Feature:** CI/CD configuration patterns
 
-**7. YAML (Target: Rust Book)**
+- `GitHub Actions workflow configuration` --lang yaml
+- `CI pipeline for Rust projects` --lang yaml
+- `build matrix definition` --type mapping --lang yaml
+- `dependency caching` --type mapping --lang yaml
+- `test job configuration` --type sequence --lang yaml
+- `environment variables` --type mapping --lang yaml
+- `workflow triggers` --type mapping --lang yaml
+- `what's a good CI/CD setup for a Rust project?` --lang yaml
 
-*   **Concept:** Configuration for GitHub Actions workflows.
-*   **Command:**
-    ```bash
-    ./target/release/vectordb-cli repo query 'github actions workflow' --name e2e-query-rustbook --lang yaml --limit 2
-    ```
-*   **Expected:** Content from `.github/workflows/*.yml` files. 
+### 8. Markdown (Target: Rust Book)
+**Feature:** Concurrency patterns in Rust
+
+- `concurrency vs parallelism in Rust` --lang markdown
+- `thread spawning examples` --type code_block --lang markdown
+- `mutex implementation` --type code_block --lang markdown
+- `channel communication` --type section --lang markdown
+- `concurrency patterns` --type heading --lang markdown
+- `Arc and Mutex patterns` --type file_chunk --lang markdown
+- `data races prevention` --type paragraph --lang markdown
+- `what's the difference between Send and Sync?` --lang markdown
+
+This comprehensive query plan tests all supported languages:
+- Rust: struct, trait, function, enum, impl, constant
+- Markdown: file_chunk, code_block, heading, section, paragraph
+- Python: class, method, function, decorator
+- Go: struct, interface, method, function
+- TypeScript: interface, type, class, variable, function, method
+- JavaScript: function, method
+- YAML: mapping, sequence, file_chunk
+

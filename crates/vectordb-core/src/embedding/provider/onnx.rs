@@ -148,17 +148,36 @@ impl OnnxEmbeddingModel {
 
     /// Gets dimension from an ONNX session
     fn get_dimension_from_session(session: &Session) -> Result<usize> {
+        // Prioritize "sentence_embedding" for Sentence Transformer models
+        let target_output_name = session
+            .outputs
+            .iter()
+            .find(|output| output.name == "sentence_embedding")
+            .map(|o| "sentence_embedding")
+            .or_else(|| {
+                // Fallback to "pooler_output" for models like CodeBERT
+                session
+                    .outputs
+                    .iter()
+                    .find(|output| output.name == "pooler_output")
+                    .map(|o| "pooler_output")
+            })
+            // Optionally, add another fallback to "last_hidden_state" if needed,
+            // but typically dimension comes from pooled output.
+            .ok_or_else(|| anyhow!("Could not find a suitable output ('sentence_embedding' or 'pooler_output') to determine dimension"))?;
+
         session
             .outputs
             .iter()
-            .find(|output| output.name == "pooler_output")
+            .find(|output| output.name == target_output_name)
             .and_then(|output| match output.output_type {
                 ort::value::ValueType::Tensor { ref dimensions, .. } => {
+                    // Dimension is usually the last element
                     dimensions.last().map(|&d| d as usize)
                 }
                 _ => None,
             })
-            .ok_or_else(|| anyhow!("Failed to get model dimension from pooler_output"))
+            .ok_or_else(|| anyhow!("Failed to get model dimension from output: {}", target_output_name))
     }
 
     /// Checks if the session needs cleanup (idle for too long)
@@ -283,31 +302,50 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         ].map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX inputs: {}", e)))?)
             .map_err(|e| VectorDBError::EmbeddingError(format!("ONNX session batch run failed: {}", e)))?;
 
-        let pooler_output_value = outputs.get("pooler_output")
-            .or_else(|| outputs.get("last_hidden_state")) // Fallback if pooler_output is not present
-            .ok_or_else(|| VectorDBError::EmbeddingError("Model did not return 'pooler_output' or 'last_hidden_state' in batch".to_string()))?;
+        // Prioritize "sentence_embedding", fallback to "pooler_output", then "last_hidden_state"
+        let output_value = outputs.get("sentence_embedding")
+            .or_else(|| outputs.get("pooler_output"))
+            .or_else(|| outputs.get("last_hidden_state"))
+            .ok_or_else(|| VectorDBError::EmbeddingError(
+                "Model did not return 'sentence_embedding', 'pooler_output', or 'last_hidden_state' in batch".to_string()
+            ))?;
         
         // Extract raw tensor data
-        let (shape, data) = pooler_output_value.try_extract_raw_tensor::<f32>()
+        let (shape, data) = output_value.try_extract_raw_tensor::<f32>()
             .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to extract raw tensor data: {}", e)))?;
 
         let expected_dim = self.dimension;
-        if shape.len() < 2 || shape[0] as usize != batch_size || shape[shape.len() - 1] != expected_dim as i64 {
-            return Err(VectorDBError::EmbeddingError(format!(
-                "Unexpected batch pooler output shape: got {:?}, expected [{}, ..., {}]",
-                shape, batch_size, expected_dim
-            )));
-        }
-
-        let mut embeddings = Vec::with_capacity(batch_size);
-        let stride = shape.iter().skip(1).product::<i64>() as usize;
-        for i in 0..batch_size {
-            let start = i * stride;
-            let end = start + expected_dim;
-            embeddings.push(data[start..end].to_vec());
-        }
-
-        Ok(embeddings)
+        // Handle different possible output shapes:
+        // - [batch_size, embedding_dim] (pooled output)
+        // - [batch_size, sequence_length, embedding_dim] (last_hidden_state)
+        // We only directly support the pooled output shape for now.
+        // If last_hidden_state is returned, it implies pooling wasn't done in the ONNX graph.
+        if shape.len() == 2 && shape[0] as usize == batch_size && shape[1] == expected_dim as i64 {
+             // Shape is [batch_size, embedding_dim] - directly use it
+             let mut embeddings = Vec::with_capacity(batch_size);
+             let stride = expected_dim; // Stride is just the embedding dimension
+             for i in 0..batch_size {
+                 let start = i * stride;
+                 let end = start + stride;
+                 embeddings.push(data[start..end].to_vec());
+             }
+             Ok(embeddings)
+         } else if shape.len() == 3 && shape[0] as usize == batch_size && shape[2] == expected_dim as i64 {
+             // Shape is [batch_size, sequence_length, embedding_dim] - last_hidden_state
+             // This indicates the model returned token embeddings, not pooled sentence embeddings.
+             // The current design expects pooled embeddings from the ONNX model.
+             // We could implement pooling here, but it's better handled by the model export script.
+             warn!("Received token embeddings (shape: {:?}) instead of pooled sentence embeddings. The ONNX model might not include the pooling step.", shape);
+             Err(VectorDBError::EmbeddingError(
+                 "Received token embeddings instead of expected sentence embeddings. Ensure the ONNX model includes pooling.".to_string()
+             ))
+        } else {
+             // Unexpected shape
+             Err(VectorDBError::EmbeddingError(format!(
+                 "Unexpected batch output shape: got {:?}, expected compatible with [{}, {}] or [{}, sequence_length, {}]",
+                 shape, batch_size, expected_dim, batch_size, expected_dim
+             )))
+         }
     }
 }
 
@@ -393,7 +431,7 @@ mod tests {
             panic!("ONNX feature not enabled, test cannot run");
         }
         // This should fail because the paths are invalid
-        let result = OnnxEmbeddingModel::new("dummy/model.onnx", "dummy/tokenizer.json");
+        let result = OnnxEmbeddingModel::new(std::path::Path::new("dummy/model.onnx"), std::path::Path::new("dummy/tokenizer.json"));
         if result.is_err() {
             panic!(); // Expected failure, trigger panic for #[should_panic]
         }

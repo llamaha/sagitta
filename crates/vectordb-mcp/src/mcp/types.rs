@@ -313,6 +313,7 @@ pub struct RepositoryRemoveResult {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryParams {
     #[serde(rename = "repositoryName")]
     pub repository_name: String,
@@ -323,6 +324,14 @@ pub struct QueryParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "branchName")]
     pub branch_name: Option<String>,
+    /// Optional: Filter by code element type (e.g., "function", "struct", "enum", etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "elementType")]
+    pub element_type: Option<String>,
+    /// Optional: Filter by specific programming language (e.g., "rust", "python", "go"). This significantly improves relevance for code-related queries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "lang")] // Match CLI argument
+    pub lang: Option<String>,
 }
 
 fn default_limit() -> u64 {
