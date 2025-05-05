@@ -1,43 +1,18 @@
 # VectorDB MCP Server (`vectordb-mcp`)
 
-This crate implements a server adhering to the Multi-purpose Code Protocol (MCP), designed to provide an interface for interacting with the core functionalities of `vectordb-core`, such as managing Git repositories, indexing their content, and performing semantic searches.
+This crate implements a server adhering to the Model Context Protocol (MCP), designed to provide an interface for interacting with the core functionalities of `vectordb-core`, such as managing Git repositories, indexing their content, and performing semantic searches.
 
 The server communicates via JSON-RPC 2.0 messages over standard input (stdin) and standard output (stdout).
 
 ## Prerequisites
 
-1.  **Build `vectordb` Workspace:** Build the project following the instructions in the [root README.md](../../README.md), ensuring necessary features (`ort`, `cuda`) are enabled and models are downloaded (e.g., via `git lfs pull`). **See also:** [Full Setup Guide](../../docs/SETUP.md).
+1.  **Build `vectordb` Workspace:** Build the project following the instructions in the [root README.md](../../README.md), ensuring necessary features (`ort`, `cuda`) are enabled and models are downloaded.
 2.  **ONNX Runtime (if using `ort` feature):** Ensure the ONNX Runtime library is installed and accessible. See the [Full Setup Guide](../../docs/SETUP.md) for details.
 3.  **Qdrant:** A running Qdrant vector database instance must be accessible.
 
 ## Configuration
 
 The server loads its configuration (Qdrant URL, repository paths, model settings) from the standard `vectordb-cli` configuration file, typically located at `~/.config/vectordb/vectordb-cli/config.toml`. Ensure this file is correctly configured before running the MCP server.
-
-## Running the Server
-
-You can run the `vectordb-mcp` executable directly from your terminal after building the project or installing a release build.
-
-**Direct Execution:**
-
-If you built the project locally (e.g., using `cargo build --release`):
-
-```bash
-# Ensure necessary libraries like ONNX Runtime are findable
-# Example: Setting LD_LIBRARY_PATH manually if needed
-export LD_LIBRARY_PATH=./target/release/lib:$LD_LIBRARY_PATH
-
-# Pipe your JSON-RPC request to the executable
-echo '<JSON_REQUEST>' | ./target/release/vectordb-mcp | cat
-```
-
-Replace `<JSON_REQUEST>` with your request (e.g., from the [Test Plan](./mcp-e2e-test-plan.md)). Check the output in your terminal. Non-JSON-RPC output (logs, errors) will go to stderr.
-
-If you installed a release build where `vectordb-mcp` is in your `PATH` and libraries are correctly installed:
-
-```bash
-echo '<JSON_REQUEST>' | vectordb-mcp | cat
-```
 
 ## Capabilities (JSON-RPC Methods)
 
@@ -69,11 +44,7 @@ This crate might be moved into its own dedicated Git repository in the future to
 
 Currently serves as the JSON-RPC backend for `vectordb` commands.
 
-## Cursor MCP Integration
-
-To use `vectordb-mcp` as a backend for Cursor's AI features (like repository-aware chat), you first need to install the release binaries and dependencies. Follow the installation instructions (link to be added later, perhaps in the main README or a dedicated INSTALL.md).
-
-Once installed, configure a custom MCP server in Cursor's global settings (File -> Settings -> Search for "MCP").
+## MCP Integration
 
 Add a new server configuration with the following settings:
 
@@ -97,7 +68,6 @@ Add a new server configuration with the following settings:
 
 **Explanation:**
 
-*   The installation process should place the `vectordb-mcp` binary in your system's `PATH` (e.g., `/usr/local/bin`).
-*   The necessary ONNX runtime libraries should also be installed in a location where the system's dynamic linker can find them (e.g., `/usr/local/lib`, potentially requiring `ldconfig` to be run after installation). If the installer handles setting `LD_LIBRARY_PATH` or uses techniques like `RPATH`, direct execution should work. If not, you might need to manually adjust `LD_LIBRARY_PATH` or modify the command like `env LD_LIBRARY_PATH=/path/to/libs vectordb-mcp`.
+*   The installation process should place the `vectordb-mcp` binary in your system's `PATH` (e.g., `/usr/local/bin` but it's not necessary to call it from here).
 
-All logs and non-JSON-RPC output from the server will be directed to `stderr`. You can monitor Cursor's logs for communication details and potential errors. 
+All logs and non-JSON-RPC output from the server will be directed to `stderr`. You can monitor your tools logs for communication details and potential errors. 
