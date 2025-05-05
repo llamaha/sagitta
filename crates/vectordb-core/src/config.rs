@@ -496,18 +496,22 @@ mod tests {
 
     #[test]
     fn test_get_vocabulary_path_default() -> Result<()> {
-        let default_path = get_vocabulary_path(None)?;
-        assert!(default_path.ends_with("vocab.txt"));
+        let default_config = AppConfig::default();
+        let collection_name = "repo_test";
+        let default_path = get_vocabulary_path(&default_config, collection_name)?;
+        assert!(default_path.ends_with("test_vocab.json"));
         Ok(())
     }
 
     #[test]
     fn test_get_vocabulary_path_custom() -> Result<()> {
-        let custom_dir = tempdir()?.path().join("custom_vocab");
-        fs::create_dir_all(&custom_dir)?;
-        let custom_path = get_vocabulary_path(Some(&custom_dir))?;
+        let mut custom_config = AppConfig::default();
+        let custom_dir = "/tmp/custom_vocab_dir";
+        custom_config.vocabulary_base_path = Some(custom_dir.to_string());
+        let collection_name = "repo_test";
+        let custom_path = get_vocabulary_path(&custom_config, collection_name)?;
         assert!(custom_path.starts_with(&custom_dir));
-        assert!(custom_path.ends_with("vocab.txt"));
+        assert!(custom_path.ends_with("test_vocab.json"));
         Ok(())
     }
 } 
