@@ -142,7 +142,7 @@ impl OnnxEmbeddingModel {
 
         // Build session using Session::builder()
         Ok(Session::builder()? 
-            .with_optimization_level(GraphOptimizationLevel::Level1)?
+            .with_optimization_level(GraphOptimizationLevel::Level3)?
             .commit_from_file(model_path)?)
     }
 
@@ -267,16 +267,22 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
                 .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to ensure fresh session: {}", e)))?;
         }
 
+        use std::time::Instant;
         let batch_size = texts.len();
+        log::info!("[PROFILE] ONNX provider received batch of {} items, max_seq_length={}", batch_size, self.max_seq_length);
+        
         let mut all_input_ids = Vec::with_capacity(batch_size * self.max_seq_length);
         let mut all_attention_masks = Vec::with_capacity(batch_size * self.max_seq_length);
 
+        let token_start = Instant::now();
         for text in texts {
             let (mut input_ids, mut attention_mask) = self.prepare_inputs(text)
                 .map_err(|e| VectorDBError::EmbeddingError(format!("Input prep failed: {}", e)))?;
             all_input_ids.append(&mut input_ids);
             all_attention_masks.append(&mut attention_mask);
         }
+        let token_elapsed = token_start.elapsed();
+        log::info!("[PROFILE] ONNX batch tokenization (prepare_inputs) for {} items: {:?}", batch_size, token_elapsed);
 
         let input_ids_array =
             Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)
@@ -296,11 +302,14 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))
             .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create attention mask tensor value: {}", e)))?;
 
+        let onnx_start = Instant::now();
         let outputs = self.session.run(ort::inputs![
             "input_ids" => input_ids_value,
             "attention_mask" => attention_mask_value,
         ].map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX inputs: {}", e)))?)
             .map_err(|e| VectorDBError::EmbeddingError(format!("ONNX session batch run failed: {}", e)))?;
+        let onnx_elapsed = onnx_start.elapsed();
+        log::info!("[PROFILE] ONNX inference for {} items: {:?}", batch_size, onnx_elapsed);
 
         // Prioritize "sentence_embedding", fallback to "pooler_output", then "last_hidden_state"
         let output_value = outputs.get("sentence_embedding")
