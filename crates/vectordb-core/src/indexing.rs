@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, atomic::{AtomicUsize, Ordering}}, // Removed unused AtomicUsize, Ordering
     // cell::RefCell, // Added RefCell
     // thread_local, // Added thread_local
-    // time::Instant, // Added for timing
+    time::Instant, // Added for timing
 };
 use walkdir::WalkDir;
 use indicatif::ProgressBar; // Keep for progress reporting type hint
@@ -38,6 +38,15 @@ use qdrant_client::qdrant::{Vector, NamedVectors};
 use std::collections::{HashMap};
 use qdrant_client::qdrant::PointsSelector;
 use crate::config; // Import config module
+use std::cell::RefCell;
+use crate::embedding::provider::onnx::OnnxEmbeddingModel;
+use std::sync::Mutex;
+
+// Add chunk size optimization constants
+const MIN_CHUNK_SIZE: usize = 100;  // Merge chunks smaller than this
+const MAX_CHUNK_SIZE: usize = 50_000;  // Split chunks larger than this
+const TARGET_CHUNK_SIZE: usize = 1000;  // Aim for this size when splitting/merging
+const MAX_BATCH_CONTENT_SIZE: usize = 1_000_000;  // 1MB of text per batch
 
 /// Indexes files from specified paths into a Qdrant collection.
 ///
@@ -157,6 +166,7 @@ pub async fn index_paths<
          }
          // --- End File Size Check ---
 
+        let io_start = Instant::now();
         let chunks: Vec<CodeChunk> = match syntax::get_chunks(&file_path) {
             Ok(c) => c,
             Err(e) => {
@@ -167,6 +177,13 @@ pub async fn index_paths<
                 continue; // Skip this file
             }
         };
+
+        let io_elapsed = io_start.elapsed();
+        log::info!("[PROFILE] File I/O + chunking for {}: {:?}", file_path.display(), io_elapsed);
+        log::info!("[PROFILE] Created {} chunks from file {} (avg chunk size: {} chars)", 
+            chunks.len(),
+            file_path.display(),
+            if chunks.is_empty() { 0 } else { chunks.iter().map(|c| c.content.len()).sum::<usize>() / chunks.len() });
 
         if chunks.is_empty() {
             log::debug!("No code chunks found in file: {}", file_path.display());
@@ -304,10 +321,11 @@ fn process_single_file_for_indexing(
     relative_path_str: &str, // Use &str for efficiency
     branch_name: &str,
     commit_hash: &str,
-    embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync>, // Take Arc directly
+    embedding_provider: &crate::embedding::provider::onnx::OnnxEmbeddingModel, // Take reference directly
 ) -> std::result::Result<(Vec<IntermediatePointData>, HashSet<String>), String> { 
-    
+    use std::time::Instant;
     // --- File Size Check (as before) ---
+    let io_start = Instant::now();
     let metadata = match std::fs::metadata(full_path) {
         Ok(m) => m,
         Err(e) => {
@@ -335,6 +353,12 @@ fn process_single_file_for_indexing(
             return Err(format!("Skipping file due to parsing error: {} - {}", full_path.display(), e));
         }
     };
+    let io_elapsed = io_start.elapsed();
+    log::info!("[PROFILE] File I/O + chunking for {}: {:?}", full_path.display(), io_elapsed);
+    log::info!("[PROFILE] Created {} chunks from file {} (avg chunk size: {} chars)", 
+        chunks.len(),
+        full_path.display(),
+        if chunks.is_empty() { 0 } else { chunks.iter().map(|c| c.content.len()).sum::<usize>() / chunks.len() });
 
     if chunks.is_empty() {
         log::trace!("No code chunks found in file: {}", full_path.display());
@@ -342,11 +366,29 @@ fn process_single_file_for_indexing(
     }
 
     // --- Dense Embeddings (as before) --- 
+    let embed_start = Instant::now();
     let mut all_dense_embeddings = Vec::with_capacity(chunks.len());
+    log::info!("[PROFILE] Processing {} chunks from file {} with INTERNAL_EMBED_BATCH_SIZE={}", chunks.len(), full_path.display(), INTERNAL_EMBED_BATCH_SIZE);
+    
     for chunk_batch in chunks.chunks(INTERNAL_EMBED_BATCH_SIZE) {
         let contents_batch: Vec<&str> = chunk_batch.iter().map(|c| c.content.as_str()).collect();
-        match embedding_provider.embed_batch(&contents_batch) {
+        log::info!("[PROFILE] Processing batch of {} chunks ({}% of file)", 
+            contents_batch.len(),
+            (contents_batch.len() as f32 / chunks.len() as f32 * 100.0) as u32);
+        
+        let batch_embed_start = Instant::now();
+        // More granular timing
+        let trait_call_start = Instant::now();
+        let embed_result = embedding_provider.embed_batch(&contents_batch);
+        let trait_call_elapsed = trait_call_start.elapsed();
+        log::info!("[PROFILE] Time spent in embed_batch trait call for {} items in {}: {:?}", contents_batch.len(), full_path.display(), trait_call_elapsed);
+        let after_trait_call = Instant::now();
+        match embed_result {
             Ok(embeddings_batch) => {
+                let after_trait_elapsed = after_trait_call.elapsed();
+                log::info!("[PROFILE] Time spent after embed_batch trait call (result handling) for {} items in {}: {:?}", contents_batch.len(), full_path.display(), after_trait_elapsed);
+                let batch_embed_elapsed = batch_embed_start.elapsed();
+                log::info!("[PROFILE] Embedding batch ({} items) for {}: {:?}", contents_batch.len(), full_path.display(), batch_embed_elapsed);
                 if embeddings_batch.len() != contents_batch.len() {
                     return Err(format!("Embedding batch size mismatch for {}", full_path.display()));
                 }
@@ -357,6 +399,8 @@ fn process_single_file_for_indexing(
             }
         }
     }
+    let embed_elapsed = embed_start.elapsed();
+    log::info!("[PROFILE] Total embedding time for {}: {:?}", full_path.display(), embed_elapsed);
     if all_dense_embeddings.len() != chunks.len() {
         return Err(format!("Embedding count mismatch after batching for {}", full_path.display()));
     }
@@ -371,7 +415,10 @@ fn process_single_file_for_indexing(
 
     for (i, chunk) in chunks.iter().enumerate() {
         // --- Tokenize & Calculate TF & Collect Tokens --- 
+        let token_start = Instant::now();
         let tokens = tokenizer::tokenize_code(&chunk.content, &tokenizer_config);
+        let token_elapsed = token_start.elapsed();
+        log::info!("[PROFILE] Tokenization for chunk {} in {}: {:?}", i, full_path.display(), token_elapsed);
         let mut term_frequencies: HashMap<String, u32> = HashMap::new(); 
         for token in tokens {
             // Filtering is now handled by tokenize_code based on config
@@ -437,7 +484,7 @@ pub async fn index_repo_files<
     branch_name: &str,
     commit_hash: &str,
     client: Arc<C>, // Use generic client trait
-    embedding_handler: Arc<EmbeddingHandler>, // Changed to Arc<EmbeddingHandler>
+    embedding_handler: Arc<EmbeddingHandler>, // Kept for dimension, but not used for parallel embedding
     progress: Option<&ProgressBar>,
     max_concurrent_upserts: usize,
 ) -> Result<usize> {
@@ -469,11 +516,18 @@ pub async fn index_repo_files<
         pb.set_message("Parsing & Embedding Files...");
     }
 
-    let handler_arc_clone = embedding_handler.clone();
+    // Get ONNX model and tokenizer paths from the handler
+    let onnx_model_path = embedding_handler.onnx_model_path().ok_or_else(|| {
+        VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+    })?;
+    let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path().ok_or_else(|| {
+        VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+    })?;
 
     // Call the parallel processing function to get intermediate data
     let (all_intermediate_data, all_token_sets, processing_errors) = process_repo_files_parallel(
-        handler_arc_clone, // Pass Arc<EmbeddingHandler>
+        onnx_model_path,
+        onnx_tokenizer_path,
         repo_root,
         relative_paths,
         branch_name,
@@ -672,68 +726,312 @@ pub async fn index_repo_files<
     Ok(total_points_attempted_upsert) // Return total points attempted to upsert
 }
 
+/// Holds information about a chunk and its source file for batch processing
+struct ChunkWithMetadata {
+    chunk: CodeChunk,
+    file_path: PathBuf,
+    relative_path: String,
+    branch: String,
+    commit: String,
+}
+
+/// Normalize chunks to be within size thresholds
+fn normalize_chunks(chunks: Vec<CodeChunk>) -> Vec<CodeChunk> {
+    let mut normalized = Vec::new();
+    let mut current_chunk: Option<CodeChunk> = None;
+    let mut current_size = 0;
+
+    for chunk in chunks {
+        let chunk_size = chunk.content.len();
+
+        // If chunk is too large, split it
+        if chunk_size > MAX_CHUNK_SIZE {
+            if let Some(c) = current_chunk {
+                normalized.push(c);
+            }
+            
+            // Split large chunk into smaller ones
+            let mut content = chunk.content;
+            while !content.is_empty() {
+                let split_point = content.char_indices()
+                    .take_while(|(i, _)| *i < TARGET_CHUNK_SIZE)
+                    .last()
+                    .map(|(i, _)| i + 1)
+                    .unwrap_or(content.len());
+
+                let split_content = content[..split_point].to_string();
+                content = content[split_point..].to_string();
+
+                normalized.push(CodeChunk {
+                    content: split_content,
+                    file_path: chunk.file_path.clone(),
+                    start_line: chunk.start_line,
+                    end_line: chunk.end_line,
+                    language: chunk.language.clone(),
+                    element_type: chunk.element_type.clone(),
+                });
+            }
+            current_chunk = None;
+            current_size = 0;
+        }
+        // If chunk is too small, try to merge with previous
+        else if chunk_size < MIN_CHUNK_SIZE {
+            match &mut current_chunk {
+                Some(c) if current_size + chunk_size <= TARGET_CHUNK_SIZE => {
+                    // Merge with current chunk
+                    c.content.push_str("\n");
+                    c.content.push_str(&chunk.content);
+                    c.end_line = chunk.end_line;
+                    current_size += chunk_size + 1;
+                }
+                _ => {
+                    // Push current and start new
+                    if let Some(c) = current_chunk {
+                        normalized.push(c);
+                    }
+                    current_chunk = Some(chunk);
+                    current_size = chunk_size;
+                }
+            }
+        }
+        // Normal sized chunk
+        else {
+            if let Some(c) = current_chunk {
+                normalized.push(c);
+            }
+            normalized.push(chunk);
+            current_chunk = None;
+            current_size = 0;
+        }
+    }
+
+    // Don't forget the last chunk
+    if let Some(c) = current_chunk {
+        normalized.push(c);
+    }
+
+    normalized
+}
+
 /// Parallel processing function for repository files.
 /// Returns intermediate data for point construction and sets of unique tokens per file.
 fn process_repo_files_parallel(
-    embedding_handler: Arc<EmbeddingHandler>,
+    onnx_model_path: &std::path::Path,
+    onnx_tokenizer_path: &std::path::Path,
     repo_root: &PathBuf,
     relative_paths: &[PathBuf],
     branch_name: &str,
     commit_hash: &str,
     progress: Option<&ProgressBar>,
-) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) { // Return (IntermediateData, TokensPerFile, Errors)
-    let total_files = relative_paths.len();
-    let files_processed_counter = Arc::new(AtomicUsize::new(0));
+) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
+    use std::cell::RefCell;
+    use crate::embedding::provider::onnx::OnnxEmbeddingModel;
+    use std::sync::Mutex;
+    thread_local! {
+        static ONNX_MODEL: RefCell<Option<OnnxEmbeddingModel>> = RefCell::new(None);
+    }
 
-    // Get the embedding provider ONCE before the parallel loop
-    let embedding_provider = match embedding_handler.get_onnx_provider() {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("Failed to get embedding provider for parallel processing: {}", e);
-            return (Vec::new(), Vec::new(), vec![format!("Failed to initialize embedding provider: {}", e)]);
-        }
-    };
-
-    let results: Vec<std::result::Result<(Vec<IntermediatePointData>, HashSet<String>), String>> = relative_paths
-        .par_iter()
-        .map(|relative_path| {
-            let full_path = repo_root.join(relative_path);
-            let relative_path_str = relative_path.to_string_lossy();
-            log::trace!("Parallel processing: {}", full_path.display());
-
-            // Call the refactored function
-            let result = process_single_file_for_indexing(
-                &full_path,
-                &relative_path_str,
-                branch_name,
-                commit_hash,
-                embedding_provider.clone(), // Pass clone of the provider Arc
-            );
-
-            // Update progress bar regardless of outcome for this file
-            let count = files_processed_counter.fetch_add(1, Ordering::Relaxed);
-            if let Some(pb) = progress {
-                pb.set_position((count + 1) as u64);
-            }
-            result // Forward the result (Ok or Err)
-        })
-        .collect();
-
-    // Separate successful results (intermediate data, tokens) from errors
     let mut all_intermediate_data = Vec::new();
     let mut all_token_sets = Vec::new();
     let mut processing_errors = Vec::new();
+    let current_batch: Arc<Mutex<Vec<ChunkWithMetadata>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut current_file_tokens = HashSet::new();
 
+    // Process function for a batch of chunks
+    let process_batch = |batch: &[ChunkWithMetadata]| -> Result<Vec<Vec<f32>>> {
+        let contents: Vec<&str> = batch.iter()
+            .map(|c| c.chunk.content.as_str())
+            .collect();
+
+        let embed_start = Instant::now();
+        let embeddings = ONNX_MODEL.with(|cell| {
+            let model = cell.borrow();
+            model.as_ref().unwrap().embed_batch(&contents)
+        })?;
+        let embed_elapsed = embed_start.elapsed();
+        log::info!("[PROFILE] Cross-file batch embedding time for {} chunks: {:?}", contents.len(), embed_elapsed);
+
+        Ok(embeddings)
+    };
+
+    // Process files in parallel
+    let results: Vec<_> = relative_paths.par_iter().map(|relative_path| {
+        // Initialize ONNX model for this thread if not already initialized
+        ONNX_MODEL.with(|cell| {
+            let mut model_opt = cell.borrow_mut();
+            if model_opt.is_none() {
+                *model_opt = Some(OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
+                    .expect("Failed to create thread-local ONNX model instance"));
+            }
+        });
+
+        let full_path = repo_root.join(relative_path);
+        let relative_path_str = relative_path.to_string_lossy().to_string();
+        
+        // File I/O and chunking
+        let io_start = Instant::now();
+        let chunks = match syntax::get_chunks(&full_path) {
+            Ok(c) => normalize_chunks(c),
+            Err(e) => {
+                let error_msg = format!("Failed to process {}: {}", full_path.display(), e);
+                return Err(error_msg);
+            }
+        };
+        let io_elapsed = io_start.elapsed();
+        log::info!("[PROFILE] File I/O + chunking for {}: {:?}", full_path.display(), io_elapsed);
+        log::info!("[PROFILE] Created {} chunks from file {} (avg chunk size: {} chars)", 
+            chunks.len(),
+            full_path.display(),
+            if chunks.is_empty() { 0 } else { chunks.iter().map(|c| c.content.len()).sum::<usize>() / chunks.len() });
+
+        // Add chunks to the current batch
+        let mut file_tokens = HashSet::new();
+        let mut file_intermediate_data = Vec::new();
+
+        for chunk in chunks {
+            let chunk_meta = ChunkWithMetadata {
+                chunk,
+                file_path: full_path.clone(),
+                relative_path: relative_path_str.clone(),
+                branch: branch_name.to_string(),
+                commit: commit_hash.to_string(),
+            };
+
+            // Add to shared batch
+            let mut batch = current_batch.lock().unwrap();
+            let batch_content_size: usize = batch.iter().map(|c| c.chunk.content.len()).sum();
+            
+            if batch_content_size + chunk_meta.chunk.content.len() <= MAX_BATCH_CONTENT_SIZE 
+                && batch.len() < INTERNAL_EMBED_BATCH_SIZE {
+                batch.push(chunk_meta);
+            } else {
+                // Process current batch before adding new chunk
+                let batch_to_process = std::mem::take(&mut *batch);
+                drop(batch);
+
+                if !batch_to_process.is_empty() {
+                    match process_batch(&batch_to_process) {
+                        Ok(embeddings) => {
+                            // Process results and create intermediate data
+                            for (i, chunk_meta) in batch_to_process.iter().enumerate() {
+                                let file_extension = chunk_meta.file_path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .unwrap_or("")
+                                    .to_string();
+
+                                // Generate sparse vectors and collect tokens
+                                let tokenizer_config = TokenizerConfig::default();
+                                let tokens = tokenizer::tokenize_code(&chunk_meta.chunk.content, &tokenizer_config);
+                                let mut term_frequencies = HashMap::new();
+                                for token in tokens {
+                                    if token.kind != TokenKind::Whitespace && token.kind != TokenKind::Unknown {
+                                        let token_text = token.text;
+                                        file_tokens.insert(token_text.clone());
+                                        *term_frequencies.entry(token_text).or_insert(0) += 1;
+                                    }
+                                }
+
+                                // Create payload
+                                let mut payload_map = HashMap::new();
+                                payload_map.insert(FIELD_FILE_PATH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.relative_path.clone()));
+                                payload_map.insert(FIELD_START_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.start_line as i64));
+                                payload_map.insert(FIELD_END_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.end_line as i64));
+                                payload_map.insert(FIELD_LANGUAGE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.language.clone()));
+                                payload_map.insert(FIELD_FILE_EXTENSION.to_string(), qdrant_client::qdrant::Value::from(file_extension));
+                                payload_map.insert(FIELD_ELEMENT_TYPE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.element_type.to_string()));
+                                payload_map.insert(FIELD_CHUNK_CONTENT.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.content.clone()));
+                                payload_map.insert(FIELD_BRANCH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.branch.clone()));
+                                payload_map.insert(FIELD_COMMIT_HASH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.commit.clone()));
+
+                                file_intermediate_data.push(IntermediatePointData {
+                                    dense_vector: embeddings[i].clone(),
+                                    term_frequencies,
+                                    payload_map,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to process batch: {}", e));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update progress after processing each file
+        if let Some(pb) = progress {
+            pb.inc(1);
+        }
+
+        Ok((file_intermediate_data, file_tokens))
+    }).collect();
+
+    // Process any remaining chunks in the final batch
+    // Ensure ONNX model is initialized on the main thread before processing
+    ONNX_MODEL.with(|cell| {
+        if cell.borrow().is_none() {
+            *cell.borrow_mut() = Some(OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
+                .expect("Failed to create thread-local ONNX model instance"));
+        }
+    });
+    let final_batch = current_batch.lock().unwrap();
+    if (!final_batch.is_empty()) {
+        if let Ok(embeddings) = process_batch(&final_batch) {
+            for (i, chunk_meta) in final_batch.iter().enumerate() {
+                let file_extension = chunk_meta.file_path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // Generate sparse vectors and collect tokens
+                let tokenizer_config = TokenizerConfig::default();
+                let tokens = tokenizer::tokenize_code(&chunk_meta.chunk.content, &tokenizer_config);
+                let mut term_frequencies = HashMap::new();
+                for token in tokens {
+                    if token.kind != TokenKind::Whitespace && token.kind != TokenKind::Unknown {
+                        let token_text = token.text;
+                        current_file_tokens.insert(token_text.clone());
+                        *term_frequencies.entry(token_text).or_insert(0) += 1;
+                    }
+                }
+
+                // Create payload
+                let mut payload_map = HashMap::new();
+                payload_map.insert(FIELD_FILE_PATH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.relative_path.clone()));
+                payload_map.insert(FIELD_START_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.start_line as i64));
+                payload_map.insert(FIELD_END_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.end_line as i64));
+                payload_map.insert(FIELD_LANGUAGE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.language.clone()));
+                payload_map.insert(FIELD_FILE_EXTENSION.to_string(), qdrant_client::qdrant::Value::from(file_extension));
+                payload_map.insert(FIELD_ELEMENT_TYPE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.element_type.to_string()));
+                payload_map.insert(FIELD_CHUNK_CONTENT.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.content.clone()));
+                payload_map.insert(FIELD_BRANCH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.branch.clone()));
+                payload_map.insert(FIELD_COMMIT_HASH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.commit.clone()));
+
+                all_intermediate_data.push(IntermediatePointData {
+                    dense_vector: embeddings[i].clone(),
+                    term_frequencies,
+                    payload_map,
+                });
+            }
+        }
+    }
+
+    // Collect results from parallel processing
     for result in results {
         match result {
-            Ok((intermediate_list, tokens)) => {
-                all_intermediate_data.extend(intermediate_list);
-                all_token_sets.push(tokens);
+            Ok((file_data, file_tokens)) => {
+                all_intermediate_data.extend(file_data);
+                all_token_sets.push(file_tokens);
             }
             Err(e) => {
                 processing_errors.push(e);
             }
         }
+    }
+
+    // Add any remaining tokens from the last file
+    if !current_file_tokens.is_empty() {
+        all_token_sets.push(current_file_tokens);
     }
 
     (all_intermediate_data, all_token_sets, processing_errors)
@@ -938,8 +1236,10 @@ mod tests {
         let regular_dir_entry = create_dir_entry(&regular_dir_path, true);
         assert!(!is_target_dir(&regular_dir_entry));
         
+        
         // Test file named "target" (should return false since it's not a directory)
         let target_file_entry = create_dir_entry(&target_file_path, false);
         assert!(!is_target_dir(&target_file_entry));
     }
 }
+
