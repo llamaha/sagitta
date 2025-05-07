@@ -6,6 +6,10 @@ vectordb-cli is powered by the [vectordb-core](./crates/vectordb-core/README.md)
 
 There is also a [vectordb-mcp](./crates/vectordb-mcp/README.md) that allows this tool to operate as an MCP server.  It's recommended to compile both CLI and MCP as they compliment each other and both are lightweight frontends to the same core library.
 
+## Performance
+
+vectordb-cli has been extensively optimized for high-performance indexing and search operations. Through careful tuning of parallel processing, GPU utilization, and embedding model selection, we've achieved significant speed improvements while maintaining high-quality search results. The tool intelligently balances resource usage based on your hardware capabilities, making it efficient even on systems with limited GPU memory.
+
 ## Getting Started
 
 See the [Setup Guide](./docs/SETUP.md) for instructions on building, running, and generating the ONNX model and tokenizer files required for vectordb-cli. The ONNX model and tokenizer are now generated locally using scripts/setup_onnx_model.sh and are not stored in the repository.

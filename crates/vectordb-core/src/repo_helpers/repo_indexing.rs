@@ -13,13 +13,14 @@ use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_COMM
 use crate::config::AppConfig;
 use crate::embedding::EmbeddingHandler;
 use crate::QdrantClientTrait;
-use crate::indexing::{self, index_repo_files, ensure_collection_exists};
+use crate::indexing::{self, index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
 use crate::error::VectorDBError as Error;
 use crate::repo_helpers::git_utils::create_fetch_options;
 use crate::repo_helpers::qdrant_utils::get_collection_name;
 use git2::{Repository, FetchOptions, Reference, BranchType, AutotagOption, ErrorCode};
 use anyhow::anyhow;
 use std::process::{Command, Stdio};
+use walkdir::WalkDir;
 
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -144,6 +145,7 @@ pub async fn prepare_repository<C>(
     base_path_for_new_clones: &Path,
     client: Arc<C>,
     embedding_dim: u64,
+    config: &AppConfig,
 ) -> Result<RepositoryConfig, Error>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -163,7 +165,7 @@ where
 
     let url_str = url.to_string(); // Clone url for closure
     let repo_name_str = repo_name.to_string(); // Clone repo_name for closure
-    let collection_name = get_collection_name(&repo_name_str);
+    let collection_name = get_collection_name(&repo_name_str, config);
 
     let mut was_cloned = false;
     if !final_local_path.exists() {
@@ -315,12 +317,13 @@ where
 pub async fn delete_repository_data<C>(
     repo_config: &RepositoryConfig,
     client: Arc<C>,
+    config: &AppConfig,
 ) -> Result<(), Error>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let repo_name = &repo_config.name;
-    let collection_name = get_collection_name(repo_name);
+    let collection_name = get_collection_name(repo_name, config);
     info!("Attempting to delete Qdrant collection '{collection_name}'...");
     match client.delete_collection(collection_name.clone()).await {
         Ok(deleted) => {
@@ -635,5 +638,89 @@ fn checkout_branch(repo_path: &Path, branch_name: &str) -> Result<(), anyhow::Er
             info!("git checkout stderr:\n{}", stderr);
         }
     }
+    Ok(())
+}
+
+pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
+    client: Arc<C>,
+    repo_path: &Path,
+    collection_name: &str,
+    branch: &str,
+    commit_hash: &str,
+    config: &AppConfig,
+) -> Result<()> {
+    let mut files_to_process = Vec::new();
+    
+    // Walk through the repository directory
+    for entry in WalkDir::new(repo_path)
+        .into_iter()
+        .filter_entry(|e| !is_hidden(e) && !is_target_dir(e))
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        // Get file metadata
+        let metadata = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(e) => {
+                log::warn!("Failed to get metadata for file {}: {}. Skipping.", path.display(), e);
+                continue;
+            }
+        };
+
+        // Check file size
+        if metadata.len() > config.performance.max_file_size_bytes {
+            log::warn!(
+                "File {} exceeds maximum size limit ({} bytes), skipping",
+                path.display(),
+                config.performance.max_file_size_bytes
+            );
+            continue;
+        }
+
+        // Get relative path
+        let relative_path = path.strip_prefix(repo_path)
+            .map_err(|e| anyhow!("Failed to get relative path for {}: {}", path.display(), e))?;
+        
+        files_to_process.push(relative_path.to_path_buf());
+    }
+
+    // Process the files
+    if files_to_process.is_empty() {
+        log::info!("No files found to process in repository {}", repo_path.display());
+        return Ok(());
+    }
+
+    // Create a progress bar
+    let pb = ProgressBar::new(files_to_process.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}, {eta})")
+            .map_err(|e| Error::Other(e.to_string()))?
+            .progress_chars("#=-"),
+    );
+    pb.set_draw_target(indicatif::ProgressDrawTarget::stderr());
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+
+    // Initialize embedding handler
+    let embedding_handler = EmbeddingHandler::new(config)
+        .context("Failed to initialize embedding handler for repo indexing")?;
+    let embedding_handler_arc = Arc::new(embedding_handler);
+
+    // Index the files
+    index_files(
+        client,
+        config,
+        &repo_path.to_path_buf(),
+        &files_to_process,
+        collection_name,
+        branch,
+        commit_hash,
+    ).await?;
+
+    pb.finish_with_message("Indexing complete");
     Ok(())
 } 

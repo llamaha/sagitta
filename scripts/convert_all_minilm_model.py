@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Convert Sentence Transformer Code Search model to ONNX format
+# Convert All-MiniLM-L6-v2 Sentence Transformer model to ONNX format
 
 import os
 import torch
@@ -10,8 +10,8 @@ import sys
 import argparse
 
 # Define the model we want to convert
-DEFAULT_MODEL_NAME = "flax-sentence-embeddings/st-codesearch-distilroberta-base"
-DEFAULT_OUTPUT_DIR = "st_code_onnx"
+DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_OUTPUT_DIR = "all_minilm_onnx"
 
 # --- Sentence Transformer specific changes START ---
 # Sentence Transformers often require pooling the last hidden state.
@@ -155,8 +155,8 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
         pytorch_model = AutoModel.from_pretrained(model_name)
         pytorch_model.eval()
 
-        # Prepare sample input text
-        text = "def example_function(input_arg): return input_arg + 1"
+        # Prepare sample input text for verification (using a general text sample)
+        text = "The quick brown fox jumps over the lazy dog."
         inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=128) # Use same max_length as dummy
 
         # PyTorch inference
@@ -196,7 +196,7 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
         print(f"Error verifying ONNX model: {e}", file=sys.stderr)
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Sentence Transformer models to ONNX.")
+    parser = argparse.ArgumentParser(description="Convert all-MiniLM-L6-v2 model to ONNX.")
     parser.add_argument(
         "--model_name",
         type=str,

@@ -38,6 +38,22 @@ This guide provides instructions to build, install, and configure `vectordb-cli`
     ```
     This will create `onnx/model_quantized.onnx` and the necessary tokenizer files in the `onnx/` directory.
 
+    Alternatively, you can use the Python conversion scripts directly with a virtual environment:
+    ```bash
+    # Create and activate a Python virtual environment
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+    # Install dependencies
+    pip install torch transformers onnx onnxruntime numpy
+
+    # Run the conversion script
+    python scripts/convert_st_code_model.py
+    
+    # Deactivate the virtual environment when done
+    deactivate
+    ```
+
 3.  **Build (CPU-only)**:
     ```bash
     cargo build --release
@@ -109,6 +125,27 @@ Most of these commands have further options available under the help menus.
 The default build (`cargo build --release`) uses the CPU for embeddings. For significantly faster performance on large codebases, you can compile with GPU support using Cargo feature flags.
 
 The build script (`build.rs`) handles downloading the necessary ONNX Runtime libraries (including GPU-specific ones) and configuring the linker (`RPATH` / `@executable_path`) so that the `vectordb-cli` binary can find these libraries at runtime without needing `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH` to be set manually.
+
+### Managing GPU Memory Usage with Rayon Threads
+
+When indexing large repositories with GPU acceleration, vectordb-cli may hit GPU Out-of-Memory (OOM) errors due to parallel processing. By default, Rayon creates as many worker threads as there are CPU cores, and each thread may initialize its own ONNX model in GPU memory.
+
+To prevent GPU memory exhaustion, set the `RAYON_NUM_THREADS` environment variable:
+
+```bash
+# Limit Rayon to 8 worker threads - adjust based on your GPU memory capacity
+export RAYON_NUM_THREADS=8
+
+# Then run your commands normally
+vectordb-cli repo sync
+```
+
+This limitation is particularly important for:
+- Large repositories with many files
+- GPUs with limited VRAM (e.g., 8GB or less)
+- Systems with many CPU cores (16+)
+
+Setting `RAYON_NUM_THREADS` too low reduces parallelism, while setting it too high risks GPU OOM errors. Experiment to find the optimal value for your hardware.
 
 ### Available Feature Flags
 
@@ -216,6 +253,108 @@ Similar to Core ML, enabling Metal might require explicitly requesting the `Meta
 ## Using Different Embedding Models (e.g., CodeBERT)
 
 You can configure `vectordb-cli` to use alternative sentence-transformer models compatible with ONNX, instead of the default `all-MiniLM-L6-v2`. CodeBERT (`microsoft/codebert-base`) is one such example, specifically trained on code.
+
+### Available Model Conversion Scripts
+
+The repository includes scripts to generate ONNX models from different Sentence Transformers:
+
+1. **Convert All-MiniLM-L6-v2** (general purpose model, 384 dimensions):
+   ```bash
+   # Set up a Python virtual environment
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install torch transformers onnx onnxruntime numpy
+   
+   # Run the conversion script
+   python scripts/convert_all_minilm_model.py
+   
+   # This will create the model in all_minilm_onnx/ directory
+   ```
+
+2. **Convert ST-CodeSearch** (code-specific model, 768 dimensions):
+   ```bash
+   # If you haven't already set up the virtual environment
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install torch transformers onnx onnxruntime numpy
+   
+   # Run the conversion script  
+   python scripts/convert_st_code_model.py
+   
+   # This will create the model in st_code_onnx/ directory
+   ```
+
+### Performance Optimizations
+
+vectordb-cli incorporates several key optimizations to maximize performance without compromising search quality:
+
+1. **Parallel Processing:**
+   - Intelligent thread management for optimal GPU utilization
+   - Automatic batch size optimization for embedding generation
+   - Efficient memory management to prevent GPU OOM errors
+
+2. **Model Selection:**
+   - Carefully chosen embedding models balancing speed and accuracy
+   - All-MiniLM-L6-v2 (384d) for fast indexing and good general results
+   - ST-CodeSearch (768d) for higher accuracy on code-specific queries
+
+3. **Resource Management:**
+   - Dynamic thread allocation based on available GPU memory
+   - Smart batching to maximize GPU utilization
+   - Efficient memory cleanup during large indexing operations
+
+4. **Search Quality:**
+   - Hybrid search combining dense and sparse embeddings
+   - Optimized tokenization for code-specific content
+   - Maintained high relevance while achieving significant speed gains
+
+These optimizations make vectordb-cli particularly efficient for both large-scale indexing operations and real-time search queries, while ensuring high-quality results across different types of codebases.
+
+### Model Comparison
+
+| Feature             | All-MiniLM-L6-v2                | ST-CodeSearch                      |
+| ------------------- | ------------------------------ | ---------------------------------- |
+| **Primary Use**     | General semantic search        | Code-focused search                |
+| **Dimensions**      | 384                           | 768                                |
+| **Speed**          | Faster                         | Slower                             |
+| **GPU Memory**     | Lower (~1-2GB)                | Higher (~2-4GB)                    |
+| **Index Size**     | Smaller                        | Larger                             |
+| **Accuracy**       | Good                           | Better for code                    |
+| **Best For**       | Quick prototyping, small GPUs  | Code-specific search              |
+
+### Performance and GPU Memory Considerations
+
+The relationship between model size, GPU memory, and indexing performance is crucial to understand:
+
+1. **Model Size vs. GPU Memory:**
+   - Larger models (higher dimensions) require more GPU memory per instance
+   - Each Rayon thread creates its own model instance in GPU memory
+   - Total GPU memory usage ≈ (Model Size × Number of Rayon Threads)
+
+2. **Performance Tradeoffs:**
+   - More Rayon threads = Faster indexing (up to GPU memory limits)
+   - Larger models = Better accuracy but fewer possible parallel threads
+   - Available GPU memory determines optimal balance
+
+3. **Recommendations by Use Case:**
+   - **Large Repositories (many files):**
+     ```bash
+     # Use smaller model (All-MiniLM) with more threads
+     export RAYON_NUM_THREADS=8  # On 8GB GPU
+     ```
+   - **Small-Medium Repositories (accuracy critical):**
+     ```bash
+     # Use ST-CodeSearch with fewer threads
+     export RAYON_NUM_THREADS=6  # On 8GB GPU
+     ```
+
+4. **Finding Your Optimal Setup:**
+   - Start with recommended threads for your model/GPU combination
+   - If you get OOM errors, reduce RAYON_NUM_THREADS
+   - If indexing is slow and GPU memory is available, increase threads
+   - Monitor GPU memory usage while indexing to fine-tune
+
+Remember: The optimal configuration depends heavily on your specific hardware and use case. Experimentation is key to finding the best balance between indexing speed and model accuracy for your needs.
 
 ### Generating the CodeBERT ONNX Model
 

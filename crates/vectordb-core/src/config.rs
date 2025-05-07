@@ -65,6 +65,58 @@ fn default_max_concurrent_upserts() -> usize {
     8 // Default to 8 concurrent uploads
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// Configuration for performance-related settings
+pub struct PerformanceConfig {
+    /// Batch size for Qdrant upserts
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+    /// Batch size for internal embedding operations
+    #[serde(default = "default_internal_embed_batch_size")]
+    pub internal_embed_batch_size: usize,
+    /// Prefix for collection names in Qdrant
+    #[serde(default = "default_collection_name_prefix")]
+    pub collection_name_prefix: String,
+    /// Maximum file size in bytes that will be processed
+    #[serde(default = "default_max_file_size_bytes")]
+    pub max_file_size_bytes: u64,
+    /// Default vector dimension for embeddings
+    #[serde(default = "default_vector_dimension")]
+    pub vector_dimension: u64,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            batch_size: default_batch_size(),
+            internal_embed_batch_size: default_internal_embed_batch_size(),
+            collection_name_prefix: default_collection_name_prefix(),
+            max_file_size_bytes: default_max_file_size_bytes(),
+            vector_dimension: default_vector_dimension(),
+        }
+    }
+}
+
+fn default_batch_size() -> usize {
+    256
+}
+
+fn default_internal_embed_batch_size() -> usize {
+    128
+}
+
+fn default_collection_name_prefix() -> String {
+    "repo_".to_string()
+}
+
+fn default_max_file_size_bytes() -> u64 {
+    5 * 1024 * 1024 // 5 MB
+}
+
+fn default_vector_dimension() -> u64 {
+    384
+}
+
 /// Main application configuration structure.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppConfig {
@@ -89,6 +141,9 @@ pub struct AppConfig {
     /// Indexing configuration settings.
     #[serde(default)]
     pub indexing: IndexingConfig,
+    /// Performance-related configuration settings
+    #[serde(default)]
+    pub performance: PerformanceConfig,
 }
 
 /// Configuration specific to a single repository.
@@ -106,11 +161,12 @@ impl Default for AppConfig {
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
-            repositories_base_path: None, // Default to None
-            vocabulary_base_path: None, // Default to None
+            repositories_base_path: None,
+            vocabulary_base_path: None,
             repositories: Vec::new(),
             active_repository: None,
             indexing: IndexingConfig::default(),
+            performance: PerformanceConfig::default(),
         }
     }
 }
@@ -389,6 +445,7 @@ mod tests {
             repositories_base_path: Some(data_path.to_string_lossy().to_string()),
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
+            performance: PerformanceConfig::default(),
         };
 
         // Save and load
@@ -441,6 +498,7 @@ mod tests {
             active_repository: None,
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
+            performance: PerformanceConfig::default(),
         };
         
         // Should use the custom path from config

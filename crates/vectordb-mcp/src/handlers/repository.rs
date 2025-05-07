@@ -72,11 +72,18 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         target_ref: params.target_ref, // Pass through the target_ref from MCP params
     };
 
+    // Get a clone of the config for handle_repo_add
+    let config_clone = {
+        let config_read_guard = config.read().await;
+        config_read_guard.clone()
+    };
+
     let new_repo_config_result = handle_repo_add(
         args, // Use the mapped args
         initial_base_path,
         embedding_dim,
         qdrant_client.clone(),
+        &config_clone, // Use the cloned config instead of the guard
     )
     .await;
 
@@ -172,7 +179,7 @@ pub async fn handle_repository_remove<C: QdrantClientTrait + Send + Sync + 'stat
     let repo_config_to_remove = config_write_guard.repositories[repo_index].clone();
 
     // Attempt to delete data first
-    if let Err(e) = delete_repository_data(&repo_config_to_remove, qdrant_client.clone()).await {
+    if let Err(e) = delete_repository_data(&repo_config_to_remove, qdrant_client.clone(), &config_write_guard).await {
         // Log error but proceed with config removal
         error!(repo_name = %params.name, error = %e, "Failed to delete repository data, proceeding with config removal.");
     }
@@ -211,7 +218,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     // --- Get Vocabulary Path BEFORE sync ---
     let (vocab_path, vocab_exists_before_sync) = {
         let config_read = config.read().await;
-        let collection_name_for_vocab = get_collection_name(&repo_name);
+        let collection_name_for_vocab = get_collection_name(&repo_name, &config_read);
         let path_result = config::get_vocabulary_path(&*config_read, &collection_name_for_vocab);
         match path_result {
             Ok(p) => {
@@ -402,7 +409,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             .as_deref()
             .or(repo_config_clone.active_branch.as_deref())
             .unwrap_or(&repo_config_clone.default_branch);
-        let collection_name = get_collection_name(&repo_name);
+        let collection_name = get_collection_name(&repo_name, &app_config_clone);
 
         let files_to_index_abs = match gather_files(&[repo_root.clone()], None) {
             Ok(files) => files,
@@ -626,6 +633,7 @@ mod tests {
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             vocabulary_base_path: Some(PathBuf::from("/vocab").to_string_lossy().into_owned()),
+            performance: Default::default(),
         };
         let config_arc = Arc::new(RwLock::new(config));
 

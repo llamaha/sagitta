@@ -18,6 +18,7 @@ use vectordb_core::embedding::EmbeddingHandler;
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
 use vectordb_core::config::get_repo_base_path;
 use crate::cli::CliArgs;
+use vectordb_core::config::{IndexingConfig, PerformanceConfig};
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoArgs {
@@ -68,7 +69,8 @@ where
                 add_args, 
                 repo_base_path, 
                 embedding_dim as u64, 
-                Arc::clone(&client)
+                Arc::clone(&client),
+                &config
             ).await;
             match repo_config_result {
                 Ok(new_repo_config) => {
@@ -155,6 +157,7 @@ mod tests {
             repositories: vec![],
             active_repository: None,
             indexing: Default::default(),
+            performance: PerformanceConfig::default(),
         };
         config
     }
@@ -214,6 +217,7 @@ mod tests {
             repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
             indexing: IndexingConfig::default(),
+            performance: PerformanceConfig::default(),
         }
     }
 

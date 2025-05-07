@@ -73,7 +73,7 @@ where
     let repo_config_clone = config.repositories[repo_config_index].clone();
 
     // Use the core function to delete Qdrant collection
-    let collection_name = vectordb_core::repo_helpers::get_collection_name(&repo_name);
+    let collection_name = vectordb_core::repo_helpers::get_collection_name(&repo_name, &config);
     info!("Attempting to delete Qdrant collection '{}'...", collection_name);
     match client.delete_collection(collection_name.clone()).await {
         Ok(deleted) => {

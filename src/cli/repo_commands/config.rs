@@ -4,7 +4,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 use vectordb_core::AppConfig;
-use vectordb_core::config::{save_config, get_config_path_or_default, IndexingConfig, load_config};
+use vectordb_core::config::{save_config, get_config_path_or_default, IndexingConfig, load_config, PerformanceConfig};
 use crate::cli::CliArgs;
 use crate::cli::commands::Commands;
 use crate::cli::simple;
@@ -90,6 +90,7 @@ fn get_default_config() -> AppConfig {
         server_api_key_path: None,
         indexing: IndexingConfig::default(),
         vocabulary_base_path: None,
+        performance: PerformanceConfig::default(),
     }
 }
 
@@ -121,6 +122,7 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
+            performance: PerformanceConfig::default(),
         };
         
         // Set repo base path
@@ -160,6 +162,7 @@ mod tests {
             repositories_base_path: None,
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
+            performance: PerformanceConfig::default(),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
@@ -203,6 +206,7 @@ mod tests {
             repositories_base_path: None,
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
+            performance: PerformanceConfig::default(),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
