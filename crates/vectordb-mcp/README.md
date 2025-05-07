@@ -50,21 +50,32 @@ Add a new server configuration with the following settings:
 
 ```json
 {
-    "serverName": "vectordb",
-    "workingDirectory": "/path/to/your/installation",
-    "command": [
-        "/path/to/your/installation/vectordb-mcp"
-    ],
-    "env": {
-         "LD_LIBRARY_PATH": "/path/to/onnx/libs:/path/to/cuda/libs"
+  "mcpServers": {
+    "vectordb-mcp": {
+      "command": "/home/adam/repos/vectordb-cli/target/release/vectordb-mcp",
+      "args": [],
+      "cwd": "/home/adam/repos/vectordb-cli",
+      "env": {
+        "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:/home/adam/repos/vectordb-cli/target/release/lib",
+        "RAYON_NUM_THREADS": "8"
+      }
     }
+  }
 }
 ```
 
-*   **`serverName`:** `vectordb` (or any name you prefer)
-*   **`workingDirectory`:** Set this to the *absolute path* where `vectordb-mcp` and its associated libraries (like the ONNX runtime libs, if packaged together) are installed. For development builds within the repo, this would be the absolute path to the repo root (e.g., `/home/user/repos/vectordb-cli`).
-*   **`command`:** An array containing the *absolute path* to the `vectordb-mcp` executable (e.g., `["/path/to/your/installation/vectordb-mcp"]` or `["/home/user/repos/vectordb-cli/target/release/vectordb-mcp"]` for development).
-*   **`env` (Optional):** A dictionary for environment variables. Use this to set `LD_LIBRARY_PATH` if the necessary libraries (like ONNX runtime, CUDA) aren't automatically found by the system linker. Replace the example paths with the actual absolute paths to the directories containing the required `.so` files, separated by colons (`:`). If your installation script correctly configures system library paths (e.g., using `ldconfig` or RPATH), you might not need to set this manually.
+This configuration defines an MCP server named `vectordb-mcp` with the following properties:
+
+*   **`command`**: The *absolute path* to the `vectordb-mcp` executable. 
+    *   Example (development): `"/home/adam/repos/vectordb-cli/target/release/vectordb-mcp"`
+    *   Example (installation): `"/path/to/your/installation/vectordb-mcp"`
+*   **`args`**: An array of command-line arguments to pass to the executable (currently empty in the example).
+*   **`cwd` (Current Working Directory)**: The *absolute path* to the directory where the command should be executed. For development, this is typically the repository root.
+    *   Example: `"/home/adam/repos/vectordb-cli"`
+*   **`env`**: A dictionary for environment variables. 
+    *   `LD_LIBRARY_PATH`: Use this to specify paths to necessary shared libraries (like ONNX runtime, CUDA) if they are not in standard system locations. Paths are colon-separated.
+        *   Example: `"/usr/local/cuda-12.8/lib64:/home/adam/repos/vectordb-cli/target/release/lib"`
+    *   `RAYON_NUM_THREADS`: Optionally, set the number of threads for Rayon to use (e.g., `"8"`). This might be beneficial for performance and resource management during parallel operations like indexing.
 
 **Explanation:**
 

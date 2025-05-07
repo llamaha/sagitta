@@ -129,15 +129,12 @@ pub async fn index_paths<
     let total_files = files_to_process.len();
 
     // Create a single embedding model instance for sequential processing
-    let dense_model = {
-        let model_path = embedding_handler.onnx_model_path.as_ref().ok_or_else(|| {
-            VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
-        })?;
-        let tokenizer_path = embedding_handler.onnx_tokenizer_path.as_ref().ok_or_else(|| {
-            VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
-        })?;
-        crate::embedding::provider::onnx::OnnxEmbeddingModel::new(model_path, tokenizer_path)
-            .map_err(VectorDBError::from)?
+    let dense_model = match embedding_handler.create_embedding_model() {
+        Ok(m) => m,
+        Err(e) => {
+            log::error!("Failed to create embedding model for sequential indexing: {}", e);
+            return Err(e.into());
+        }
     };
 
     for (file_idx, file_path) in files_to_process.into_iter().enumerate() {
@@ -520,10 +517,10 @@ pub async fn index_repo_files<
     }
 
     // Get ONNX model and tokenizer paths from the handler
-    let onnx_model_path = embedding_handler.onnx_model_path.as_ref().ok_or_else(|| {
+    let onnx_model_path = embedding_handler.onnx_model_path().ok_or_else(|| {
         VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
     })?;
-    let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path.as_ref().ok_or_else(|| {
+    let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path().ok_or_else(|| {
         VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
     })?;
 
@@ -730,6 +727,7 @@ pub async fn index_repo_files<
 }
 
 /// Holds information about a chunk and its source file for batch processing
+#[derive(Clone)]
 struct ChunkWithMetadata {
     chunk: CodeChunk,
     file_path: PathBuf,
@@ -759,7 +757,7 @@ fn normalize_chunks(chunks: Vec<CodeChunk>) -> Vec<CodeChunk> {
                 let split_point = content.char_indices()
                     .take_while(|(i, _)| *i < TARGET_CHUNK_SIZE)
                     .last()
-                    .map(|(i, _)| i + 1)
+                    .map(|(i, char_val)| i + char_val.len_utf8())
                     .unwrap_or(content.len());
 
                 let split_content = content[..split_point].to_string();
@@ -827,8 +825,12 @@ fn process_repo_files_parallel(
     commit_hash: &str,
     progress: Option<&ProgressBar>,
 ) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
+    use std::cell::RefCell;
     use crate::embedding::provider::onnx::OnnxEmbeddingModel;
     use std::sync::Mutex;
+    thread_local! {
+        static ONNX_MODEL: RefCell<Option<OnnxEmbeddingModel>> = RefCell::new(None);
+    }
 
     let mut all_intermediate_data = Vec::new();
     let mut all_token_sets = Vec::new();
@@ -841,18 +843,29 @@ fn process_repo_files_parallel(
         let contents: Vec<&str> = batch.iter()
             .map(|c| c.chunk.content.as_str())
             .collect();
+
         let embed_start = Instant::now();
-        let model = OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX model: {}", e)))?;
-        let embeddings = model.embed_batch(&contents)
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to embed batch: {}", e)))?;
+        let embeddings = ONNX_MODEL.with(|cell| {
+            let model = cell.borrow();
+            model.as_ref().unwrap().embed_batch(&contents)
+        })?;
         let embed_elapsed = embed_start.elapsed();
         log::info!("[PROFILE] Cross-file batch embedding time for {} chunks: {:?}", contents.len(), embed_elapsed);
+
         Ok(embeddings)
     };
 
     // Process files in parallel
     let results: Vec<_> = relative_paths.par_iter().map(|relative_path| {
+        // Initialize ONNX model for this thread if not already initialized
+        ONNX_MODEL.with(|cell| {
+            let mut model_opt = cell.borrow_mut();
+            if model_opt.is_none() {
+                *model_opt = Some(OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
+                    .expect("Failed to create thread-local ONNX model instance"));
+            }
+        });
+
         let full_path = repo_root.join(relative_path);
         let relative_path_str = relative_path.to_string_lossy().to_string();
         
@@ -953,6 +966,135 @@ fn process_repo_files_parallel(
 
         Ok((file_intermediate_data, file_tokens))
     }).collect();
+
+    // ==================================================================================
+    // IMPORTANT: GPU Memory Management - DO NOT REMOVE THIS SECTION!
+    // ==================================================================================
+    // The following code is critical for preventing GPU Out-of-Memory (OOM) errors.
+    //
+    // Problem: During parallel processing, each Rayon worker thread creates its own 
+    // thread-local ONNX model in GPU memory. When the main thread tries to process the
+    // final batch afterward, it attempts to create yet another model instance, which can
+    // exhaust available VRAM and cause a crash.
+    //
+    // Solution: Before the main thread processes the final batch, we explicitly force all
+    // worker threads to drop their thread-local ONNX models, freeing GPU memory. This is
+    // done by:
+    // 1. Creating a parallel job that accesses each thread's thread-local storage
+    // 2. Taking ownership of the model (via Option::take()) which drops it when the scope ends
+    // 3. Adding a short sleep to allow the GPU driver to properly reclaim memory
+    //
+    // Alternative approaches like pooling models or restructuring the batching logic would
+    // require more extensive changes to the codebase.
+    //
+    // WARNING: Removing this cleanup code may cause GPU OOM errors on large repositories!
+    // ==================================================================================
+    log::info!("Cleaning up thread-local ONNX models before processing final batch");
+    (0..num_cpus::get()).into_par_iter().for_each(|_| {
+        // Access thread_local to force it to this thread, then explicitly drop it
+        ONNX_MODEL.with(|cell| {
+            let mut model_opt = cell.borrow_mut();
+            // Take the model out (if it exists) which will drop it when this scope ends
+            if model_opt.is_some() {
+                log::debug!("Dropping thread-local ONNX model to free GPU memory");
+                let _ = model_opt.take();
+            }
+        });
+    });
+
+    // Small delay to allow GPU memory to be properly released
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    log::info!("Thread-local models cleaned up, proceeding with final batch processing");
+
+    // Process any remaining chunks in the final batch
+    // Lock the mutex to get access to the batch, then clone it to release the lock ASAP.
+    let final_batch_data: Vec<ChunkWithMetadata> = {
+        let batch_guard = current_batch.lock().unwrap();
+        batch_guard.clone()
+    }; // MutexGuard is dropped here
+
+    if !final_batch_data.is_empty() {
+        log::info!("Processing final batch of {} chunks on the main thread.", final_batch_data.len());
+
+        // Create a dedicated, local ONNX model for the main thread's final batch.
+        // This happens AFTER worker threads have cleaned up their models.
+        let main_thread_final_batch_model = OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
+            .map_err(|e| {
+                log::error!("Failed to create main-thread ONNX model for final batch: {:?}", e);
+                // Assuming VectorDBError can be created from a String or anyhow::Error
+                // Adjust error creation as per your VectorDBError definition
+                VectorDBError::EmbeddingError(format!("Failed to create main-thread ONNX model for final batch: {}", e))
+            })
+            .expect("Main thread ONNX model creation for final batch failed"); // Or handle Result if preferred
+
+        // Temporarily place the local model into the main thread's thread_local slot
+        // so that `process_batch` (which uses the thread_local) can find it.
+        ONNX_MODEL.with(|cell| {
+            let mut model_opt = cell.borrow_mut();
+            // It should have been cleared by the parallel cleanup if the main thread participated,
+            // or it was never set if the main thread didn't run a worker task.
+            if model_opt.is_some() {
+                log::warn!("Main thread's ONNX_MODEL was already Some before final batch processing. This is unexpected. Taking existing model.");
+                let _ = model_opt.take(); // Drop any unexpected existing model
+            }
+            *model_opt = Some(main_thread_final_batch_model); // Move our local model in
+        });
+
+        let embeddings_result = process_batch(&final_batch_data);
+
+        // CRUCIALLY: Take the model back out of the thread_local immediately after use.
+        // The model (now in `taken_model_option`) will be dropped when this scope ends.
+        let mut taken_model_option: Option<OnnxEmbeddingModel> = None;
+        ONNX_MODEL.with(|cell| {
+            let mut model_opt = cell.borrow_mut();
+            if model_opt.is_some() {
+                log::debug!("Taking back main thread's final batch ONNX model from thread_local to ensure it's dropped.");
+                taken_model_option = model_opt.take();
+            } else {
+                log::warn!("Main thread's ONNX_MODEL was None after final batch processing. Model might have been taken elsewhere or not set.");
+            }
+        });
+        // `taken_model_option` (containing the model used for the final batch) will drop here if it's Some.
+
+        if let Ok(embeddings) = embeddings_result {
+            for (i, chunk_meta) in final_batch_data.iter().enumerate() { // Iterate over final_batch_data
+                let file_extension = chunk_meta.file_path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // Generate sparse vectors and collect tokens
+                let tokenizer_config = TokenizerConfig::default();
+                let tokens = tokenizer::tokenize_code(&chunk_meta.chunk.content, &tokenizer_config);
+                let mut term_frequencies = HashMap::new();
+                for token in tokens {
+                    if token.kind != TokenKind::Whitespace && token.kind != TokenKind::Unknown {
+                        let token_text = token.text;
+                        current_file_tokens.insert(token_text.clone());
+                        *term_frequencies.entry(token_text).or_insert(0) += 1;
+                    }
+                }
+
+                // Create payload
+                let mut payload_map = HashMap::new();
+                payload_map.insert(FIELD_FILE_PATH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.relative_path.clone()));
+                payload_map.insert(FIELD_START_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.start_line as i64));
+                payload_map.insert(FIELD_END_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.end_line as i64));
+                payload_map.insert(FIELD_LANGUAGE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.language.clone()));
+                payload_map.insert(FIELD_FILE_EXTENSION.to_string(), qdrant_client::qdrant::Value::from(file_extension));
+                payload_map.insert(FIELD_ELEMENT_TYPE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.element_type.to_string()));
+                payload_map.insert(FIELD_CHUNK_CONTENT.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.content.clone()));
+                payload_map.insert(FIELD_BRANCH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.branch.clone()));
+                payload_map.insert(FIELD_COMMIT_HASH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.commit.clone()));
+
+                all_intermediate_data.push(IntermediatePointData {
+                    dense_vector: embeddings[i].clone(),
+                    term_frequencies,
+                    payload_map,
+                });
+            }
+        }
+    }
 
     // Collect results from parallel processing
     for result in results {

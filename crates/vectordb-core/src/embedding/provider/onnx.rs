@@ -188,13 +188,7 @@ impl OnnxEmbeddingModel {
     /// Recreates the session if needed
     fn ensure_fresh_session(&mut self) -> Result<()> {
         if self.needs_cleanup() {
-            warn!("Session idle for too long, recreating to free CUDA memory");
-            // Drop the old session explicitly
-            std::mem::drop(std::mem::replace(&mut self.session, Self::create_session(&self.model_path)?));
-            // Force CUDA memory cleanup
-            unsafe {
-                ort::sys::OrtSessionOptionsAppendExecutionProvider_CUDA(std::ptr::null_mut(), 0);
-            }
+            warn!("Session was idle for > 5 minutes. Currently only updating timestamp. Previous recreation logic removed.");
         }
         self.last_used = Instant::now();
         Ok(())
@@ -355,6 +349,16 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
                  shape, batch_size, expected_dim, batch_size, expected_dim
              )))
          }
+    }
+}
+
+// Add Drop implementation for OnnxEmbeddingModel
+impl Drop for OnnxEmbeddingModel {
+    fn drop(&mut self) {
+        debug!(
+            "Dropping OnnxEmbeddingModel for model: {}. Associated ort::Session will be dropped by RAII.",
+            self.model_path.display()
+        );
     }
 }
 

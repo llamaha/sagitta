@@ -17,7 +17,7 @@ To run each test case, pipe the JSON request directly into the server process us
 
 Example:
 ```bash
-echo '<JSON_REQUEST>' | LD_LIBRARY_PATH=./target/release/lib:$LD_LIBRARY_PATH target/release/vectordb-mcp | cat
+echo '{"jsonrpc": "2.0", "method": "repository/sync", "params": {"name": "test-sinatra"}, "id": 1}' | LD_LIBRARY_PATH=/home/adam/repos/vectordb-cli/target/release/lib RUST_LOG=debug /home/adam/repos/vectordb-cli/target/release/vectordb-mcp
 ```
 
 Replace `<JSON_REQUEST>` with the specific request JSON for each step below. The server's response (and logs) will be printed to your terminal.
