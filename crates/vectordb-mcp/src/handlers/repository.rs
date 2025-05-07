@@ -28,15 +28,29 @@ use std::path::PathBuf;
 use git2::Repository; // Import git2
 use vectordb_core::config; // Add imports
 
-#[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = ?params.name, url = ?params.url))]
+#[instrument(skip(config, qdrant_client), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
     params: RepositoryAddParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<RepositoryAddResult, ErrorObject> {
     // Log the received target_ref immediately
     info!(received_target_ref = ?params.target_ref, "Handling repository/add request");
+    let config_read_guard = config.read().await; // Added for local_embedding_handler
+
+    // Create EmbeddingHandler instance locally for this operation
+    let local_embedding_handler = Arc::new(
+        EmbeddingHandler::new(&config_read_guard).map_err(|e| {
+            error!(error = %e, "Failed to create embedding handler for repo_add");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: format!("Failed to initialize embedding handler: {}", e),
+                data: None,
+            }
+        })?,
+    );
+    info!("Local embedding handler created for repository_add: {}", params.name);
+    drop(config_read_guard); // Release read lock before potentially long operations or acquiring write lock
 
     let initial_base_path = get_repo_base_path(Some(&*config.read().await)).map_err(|e| ErrorObject {
         code: error_codes::INTERNAL_ERROR,
@@ -53,7 +67,8 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         data: None,
     })?;
 
-    let embedding_dim = embedding_handler.dimension().map_err(|e| ErrorObject {
+    // Use the local_embedding_handler here
+    let embedding_dim = local_embedding_handler.dimension().map_err(|e| ErrorObject {
         code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to get embedding dimension: {}", e),
         data: None,
@@ -121,6 +136,10 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
             }
             info!(repo_name=%repo_config.name, "Successfully added repository and saved config.");
 
+            // Explicitly drop the local embedding handler before returning from success path
+            drop(local_embedding_handler);
+            info!("Explicitly dropped local_embedding_handler in handle_repository_add for repo: {}", repo_config.name);
+
             Ok(RepositoryAddResult {
                 name: repo_config.name,
                 url: repo_config.url,
@@ -131,6 +150,8 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         }
         Err(e) => {
             error!(error = %e, "Core handle_repo_add failed");
+            // Explicitly drop here too in case of early error after its creation, though it should also go out of scope
+            drop(local_embedding_handler); 
             Err(map_add_repo_error(e)) // Use imported helper
         }
     }
@@ -204,198 +225,164 @@ pub async fn handle_repository_remove<C: QdrantClientTrait + Send + Sync + 'stat
     })
 }
 
-#[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = %params.name))]
+#[instrument(skip(config, qdrant_client), fields(repo_name = %params.name))]
 pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static>(
     params: RepositorySyncParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<RepositorySyncResult, ErrorObject> {
-    let repo_name = params.name.clone();
-    let mut commit_hash: String; // Make mutable
-    let target_ref_name: Option<String>; // To store the target ref name if it exists
+    info!("Handling repository/sync request");
+    let repo_name = params.name;
+    let config_read_guard = config.read().await;
 
-    // --- Get Vocabulary Path BEFORE sync ---
-    let (vocab_path, vocab_exists_before_sync) = {
-        let config_read = config.read().await;
-        let collection_name_for_vocab = get_collection_name(&repo_name, &config_read);
-        let path_result = config::get_vocabulary_path(&*config_read, &collection_name_for_vocab);
-        match path_result {
-            Ok(p) => {
-                let exists = p.exists();
-                info!(repo_name=%repo_name, vocab_path=%p.display(), vocab_exists=%exists, "Checked vocabulary existence before sync");
-                (p, exists)
-            },
-            Err(e) => {
-                error!(error = %e, collection=%collection_name_for_vocab, "Failed to determine vocabulary path before sync");
-                // Return error immediately if we can't even determine the path
-                return Err(ErrorObject {
-                    code: error_codes::CONFIG_LOAD_FAILED,
-                    message: format!("Failed to determine vocabulary path: {}", e),
-                    data: None,
-                });
+    // Create EmbeddingHandler instance locally for this operation
+    let local_embedding_handler = Arc::new(
+        EmbeddingHandler::new(&config_read_guard).map_err(|e| {
+            error!(error = %e, "Failed to create embedding handler for sync");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: format!("Failed to initialize embedding handler: {}", e),
+                data: None,
             }
-        }
-    };
-    // --- End Vocabulary Path Check ---
+        })?,
+    );
+    info!("Local embedding handler created for sync of repo: {}", repo_name);
 
-    // Drop the write lock before calling sync, which might take time
-    // drop(config.write().await); // Drop seems incorrect here, should be read lock?
+    let repo_config = config_read_guard
+        .repositories
+        .iter()
+        .find(|r| r.name == repo_name)
+        .ok_or_else(|| ErrorObject {
+            code: error_codes::REPO_NOT_FOUND,
+            message: format!("Repository '{}' not found during sync", repo_name),
+            data: None,
+        })?
+        .clone();
+
+    // Drop the read lock before long-running operations
+    // and clone AppConfig for use in sync_repository and index_repo_files
+    let app_config_clone = config_read_guard.clone();
+    drop(config_read_guard);
+
+    // branch_to_sync is determined from the cloned repo_config
+    let branch_to_sync_str = repo_config.target_ref.as_deref()
+        .or(repo_config.active_branch.as_deref())
+        .unwrap_or("main");
 
     // Prepare sync options
     let options = SyncOptions {
         force: params.force.unwrap_or(false),
         extensions: params.extensions,
     };
-    
-    // Clone AppConfig before sync to avoid holding lock across await (like CLI)
-    let app_config_clone: AppConfig = {
-        let config_read = config.read().await;
-        (*config_read).clone()
-    };
 
-    let repo_index = app_config_clone // Use the clone to find the index
-        .repositories
-        .iter()
-        .position(|r| r.name == repo_name)
-        .ok_or_else(|| ErrorObject {
-            code: error_codes::REPO_NOT_FOUND,
-            message: format!("Repository '{}' not found during sync", repo_name),
-            data: None,
-        })?;
-
-    // Store target_ref value before calling sync, as config might change
-    target_ref_name = app_config_clone.repositories[repo_index].target_ref.clone();
-
-    // Call core function and map the Result<vectordb_core::sync::SyncResult, VectorDBError> 
-    // to Result<RepositorySyncResult, ErrorObject> (Note: Core SyncResult structure differs from MCP)
-    let core_sync_result = sync_repository(
-        qdrant_client.clone(),
-        &app_config_clone.repositories[repo_index], // Pass ref from clone
-        options,
-        &app_config_clone, // Pass ref to clone
-    ).await;
-    
-    // No longer need to explicitly drop the lock here
+    // Call the 4-argument vectordb_core::sync::sync_repository
+    let core_sync_result = vectordb_core::sync::sync_repository(
+        qdrant_client.clone(), // qdrant_client
+        &repo_config,          // &RepositoryConfig
+        options,               // SyncOptions
+        &app_config_clone,     // &AppConfig
+    )
+    .await;
 
     let sync_message: String;
+    let mut actual_synced_commit: Option<String> = None;
+    let mut indexed_languages_from_sync: Vec<String> = Vec::new();
+    let mut sync_was_successful_according_to_core = false;
 
-    match core_sync_result {
-        Ok(sync_result) => {
-            sync_message = sync_result.message.clone(); // Store message for final result
-            if sync_result.success {
-                if let Some(commit) = sync_result.last_synced_commit {
-                    commit_hash = commit; // Store commit for potential indexing stage
-                    info!(repo_name=%repo_name, commit=%commit_hash, "Sync successful, proceeding to update config.");
-                    // Update config immediately
+    match core_sync_result { // Match on the direct result
+        Ok(core_success_result) => {
+            sync_message = core_success_result.message.clone();
+            actual_synced_commit = core_success_result.last_synced_commit.clone();
+            indexed_languages_from_sync = core_success_result.indexed_languages.clone();
+            sync_was_successful_according_to_core = core_success_result.success;
+
+            if core_success_result.success {
+                if let Some(commit) = &actual_synced_commit {
+                    info!(repo_name=%repo_name, commit=%commit, "Sync successful, proceeding to update config.");
                     let mut config_write = config.write().await;
                     if let Some(repo_mut) = config_write.repositories.iter_mut().find(|r| r.name == repo_name) {
-                        let branch_or_ref = target_ref_name.as_deref().or(repo_mut.active_branch.as_deref()).unwrap_or("main");
-                        repo_mut.last_synced_commits.insert(branch_or_ref.to_string(), commit_hash.clone());
-                        repo_mut.indexed_languages = Some(sync_result.indexed_languages.clone()); // Clone languages
-                        // Save config right after updating it, propagating error
+                        // Use branch_to_sync_str (which is &str) for the key
+                        repo_mut.last_synced_commits.insert(branch_to_sync_str.to_string(), commit.clone());
+                        repo_mut.indexed_languages = Some(indexed_languages_from_sync.clone());
                         vectordb_core::config::save_config(&*config_write, None).map_err(|e| {
                             error!(error = %e, "Failed to save config after repository sync update");
-                            // Decide if this should be a hard error for the sync operation? Yes.
                             ErrorObject {
                                 code: error_codes::CONFIG_SAVE_FAILED,
                                 message: format!("Failed to save config after sync update: {}", e),
                                 data: None,
                             }
-                        })?; // Use ? to propagate error
+                        })?;
                     } else {
                          error!("Failed to find repository '{}' to update sync status after successful sync.", repo_name);
                     }
                 } else {
-                    // Sync reported success but no commit hash (e.g., up-to-date message)
-                    info!(repo_name=%repo_name, status=%sync_result.message, "Sync resulted in status message, no new commit hash from sync.");
-                    commit_hash = String::new(); 
+                    info!(repo_name=%repo_name, status=%sync_message, "Sync resulted in status message, no new commit hash from sync.");
                 }
             } else {
-                // Sync reported failure
-                error!(repo_name = %repo_name, error = %sync_result.message, "Core repository sync reported failure");
+                error!(repo_name = %repo_name, error = %sync_message, "Core repository sync reported failure");
                 return Err(ErrorObject {
                     code: error_codes::CORE_LOGIC_ERROR,
-                    message: sync_result.message,
+                    message: sync_message,
                     data: None,
                 });
             }
         },
-        Err(core_error) => { // Explicitly map the error
+        Err(core_error) => { 
             error!(repo_name= %repo_name, error = %core_error, "Core sync function failed");
             let error_data = create_error_data(&anyhow!(core_error));
             return Err(ErrorObject { 
-                code: error_codes::INTERNAL_ERROR, // Or map core_error type to specific MCP code
-                message: "Core sync function failed.".to_string(), // Concise message 
-                data: Some(error_data), // Add detailed data
+                code: error_codes::INTERNAL_ERROR, 
+                message: "Core sync function failed.".to_string(),  
+                data: Some(error_data), 
             });
         }
     }
-    // --- End of Sync Stage Logic ---
     
     // --- Indexing Stage ---
-    // Determine if indexing should run:
-    // 1. Sync produced a commit hash (even if it's the same as before) OR
-    // 2. Vocabulary file didn't exist before the sync started (force initial index)
-    let should_index = !commit_hash.is_empty() || !vocab_exists_before_sync;
+    // Restore vocab_exists_before_sync logic
+    let vocab_exists_before_sync = {
+        let collection_name_for_vocab = get_collection_name(&repo_name, &app_config_clone);
+        config::get_vocabulary_path(&app_config_clone, &collection_name_for_vocab)
+            .map(|p| p.exists())
+            .unwrap_or(false) // If path fails, assume it doesn't exist
+    };
+
+    let should_index = actual_synced_commit.as_ref().map_or(false, |s| !s.is_empty()) || !vocab_exists_before_sync;
 
     if !should_index {
-        info!(repo_name = %repo_name, commit = %commit_hash, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
+        info!(repo_name = %repo_name, commit = ?actual_synced_commit, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
     } else {
-        // Get fresh repo config clone needed for indexing (config might have been updated)
-        let repo_config_clone: RepositoryConfig = {
-            let config_read_guard = config.read().await; // Read lock again
-            config_read_guard
-                .repositories
-                .iter()
-                .find(|r| r.name == repo_name)
-                .cloned()
-                .ok_or_else(|| ErrorObject {
-                    code: error_codes::REPO_NOT_FOUND,
-                    message: format!("Repository '{}' disappeared unexpectedly before indexing", repo_name),
-                    data: None,
-                })?
-        };
-        // Clone entire app config needed by index_repo_files
-        let app_config_clone: AppConfig = {
-            let config_read_guard = config.read().await;
-            (*config_read_guard).clone()
-        };
+        // Get fresh repo config clone needed for indexing (config might have been updated from app_config_clone earlier)
+        // No, repo_config is already a clone from before the write lock. We need app_config_clone for general settings.
+        // And repo_config_clone is already the one for this specific repo.
 
-        let repo_root = &repo_config_clone.local_path;
+        let repo_root = &repo_config.local_path; // Use the initially cloned repo_config
 
-        // Determine the commit hash to use for indexing
-        let indexing_commit_hash = if commit_hash.is_empty() {
-            // If sync reported no change but we force index (vocab missing),
-            // get the current HEAD commit of the local repo.
-            info!(repo_name=%repo_name, "Fetching current HEAD commit for forced indexing.");
+        let indexing_commit_hash = if actual_synced_commit.as_ref().map_or(true, |s| s.is_empty()) {
+            info!(repo_name=%repo_name, "Fetching current HEAD commit for forced indexing (sync returned no commit or vocab missing).");
             match Repository::open(repo_root) {
                 Ok(repo) => repo.head()
                     .and_then(|head_ref| head_ref.resolve())
                     .and_then(|resolved_ref| resolved_ref.target().ok_or_else(|| git2::Error::from_str("HEAD has no target OID")))
                     .map(|oid| oid.to_string())
-                    .map_err(|e| {
-                        error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to get current commit hash from local repo");
-                        e // Propagate git2 error for logging maybe?
+                    .unwrap_or_else(|e| {
+                        error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to get current commit hash from local repo for indexing");
+                        String::new()
                     })
-                    .unwrap_or_else(|_| String::new()) // Fallback to empty on error
                 ,
                 Err(e) => {
-                    error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to open local git repository");
-                    String::new() // Fallback to empty if repo open fails
+                    error!(repo_name=%repo_name, error=%e, path=%repo_root.display(), "Failed to open local git repository for indexing commit hash retrieval");
+                    String::new()
                 }
             }
         } else {
-            // Use the commit hash reported by the sync operation
-            commit_hash.clone()
+            actual_synced_commit.clone().unwrap() // Known to be Some and not empty if this branch is taken due to `should_index` logic
         };
 
-        // Ensure we don't try indexing with an empty commit hash if it was derived or passed incorrectly
         if indexing_commit_hash.is_empty() {
              error!(repo_name=%repo_name, "Resolved commit hash for indexing is empty. Aborting indexing stage.");
-             // Return an error if we can't get a commit hash when indexing is required
              return Err(ErrorObject {
-                 code: error_codes::GIT_OPERATION_FAILED, // Or a new specific code?
+                 code: error_codes::GIT_OPERATION_FAILED, 
                  message: "Failed to determine commit hash required for indexing.".to_string(),
                  data: None,
              });
@@ -403,12 +390,9 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
              info!(repo_name = %repo_name, commit = %indexing_commit_hash, "Starting indexing stage.");
         }
 
-        // Now proceed with indexing logic using indexing_commit_hash
-        let context_identifier = repo_config_clone
-            .target_ref
-            .as_deref()
-            .or(repo_config_clone.active_branch.as_deref())
-            .unwrap_or(&repo_config_clone.default_branch);
+        let context_identifier = repo_config.target_ref.as_deref()
+            .or(repo_config.active_branch.as_deref())
+            .unwrap_or(&repo_config.default_branch);
         let collection_name = get_collection_name(&repo_name, &app_config_clone);
 
         let files_to_index_abs = match gather_files(&[repo_root.clone()], None) {
@@ -441,7 +425,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                 context_identifier, 
                 &indexing_commit_hash, // Use the potentially derived commit hash
                 qdrant_client.clone(),
-                embedding_handler.clone(),
+                local_embedding_handler.clone(),
                 None,
                 app_config_clone.indexing.max_concurrent_upserts,
             )
@@ -462,6 +446,10 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             }
         }
     } // End of indexing stage
+
+    // Explicitly drop the local embedding handler before returning
+    drop(local_embedding_handler);
+    info!("Explicitly dropped local_embedding_handler in handle_repository_sync for repo: {}", repo_name);
 
     // Return the message from the core sync result
     Ok(RepositorySyncResult {
@@ -633,7 +621,6 @@ mod tests {
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             vocabulary_base_path: Some(PathBuf::from("/vocab").to_string_lossy().into_owned()),
-            performance: Default::default(),
         };
         let config_arc = Arc::new(RwLock::new(config));
 

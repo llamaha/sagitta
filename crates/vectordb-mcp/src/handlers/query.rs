@@ -19,13 +19,14 @@ use vectordb_core::{
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 
-#[instrument(skip(config, qdrant_client, embedding_handler), fields(repo_name = %params.repository_name, query = %params.query_text))]
+#[instrument(skip(config, qdrant_client), fields(repo_name = %params.repository_name, query = %params.query_text))]
 pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     params: QueryParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<QueryResult, ErrorObject> {
+    let query_text = params.query_text.clone();
+    let limit = params.limit;
     let config_read_guard = config.read().await;
 
     let repo_config = config_read_guard
@@ -47,10 +48,17 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         })?;
 
     let collection_name = get_collection_name(&params.repository_name, &config_read_guard);
-    let query_text = params.query_text;
-    let limit = params.limit;
 
-    info!(collection=%collection_name, branch=%branch_name, limit=%limit, "Preparing query");
+    info!(
+        collection=%collection_name,
+        branch=%branch_name,
+        limit=%limit,
+        "Handling query for repo: {}, branch: {:?}, query: '{}', limit: {}",
+        params.repository_name,
+        params.branch_name,
+        query_text,
+        limit
+    );
 
     let mut filter_conditions = vec![Condition::matches(
         FIELD_BRANCH,
@@ -70,10 +78,23 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     }
     let filter = Some(Filter::must(filter_conditions));
     
+    // Create EmbeddingHandler instance locally for this operation
+    let local_embedding_handler = Arc::new(
+        EmbeddingHandler::new(&config_read_guard).map_err(|e| {
+            error!(error = %e, "Failed to create embedding handler for query");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: format!("Failed to initialize embedding handler: {}", e),
+                data: None,
+            }
+        })?,
+    );
+    info!("Local embedding handler created for query on repo: {}", params.repository_name);
+
     let search_response = search_collection(
         qdrant_client,
         &collection_name,
-        &embedding_handler,
+        &local_embedding_handler,
         &query_text,
         limit,
         filter,
@@ -130,5 +151,10 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     }
 
     info!(count = results.len(), "Returning query results");
+
+    // Explicitly drop the local embedding handler before returning
+    drop(local_embedding_handler);
+    info!("Explicitly dropped local_embedding_handler in handle_query for repo: {}", params.repository_name);
+
     Ok(QueryResult { results })
 } 

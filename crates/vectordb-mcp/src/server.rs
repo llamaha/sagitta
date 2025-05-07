@@ -52,7 +52,6 @@ use crate::handlers::initialize::handle_initialize;
 pub struct Server<C: QdrantClientTrait + Send + Sync + 'static> {
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
 }
 
 impl Server<Qdrant> {
@@ -83,19 +82,11 @@ impl Server<Qdrant> {
 
         let qdrant_client: Arc<Qdrant> = Arc::new(qdrant_instance);
         
-        let embedding_handler = Arc::new(EmbeddingHandler::new(&config)?);
-        info!("Embedding handler initialized with type: {}", embedding_handler.embedding_model_type);
-        match embedding_handler.dimension() {
-            Ok(dim) => info!("Embedding dimension: {}", dim),
-            Err(e) => warn!("Could not get embedding dimension: {}", e),
-        }
-
         let config_arc = Arc::new(RwLock::new(config));
 
         Ok(Self {
             config: config_arc,
             qdrant_client,
-            embedding_handler,
         })
     }
 }
@@ -107,12 +98,10 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
     pub fn new_for_test(
         config: Arc<RwLock<AppConfig>>,
         qdrant_client: Arc<C>,
-        embedding_handler: Arc<EmbeddingHandler>,
     ) -> Self {
         Self {
             config,
             qdrant_client,
-            embedding_handler,
         }
     }
 
@@ -148,24 +137,11 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                             let server_config = Arc::clone(&self.config);
                             let qdrant_client_clone = Arc::clone(&self.qdrant_client);
                             
-                            // Only clone embedding handler for non-initialize requests
-                            let embedding_handler_clone = if request.method == "initialize" || request.method == "mcp_vectordb_mcp_initialize" {
-                                None
-                            } else {
-                                Some(Arc::clone(&self.embedding_handler))
-                            };
-
                             let result = self.handle_request(
                                 request,
                                 server_config,
                                 qdrant_client_clone,
-                                embedding_handler_clone.clone(),
                             ).await;
-
-                            // Drop embedding handler after use for non-initialize requests
-                            if embedding_handler_clone.is_some() {
-                                drop(embedding_handler_clone);
-                            }
 
                             match result {
                                 Ok(Some(result)) => Some(Response::success(result, request_id)),
@@ -219,13 +195,12 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         Ok(())
     }
 
-    #[instrument(skip(self, config, qdrant_client, embedding_handler), fields(request_id = ?request.id, method = %request.method))]
+    #[instrument(skip(self, config, qdrant_client), fields(request_id = ?request.id, method = %request.method))]
     pub async fn handle_request(
         &self,
         request: Request,
         config: Arc<RwLock<AppConfig>>,
         qdrant_client: Arc<C>,
-        embedding_handler: Option<Arc<EmbeddingHandler>>,
     ) -> Result<Option<serde_json::Value>, ErrorObject> {
         if request.jsonrpc != "2.0" {
             return Err(ErrorObject {
@@ -253,22 +228,12 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "query" | "mcp_vectordb_mcp_query" => {
                 let params: QueryParams = deserialize_params(request.params, "query")?;
-                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: "Embedding handler not available".to_string(),
-                    data: None,
-                })?;
-                let result = handle_query(params, config, qdrant_client, embedding_handler).await?;
+                let result = handle_query(params, config, qdrant_client).await?;
                 ok_some(result)
             }
             "repository/add" | "mcp_vectordb_mcp_repository_add" => {
                 let params: RepositoryAddParams = deserialize_params(request.params, "repository/add")?;
-                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: "Embedding handler not available".to_string(),
-                    data: None,
-                })?;
-                let result = handle_repository_add(params, config, qdrant_client, embedding_handler).await?;
+                let result = handle_repository_add(params, config, qdrant_client).await?;
                 ok_some(result)
             }
             "repository/list" | "mcp_vectordb_mcp_repository_list" => {
@@ -283,12 +248,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "repository/sync" | "mcp_vectordb_mcp_repository_sync" => {
                 let params: RepositorySyncParams = deserialize_params(request.params, "repository/sync")?;
-                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: "Embedding handler not available".to_string(),
-                    data: None,
-                })?;
-                let result = handle_repository_sync(params, config, qdrant_client, embedding_handler).await?;
+                let result = handle_repository_sync(params, config, qdrant_client).await?;
                 ok_some(result)
             }
             "repository/search_file" | "mcp_vectordb_mcp_repository_search_file" => {
@@ -309,12 +269,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "tools/call" => {
                 let params: CallToolParams = deserialize_params(request.params, "tool/call")?;
-                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: "Embedding handler not available".to_string(),
-                    data: None,
-                })?;
-                handle_tools_call(params, config, qdrant_client, embedding_handler).await
+                handle_tools_call(params, config, qdrant_client).await
             }
             _ => Err(ErrorObject {
                 code: error_codes::METHOD_NOT_FOUND,

@@ -17,12 +17,11 @@ use tokio::sync::RwLock;
 use tracing::instrument;
 use vectordb_core::{config::AppConfig, embedding::EmbeddingHandler, qdrant_client_trait::QdrantClientTrait};
 
-#[instrument(skip(config, qdrant_client, embedding_handler), fields(tool_name = %params.name))]
+#[instrument(skip(config, qdrant_client), fields(tool_name = %params.name))]
 pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
     params: CallToolParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
 ) -> Result<Option<serde_json::Value>, ErrorObject> {
     let tool_name = params.name.as_str();
     let arguments = params.arguments;
@@ -39,7 +38,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_add" => {
             let add_params: RepositoryAddParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_add(add_params, config, qdrant_client, embedding_handler).await {
+            match handle_repository_add(add_params, config, qdrant_client).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -63,7 +62,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_sync" => {
             let sync_params: RepositorySyncParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_sync(sync_params, config, qdrant_client, embedding_handler).await {
+            match handle_repository_sync(sync_params, config, qdrant_client).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -71,7 +70,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "query" => {
             let query_params: QueryParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_query(query_params, config, qdrant_client, embedding_handler).await {
+            match handle_query(query_params, config, qdrant_client).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
