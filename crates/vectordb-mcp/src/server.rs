@@ -84,7 +84,7 @@ impl Server<Qdrant> {
         let qdrant_client: Arc<Qdrant> = Arc::new(qdrant_instance);
         
         let embedding_handler = Arc::new(EmbeddingHandler::new(&config)?);
-        info!("Embedding handler initialized with type: {}", embedding_handler.get_model_type());
+        info!("Embedding handler initialized with type: {}", embedding_handler.embedding_model_type);
         match embedding_handler.dimension() {
             Ok(dim) => info!("Embedding dimension: {}", dim),
             Err(e) => warn!("Could not get embedding dimension: {}", e),
@@ -125,6 +125,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         let mut writer = BufWriter::new(stdout);
 
         let mut line_buf = String::new();
+        let mut initialized = false;
 
         loop {
             line_buf.clear();
@@ -146,9 +147,27 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                             let request_id = request.id.clone();
                             let server_config = Arc::clone(&self.config);
                             let qdrant_client_clone = Arc::clone(&self.qdrant_client);
-                            let embedding_handler_clone = Arc::clone(&self.embedding_handler);
                             
-                            match self.handle_request(request, server_config, qdrant_client_clone, embedding_handler_clone).await {
+                            // Only clone embedding handler for non-initialize requests
+                            let embedding_handler_clone = if request.method == "initialize" || request.method == "mcp_vectordb_mcp_initialize" {
+                                None
+                            } else {
+                                Some(Arc::clone(&self.embedding_handler))
+                            };
+
+                            let result = self.handle_request(
+                                request,
+                                server_config,
+                                qdrant_client_clone,
+                                embedding_handler_clone.clone(),
+                            ).await;
+
+                            // Drop embedding handler after use for non-initialize requests
+                            if embedding_handler_clone.is_some() {
+                                drop(embedding_handler_clone);
+                            }
+
+                            match result {
                                 Ok(Some(result)) => Some(Response::success(result, request_id)),
                                 Ok(None) => None,
                                 Err(err_obj) => Some(Response::error(err_obj, request_id)),
@@ -206,7 +225,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         request: Request,
         config: Arc<RwLock<AppConfig>>,
         qdrant_client: Arc<C>,
-        embedding_handler: Arc<EmbeddingHandler>,
+        embedding_handler: Option<Arc<EmbeddingHandler>>,
     ) -> Result<Option<serde_json::Value>, ErrorObject> {
         if request.jsonrpc != "2.0" {
             return Err(ErrorObject {
@@ -234,11 +253,21 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "query" | "mcp_vectordb_mcp_query" => {
                 let params: QueryParams = deserialize_params(request.params, "query")?;
+                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: "Embedding handler not available".to_string(),
+                    data: None,
+                })?;
                 let result = handle_query(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
             "repository/add" | "mcp_vectordb_mcp_repository_add" => {
                 let params: RepositoryAddParams = deserialize_params(request.params, "repository/add")?;
+                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: "Embedding handler not available".to_string(),
+                    data: None,
+                })?;
                 let result = handle_repository_add(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
@@ -254,6 +283,11 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "repository/sync" | "mcp_vectordb_mcp_repository_sync" => {
                 let params: RepositorySyncParams = deserialize_params(request.params, "repository/sync")?;
+                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: "Embedding handler not available".to_string(),
+                    data: None,
+                })?;
                 let result = handle_repository_sync(params, config, qdrant_client, embedding_handler).await?;
                 ok_some(result)
             }
@@ -269,15 +303,17 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "tools/list" | "mcp_vectordb_mcp_tools_list" => {
                 let _params: ListToolsParams = deserialize_params(request.params, "tool/list")?;
-                
                 let tools = get_tool_definitions();
-                
                 let result = ListToolsResult { tools };
-                
                 ok_some(result)
             }
             "tools/call" => {
                 let params: CallToolParams = deserialize_params(request.params, "tool/call")?;
+                let embedding_handler = embedding_handler.ok_or_else(|| ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: "Embedding handler not available".to_string(),
+                    data: None,
+                })?;
                 handle_tools_call(params, config, qdrant_client, embedding_handler).await
             }
             _ => Err(ErrorObject {

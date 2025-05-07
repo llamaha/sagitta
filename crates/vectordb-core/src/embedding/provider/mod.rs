@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::path::PathBuf;
 
-// Keep commented for now, syntax needs to move
-// use crate::syntax::SyntaxElement;
-
 // === New EmbeddingProvider Trait ===
 #[cfg_attr(test, mockall::automock)]
 pub trait EmbeddingProvider: Send + Sync + Debug {
@@ -28,11 +25,14 @@ pub trait EmbeddingProvider: Send + Sync + Debug {
 }
 
 // === Provider Modules ===
-// This will contain specific implementations like ONNX
 pub mod onnx;
+pub mod session_pool;
+
+// Re-export commonly used types
+pub use onnx::OnnxEmbeddingModel;
+pub use session_pool::OnnxSessionPool;
 
 // === Config Structs ===
-// Consider moving this to types.rs or config.rs later if appropriate
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EmbeddingModelConfig {
     pub model_type: EmbeddingModelType,

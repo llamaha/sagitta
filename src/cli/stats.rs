@@ -78,7 +78,7 @@ where
 
     println!("Fetching stats for repository: {}", active_repo_name_string.cyan());
     
-    let collection_name = get_collection_name(&active_repo_name_string);
+    let collection_name = get_collection_name(&active_repo_name_string, &config);
 
     // Fetch collection info
     let collection_info_result = client

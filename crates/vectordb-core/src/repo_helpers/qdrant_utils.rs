@@ -7,12 +7,13 @@ use qdrant_client::qdrant::{DeletePointsBuilder, PointStruct, Filter, Condition,
 use indicatif::ProgressBar;
 use colored::Colorize;
 use anyhow::{Context, Result};
-use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_FILE_PATH, COLLECTION_NAME_PREFIX};
+use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_FILE_PATH};
 use crate::error::VectorDBError as Error;
 use crate::QdrantClientTrait;
+use crate::config::AppConfig;
 
-pub fn get_collection_name(repo_name: &str) -> String {
-    format!("{}{}", COLLECTION_NAME_PREFIX, repo_name)
+pub fn get_collection_name(repo_name: &str, config: &AppConfig) -> String {
+    format!("{}{}", config.performance.collection_name_prefix, repo_name)
 }
 
 pub async fn delete_points_for_files<
@@ -132,4 +133,72 @@ pub fn create_branch_filter(branch_name: &str) -> Filter {
     Filter::must([
         Condition::matches(FIELD_BRANCH, branch_name.to_string()),
     ])
+}
+
+pub async fn delete_points_by_branch(
+    client: &impl QdrantClientTrait,
+    collection_name: &str,
+    branch: &str,
+    config: &AppConfig,
+) -> Result<()> {
+    let filter = Filter::must([
+        Condition::matches(FIELD_BRANCH, branch.to_string()),
+    ]);
+
+    let mut point_ids_to_delete: Vec<PointId> = Vec::new();
+    let mut offset: Option<PointId> = None;
+
+    // Scroll through all points for this branch
+    loop {
+        let mut builder = ScrollPointsBuilder::new(collection_name)
+            .filter(filter.clone())
+            .limit(1000)
+            .with_payload(false)
+            .with_vectors(false);
+
+        if let Some(o) = offset {
+            builder = builder.offset(o);
+        }
+        
+        let scroll_request = builder.into();
+        let scroll_result: ScrollResponse = client.scroll(scroll_request).await
+            .with_context(|| format!("Failed to scroll points for deletion in collection '{}'", collection_name))?;
+        
+        if scroll_result.result.is_empty() {
+            break;
+        }
+
+        for point in scroll_result.result {
+            if let Some(id) = point.id {
+                point_ids_to_delete.push(id);
+            } else {
+                log::warn!("Found point without ID during scroll for deletion: {:?}", point);
+            }
+        }
+
+        offset = scroll_result.next_page_offset;
+        if offset.is_none() {
+            break;
+        }
+    }
+
+    if point_ids_to_delete.is_empty() {
+        log::info!("No points found for branch '{}' in collection '{}'.", branch, collection_name);
+        return Ok(());
+    }
+
+    log::debug!("Found {} points to delete for branch '{}'.", point_ids_to_delete.len(), branch);
+
+    // Delete points in chunks
+    for chunk in point_ids_to_delete.chunks(config.performance.batch_size) {
+        let delete_request = DeletePointsBuilder::new(collection_name)
+            .points(chunk.to_vec());
+        client.delete_points(delete_request.into()).await
+            .with_context(|| format!("Failed to delete a batch of points from collection '{}'", collection_name))?;
+        log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch);
+    }
+
+    log::info!("Successfully deleted {} points for branch '{}' in collection '{}'.",
+        point_ids_to_delete.len(), branch, collection_name);
+    Ok(())
 } 

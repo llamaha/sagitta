@@ -95,6 +95,7 @@ pub async fn handle_repo_add<C>(
     repo_base_path_for_add: PathBuf,
     embedding_dim: u64,
     client: Arc<C>,
+    config: &AppConfig,
 ) -> Result<RepositoryConfig, AddRepoError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -282,7 +283,7 @@ where
     );
     
     // Use helpers from crate::repo_helpers
-    let collection_name = helpers::get_collection_name(&repo_name);
+    let collection_name = helpers::get_collection_name(&repo_name, config);
     info!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
     
     // Use the passed-in embedding_dim
@@ -341,11 +342,13 @@ mod tests {
             repositories: vec![],
             active_repository: None,
             indexing: IndexingConfig::default(), // Add missing field
+            performance: Default::default(),
         }
     }
 
     #[tokio::test]
     async fn test_handle_repo_add_new_clone() {
+        let config = test_config_with_empty_repo_list();
         let dir = tempdir().unwrap();
         let repo_name = "test-repo";
         let repo_url = "https://github.com/octocat/Spoon-Knife"; // A known public repo
@@ -386,16 +389,18 @@ mod tests {
         // Restore the create_collection expectation
         mock_client.expect_create_collection()
             .times(1)
-            // Match collection name and expected dimension (use DEFAULT_VECTOR_DIMENSION from helpers)
-            .with(mockall::predicate::eq(format!("repo_{}", repo_name)), mockall::predicate::eq(crate::repo_helpers::DEFAULT_VECTOR_DIMENSION)) 
+            // Match collection name and expected dimension (use config value)
+            .with(mockall::predicate::eq(format!("{}{}", config.performance.collection_name_prefix, repo_name)), 
+                  mockall::predicate::eq(config.performance.vector_dimension as u64))
             .returning(|_, _| Ok(true)); // Simulate creation success
             
         // Pass base_path and dimension directly to the modified function
         let result = handle_repo_add(
             args, 
             base_path.clone(), // Pass the temp dir base path
-            crate::repo_helpers::DEFAULT_VECTOR_DIMENSION, // Pass default dimension
-            Arc::new(mock_client)
+            config.performance.vector_dimension as u64, // Pass dimension from config
+            Arc::new(mock_client),
+            &config
         ).await;
 
         // Uncomment assertions
@@ -440,6 +445,7 @@ mod tests {
             repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
             indexing: Default::default(),
+            performance: Default::default(),
         }
     }
 } 

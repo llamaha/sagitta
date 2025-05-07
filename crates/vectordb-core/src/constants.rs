@@ -11,6 +11,9 @@ pub const FIELD_FILE_EXTENSION: &str = "file_extension";
 pub const FIELD_BRANCH: &str = "branch";
 pub const FIELD_COMMIT_HASH: &str = "commit_hash";
 
+// Performance-related constants are now configurable via config.toml
+// See crate::config::PerformanceConfig for the default values and configuration options
+
 // Other constants
 pub const BATCH_SIZE: usize = 256; // Batch size for Qdrant upserts
 pub const INTERNAL_EMBED_BATCH_SIZE: usize = 512; // Increased batch size again (was 256)

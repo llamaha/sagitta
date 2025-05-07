@@ -269,7 +269,7 @@ where
     info!("Files to index/update: {}, Files to delete: {}", files_to_index_count, files_to_delete_count);
     
     // --- Qdrant Operations ---
-    let collection_name = repo_helpers::get_collection_name(repo_name);
+    let collection_name = repo_helpers::get_collection_name(repo_name, app_config);
     let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
     
     // Ensure collection exists (might need embedding dimension)

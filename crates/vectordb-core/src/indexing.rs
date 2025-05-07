@@ -123,18 +123,21 @@ pub async fn index_paths<
         pb.set_message("Processing files...");
     }
 
-    let mut points_batch = Vec::with_capacity(BATCH_SIZE);
+    let mut points_batch = Vec::with_capacity(config.performance.batch_size);
     let mut files_processed_count = 0;
     let mut points_processed_count = 0;
     let total_files = files_to_process.len();
 
     // Create a single embedding model instance for sequential processing
-    let dense_model = match embedding_handler.create_embedding_model() {
-        Ok(m) => m,
-        Err(e) => {
-            log::error!("Failed to create embedding model for sequential indexing: {}", e);
-            return Err(e.into());
-        }
+    let dense_model = {
+        let model_path = embedding_handler.onnx_model_path.as_ref().ok_or_else(|| {
+            VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+        })?;
+        let tokenizer_path = embedding_handler.onnx_tokenizer_path.as_ref().ok_or_else(|| {
+            VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+        })?;
+        crate::embedding::provider::onnx::OnnxEmbeddingModel::new(model_path, tokenizer_path)
+            .map_err(VectorDBError::from)?
     };
 
     for (file_idx, file_path) in files_to_process.into_iter().enumerate() {
@@ -145,10 +148,10 @@ pub async fn index_paths<
         // --- File Size Check (existing code) --- 
         match std::fs::metadata(&file_path) {
              Ok(metadata) => {
-                 if metadata.len() > MAX_FILE_SIZE_BYTES {
+                 if metadata.len() > config.performance.max_file_size_bytes {
                      log::warn!(
                          "Skipping file larger than {} bytes: {}",
-                         MAX_FILE_SIZE_BYTES,
+                         config.performance.max_file_size_bytes,
                          file_path.display()
                      );
                      if let Some(pb) = progress { pb.inc(1); }
@@ -517,10 +520,10 @@ pub async fn index_repo_files<
     }
 
     // Get ONNX model and tokenizer paths from the handler
-    let onnx_model_path = embedding_handler.onnx_model_path().ok_or_else(|| {
+    let onnx_model_path = embedding_handler.onnx_model_path.as_ref().ok_or_else(|| {
         VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
     })?;
-    let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path().ok_or_else(|| {
+    let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path.as_ref().ok_or_else(|| {
         VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
     })?;
 
@@ -824,12 +827,8 @@ fn process_repo_files_parallel(
     commit_hash: &str,
     progress: Option<&ProgressBar>,
 ) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
-    use std::cell::RefCell;
     use crate::embedding::provider::onnx::OnnxEmbeddingModel;
     use std::sync::Mutex;
-    thread_local! {
-        static ONNX_MODEL: RefCell<Option<OnnxEmbeddingModel>> = RefCell::new(None);
-    }
 
     let mut all_intermediate_data = Vec::new();
     let mut all_token_sets = Vec::new();
@@ -842,29 +841,18 @@ fn process_repo_files_parallel(
         let contents: Vec<&str> = batch.iter()
             .map(|c| c.chunk.content.as_str())
             .collect();
-
         let embed_start = Instant::now();
-        let embeddings = ONNX_MODEL.with(|cell| {
-            let model = cell.borrow();
-            model.as_ref().unwrap().embed_batch(&contents)
-        })?;
+        let model = OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
+            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX model: {}", e)))?;
+        let embeddings = model.embed_batch(&contents)
+            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to embed batch: {}", e)))?;
         let embed_elapsed = embed_start.elapsed();
         log::info!("[PROFILE] Cross-file batch embedding time for {} chunks: {:?}", contents.len(), embed_elapsed);
-
         Ok(embeddings)
     };
 
     // Process files in parallel
     let results: Vec<_> = relative_paths.par_iter().map(|relative_path| {
-        // Initialize ONNX model for this thread if not already initialized
-        ONNX_MODEL.with(|cell| {
-            let mut model_opt = cell.borrow_mut();
-            if model_opt.is_none() {
-                *model_opt = Some(OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
-                    .expect("Failed to create thread-local ONNX model instance"));
-            }
-        });
-
         let full_path = repo_root.join(relative_path);
         let relative_path_str = relative_path.to_string_lossy().to_string();
         
@@ -965,56 +953,6 @@ fn process_repo_files_parallel(
 
         Ok((file_intermediate_data, file_tokens))
     }).collect();
-
-    // Process any remaining chunks in the final batch
-    // Ensure ONNX model is initialized on the main thread before processing
-    ONNX_MODEL.with(|cell| {
-        if cell.borrow().is_none() {
-            *cell.borrow_mut() = Some(OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
-                .expect("Failed to create thread-local ONNX model instance"));
-        }
-    });
-    let final_batch = current_batch.lock().unwrap();
-    if (!final_batch.is_empty()) {
-        if let Ok(embeddings) = process_batch(&final_batch) {
-            for (i, chunk_meta) in final_batch.iter().enumerate() {
-                let file_extension = chunk_meta.file_path.extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                // Generate sparse vectors and collect tokens
-                let tokenizer_config = TokenizerConfig::default();
-                let tokens = tokenizer::tokenize_code(&chunk_meta.chunk.content, &tokenizer_config);
-                let mut term_frequencies = HashMap::new();
-                for token in tokens {
-                    if token.kind != TokenKind::Whitespace && token.kind != TokenKind::Unknown {
-                        let token_text = token.text;
-                        current_file_tokens.insert(token_text.clone());
-                        *term_frequencies.entry(token_text).or_insert(0) += 1;
-                    }
-                }
-
-                // Create payload
-                let mut payload_map = HashMap::new();
-                payload_map.insert(FIELD_FILE_PATH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.relative_path.clone()));
-                payload_map.insert(FIELD_START_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.start_line as i64));
-                payload_map.insert(FIELD_END_LINE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.end_line as i64));
-                payload_map.insert(FIELD_LANGUAGE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.language.clone()));
-                payload_map.insert(FIELD_FILE_EXTENSION.to_string(), qdrant_client::qdrant::Value::from(file_extension));
-                payload_map.insert(FIELD_ELEMENT_TYPE.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.element_type.to_string()));
-                payload_map.insert(FIELD_CHUNK_CONTENT.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.chunk.content.clone()));
-                payload_map.insert(FIELD_BRANCH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.branch.clone()));
-                payload_map.insert(FIELD_COMMIT_HASH.to_string(), qdrant_client::qdrant::Value::from(chunk_meta.commit.clone()));
-
-                all_intermediate_data.push(IntermediatePointData {
-                    dense_vector: embeddings[i].clone(),
-                    term_frequencies,
-                    payload_map,
-                });
-            }
-        }
-    }
 
     // Collect results from parallel processing
     for result in results {

@@ -46,7 +46,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             data: None,
         })?;
 
-    let collection_name = get_collection_name(&params.repository_name);
+    let collection_name = get_collection_name(&params.repository_name, &config_read_guard);
     let query_text = params.query_text;
     let limit = params.limit;
 

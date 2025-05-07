@@ -27,9 +27,9 @@ Replace `<JSON_REQUEST>` with the specific request JSON for each step below. The
 We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 **Repository Details:**
-*   Name: `test-basic`
-*   URL: `https://github.com/git-fixtures/basic.git` (Example public repo)
-*   Branch: `master`
+*   Name: `test-sinatra`
+*   URL: `https://github.com/sinatra/sinatra.git`
+*   Branch: `main`
 
 ### 1. Add Repository (`repository_add`)
 
@@ -41,8 +41,8 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/add",
   "params": {
-    "url": "https://github.com/git-fixtures/basic.git",
-    "name": "test-basic"
+    "url": "https://github.com/sinatra/sinatra.git",
+    "name": "test-sinatra"
   },
   "id": 1
 }
@@ -53,11 +53,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic",
-    "url": "https://github.com/git-fixtures/basic.git",
-    "local_path": "/path/to/your/repositories/test-basic", // Actual path will vary
-    "default_branch": "master",
-    "active_branch": "master" // Or null initially, depending on implementation detail
+    "name": "test-sinatra",
+    "url": "https://github.com/sinatra/sinatra.git",
+    "localPath": "/path/to/your/repositories/test-sinatra", // Actual path will vary
+    "defaultBranch": "main",
+    "activeBranch": "main"
   },
   "id": 1
 }
@@ -65,8 +65,8 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 **Verification:**
 *   Check server logs for successful clone and collection creation messages.
-*   Verify the repository files exist in the `local_path`.
-*   Verify the Qdrant collection `test-basic` exists (may be empty initially).
+*   Verify the repository files exist in the `localPath`.
+*   Verify the Qdrant collection `test-sinatra` exists (may be empty initially).
 
 ### 2. List Repositories (`repository_list`)
 
@@ -89,10 +89,9 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "result": {
     "repositories": [
       {
-        "name": "test-basic",
-        "url": "https://github.com/git-fixtures/basic.git",
-        "local_path": "/path/to/your/repositories/test-basic",
-        "active_branch": "master"
+        "name": "test-sinatra",
+        "remote": "https://github.com/sinatra/sinatra.git",
+        "branch": "main"
       }
       // Potentially other repositories if added previously
     ]
@@ -102,7 +101,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 ```
 
 **Verification:**
-*   Confirm the `test-basic` repository is present in the `repositories` array with correct details.
+*   Confirm the `test-sinatra` repository is present in the `repositories` array with correct details.
 
 ### 3. Sync Repository (`repository_sync`)
 
@@ -114,7 +113,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/sync",
   "params": {
-    "name": "test-basic"
+    "name": "test-sinatra"
   },
   "id": 3
 }
@@ -125,9 +124,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic",
-    "status": "Synced and Indexed", // Or similar success status
-    "commit_hash": "..." // The commit hash that was indexed
+    "message": "Successfully synced repository 'test-sinatra' branch/ref 'main' to commit <COMMIT_HASH>" // Example: "91cfb548c9e50a65324a9ce9e4ea5f10cd897027"
   },
   "id": 3
 }
@@ -135,22 +132,22 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 **Verification:**
 *   Check server logs for git pull/fetch, parsing, embedding, and upsert operations.
-*   Verify the Qdrant collection `test-basic` now contains points (check Qdrant UI or API). The number should correspond to the code chunks found.
+*   Verify the Qdrant collection `test-sinatra` now contains points (check Qdrant UI or API). The number should correspond to the code chunks found (e.g., > 0).
 
 ### 4. Query Repository (`query`)
 
 **Goal:** Perform a semantic search query against the indexed repository data.
 
-**Request (Note: parameters are snake_case):**
+**Request (Note: parameters are camelCase):**
 ```json
 {
   "jsonrpc": "2.0",
   "method": "query",
   "params": {
-    "repository_name": "test-basic",
-    "query_text": "read file content",
+    "repositoryName": "test-sinatra",
+    "queryText": "define a route",
     "limit": 5
-    // "branch_name": "master" // Optional, snake_case if used
+    // "branchName": "main" // Optional
   },
   "id": 4
 }
@@ -163,11 +160,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "result": {
     "results": [
       {
-        "file_path": "CHANGELOG", // Example result
-        "start_line": 1,
-        "end_line": 5,
-        "score": 0.85, // Example score
-        "content": "== 0.1.1 / 2013-02-17\n\n* Fix issue #1.\n\n== 0.1.0 / 2013-02-14\n\n* Added foo().\n* Added bar()."
+        "filePath": "test/route_added_hook_test.rb", // Example result for Sinatra
+        "startLine": 5,
+        "endLine": 11,
+        "score": 0.5, // Example score
+        "content": "def self.routes ; @routes ; end\ndef self.procs ; @procs ; end\ndef self.route_added(verb, path, proc)\n    @routes << [verb, path]\n    @procs << proc\n  end"
       }
       // ... other results up to limit
     ]
@@ -178,7 +175,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 **Verification:**
 *   Check the `results` array contains relevant code snippets or file content matching the query.
-*   Verify `file_path`, line numbers, and `content` seem correct.
+*   Verify `filePath`, line numbers, and `content` seem correct.
 *   Verify the number of results matches the `limit` requested (or fewer if less results available).
 
 ### 5. Add Repository with Target Ref (`repository_add`)
@@ -186,9 +183,9 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 **Goal:** Add a repository configuration targeting a specific tag or commit.
 
 **Repository Details:**
-*   Name: `test-basic-tag`
-*   URL: `https://github.com/git-fixtures/basic.git`
-*   Target Ref: `b029517f6300c2da0f4b651b8642506cd6aaf45d` (Commit hash for v1.0.0 tag)
+*   Name: `test-sinatra-tag`
+*   URL: `https://github.com/sinatra/sinatra.git`
+*   Target Ref: `f74f968a007a3a578064d079c23631f90cb63404` (Commit hash for v3.0.0 tag)
 
 **Request:**
 ```json
@@ -196,9 +193,9 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/add",
   "params": {
-    "url": "https://github.com/git-fixtures/basic.git",
-    "name": "test-basic-tag",
-    "target_ref": "b029517f6300c2da0f4b651b8642506cd6aaf45d" 
+    "url": "https://github.com/sinatra/sinatra.git",
+    "name": "test-sinatra-tag",
+    "targetRef": "f74f968a007a3a578064d079c23631f90cb63404" 
   },
   "id": 6
 }
@@ -209,11 +206,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic-tag",
-    "url": "https://github.com/git-fixtures/basic.git",
-    "local_path": "/path/to/your/repositories/test-basic-tag", // Actual path will vary
-    "default_branch": "b029517f6300c2da0f4b651b8642506cd6aaf45d", // Should reflect the target ref
-    "active_branch": "b029517f6300c2da0f4b651b8642506cd6aaf45d"  // Should reflect the target ref
+    "name": "test-sinatra-tag",
+    "url": "https://github.com/sinatra/sinatra.git",
+    "localPath": "/path/to/your/repositories/test-sinatra-tag", // Actual path will vary
+    "defaultBranch": "f74f968a007a3a578064d079c23631f90cb63404", // Should reflect the targetRef
+    "activeBranch": "f74f968a007a3a578064d079c23631f90cb63404"  // Should reflect the targetRef
   },
   "id": 6
 }
@@ -221,14 +218,14 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 **Verification:**
 *   Check server logs for successful clone and checkout messages.
-*   Verify the repository files exist in the `local_path`.
-*   Run `git -C /path/to/your/repositories/test-basic-tag rev-parse HEAD` and verify it matches the `target_ref`.
-*   Verify the Qdrant collection `test-basic-tag` exists.
-*   Run `repository/list` and verify `test-basic-tag` appears with the `target_ref` as its `active_branch`.
+*   Verify the repository files exist in the `localPath`.
+*   Run `git -C /path/to/your/repositories/test-sinatra-tag rev-parse HEAD` and verify it matches the `targetRef`.
+*   Verify the Qdrant collection `test-sinatra-tag` exists.
+*   Run `repository/list` and verify `test-sinatra-tag` appears with the `targetRef` as its `branch` (or `activeBranch` if list output changes).
 
 ### 6. Sync Repository with Target Ref (`repository_sync`)
 
-**Goal:** Ensure syncing a repository with a `target_ref` checks out the correct ref and indexes its content without fetching/pulling.
+**Goal:** Ensure syncing a repository with a `targetRef` checks out the correct ref and indexes its content without fetching/pulling.
 
 **Request:**
 ```json
@@ -236,7 +233,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/sync",
   "params": {
-    "name": "test-basic-tag"
+    "name": "test-sinatra-tag"
   },
   "id": 7
 }
@@ -247,9 +244,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic-tag",
-    "status": "Indexed static ref 'b029517f6300c2da0f4b651b8642506cd6aaf45d'", // Status reflects static ref
-    "commit_hash": "b029517f6300c2da0f4b651b8642506cd6aaf45d" // Commit hash matches the target ref
+    "message": "Successfully synced repository 'test-sinatra-tag' branch/ref 'f74f968a007a3a578064d079c23631f90cb63404' to commit f74f968a007a3a578064d079c23631f90cb63404"
   },
   "id": 7
 }
@@ -258,7 +253,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 **Verification:**
 *   Check server logs: Verify `git checkout` and `git rev-parse` messages appear, but **NO** `git fetch` or `git pull` messages.
 *   Verify logs show parsing, embedding, and upsert operations for the content at the specified commit.
-*   Verify the Qdrant collection `test-basic-tag` contains points corresponding to the code at the target commit.
+*   Verify the Qdrant collection `test-sinatra-tag` contains points corresponding to the code at the target commit.
 
 ### 7. Query Repository with Target Ref (`query`)
 
@@ -270,8 +265,8 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "query",
   "params": {
-    "repository_name": "test-basic-tag",
-    "query_text": "file content", // Query relevant to the content at the specific tag
+    "repositoryName": "test-sinatra-tag",
+    "queryText": "get request", // Query relevant to the content at the specific tag
     "limit": 3
   },
   "id": 8
@@ -287,11 +282,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
       // Results should reflect content present *only* at the target commit/tag,
       // NOT content added in later commits on the main branch.
       {
-        "file_path": ".gitignore", // Example from v1.0.0
-        "start_line": 1,
-        "end_line": 1,
-        "score": 0.7, // Example score
-        "content": "*.rbc"
+        "filePath": "lib/sinatra/base.rb", // Example from Sinatra v3.0.0
+        "startLine": 690, // Line numbers are illustrative
+        "endLine": 695,
+        "score": 0.6, // Example score
+        "content": "      # Defining a `GET` handler also automatically defines\n      # a `HEAD` handler.\n      def get(path, opts = {}, &block)\n        conditions = @conditions.dup\n        route('GET', path, opts, &block)\n\n        @conditions = conditions\n        route('HEAD', path, opts, &block)\n      end"
       }
       // ... other relevant results ...
     ]
@@ -301,8 +296,8 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 ```
 
 **Verification:**
-*   Verify the results are relevant to the code state at the `target_ref` (`b029517...`).
-*   Verify results *do not* include content added after that commit (e.g., changes in the `master` branch of `git-fixtures/basic.git`).
+*   Verify the results are relevant to the code state at the `targetRef` (`f74f968...`).
+*   Verify results *do not* include content added after that commit (e.g., changes in the `main` branch of `sinatra/sinatra.git` after v3.0.0).
 
 ### 8. Remove Repository with Target Ref (`repository_remove`)
 
@@ -314,9 +309,9 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/remove",
   "params": {
-    "name": "test-basic-tag"
+    "name": "test-sinatra-tag"
   },
-  "id": 9
+  "id": 9 // Original plan used 9 for both removes, let's keep this one 9
 }
 ```
 
@@ -325,7 +320,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic-tag",
+    "name": "test-sinatra-tag",
     "status": "Removed"
   },
   "id": 9
@@ -333,15 +328,15 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 ```
 
 **Verification:**
-*   Run `repository_list` again; `test-basic-tag` should no longer be listed.
-*   Verify the local directory `/path/to/your/repositories/test-basic-tag` is deleted.
-*   Verify the Qdrant collection `test-basic-tag` is deleted.
+*   Run `repository_list` again; `test-sinatra-tag` should no longer be listed.
+*   Verify the local directory `/path/to/your/repositories/test-sinatra-tag` is deleted.
+*   Verify the Qdrant collection `test-sinatra-tag` is deleted.
 
 ### 9. Remove Repository (`repository_remove`)
 
-(Renumbering the original remove test case)
+(Renumbering to avoid ID conflict, though test plan re-used ID 9)
 
-**Goal:** Remove the original `test-basic` repository configuration and associated data.
+**Goal:** Remove the original `test-sinatra` repository configuration and associated data.
 
 **Request:**
 ```json
@@ -349,9 +344,9 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "jsonrpc": "2.0",
   "method": "repository/remove",
   "params": {
-    "name": "test-basic"
+    "name": "test-sinatra"
   },
-  "id": 9
+  "id": 10 // New ID to avoid conflict with previous step 8 which used ID 9.
 }
 ```
 
@@ -360,16 +355,16 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 {
   "jsonrpc": "2.0",
   "result": {
-    "name": "test-basic",
+    "name": "test-sinatra",
     "status": "Removed"
   },
-  "id": 9
+  "id": 10
 }
 ```
 
 **Verification:**
-*   Run `repository_list` again; `test-basic` should no longer be listed.
+*   Run `repository_list` again; `test-sinatra` should no longer be listed.
 *   Check the server logs for deletion messages.
-*   Verify the local repository directory (`/path/to/your/repositories/test-basic`) has been deleted.
-*   Verify the Qdrant collection `test-basic` has been deleted or cleared.
+*   Verify the local repository directory (`/path/to/your/repositories/test-sinatra`) has been deleted.
+*   Verify the Qdrant collection `test-sinatra` has been deleted or cleared.
 

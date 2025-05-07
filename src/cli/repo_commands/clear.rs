@@ -43,7 +43,7 @@ where
         .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name))?;
 
     // --- Check Qdrant Collection Status (Informational) ---
-    let collection_name = get_collection_name(&repo_name);
+    let collection_name = get_collection_name(&repo_name, &config);
     let collection_did_exist = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {

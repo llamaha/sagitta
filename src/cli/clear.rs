@@ -43,7 +43,7 @@ pub async fn handle_clear(
     };
 
     let target_repo_name = &repo_to_clear.name;
-    let collection_name = get_collection_name(target_repo_name);
+    let collection_name = get_collection_name(target_repo_name, &config);
     log::info!("Preparing to clear data for repository: '{}', collection: '{}'", target_repo_name, collection_name);
 
     // --- Confirmation --- 
