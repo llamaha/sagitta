@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod tests {
     // Adjust import paths
-    use crate::syntax::parser::{CodeChunk, SyntaxParser};
+    use crate::syntax::parser::SyntaxParser;
     use crate::syntax::markdown::{MarkdownParser, MAX_SECTION_SIZE}; // Import constant
     use anyhow::Result;
 

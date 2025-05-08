@@ -209,6 +209,9 @@ mod tests {
         let chunks = parser.parse(code, "test.rs")?;
         assert_eq!(chunks.len(), 1, "Expected a single chunk for the struct");
         let chunk = &chunks[0];
+        if !chunk.content.contains("/// This is a Point struct") {
+            println!("DEBUG: Actual chunk content: {}", chunk.content);
+        }
         assert!(chunk.content.contains("/// This is a Point struct"), "Doc comment missing");
         assert!(chunk.content.contains("struct Point"), "Struct definition missing");
         Ok(())
@@ -227,6 +230,9 @@ mod tests {
         let chunks = parser.parse(code, "test.rs")?;
         assert_eq!(chunks.len(), 1, "Expected a single chunk for the function");
         let chunk = &chunks[0];
+        if !chunk.content.contains("/// Adds two numbers") {
+            println!("DEBUG: Actual chunk content: {}", chunk.content);
+        }
         assert!(chunk.content.contains("/// Adds two numbers"), "Doc comment missing");
         assert!(chunk.content.contains("fn add"), "Function definition missing");
         Ok(())

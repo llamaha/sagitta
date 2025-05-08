@@ -93,6 +93,7 @@ num_cpus = "1.16"
 # tempfile = "3.10.1" # Moved to main dependencies
 serde_json = "1.0.117"
 mockall = "0.12.1"
+git2 = "0.18.3" # Also add as dev-dependency for tests
 
 # Required by tree-sitter-markdown
 cc = "1.0"

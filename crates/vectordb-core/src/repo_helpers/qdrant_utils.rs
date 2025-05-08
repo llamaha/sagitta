@@ -1,11 +1,9 @@
 // Qdrant-related helper functions from repo_helpers.rs will be moved here. 
 
 use std::path::PathBuf;
-use qdrant_client::qdrant::{DeletePointsBuilder, PointStruct, Filter, Condition, 
-    ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, UpsertPointsBuilder, 
+use qdrant_client::qdrant::{DeletePointsBuilder, Filter, Condition, 
+    ScrollPointsBuilder, ScrollResponse, 
     PointId, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList};
-use indicatif::ProgressBar;
-use colored::Colorize;
 use anyhow::{Context, Result};
 use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_FILE_PATH};
 use crate::error::VectorDBError as Error;

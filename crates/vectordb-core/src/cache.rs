@@ -225,7 +225,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::fs;
-    use crate::config::AppConfig;
+    
     use crate::EmbeddingModelType;
 
     // Helper to create a cache for testing

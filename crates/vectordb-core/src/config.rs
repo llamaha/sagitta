@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 use anyhow::anyhow;
-use crate::error::{Result as VectorDBResult, VectorDBError};
+use crate::error::VectorDBError;
 use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "vectordb-cli";

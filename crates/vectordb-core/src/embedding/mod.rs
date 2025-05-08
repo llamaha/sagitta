@@ -6,6 +6,7 @@ use std::fmt;
 use crate::config::AppConfig; // Use config from core
 use crate::config::load_config;
 use crate::config::get_vocabulary_path;
+use crate::config::PerformanceConfig;
 
 // Provider related imports will need adjustment
 #[cfg(feature = "ort")]
@@ -128,8 +129,14 @@ impl EmbeddingHandler {
 
                 provider::onnx::OnnxEmbeddingModel::new(&model_path, &tokenizer_path)
                     .map(|p| Arc::new(Mutex::new(p)))
-                    .map_err(VectorDBError::from) // Map anyhow::Error
+                    .map_err(VectorDBError::from)
             },
+        };
+
+        #[cfg(feature = "ort")]
+        let onnx_provider = match onnx_provider_result {
+            Ok(provider) => provider,
+            Err(e) => return Err(e),
         };
 
         #[cfg(not(feature = "ort"))]
@@ -140,7 +147,7 @@ impl EmbeddingHandler {
             onnx_model_path: config.onnx_model_path.clone().map(PathBuf::from),
             onnx_tokenizer_path: config.onnx_tokenizer_path.clone().map(PathBuf::from),
             #[cfg(feature = "ort")]
-            onnx_provider: onnx_provider_result.ok(),
+            onnx_provider: Some(onnx_provider),
         })
     }
 
@@ -277,7 +284,7 @@ impl EmbeddingHandler {
 mod tests {
     use super::*;
     use crate::config::AppConfig;
-    use crate::config::IndexingConfig;
+    
     use crate::embedding::{EmbeddingHandler, EmbeddingModelType, EmbeddingModel};
     use crate::error::VectorDBError;
     use std::fs;
@@ -308,6 +315,7 @@ mod tests {
             repositories_base_path: None,
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
             indexing: Default::default(),
+            performance: PerformanceConfig::default(),
         }
     }
 
@@ -478,20 +486,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic] // Expect panic if model files are missing
     fn test_handler_creation_with_real_paths_but_no_files() {
         if !cfg!(feature = "onnx") {
-            // Removed: println!("Skipping ONNX test because model files aren't available");
-            panic!(); // Ensure test fails if feature disabled
+            // Skip test if ONNX feature is not enabled
+            return;
         }
-        // Configuration code that would lead to panic if files don't exist
         let config = AppConfig {
-            // Set paths that *should* exist but we ensure they don't
             onnx_model_path: Some("./nonexistent/model.onnx".to_string()),
             onnx_tokenizer_path: Some("./nonexistent/tokenizer".to_string()),
             ..Default::default()
         };
-        let _ = EmbeddingHandler::new(&config); // This should panic
+        let result = EmbeddingHandler::new(&config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("ONNX") || err_msg.contains("ort") || err_msg.contains("model"), "Unexpected error: {}", err_msg);
     }
 
     #[test]

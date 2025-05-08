@@ -1,10 +1,8 @@
 use crate::config::RepositoryConfig;
 use crate::error::VectorDBError;
-use git2::{Repository, ErrorCode, FetchOptions, AutotagOption, RemoteCallbacks, Cred, CredentialType};
-use log::{info, warn, debug};
+use git2::Repository;
+use log::info;
 use anyhow::{Context, Result};
-use std::io::{Write};
-use std::path::PathBuf;
 use crate::repo_helpers::create_fetch_options;
 
 /// Switches the current HEAD of the repository to the specified branch.
