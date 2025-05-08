@@ -1,9 +1,12 @@
 use qdrant_client::qdrant::{Value, ScoredPoint, PointId};
 use std::collections::HashMap;
-use vectordb_lib::cli::commands::{
-    FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE
+use vectordb_cli::cli::commands::{
+    FIELD_FILE_PATH, FIELD_START_LINE, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE, FIELD_CHUNK_CONTENT,
+    // FIELD_BRANCH, FIELD_COMMIT_HASH, // Not used in this test file, but available
 };
-use vectordb_lib::cli::formatters::print_search_results;
+use vectordb_cli::cli::formatters::print_search_results;
+use anyhow::Result;
+use std::io::Cursor;
 
 // Add test module to ensure tests are discovered
 #[cfg(test)]

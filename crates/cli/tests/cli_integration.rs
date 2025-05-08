@@ -11,8 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use git2::{Repository, Signature, Commit, Oid};
 use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{CountPointsBuilder, Filter, Condition};
-use vectordb_core::config::AppConfig;
-use vectordb_lib::cli::commands::{FIELD_FILE_PATH, FIELD_BRANCH, FIELD_COMMIT_HASH};
+use vectordb_core::config::{AppConfig, RepositoryConfig, save_config, load_config, get_config_path_or_default};
+use vectordb_cli::cli::commands::{FIELD_FILE_PATH, FIELD_BRANCH, FIELD_COMMIT_HASH};
 
 // Helper function to get the path to the compiled binary
 fn get_binary_path() -> Result<PathBuf> {

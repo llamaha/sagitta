@@ -12,7 +12,7 @@ name = "vectordb-mcp"
 path = "src/main.rs"
 
 [dependencies]
-vectordb_core = { path = "../vectordb-core", features = ["onnx"] }
+vectordb_core = { path = "../../", features = ["onnx"] }
 anyhow = "1.0"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,7 +35,7 @@ async-trait = "0.1"
 mockall = "0.12" # Or the latest version 
 rand = "0.8" # Add rand dependency
 # Add core dependency with features needed for tests
-vectordb_core = { path = "../vectordb-core", features = ["onnx"] }
+vectordb_core = { path = "../../", features = ["onnx"] }
 serde_json = "1.0"
 # Add other dev dependencies as needed
 

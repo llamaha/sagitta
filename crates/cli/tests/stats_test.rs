@@ -1,10 +1,11 @@
 use vectordb_core::config::{AppConfig, RepositoryConfig};
-use vectordb_lib::cli::stats::{StatsArgs, handle_stats};
+use vectordb_cli::cli::stats::{StatsArgs, handle_stats};
 use qdrant_client::Qdrant;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+use tempfile::tempdir;
 
 #[cfg(test)]
 mod tests {

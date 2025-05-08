@@ -1,6 +1,6 @@
 use anyhow::Result;
 use vectordb_core::config::{AppConfig, RepositoryConfig};
-use vectordb_lib::cli::repo_commands::r#use::{UseRepoArgs, use_repository};
+use vectordb_cli::cli::repo_commands::r#use::{UseRepoArgs, use_repository};
 use std::path::PathBuf;
 use std::collections::HashMap;
 use tempfile::tempdir;

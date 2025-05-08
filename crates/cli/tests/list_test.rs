@@ -1,9 +1,10 @@
 use anyhow::Result;
 use vectordb_core::config::{AppConfig, RepositoryConfig};
-use vectordb_lib::cli::repo_commands::list::list_repositories;
+use vectordb_cli::cli::repo_commands::list::list_repositories;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use vectordb_lib::cli::repo_commands::list::ListArgs;
+use vectordb_cli::cli::repo_commands::list::ListArgs;
+use tempfile::tempdir;
 
 #[cfg(test)]
 mod tests {

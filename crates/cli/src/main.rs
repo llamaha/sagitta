@@ -5,10 +5,8 @@ use clap::Parser;
 use std::sync::Arc;
 use std::path::PathBuf;
 
-// Import library modules
-use vectordb_lib::{
-    cli::commands::{handle_command, CliArgs},
-};
+// Import library modules from the lib target (now named vectordb_cli)
+use vectordb_cli::cli::{handle_command, CliArgs};
 use qdrant_client::Qdrant;
 
 // Use items from the new core library
