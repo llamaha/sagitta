@@ -6,7 +6,7 @@ edition = "2021"
 [workspace]
 members = [
     ".",
-    "crates/cli",
+    "crates/vectordb-cli",
     "crates/vectordb-mcp"
 ]
 resolver = "2"
@@ -110,9 +110,3 @@ tempfile = "3" # For tests that use tempfile directly
 anyhow = "1.0" # For test error handling
 test-log = "0.2"
 # qdrant-client, serde, serde_json, toml are already in [dependencies] or covered
-
-# Required by tree-sitter-markdown
-[build-dependencies]
-cc = "1.0"
-fs_extra = "1.3"
-dirs = "5.0.1" # Matching version from CLI's build deps if different, or use the one it had.

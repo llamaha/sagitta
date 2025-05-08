@@ -52,11 +52,11 @@ Add a new server configuration with the following settings:
 {
   "mcpServers": {
     "vectordb-mcp": {
-      "command": "/home/adam/repos/vectordb-cli/target/release/vectordb-mcp",
+      "command": "/path/to/your/vectordb-workspace/target/release/vectordb-mcp",
       "args": [],
-      "cwd": "/home/adam/repos/vectordb-cli",
+      "cwd": "/path/to/your/vectordb-workspace",
       "env": {
-        "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:/home/adam/repos/vectordb-cli/target/release/lib",
+        "LD_LIBRARY_PATH": "/path/to/your/onnxruntime/lib:/optional/path/to/cuda/lib64",
         "RAYON_NUM_THREADS": "8"
       }
     }
@@ -66,15 +66,15 @@ Add a new server configuration with the following settings:
 
 This configuration defines an MCP server named `vectordb-mcp` with the following properties:
 
-*   **`command`**: The *absolute path* to the `vectordb-mcp` executable. 
-    *   Example (development): `"/home/adam/repos/vectordb-cli/target/release/vectordb-mcp"`
-    *   Example (installation): `"/path/to/your/installation/vectordb-mcp"`
+*   **`command`**: The *absolute path* to the `vectordb-mcp` executable, found in your workspace's `target/release/` directory.
+    *   Example (development): `"/home/user/projects/vectordb/target/release/vectordb-mcp"`
+    *   Example (installation): `"/usr/local/bin/vectordb-mcp"` (if installed to PATH)
 *   **`args`**: An array of command-line arguments to pass to the executable (currently empty in the example).
-*   **`cwd` (Current Working Directory)**: The *absolute path* to the directory where the command should be executed. For development, this is typically the repository root.
-    *   Example: `"/home/adam/repos/vectordb-cli"`
+*   **`cwd` (Current Working Directory)**: The *absolute path* to the root of your `vectordb` workspace.
+    *   Example: `"/home/user/projects/vectordb"`
 *   **`env`**: A dictionary for environment variables. 
-    *   `LD_LIBRARY_PATH`: Use this to specify paths to necessary shared libraries (like ONNX runtime, CUDA) if they are not in standard system locations. Paths are colon-separated.
-        *   Example: `"/usr/local/cuda-12.8/lib64:/home/adam/repos/vectordb-cli/target/release/lib"`
+    *   `LD_LIBRARY_PATH`: Use this to specify paths to necessary shared libraries, primarily the ONNX Runtime libraries. If you have a separate CUDA installation providing cuDNN, include its library path as well. Paths are colon-separated on Linux/macOS. (For Windows, use `PATH` and semicolon separation).
+        *   Example: `"/opt/onnxruntime/lib:/usr/local/cuda/lib64"`
     *   `RAYON_NUM_THREADS`: Optionally, set the number of threads for Rayon to use (e.g., `"8"`). This might be beneficial for performance and resource management during parallel operations like indexing.
 
 **Explanation:**

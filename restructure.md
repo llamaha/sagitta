@@ -9,7 +9,7 @@ This document outlines the plan to restructure the `vectordb` project, moving `v
 
 ## Target Structure:
 - Root (`./`): Will house the `vectordb-core` library and be the workspace root.
-- `./crates/cli/`: Will house the `vectordb-cli` binary crate.
+- `./crates/vectordb-cli/`: Will house the `vectordb-cli` binary crate.
 - `./crates/vectordb-mcp/`: Will remain, with updated dependency paths.
 
 ## Phases:
@@ -24,13 +24,13 @@ This document outlines the plan to restructure the `vectordb` project, moving `v
         [workspace]
         members = [
             ".",            # vectordb-core (root library)
-            "crates/cli",   # New CLI crate
+            "crates/vectordb-cli",   # New CLI crate
             "crates/vectordb-mcp"
         ]
         resolver = "2"
         ```
 
-2.  **New `crates/cli/Cargo.toml` Creation:**
+2.  **New `crates/vectordb-cli/Cargo.toml` Creation:**
     *   A new manifest for the `vectordb-cli` package.
     *   Defines a binary `[[bin]] name = "vectordb-cli" path = "src/main.rs"`.
     *   Dependencies:
@@ -48,12 +48,12 @@ This document outlines the plan to restructure the `vectordb` project, moving `v
     *   Delete the empty `crates/vectordb-core/` directory.
 
 2.  **Relocate `vectordb-cli` Source Code:**
-    *   Create `crates/cli/src/`.
-    *   Move current root `src/bin/vectordb-cli.rs` to `crates/cli/src/main.rs`.
-    *   Transfer other CLI-specific modules/files from current root `src/*` (e.g., `src/cli/`, `src/edit/`, relevant parts of `src/lib.rs`) into `crates/cli/src/`.
+    *   Create `crates/vectordb-cli/src/`.
+    *   Move current root `src/bin/vectordb-cli.rs` to `crates/vectordb-cli/src/main.rs`.
+    *   Transfer other CLI-specific modules/files from current root `src/*` (e.g., `src/cli/`, `src/edit/`, relevant parts of `src/lib.rs`) into `crates/vectordb-cli/src/`.
 
 3.  **Adjust `use` Statements:**
-    *   Update `use` statements across all affected Rust files in `src/`, `crates/cli/src/`, and `crates/vectordb-mcp/src/` to reflect new module paths and crate dependencies.
+    *   Update `use` statements across all affected Rust files in `src/`, `crates/vectordb-cli/src/`, and `crates/vectordb-mcp/src/` to reflect new module paths and crate dependencies.
     *   Ensure `vectordb-core`'s `src/lib.rs` correctly defines its public API via `pub use`.
 
 ### Phase 3: Build, Test, and Refine

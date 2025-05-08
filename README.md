@@ -1,14 +1,45 @@
-# VectorDB CLI
+# `vectordb-core`
 
-VectorDB CLI is a command-line client for managing indexed code repositories. It allows developers to index, search, and interact with codebase embeddings directly from the terminal.
+`vectordb-core` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `vectordb-cli`.
 
-vectordb-cli is powered by the [vectordb-core](./crates/vectordb-core/README.md) library, and they are currently packaged together in this repository. This structure facilitates rapid development during these early phases. In the future, `vectordb-core` will be migrated to a standalone library crate, suitable for use as a dependency in other projects.
-
-There is also a [vectordb-mcp](./crates/vectordb-mcp/README.md) that allows this tool to operate as an MCP server.  It's recommended to compile both CLI and MCP as they compliment each other and both are lightweight frontends to the same core library.
+This repository also contains:
+- [`crates/vectordb-cli`](./crates/vectordb-cli/README.md): A command-line interface for `vectordb-core`.
+- [`crates/vectordb-mcp`](./crates/vectordb-mcp/README.md): A server component (MCP) for `vectordb-core`.
 
 ## Performance
 
-vectordb-cli has been extensively optimized for high-performance indexing and search operations. Through careful tuning of parallel processing, GPU utilization, and embedding model selection, we've achieved significant speed improvements while maintaining high-quality search results. The tool intelligently balances resource usage based on your hardware capabilities, making it efficient even on systems with limited GPU memory.
+`vectordb-core` is designed for high-performance indexing and search operations, enabling tools like `vectordb-cli` to achieve significant speed. Through careful tuning of parallel processing, GPU utilization (via ONNX Runtime), and embedding model selection, we've focused on achieving substantial speed improvements while maintaining high-quality search results. The library aims to intelligently balance resource usage based on hardware capabilities, making it efficient even on systems with limited GPU memory when used appropriately by a frontend application.
+
+## Prerequisites
+
+To use `vectordb-core` with ONNX-based embedding models, you need to have the ONNX Runtime installed and accessible to the library.
+
+### 1. Install ONNX Runtime
+
+You can download the ONNX Runtime from the official website: [https://onnxruntime.ai/docs/install/](https://onnxruntime.ai/docs/install/)
+
+Please follow the instructions specific to your operating system and preferred installation method (e.g., pre-built binaries, build from source).
+
+### 2. Configure `LD_LIBRARY_PATH` (Linux/macOS)
+
+Once installed, you need to ensure that the system can find the ONNX Runtime shared libraries. You can do this by setting the `LD_LIBRARY_PATH` (on Linux) or `DYLD_LIBRARY_PATH` (on macOS) environment variable.
+
+For example, if you installed ONNX Runtime to `/opt/onnxruntime`:
+
+**Linux:**
+```bash
+export LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH
+```
+
+**macOS:**
+```bash
+export DYLD_LIBRARY_PATH=/opt/onnxruntime/lib:$DYLD_LIBRARY_PATH
+```
+
+You may want to add this line to your shell's configuration file (e.g., `~/.bashrc`, `~/.zshrc`) to make the setting permanent.
+
+**Windows:**
+Ensure the path to the ONNX Runtime DLLs (e.g., `onnxruntime.dll`) is included in your system's `PATH` environment variable.
 
 ## Getting Started
 
