@@ -22,7 +22,7 @@ This repository also contains:
 
     **Important:** You need the official ONNX Runtime **library distribution**, not just the Python package (`pip install onnxruntime`). The compiled Rust tools require the shared library files (`.so`, `.dylib`, `.dll`) arranged correctly with the necessary symbolic links, which the pip package doesn't typically set up for external use.
 
-    *   **Download:** Get the pre-built binaries for your OS/Architecture (CPU or GPU version) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-1.20.0.tgz` or `onnxruntime-linux-x64-gpu-1.20.0.tgz`).
+    *   **Download:** Get the pre-built binaries for your OS/Architecture (CPU or GPU version) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-1.20.0.tgz` or `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu.
     *   **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
         ```bash
         # Example for Linux
@@ -40,7 +40,7 @@ This repository also contains:
             # Example (adjust path and add to shell profile):
             export DYLD_LIBRARY_PATH=~/onnxruntime/onnxruntime-osx-<arch>-1.20.0/lib:$DYLD_LIBRARY_PATH
             ```
-        *   **Windows:** Add the full path to the `bin` directory (containing the `.dll` files) within the extracted folder to your system's `PATH` environment variable.
+        *   **Windows:** Add the full path to the `bin` directory (containing the `.dll` files, e.g., `onnxruntime.dll`) within the extracted folder to your system's `PATH` environment variable.
 
 3.  **Qdrant (Vector Database)**: Start the Qdrant vector store. Running via Docker is recommended:
     ```bash
@@ -55,8 +55,8 @@ This repository also contains:
 ### 1. Clone the Repository
 ```bash
 # Replace with the actual repository URL
-git clone <your-repository-url>
-cd <repository-directory-name> # e.g., vectordb-core
+git clone https://gitlab.com/amulvany/vectordb-core.git
+cd vectordb-core 
 ```
 
 ### 2. Build the Tools
@@ -69,19 +69,19 @@ The resulting binaries will be located in the `target/release/` directory (e.g.,
 
 *(Optional) If you only need a specific tool, you can build it individually, e.g.: `cargo build --release --package vectordb-cli`.*
 
-### 3. Set Up Embedding Models (for `vectordb-cli`)
+### 3. Set Up Embedding Models
 
-`vectordb-cli` requires ONNX-format embedding models and their tokenizers.
+Tools using `vectordb-core` (like `vectordb-cli`) require ONNX-format embedding models and their tokenizers.
 
 *   **Generate/Obtain Model Files**: The `scripts/` directory contains Python helper scripts to convert models from the Hugging Face Hub to the required ONNX format:
-    *   To generate the default model (`all-MiniLM-L6-v2`), use `convert_all_minilm_model.py`. First, set up a Python environment (see section 5 below), then run:
+    *   To generate the default model (`all-MiniLM-L6-v2`), use `convert_all_minilm_model.py`. First, set up a Python environment (see section 6 below), then run:
         ```bash
         python scripts/convert_all_minilm_model.py
         ```
         This script typically downloads the model and saves the ONNX model and tokenizer files into an `onnx/` directory (or similar, check the script output).
-    *   To generate other models (like a code-specific one), use the corresponding script (e.g., `convert_st_code_model.py`). See section 5 for more details.
+    *   To generate other models (like a code-specific one), use the corresponding script (e.g., `convert_st_code_model.py`). See section 6 for more details.
 
-*   **Configure `vectordb-cli` Model Paths**: `vectordb-cli` needs to know where the ONNX model and tokenizer files are. Refer to the [`crates/vectordb-cli/README.md`](./crates/vectordb-cli/README.md#installation) for details on configuration via environment variables, config file, or command-line arguments.
+*   **Configure Model Paths**: The paths to the ONNX model (`.onnx` file) and tokenizer (`tokenizer.json` directory) need to be specified. This is typically done via the central configuration file (see section 4), although tools like `vectordb-cli` may also allow overriding via environment variables or command-line arguments (refer to specific tool documentation).
 
 ### 4. Configuration File
 
@@ -91,36 +91,37 @@ Both `vectordb-cli` and `vectordb-mcp` load settings (like Qdrant URL, repositor
 
 You can initialize a default configuration using `vectordb-cli init` (see the `vectordb-cli` README).
 
-### 5. Using GPU Acceleration (Optional)
+### 5. Using GPU Acceleration (Optional but highly recommended)
 
 `vectordb-core` can leverage GPU acceleration if you have a compatible ONNX Runtime build installed and correctly configured.
 
-*   **Install GPU-enabled ONNX Runtime**: Follow the instructions in Prerequisites, ensuring you select a version with GPU support (CUDA, DirectML, CoreML/Metal) and install any necessary drivers (NVIDIA drivers, CUDA Toolkit, cuDNN).
-*   **Set Library Path**: Ensure `LD_LIBRARY_PATH` (or equivalent) points to the directory containing the GPU-enabled ONNX Runtime libraries.
+*   **Install GPU-enabled ONNX Runtime**: Follow the instructions in Prerequisites, ensuring you select a version with GPU support (currently, CUDA on Linux is the primary tested configuration) and install any necessary drivers (NVIDIA drivers, CUDA Toolkit, cuDNN).
+*   **Set Library Path**: Ensure `LD_LIBRARY_PATH` (or equivalent like `PATH` on Windows) points to the directory containing the GPU-enabled ONNX Runtime libraries.
 *   **(Optional) Build `vectordb-core` with GPU features**: The `ort` crate dependency in `Cargo.toml` has features (like `cuda`). If you encounter issues with the default `download-binaries` feature conflicting with your system install, you might consider modifying `Cargo.toml` to use a specific feature (e.g., `ort = { ..., default-features = false, features = ["cuda"] }`) and rebuilding the workspace (`cargo build --release --workspace`).
 *   **Manage GPU Memory**: When indexing large repositories with GPU, you might hit Out-of-Memory errors. Limit parallel threads using Rayon:
     ```bash
     # Adjust N based on your GPU memory
     export RAYON_NUM_THREADS=N 
-    vectordb-cli repo sync # Or other commands
+    vectordb-cli repo sync # Or other tool commands
     ```
+*   **Other Platforms:** Support for GPU acceleration on macOS (Metal/CoreML) and Windows (DirectML) via ONNX Runtime is possible but less tested currently. Contributions and testing are welcome.
 
-### 6. Using Different Embedding Models (for `vectordb-cli`)
+### 6. Using Different Embedding Models
 
-You can configure `vectordb-cli` to use alternative sentence-transformer models compatible with ONNX.
+`vectordb-core` supports using alternative sentence-transformer models compatible with ONNX.
 
 *   **Available Model Conversion Scripts**: The `./scripts/` directory includes Python scripts (`convert_all_minilm_model.py`, `convert_st_code_model.py`) to generate ONNX models from different Sentence Transformer models available on the Hugging Face Hub.
 *   **Running Conversion Scripts**:
     1.  Set up a Python virtual environment and install dependencies:
         ```bash
         python -m venv .venv
-        source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+        source .venv/bin/activate  # On Windows: .venv\Scripts\activate
         pip install torch transformers onnx onnxruntime numpy tokenizers optimum
         ```
     2.  Run the desired conversion script (e.g., `python scripts/convert_st_code_model.py`). This typically creates a new directory (e.g., `st_code_onnx/`) with the model files.
     3.  Deactivate: `deactivate`.
-*   **Configure `vectordb-cli`**: Update the CLI's configuration to point to the new model and tokenizer files (see `crates/vectordb-cli/README.md`).
-*   **Index Compatibility**: Different models produce embeddings of different dimensions. Qdrant indexes are tied to a specific dimension. If `vectordb-cli` detects a model dimension mismatch for an existing index, it will likely clear and recreate the index.
+*   **Configure Model Paths**: Update the central configuration (see section 4) to point to the new model's `.onnx` file and tokenizer directory. Tools may also allow overrides via environment variables or arguments.
+*   **Index Compatibility**: Different models produce embeddings of different dimensions. Qdrant indexes are tied to a specific dimension. If the core library (used by tools like `vectordb-cli`) detects a model dimension mismatch for an existing index, it will likely need to clear and recreate the index.
 
 ## License
 
