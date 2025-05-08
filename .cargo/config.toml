@@ -1,7 +1,0 @@
-[target.x86_64-unknown-linux-gnu] # Adjust target triple if needed
-rustflags = [
-  # Look for libraries in the same directory as the executable
-  "-C", "link-arg=-Wl,-rpath,$ORIGIN", 
-  # Also look in the deps subdirectory relative to the executable
-  "-C", "link-arg=-Wl,-rpath,$ORIGIN/deps"
-] 
