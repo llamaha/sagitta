@@ -68,7 +68,15 @@ The resulting binaries will be located in the `target/release/` directory (e.g.,
 
 *   **Configure `vectordb-cli` Model Paths**: `vectordb-cli` needs to know where the ONNX model and tokenizer files are. Refer to the [`crates/vectordb-cli/README.md`](./crates/vectordb-cli/README.md#installation) for details on configuration via environment variables, config file, or command-line arguments.
 
-### 4. Using GPU Acceleration (Optional)
+### 4. Configuration File
+
+Both `vectordb-cli` and `vectordb-mcp` load settings (like Qdrant URL, repository paths, model paths if not overridden by environment variables or arguments) from a central configuration file. This file is typically located at:
+
+`~/.config/vectordb/vectordb-cli/config.toml`
+
+You can initialize a default configuration using `vectordb-cli init` (see the `vectordb-cli` README).
+
+### 5. Using GPU Acceleration (Optional)
 
 `vectordb-core` can leverage GPU acceleration if you have a compatible ONNX Runtime build installed and correctly configured.
 
@@ -82,7 +90,7 @@ The resulting binaries will be located in the `target/release/` directory (e.g.,
     vectordb-cli repo sync # Or other commands
     ```
 
-### 5. Using Different Embedding Models (for `vectordb-cli`)
+### 6. Using Different Embedding Models (for `vectordb-cli`)
 
 You can configure `vectordb-cli` to use alternative sentence-transformer models compatible with ONNX.
 
