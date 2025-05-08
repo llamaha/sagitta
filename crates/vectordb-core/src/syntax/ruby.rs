@@ -5,12 +5,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for Ruby language files using Tree-sitter.
 pub struct RubyParser {
     parser: Parser,
     query: Query,
 }
 
 impl RubyParser {
+    /// Creates a new `RubyParser` with the Ruby grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_ruby::language();

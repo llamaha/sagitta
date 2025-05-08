@@ -6,18 +6,26 @@ use regex::Regex;
 /// Represents the type of token identified.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum TokenKind {
-    Identifier, // Includes keywords for now
+    /// An identifier or keyword.
+    Identifier,
+    /// A symbol (e.g., `+`, `::`, `->`).
     Symbol,
-    Literal, // String, char, number
+    /// A literal value (string, char, number).
+    Literal,
+    /// A code comment (line or block).
     Comment,
+    /// Whitespace characters (spaces, tabs, newlines).
     Whitespace,
+    /// An unknown character or sequence not matched by other kinds.
     Unknown,
 }
 
 /// Represents a distinct token identified in the source code.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Token {
+    /// The textual content of the token.
     pub text: String,
+    /// The classified kind of the token.
     pub kind: TokenKind,
     // Optional: Add positional info if needed later
     // pub line: usize,

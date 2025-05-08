@@ -12,6 +12,8 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 
 // === New EmbeddingProvider Trait ===
+/// A trait for embedding providers, defining a common interface for generating embeddings.
+/// This allows for different underlying embedding model implementations (e.g., ONNX, SentenceTransformers).
 #[cfg_attr(test, mockall::automock)]
 pub trait EmbeddingProvider: Send + Sync + Debug {
     /// Get the embedding dimension of the model.
@@ -25,7 +27,9 @@ pub trait EmbeddingProvider: Send + Sync + Debug {
 }
 
 // === Provider Modules ===
+/// Provides an ONNX-based implementation of the `EmbeddingProvider` trait.
 pub mod onnx;
+/// Provides a session pool for ONNX models to manage concurrent access.
 pub mod session_pool;
 
 // Re-export commonly used types
@@ -33,14 +37,21 @@ pub use onnx::OnnxEmbeddingModel;
 pub use session_pool::OnnxSessionPool;
 
 // === Config Structs ===
+/// Configuration for an embedding model provider.
+/// This struct holds information like the model type and paths to model files.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EmbeddingModelConfig {
+    /// The type of the embedding model (e.g., ONNX, Default).
     pub model_type: EmbeddingModelType,
+    /// Optional path to the ONNX model file.
     pub onnx_model_path: Option<PathBuf>,
+    /// Optional path to the ONNX tokenizer configuration file or directory.
     pub onnx_tokenizer_path: Option<PathBuf>,
 }
 
 impl EmbeddingModelConfig {
+    /// Creates a new `EmbeddingModelConfig` for the given `model_type`.
+    /// ONNX paths are initialized to `None` and can be set later.
     pub fn new(model_type: EmbeddingModelType) -> Self {
         Self {
             model_type,

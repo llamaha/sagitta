@@ -4,17 +4,29 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 // Declare the sub-modules within the syntax module
+/// Fallback parser for unsupported languages.
 pub mod fallback;
+/// Parser for Go language files.
 pub mod golang;
+/// Parser for JavaScript language files.
 pub mod javascript;
+/// Language detection and mapping utilities.
 pub mod languages;
+/// Parser for Markdown files.
 pub mod markdown;
+/// Core parsing traits and structures.
 pub mod parser;
+/// Parser for Python language files.
 pub mod python;
+/// Parser for Ruby language files.
 pub mod ruby;
+/// Parser for Rust language files.
 pub mod rust;
+/// Parser for TypeScript language files.
 pub mod typescript;
+/// Parser for YAML files.
 pub mod yaml;
+/// Parser for HTML files.
 pub mod html;
 
 // Re-export the core trait and struct

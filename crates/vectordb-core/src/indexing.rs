@@ -1221,6 +1221,7 @@ pub async fn ensure_collection_exists<
 }
 
 // Helper functions for filtering files (moved from src/vectordb/indexing.rs)
+/// Checks if a directory entry is hidden (starts with a dot). 
 pub fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry.file_name()
          .to_str()
@@ -1228,6 +1229,7 @@ pub fn is_hidden(entry: &walkdir::DirEntry) -> bool {
          .unwrap_or(false)
 }
 
+/// Checks if a directory entry is the `target` directory.
 pub fn is_target_dir(entry: &walkdir::DirEntry) -> bool {
     entry.file_name() == "target" && entry.file_type().is_dir()
 }

@@ -22,6 +22,7 @@ use crate::config::AppConfig;
 use std::io::Write;
 use git2::build::RepoBuilder; // Import RepoBuilder
 
+/// Arguments for the `repo add` command.
 #[derive(Args, Debug)]
 #[derive(Clone)]
 pub struct AddRepoArgs {
@@ -65,33 +66,48 @@ pub struct AddRepoArgs {
     pub target_ref: Option<String>,
 }
 
-// Define a specific error type for this operation
+/// Errors that can occur during the `repo add` operation.
 #[derive(Error, Debug)]
 pub enum AddRepoError {
+    /// Invalid combination or missing arguments.
     #[error("Invalid arguments: {0}")]
     InvalidArgs(String),
+    /// The repository name is already configured.
     #[error("Repository '{0}' already exists.")]
     RepoExists(String), // Note: This check will now be done by the caller (Relay)
+    /// Could not derive a repository name from the provided URL or local path.
     #[error("Could not derive repository name from {0}")]
     NameDerivationError(String),
+    /// Filesystem I/O error.
     #[error("Filesystem error: {0}")]
     IoError(#[from] std::io::Error),
+    /// Error reading or writing configuration.
     #[error("Configuration error: {0}")]
     ConfigError(anyhow::Error),
+    /// A Git operation (clone, open, remote fetch, etc.) failed.
     #[error("Git operation failed: {0}")]
     GitError(anyhow::Error), // Keep anyhow for git errors for now
+    /// Failed to open an existing local repository.
     #[error("Failed to open repository at {0}: {1}")]
     RepoOpenError(PathBuf, anyhow::Error),
+    /// Could not determine the default branch of the repository.
     #[error("Failed to determine default branch: {0}")]
     BranchDetectionError(anyhow::Error),
+    /// An operation with the Qdrant client failed.
     #[error("Qdrant operation failed: {0}")]
     QdrantError(anyhow::Error), // Keep anyhow for qdrant errors
+    /// An error occurred during embedding generation or handling.
     #[error("Embedding logic error: {0}")]
     EmbeddingError(anyhow::Error),
+    /// Failed to determine the repository URL, either from args or existing remote.
     #[error("Failed to determine repository URL.")]
     UrlDeterminationError,
 }
 
+/// Handles the logic for adding a new repository (cloning or linking local).
+/// It validates arguments, determines paths and names, interacts with Git,
+/// ensures the Qdrant collection exists, and returns the generated `RepositoryConfig`.
+/// **Note:** This function does *not* modify the `AppConfig` directly, nor does it perform initial indexing.
 pub async fn handle_repo_add<C>(
     args: AddRepoArgs,
     repo_base_path_for_add: PathBuf,

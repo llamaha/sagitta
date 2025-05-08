@@ -18,23 +18,32 @@ const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 /// Represents configuration for a single managed repository
 pub struct RepositoryConfig {
+    /// Unique name identifying the repository.
     pub name: String,
+    /// The remote Git URL (HTTPS or SSH).
     pub url: String,
+    /// The local filesystem path where the repository is cloned.
     pub local_path: PathBuf,
+    /// The default branch name (e.g., "main", "master").
     pub default_branch: String,
+    /// List of branches currently tracked for synchronization.
     pub tracked_branches: Vec<String>,
+    /// The name of the Git remote to use (usually "origin").
     #[serde(default)]
     pub remote_name: Option<String>,
+    /// Map of branch names to the last commit hash synced for that branch.
     #[serde(default)]
     pub last_synced_commits: HashMap<String, String>,
+    /// The currently checked-out branch in the local repository.
     #[serde(default)]
     pub active_branch: Option<String>,
-    // SSH Credential Fields (Optional)
+    /// Optional path to an SSH private key for authentication.
     #[serde(default)]
     pub ssh_key_path: Option<PathBuf>,
+    /// Optional passphrase for the SSH private key.
     #[serde(default)]
     pub ssh_key_passphrase: Option<String>,
-    // Indexed languages/extensions
+    /// Optional list of languages detected and indexed in the last sync.
     #[serde(default)]
     pub indexed_languages: Option<Vec<String>>,
     /// If true, the repository was added via a local path rather than a URL.
@@ -356,7 +365,9 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
 /// Structure holding repository list and active status, for listing purposes.
 #[derive(Debug, Serialize)] // Keep Serialize needed by original caller
 pub struct ManagedRepositories {
+    /// List of repository configurations.
     pub repositories: Vec<RepositoryConfig>,
+    /// Name of the currently active repository, if any.
     pub active_repository: Option<String>,
 }
 

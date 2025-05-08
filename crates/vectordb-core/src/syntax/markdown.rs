@@ -17,12 +17,14 @@ struct MarkdownHeading {
     end_line: usize,   // End line in the document (1-based)
 }
 
+/// Parser for Markdown files using Tree-sitter and custom section logic.
 pub struct MarkdownParser {
     parser: Parser,
     // Query might not be needed directly if extract_headings uses its own
 }
 
 impl MarkdownParser {
+    /// Creates a new `MarkdownParser` with the Markdown grammar.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         // Use tree-sitter-md

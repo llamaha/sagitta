@@ -62,10 +62,12 @@ impl Clone for OnnxEmbeddingModel {
 pub struct ThreadSafeOnnxProvider(Arc<Mutex<OnnxEmbeddingModel>>);
 
 impl ThreadSafeOnnxProvider {
+    /// Creates a new `ThreadSafeOnnxProvider` by wrapping an `OnnxEmbeddingModel` in an `Arc<Mutex>`.
     pub fn new(model: OnnxEmbeddingModel) -> Self {
         Self(Arc::new(Mutex::new(model)))
     }
 
+    /// Consumes the `ThreadSafeOnnxProvider`, returning the inner `Arc<Mutex<OnnxEmbeddingModel>>`.
     pub fn into_inner(self) -> Arc<Mutex<OnnxEmbeddingModel>> {
         self.0
     }

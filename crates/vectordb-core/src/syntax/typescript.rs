@@ -5,12 +5,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for TypeScript language files using Tree-sitter.
 pub struct TypeScriptParser {
     parser: Parser,
     query: Query,
 }
 
 impl TypeScriptParser {
+    /// Creates a new `TypeScriptParser` with the TypeScript grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         // Use the TypeScript-specific grammar

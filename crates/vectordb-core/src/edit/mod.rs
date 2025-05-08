@@ -12,32 +12,55 @@ use tracing::{info, trace};
 
 // --- Public Struct/Enum Definitions ---
 
+/// Severity level for validation issues.
 #[derive(Debug, Clone, PartialEq, Eq)] // Added derive for potential future use
 pub enum EngineValidationSeverity {
+    /// Indicates an error that prevents the edit.
     Error,
+    /// Indicates a potential issue or suggestion.
     Warning,
+    /// Informational message.
     Info,
 }
 
+/// Represents a validation issue found during edit checks.
 #[derive(Debug, Clone)] // Added derive for potential future use
 pub struct EngineValidationIssue {
+    /// The severity of the issue.
     pub severity: EngineValidationSeverity,
+    /// A descriptive message about the issue.
     pub message: String,
-    pub line_number: Option<usize>, // Line number where the issue occurs (1-based)
+    /// The 1-based line number where the issue occurs, if applicable.
+    pub line_number: Option<usize>,
 }
 
+/// Options to control the behavior of the edit engine.
 #[derive(Debug, Clone, Default)] // <-- Added Default derive
 pub struct EngineEditOptions {
-    pub format_code: bool, // Placeholder for future formatting feature
-    pub update_references: bool, // Placeholder for future reference updating
-    pub preserve_documentation: bool, // Placeholder for future documentation preservation
+    /// Whether to format the inserted code (not yet implemented).
+    pub format_code: bool,
+    /// Whether to update references to the edited element (not yet implemented).
+    pub update_references: bool,
+    /// Whether to attempt preserving documentation comments (not yet implemented).
+    pub preserve_documentation: bool,
     // Add other options here as needed
 }
 
+/// Specifies the target location for an edit operation.
 #[derive(Debug)]
 pub enum EditTarget {
-    LineRange { start: usize, end: usize },
-    Semantic { element_query: String },
+    /// Target a specific range of lines (1-based, inclusive).
+    LineRange { 
+        /// Start line number (1-based).
+        start: usize, 
+        /// End line number (1-based, inclusive).
+        end: usize 
+    },
+    /// Target a code element identified by a semantic query.
+    Semantic { 
+        /// Query string to identify the element (e.g., "function:my_func").
+        element_query: String 
+    },
 }
 
 // --- Public API Functions ---

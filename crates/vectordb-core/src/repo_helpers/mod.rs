@@ -1,5 +1,8 @@
+/// Utilities for Git operations.
 pub mod git_utils;
+/// Utilities for interacting with Qdrant.
 pub mod qdrant_utils;
+/// Functions related to repository indexing logic.
 pub mod repo_indexing;
 
 pub use self::git_utils::{is_supported_extension, create_fetch_options, collect_files_from_tree, switch_repository_branch};

@@ -73,33 +73,56 @@ pub fn extract_snippet(file_path: &str, chunk_start_line: usize, chunk_end_line:
 /// TODO: Align this with the string element_types used by SyntaxParser implementations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ElementType {
+    /// A standalone function.
     Function,
+    /// A struct definition.
     Struct,
+    /// A class definition.
     Class,
+    /// A method within a class or impl.
     Method,
+    /// An interface definition.
     Interface,
+    /// An enum definition.
     Enum,
+    /// A type alias (e.g., `type MyType = ...`).
     TypeAlias,
+    /// A constant definition (`const`).
     Const,
+    /// A static variable definition (`static`).
     Static,
+    /// A module definition (`mod`).
     Module,
+    /// A trait definition.
     Trait,
+    /// An implementation block (`impl`).
     Impl,
+    /// A macro definition or invocation.
     Macro,
+    /// A use/import statement.
     Use,
+    /// An extern crate declaration.
     ExternCrate,
+    /// A test function (`#[test]`).
     Test,
-    FileChunk, // For fallback or whole-file chunks
+    /// A chunk from a file where specific elements couldn't be parsed (fallback).
+    FileChunk,
+    /// An unknown or uncategorized element.
     Unknown,
 }
 
 /// Represents a code snippet extracted by the syntax parser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snippet {
+    /// The content of the code snippet.
     pub content: String,
+    /// The programming language of the snippet.
     pub language: String,
+    /// The 1-based starting line number in the original file.
     pub start_line: usize,
+    /// The 1-based ending line number (inclusive) in the original file.
     pub end_line: usize,
+    /// The type of code element this snippet represents.
     pub element_type: ElementType,
 }
 

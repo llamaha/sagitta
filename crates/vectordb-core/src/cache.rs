@@ -22,9 +22,12 @@ struct CacheFile {
     entries: HashMap<String, CacheEntry>,
 }
 
-/// Result of a cache check
+/// Result of a cache check operation.
 pub enum CacheCheckResult {
-    Hit,             // Simplified Hit variant
+    /// Cache entry is valid and up-to-date.
+    Hit,
+    /// Cache entry is missing, expired, or invalid (e.g., file changed).
+    /// Contains the new file hash if successfully calculated, otherwise None.
     Miss(Option<u64>), // Cache miss, contains Option<file_hash>
 }
 
@@ -41,6 +44,8 @@ pub struct EmbeddingCache {
 }
 
 impl EmbeddingCache {
+    /// Creates a new `EmbeddingCache` or loads it from the specified path.
+    /// Initializes with a default TTL and ONNX model type.
     pub fn new(cache_path: String) -> Result<Self> {
         let ttl = 86400 * 7; // Default TTL: 7 days
 
@@ -69,16 +74,20 @@ impl EmbeddingCache {
         self.current_model_type = model_type;
     }
 
+    /// Clears all entries from the cache and saves the empty cache.
     pub fn clear(&mut self) -> Result<()> {
         self.entries.clear();
         self.save()?;
         Ok(())
     }
 
+    /// Returns the number of entries currently in the cache.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Saves the current cache state to the file specified during creation.
+    /// This operation is atomic (uses a temporary file).
     pub fn save(&self) -> Result<()> {
         if let Some(parent) = Path::new(&self.cache_path).parent() {
             std::fs::create_dir_all(parent).map_err(|e| VectorDBError::DirectoryCreationError {
@@ -114,6 +123,8 @@ impl EmbeddingCache {
         Ok(())
     }
 
+    /// Calculates a hash based on the file's modification time and size.
+    /// This is used to detect if a file has changed since it was last cached.
     pub fn get_file_hash(path: &Path) -> Result<u64> {
         let metadata = std::fs::metadata(path).map_err(|e| VectorDBError::MetadataError {
             path: path.to_path_buf(),

@@ -136,6 +136,9 @@ pub fn collect_files_from_tree(
     Ok(())
 }
 
+/// Switches the active branch for a given repository in the configuration.
+/// This involves checking out the branch in the local Git repository and updating the
+/// `active_branch` field in the `RepositoryConfig`.
 pub fn switch_repository_branch(
     config: &mut AppConfig,
     repo_name: &str,

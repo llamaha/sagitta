@@ -15,19 +15,34 @@ use crate::error::{VectorDBError, Result}; // Use crate::error
 // use mockall::automock for automatic mock generation in tests
 // #[cfg_attr(test, mockall::automock)] // Remove mockall
 #[async_trait]
+/// Trait defining the interface for a Qdrant client.
+/// This allows for mocking the client in tests.
 pub trait QdrantClientTrait: Send + Sync {
+    /// Checks the health of the Qdrant server.
     async fn health_check(&self) -> Result<HealthCheckReply>;
+    /// Deletes a collection from the Qdrant server.
     async fn delete_collection(&self, collection_name: String) -> Result<bool>;
+    /// Searches for points in a collection.
     async fn search_points(&self, request: SearchPoints) -> Result<SearchResponse>;
+    /// Gets information about a collection.
     async fn get_collection_info(&self, collection_name: String) -> Result<CollectionInfo>;
+    /// Counts the number of points in a collection.
     async fn count(&self, request: CountPoints) -> Result<CountResponse>;
+    /// Checks if a collection exists.
     async fn collection_exists(&self, collection_name: String) -> Result<bool>;
+    /// Deletes points from a collection and waits for the operation to complete.
     async fn delete_points_blocking(&self, collection_name: &str, points_selector: &PointsSelector) -> Result<()>;
+    /// Scrolls through points in a collection.
     async fn scroll(&self, request: ScrollPoints) -> Result<ScrollResponse>;
+    /// Upserts points into a collection.
     async fn upsert_points(&self, request: UpsertPoints) -> Result<PointsOperationResponse>;
+    /// Creates a new collection.
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool>;
+    /// Deletes points from a collection.
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse>;
+    /// Queries points in a collection using a query request.
     async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse>;
+    /// Performs a query on points in a collection.
     async fn query(&self, request: QueryPoints) -> Result<QueryResponse>;
     // Add other methods used by the application as needed
 }
