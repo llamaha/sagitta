@@ -2,6 +2,12 @@
 
 `vectordb-core` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `vectordb-cli`.
 
+> **⚠️ WARNING: GPU Required for Practical Use**
+>
+> `vectordb-core` and its tools are designed for high-throughput, granular code search and indexing. **CPU execution is not recommended**: it is orders of magnitude slower than GPU and is not appropriate for real-world or production workloads. Always use a GPU-enabled ONNX Runtime and a compatible GPU for indexing and search. CPU mode is only suitable for development or debugging small test cases.
+>
+> **Note:** If your repository is small enough for CPU to be viable (e.g., less than 200 files), you probably don't need a semantic search engine like vectordb-core to query it in the first place—but when adding dependencies, you probably don't know how many files it has anyway.
+
 This repository also contains:
 - [`crates/vectordb-cli`](./crates/vectordb-cli/README.md): A command-line interface for `vectordb-core`.
 - [`crates/vectordb-mcp`](./crates/vectordb-mcp/README.md): A server component (MCP) for `vectordb-core`.
@@ -22,7 +28,7 @@ This repository also contains:
 
     **Important:** You need the official ONNX Runtime **library distribution**, not just the Python package (`pip install onnxruntime`). The compiled Rust tools require the shared library files (`.so`, `.dylib`, `.dll`) arranged correctly with the necessary symbolic links, which the pip package doesn't typically set up for external use.
 
-    *   **Download:** Get the pre-built binaries for your OS/Architecture (CPU or GPU version) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-1.20.0.tgz` or `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu.
+    *   **Download:** Get the pre-built binaries for your OS/Architecture (**GPU version is required for practical use; CPU is only for development or debugging**) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu. **Do not use the CPU-only version for production or large codebases.**
     *   **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
         ```bash
         # Example for Linux
