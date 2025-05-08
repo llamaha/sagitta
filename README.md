@@ -19,13 +19,28 @@ This repository also contains:
     ```
 
 2.  **ONNX Runtime**: `vectordb-core` uses ONNX Runtime for its embedding models.
-    *   You can download the ONNX Runtime from the official website: [https://onnxruntime.ai/docs/install/](https://onnxruntime.ai/docs/install/)
-    *   Please follow the instructions specific to your operating system and preferred installation method (e.g., pre-built binaries, build from source).
-    *   **Configure Library Path:** Once installed, you need to ensure that the system can find the ONNX Runtime shared libraries. Set the appropriate environment variable for your OS:
-        *   **Linux:** `LD_LIBRARY_PATH` (e.g., `export LD_LIBRARY_PATH=/opt/onnxruntime/lib:$LD_LIBRARY_PATH`)
-        *   **macOS:** `DYLD_LIBRARY_PATH` (e.g., `export DYLD_LIBRARY_PATH=/opt/onnxruntime/lib:$DYLD_LIBRARY_PATH`)
-        *   **Windows:** Ensure the directory containing the ONNX Runtime DLLs (e.g., `onnxruntime.dll`) is in your system's `PATH`.
-    *   Add the export line to your shell profile (e.g., `~/.bashrc`, `~/.zshrc`) for persistence.
+
+    **Important:** You need the official ONNX Runtime **library distribution**, not just the Python package (`pip install onnxruntime`). The compiled Rust tools require the shared library files (`.so`, `.dylib`, `.dll`) arranged correctly with the necessary symbolic links, which the pip package doesn't typically set up for external use.
+
+    *   **Download:** Get the pre-built binaries for your OS/Architecture (CPU or GPU version) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-1.20.0.tgz` or `onnxruntime-linux-x64-gpu-1.20.0.tgz`).
+    *   **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
+        ```bash
+        # Example for Linux
+        tar -xzf onnxruntime-linux-x64-1.20.0.tgz -C ~/onnxruntime/
+        # This creates a directory like ~/onnxruntime/onnxruntime-linux-x64-1.20.0/
+        ```
+    *   **Configure Library Path:** You *must* tell your system where to find these libraries using an environment variable. Find the `lib` subdirectory inside the folder you just extracted.
+        *   **Linux:** Set `LD_LIBRARY_PATH` to point to this `lib` directory. 
+            ```bash
+            # Example (adjust path and add to ~/.bashrc or ~/.zshrc for persistence):
+            export LD_LIBRARY_PATH=~/onnxruntime/onnxruntime-linux-x64-1.20.0/lib:$LD_LIBRARY_PATH
+            ```
+        *   **macOS:** Set `DYLD_LIBRARY_PATH` similarly.
+            ```bash
+            # Example (adjust path and add to shell profile):
+            export DYLD_LIBRARY_PATH=~/onnxruntime/onnxruntime-osx-<arch>-1.20.0/lib:$DYLD_LIBRARY_PATH
+            ```
+        *   **Windows:** Add the full path to the `bin` directory (containing the `.dll` files) within the extracted folder to your system's `PATH` environment variable.
 
 3.  **Qdrant (Vector Database)**: Start the Qdrant vector store. Running via Docker is recommended:
     ```bash
