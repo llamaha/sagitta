@@ -7,7 +7,7 @@ The server communicates via JSON-RPC 2.0 messages over standard input (stdin) an
 ## Prerequisites
 
 1.  **Build `vectordb` Workspace:** Build the project following the instructions in the [root README.md](../../README.md), ensuring necessary features (`ort`, `cuda`) are enabled and models are downloaded.
-2.  **ONNX Runtime (if using `ort` feature):** Ensure the ONNX Runtime library is installed and accessible. See the [Full Setup Guide](../../docs/SETUP.md) for details.
+2.  **ONNX Runtime (if using `ort` feature):** Ensure the ONNX Runtime library is installed and accessible. See the main project [README.md](../../README.md) for details.
 3.  **Qdrant:** A running Qdrant vector database instance must be accessible.
 
 ## Configuration
@@ -81,4 +81,4 @@ This configuration defines an MCP server named `vectordb-mcp` with the following
 
 *   The installation process should place the `vectordb-mcp` binary in your system's `PATH` (e.g., `/usr/local/bin` but it's not necessary to call it from here).
 
-All logs and non-JSON-RPC output from the server will be directed to `stderr`. You can monitor your tools logs for communication details and potential errors. 
+All logs and non-JSON-RPC output from the server will be directed to `stderr`. You can monitor your tools logs for communication details and potential errors.
