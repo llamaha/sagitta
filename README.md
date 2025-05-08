@@ -2,12 +2,6 @@
 
 `vectordb-core` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `vectordb-cli`.
 
-> **⚠️ WARNING: GPU Required for Practical Use**
->
-> `vectordb-core` and its tools are designed for high-throughput, granular code search and indexing. **CPU execution is not recommended**: it is orders of magnitude slower than GPU and is not appropriate for real-world or production workloads. Always use a GPU-enabled ONNX Runtime and a compatible GPU for indexing and search. CPU mode is only suitable for development or debugging small test cases.
->
-> **Note:** If your repository is small enough for CPU to be viable (e.g., less than 200 files), you probably don't need a semantic search engine like vectordb-core to query it in the first place—but when adding dependencies, you probably don't know how many files it has anyway.
-
 This repository also contains:
 - [`crates/vectordb-cli`](./crates/vectordb-cli/README.md): A command-line interface for `vectordb-core`.
 - [`crates/vectordb-mcp`](./crates/vectordb-mcp/README.md): A server component (MCP) for `vectordb-core`.
@@ -26,27 +20,19 @@ This repository also contains:
 
 2.  **ONNX Runtime**: `vectordb-core` uses ONNX Runtime for its embedding models.
 
-    **Important:** You need the official ONNX Runtime **library distribution**, not just the Python package (`pip install onnxruntime`). The compiled Rust tools require the shared library files (`.so`, `.dylib`, `.dll`) arranged correctly with the necessary symbolic links, which the pip package doesn't typically set up for external use.
-
-    *   **Download:** Get the pre-built binaries for your OS/Architecture (**GPU version is required for practical use; CPU is only for development or debugging**) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu. **Do not use the CPU-only version for production or large codebases.**
-    *   **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
+    **Download:** Get the pre-built binaries for your OS/Architecture (**GPU version is required for practical use; CPU is only for development or debugging**) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu. **Do not use the CPU-only version for production or large codebases.**
+    **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
+    ```bash
+    # Example for Linux
+    tar -xzf onnxruntime-linux-x64-1.20.0.tgz -C ~/onnxruntime/
+    # This creates a directory like ~/onnxruntime/onnxruntime-linux-x64-1.20.0/
+    ```
+    **Configure Library Path:** You *must* tell your system where to find these libraries using an environment variable. Find the `lib` subdirectory inside the folder you just extracted.
+        **Linux:** Set `LD_LIBRARY_PATH` to point to this `lib` directory. 
         ```bash
-        # Example for Linux
-        tar -xzf onnxruntime-linux-x64-1.20.0.tgz -C ~/onnxruntime/
-        # This creates a directory like ~/onnxruntime/onnxruntime-linux-x64-1.20.0/
+        # Example (adjust path and add to ~/.bashrc or ~/.zshrc for persistence):
+        export LD_LIBRARY_PATH=~/onnxruntime/onnxruntime-linux-x64-1.20.0/lib:$LD_LIBRARY_PATH
         ```
-    *   **Configure Library Path:** You *must* tell your system where to find these libraries using an environment variable. Find the `lib` subdirectory inside the folder you just extracted.
-        *   **Linux:** Set `LD_LIBRARY_PATH` to point to this `lib` directory. 
-            ```bash
-            # Example (adjust path and add to ~/.bashrc or ~/.zshrc for persistence):
-            export LD_LIBRARY_PATH=~/onnxruntime/onnxruntime-linux-x64-1.20.0/lib:$LD_LIBRARY_PATH
-            ```
-        *   **macOS:** Set `DYLD_LIBRARY_PATH` similarly.
-            ```bash
-            # Example (adjust path and add to shell profile):
-            export DYLD_LIBRARY_PATH=~/onnxruntime/onnxruntime-osx-<arch>-1.20.0/lib:$DYLD_LIBRARY_PATH
-            ```
-        *   **Windows:** Add the full path to the `bin` directory (containing the `.dll` files, e.g., `onnxruntime.dll`) within the extracted folder to your system's `PATH` environment variable.
 
 3.  **Qdrant (Vector Database)**: Start the Qdrant vector store. Running via Docker is recommended:
     ```bash
@@ -69,11 +55,9 @@ cd vectordb-core
 
 The recommended way to build is to compile the entire workspace, which includes `vectordb-core`, `vectordb-cli`, and `vectordb-mcp`:
 ```bash
-cargo build --release --workspace
+cargo build --release --workspace --features ort/cuda
 ```
 The resulting binaries will be located in the `target/release/` directory (e.g., `target/release/vectordb-cli`, `target/release/vectordb-mcp`).
-
-*(Optional) If you only need a specific tool, you can build it individually, e.g.: `cargo build --release --package vectordb-cli`.*
 
 ### 3. Set Up Embedding Models
 
@@ -103,14 +87,12 @@ You can initialize a default configuration using `vectordb-cli init` (see the `v
 
 *   **Install GPU-enabled ONNX Runtime**: Follow the instructions in Prerequisites, ensuring you select a version with GPU support (currently, CUDA on Linux is the primary tested configuration) and install any necessary drivers (NVIDIA drivers, CUDA Toolkit, cuDNN).
 *   **Set Library Path**: Ensure `LD_LIBRARY_PATH` (or equivalent like `PATH` on Windows) points to the directory containing the GPU-enabled ONNX Runtime libraries.
-*   **(Optional) Build `vectordb-core` with GPU features**: The `ort` crate dependency in `Cargo.toml` has features (like `cuda`). If you encounter issues with the default `download-binaries` feature conflicting with your system install, you might consider modifying `Cargo.toml` to use a specific feature (e.g., `ort = { ..., default-features = false, features = ["cuda"] }`) and rebuilding the workspace (`cargo build --release --workspace`).
-*   **Manage GPU Memory**: When indexing large repositories with GPU, you might hit Out-of-Memory errors. Limit parallel threads using Rayon:
+*   **(Optional) Build `vectordb-core` with GPU features**: The `ort` crate dependency in `Cargo.toml` has features (like `cuda`). If you encounter issues with the default `download-binaries` feature conflicting with your system install, you might consider modifying `Cargo.toml` to use a specific feature (e.g., `ort = { ..., default-features = false, features = ["cuda"] }`) and rebuilding the workspace (`cargo build --release --workspace --features ort/cuda`).
+*   **Manage GPU Memory**: By default this tool is bottlenecked by your available GPU memory.  You might hit GPU Out-of-Memory errors depending on the number of parallel threads that are loading the model into GPU memory. Limit parallel threads using Rayon:
     ```bash
     # Adjust N based on your GPU memory
     export RAYON_NUM_THREADS=N 
     vectordb-cli repo sync # Or other tool commands
-    ```
-*   **Other Platforms:** Support for GPU acceleration on macOS (Metal/CoreML) and Windows (DirectML) via ONNX Runtime is possible but less tested currently. Contributions and testing are welcome.
 
 ### 6. Using Different Embedding Models
 
