@@ -8,7 +8,6 @@ use tempfile::NamedTempFile;
 use anyhow::{Result, Context, bail, anyhow};
 use tree_sitter::{Parser, Language, Node};
 use regex::Regex;
-use log;
 use tracing::{info, trace};
 
 // --- Public Struct/Enum Definitions ---

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use tree_sitter::Parser;
 
 use super::parser::{CodeChunk, SyntaxParser};
 use super::fallback::FallbackParser; // Use fallback logic internally for now

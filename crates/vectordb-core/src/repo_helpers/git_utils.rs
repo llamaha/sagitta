@@ -1,12 +1,10 @@
 // Git-related helper functions from repo_helpers.rs will be moved here. 
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use git2::{Repository, FetchOptions, Cred, RemoteCallbacks, CredentialType};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crate::config::RepositoryConfig;
 use crate::error::VectorDBError as Error;
-use crate::QdrantClientTrait;
-use log::{info, warn, error};
 use crate::config::AppConfig;
 use crate::git_helpers::switch_branch_impl;
 

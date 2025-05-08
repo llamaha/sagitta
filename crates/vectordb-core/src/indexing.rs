@@ -18,7 +18,7 @@ use qdrant_client::{
 use std::{
     collections::{HashSet},
     path::{PathBuf},
-    sync::{Arc, atomic::{AtomicUsize, Ordering}}, // Removed unused AtomicUsize, Ordering
+    sync::Arc, // Removed unused AtomicUsize, Ordering
     // cell::RefCell, // Added RefCell
     // thread_local, // Added thread_local
     time::Instant, // Added for timing
@@ -31,16 +31,11 @@ use tokio::sync::Semaphore; // Import Semaphore
 use crate::qdrant_ops::upsert_batch;
 use rayon::prelude::*; // Added Rayon
 use crate::syntax::parser::CodeChunk; // Use CodeChunk from parser
-use crate::tokenizer::{self, Token, TokenKind, TokenizerConfig}; // Import tokenizer module
+use crate::tokenizer::{self, TokenKind, TokenizerConfig}; // Import tokenizer module
 use crate::vocabulary::VocabularyManager; // Import vocabulary manager
-use crate::constants::*;
 use qdrant_client::qdrant::{Vector, NamedVectors};
 use std::collections::{HashMap};
-use qdrant_client::qdrant::PointsSelector;
 use crate::config; // Import config module
-use std::cell::RefCell;
-use crate::embedding::provider::onnx::OnnxEmbeddingModel;
-use std::sync::Mutex;
 
 // Add chunk size optimization constants
 const MIN_CHUNK_SIZE: usize = 100;  // Merge chunks smaller than this

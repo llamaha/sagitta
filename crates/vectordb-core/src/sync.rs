@@ -16,14 +16,14 @@ use qdrant_client::qdrant::{
     value::Kind as QdrantValueKind, // Alias to avoid conflict
 };
 use std::{
-    collections::{HashSet, HashMap},
-    path::{Path, PathBuf},
+    collections::HashSet,
+    path::PathBuf,
     sync::Arc,
     io::Write, // Add Write trait
 };
 use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
-use log::{info, warn, error, debug, trace};
+use log::{info, warn, debug, trace};
 
 #[derive(Debug, Clone)]
 pub struct SyncResult {

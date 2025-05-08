@@ -93,7 +93,6 @@ impl OnnxEmbeddingModel {
             model_path.display()
         );
 
-        // Load tokenizer
         // Handle tokenizer_path being either the JSON file itself or the directory containing it.
         let tokenizer_json_path = if tokenizer_path.is_file() && tokenizer_path.file_name().map_or(false, |name| name == "tokenizer.json") {
             tokenizer_path.to_path_buf()
@@ -102,6 +101,14 @@ impl OnnxEmbeddingModel {
         } else {
             tokenizer_path.to_path_buf() 
         };
+
+        // Explicitly check that both files exist
+        if !model_path.is_file() {
+            return Err(Error::msg(format!("ONNX model file does not exist: {}", model_path.display())));
+        }
+        if !tokenizer_json_path.is_file() {
+            return Err(Error::msg(format!("Tokenizer JSON file does not exist: {}", tokenizer_json_path.display())));
+        }
 
         debug!("Attempting to load tokenizer from: {}", tokenizer_json_path.display());
 
@@ -433,7 +440,7 @@ mod tests {
         let result = OnnxEmbeddingModel::new(&model_path, &tokenizer_path);
         assert!(result.is_err());
         // Expect error related to file not found
-        assert!(result.unwrap_err().to_string().contains("load tokenizer"));
+        assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
     
     #[test]

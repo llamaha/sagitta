@@ -55,26 +55,24 @@ impl RustParser {
 
     /// Extracts doc comments immediately preceding the given node.
     fn extract_doc_comments(&self, node: &Node, code: &str) -> String {
+        let start_row = node.start_position().row as usize;
+        let code_lines: Vec<&str> = code.lines().collect();
         let mut doc_lines = Vec::new();
-        let mut cur = node.prev_sibling();
-        let mut node_start_row = node.start_position().row;
-        // Only look at siblings that are comments and directly above
-        while let Some(sib) = cur {
-            let kind = sib.kind();
-            let end_row = sib.end_position().row;
-            if (kind == "line_comment" || kind == "block_comment") && end_row + 1 == node_start_row {
-                let text = code.get(sib.start_byte()..sib.end_byte()).unwrap_or("");
-                // Only include doc comments (/// or /** ... */)
-                if text.trim_start().starts_with("///") || text.trim_start().starts_with("/**") {
-                    doc_lines.push(text.trim_end().to_string());
-                }
-                cur = sib.prev_sibling();
-                // Update node_start_row to allow for stacked comments
-                // (e.g., multiple /// lines)
-                node_start_row = sib.start_position().row;
+        if start_row == 0 || code_lines.is_empty() {
+            return String::new();
+        }
+        // Walk backwards from the line above the node
+        let mut i = start_row;
+        while i > 0 {
+            let line = code_lines[i - 1].trim_end();
+            if line.trim_start().starts_with("///") || line.trim_start().starts_with("/**") {
+                doc_lines.push(line.to_string());
+            } else if line.trim().is_empty() {
+                // Allow blank lines between doc comments
             } else {
                 break;
             }
+            i -= 1;
         }
         doc_lines.reverse();
         if !doc_lines.is_empty() {

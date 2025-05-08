@@ -66,6 +66,9 @@ pub mod vocabulary;
 pub mod fs_utils; // Added fs_utils module
 pub mod sync; // Added sync module
 
+#[cfg(test)]
+pub mod test_utils;
+
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 pub use embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
 pub use error::{VectorDBError, Result};
@@ -85,6 +88,9 @@ pub use repo_helpers::{delete_repository_data, switch_repository_branch, get_col
 pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo_add is needed by CLI
 pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 
+// Re-export qdrant types needed by mcp or other crates
+pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
+
 // Keep the basic add function and test for now
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
@@ -100,3 +106,6 @@ mod tests {
         assert_eq!(result, 4);
     }
 }
+
+#[macro_use]
+extern crate log;

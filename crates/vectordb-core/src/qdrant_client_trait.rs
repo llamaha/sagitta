@@ -12,8 +12,8 @@ use qdrant_client::Qdrant;
 // Import our custom error type instead
 use crate::error::{VectorDBError, Result}; // Use crate::error
 
-// Use mockall::automock for automatic mock generation in tests
-#[cfg_attr(test, mockall::automock)]
+// use mockall::automock for automatic mock generation in tests
+// #[cfg_attr(test, mockall::automock)] // Remove mockall
 #[async_trait]
 pub trait QdrantClientTrait: Send + Sync {
     async fn health_check(&self) -> Result<HealthCheckReply>;

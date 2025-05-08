@@ -16,9 +16,11 @@ use colored::*;
 use git2::Repository;
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
-use crate::IndexingConfig;
 use log::{info, error, warn};
 use crate::config::AppConfig;
+ // Use ManualMock
+use std::io::Write;
+use git2::build::RepoBuilder; // Import RepoBuilder
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -322,127 +324,326 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
-    use crate::qdrant_client_trait::MockQdrantClientTrait;
-    use std::sync::Arc;
+    use crate::config::{AppConfig, IndexingConfig, PerformanceConfig};
+    // use crate::qdrant_client_trait::MockQdrantClientTrait; // Remove mockall
+    use crate::test_utils::ManualMockQdrantClient; // Use ManualMock
+    use std::path::Path;
     use tempfile::tempdir;
     use std::fs;
-    
+    use std::sync::Arc;
+    use git2::{Repository, Signature, /*IndexAddOption, FileMode*/};
+    use std::io::Write;
+
+    // Helper to create an initial commit in a repo
+    fn create_initial_commit(repo: &Repository, file_name: &str, content: &str) -> Result<(), git2::Error> {
+        // Create a dummy file
+        let repo_path = repo.path().parent().unwrap(); // Assuming .git parent is repo root
+        let file_path = repo_path.join(file_name);
+        let mut file = fs::File::create(&file_path).unwrap();
+        writeln!(file, "{}", content).unwrap();
+        
+        let mut index = repo.index()?;
+        index.add_path(Path::new(file_name))?;
+        // index.add_all(&[file_name], IndexAddOption::DEFAULT, None)?;
+        let oid = index.write_tree()?;
+        let tree = repo.find_tree(oid)?;
+        let signature = Signature::now("Test User", "test@example.com")?;
+        
+        // Check if HEAD exists (i.e. if there are any commits)
+        match repo.head() {
+            Ok(head_ref) => {
+                 // HEAD exists, commit on top of it
+                 let parent_commit = head_ref.peel_to_commit()?;
+                 repo.commit(Some("HEAD"), &signature, &signature, "Initial commit", &tree, &[&parent_commit])?;
+            }
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+                // HEAD doesn't exist (unborn branch), this is the first commit
+                repo.commit(Some("HEAD"), &signature, &signature, "Initial commit", &tree, &[])?;
+            }
+            Err(e) => return Err(e), // Other error
+        }
+        Ok(())
+    }
 
     // Helper to create a basic AppConfig for tests
     fn test_config_with_empty_repo_list() -> AppConfig {
-        // Should use crate::config::AppConfig
         AppConfig {
-            qdrant_url: "http://localhost:6334".to_string(), // Updated port to 6334
+            qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
-            repositories_base_path: None, // Use default
-            vocabulary_base_path: None, // Add missing field (use default)
+            repositories_base_path: None,
+            vocabulary_base_path: None,
             repositories: vec![],
             active_repository: None,
-            indexing: IndexingConfig::default(), // Add missing field
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig::default(),
         }
     }
 
     #[tokio::test]
-    async fn test_handle_repo_add_new_clone() {
-        let dir = tempdir().unwrap();
-        let repo_name = "test-repo";
-        let repo_url = "https://github.com/octocat/Spoon-Knife"; // A known public repo
-        // Use dir.path() for base path in test
-        let base_path = dir.path().to_path_buf(); 
-        let expected_local_path = base_path.join(repo_name);
+    async fn test_handle_repo_add_new_repo_local_path_success() {
+        let temp_dir = tempdir().unwrap();
+        let local_repo_path = temp_dir.path().join("test_repo");
+        fs::create_dir_all(&local_repo_path).unwrap();
+        let repo = git2::Repository::init(&local_repo_path).unwrap();
+        create_initial_commit(&repo, "README.md", "Initial commit").expect("Failed to create initial commit");
+        // Add a dummy remote 'origin' so the URL derivation logic doesn't fail immediately
+        repo.remote("origin", "file:///dev/null").expect("Failed to add dummy remote"); 
 
-        if expected_local_path.exists() {
-            fs::remove_dir_all(&expected_local_path).unwrap();
-        }
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+        let repo_name_str = "test_repo";
 
-        let args = AddRepoArgs {
-            local_path: None, // Let it derive the path
-            url: Some(repo_url.to_string()),
-            name: Some(repo_name.to_string()),
+        let config = AppConfig {
+            qdrant_url: "dummy_url".to_string(),
+            repositories: vec![],
+            active_repository: None,
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories_base_path: Some(temp_dir.path().to_str().unwrap().to_string()),
+            vocabulary_base_path: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                 vector_dimension: 10,
+                 collection_name_prefix: "test_prefix_".to_string(),
+                 ..PerformanceConfig::default()
+            },
+        };
+        
+        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_dimension = config.performance.vector_dimension;
+
+        manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
+        manual_mock_client.expect_create_collection(Ok(true));
+
+
+        let add_args = AddRepoArgs {
+            local_path: Some(local_repo_path.clone()),
+            url: None,
+            name: Some(repo_name_str.to_string()),
             branch: None,
             remote: None,
             ssh_key: None,
             ssh_passphrase: None,
-            // Pass the base path for clone destination
-            repositories_base_path: Some(base_path.clone()), // Keep this arg for now, even if handle_repo_add doesn't use it directly
+            repositories_base_path: None,
             target_ref: None,
         };
 
-        // Use the mock generated by mockall
-        let mut mock_client = MockQdrantClientTrait::new();
-        
-        // --- Set up expectations for the mock --- 
-        // The handle_repo_add calls ensure_repository_collection_exists,
-        // which likely calls collection_exists and then create_collection.
-        
-        // Expect collection_exists to be called first
-        mock_client.expect_collection_exists()
-            .times(1)
-            .with(mockall::predicate::eq(format!("repo_{}", repo_name)))
-            .returning(|_| Ok(false)); // Simulate collection doesn't exist
-
-        // Restore the create_collection expectation
-        mock_client.expect_create_collection()
-            .times(1)
-            // Match collection name and expected dimension (use config value)
-            .with(mockall::predicate::eq(format!("{}{}", config.performance.collection_name_prefix, repo_name)), 
-                  mockall::predicate::eq(config.performance.vector_dimension))
-            .returning(|_, _| Ok(true)); // Simulate creation success
-            
-        // Pass base_path and dimension directly to the modified function
         let result = handle_repo_add(
-            args, 
-            base_path.clone(), // Pass the temp dir base path
-            config.performance.vector_dimension, // Pass dimension from config
-            Arc::new(mock_client),
-            config
-        ).await;
+            add_args,
+            temp_dir.path().to_path_buf(),
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+        )
+        .await;
 
-        // Uncomment assertions
-        assert!(result.is_ok(), "handle_repo_add failed: {:?}", result.err());
-        let repo_config = result.unwrap();
-
-        assert_eq!(repo_config.name, repo_name);
-        assert_eq!(repo_config.url, repo_url);
-        assert!(repo_config.local_path.exists(), "Cloned repo path does not exist");
-        assert!(repo_config.local_path.join(".git").exists(), "Cloned repo is not a git repo");
-        assert!(!repo_config.default_branch.is_empty());
-        assert_eq!(repo_config.tracked_branches, vec![repo_config.default_branch.clone()]);
-        assert_eq!(repo_config.active_branch, Some(repo_config.default_branch.clone()));
-
-        // Clean up using expected_local_path
-        // fs::remove_dir_all(repo_config.local_path).unwrap();
-        if expected_local_path.exists() {
-            let _ = fs::remove_dir_all(expected_local_path);
-        }
+        assert!(result.is_ok());
+        let repo_config_res = result.unwrap();
+        assert_eq!(repo_config_res.name, repo_name_str);
+        assert_eq!(repo_config_res.local_path, local_repo_path);
+        assert!(repo_config_res.url.is_empty() || repo_config_res.url.starts_with("file://") || repo_config_res.url == local_repo_path.to_str().unwrap_or_default());
+        assert!(repo_config_res.added_as_local_path);
+        
+        // Verify mock calls
+        assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
+        assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
+        assert!(manual_mock_client.verify_create_collection_called());
+        assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
     }
 
-    // --- Add more tests for existing paths, errors, etc. ---
-    // e.g., test_handle_repo_add_existing_path()
-    // e.g., test_handle_repo_add_invalid_args()
-    // e.g., test_handle_repo_add_git_error()
-    // e.g., test_handle_repo_add_qdrant_error()
-
+    // Shared test setup
     fn create_test_config() -> AppConfig {
-        let temp_dir = tempdir().unwrap();
-        let repo_base = temp_dir.path().join("repos");
+        let temp_dir = tempdir().expect("Failed to create temp dir for test config");
+        let model_base = temp_dir.path().join("models");
         let vocab_base = temp_dir.path().join("vocab");
-        fs::create_dir_all(&repo_base).unwrap();
-        fs::create_dir_all(&vocab_base).unwrap();
+        let repo_base = temp_dir.path().join("repos");
+        fs::create_dir_all(&model_base).expect("Failed to create model base dir");
+        fs::create_dir_all(&vocab_base).expect("Failed to create vocab base dir");
+        fs::create_dir_all(&repo_base).expect("Failed to create repo base dir");
 
         AppConfig {
-            repositories: vec![],
-            active_repository: None,
-            qdrant_url: "http://localhost:6333".to_string(),
-            onnx_model_path: None,
-            onnx_tokenizer_path: None,
+            qdrant_url: "http://localhost:6334".to_string(),
+            onnx_model_path: Some(model_base.join("model.onnx").to_string_lossy().into_owned()),
+            onnx_tokenizer_path: Some(model_base.join("tokenizer.json").to_string_lossy().into_owned()),
             server_api_key_path: None,
             repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
-            indexing: Default::default(),
+            repositories: Vec::new(),
+            active_repository: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                vector_dimension: 128,
+                collection_name_prefix: "test_collection_".to_string(),
+                ..PerformanceConfig::default()
+            },
         }
     }
-} 
+
+    #[tokio::test]
+    async fn test_handle_repo_add_existing_local_repo_no_url_provided() {
+        let temp_dir = tempdir().unwrap();
+        let existing_repo_path = temp_dir.path().join("existing_repo");
+        fs::create_dir_all(&existing_repo_path).unwrap();
+        let git_repo = git2::Repository::init(&existing_repo_path).unwrap();
+        create_initial_commit(&git_repo, "README.md", "Initial commit for existing repo").expect("Failed to create initial commit");
+        
+        let repo_opened = git2::Repository::open(&existing_repo_path).unwrap();
+        repo_opened.remote("origin", "https://example.com/existing_repo.git").unwrap();
+
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+        let repo_name_str = "existing_repo";
+
+        let config = AppConfig {
+            qdrant_url: "dummy_url".to_string(),
+            repositories: vec![],
+            active_repository: None,
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories_base_path: Some(temp_dir.path().to_str().unwrap().to_string()),
+            vocabulary_base_path: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                 vector_dimension: 10,
+                 collection_name_prefix: "test_prefix_".to_string(),
+                 ..PerformanceConfig::default()
+            },
+        };
+        
+        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_dimension = config.performance.vector_dimension;
+
+        manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
+        manual_mock_client.expect_create_collection(Ok(true));
+
+        let add_args = AddRepoArgs {
+            local_path: Some(existing_repo_path.clone()),
+            url: None,
+            name: None, // Name will be derived from path
+            branch: None,
+            remote: Some("origin".to_string()),
+            ssh_key: None,
+            ssh_passphrase: None,
+            repositories_base_path: None,
+            target_ref: None,
+        };
+        
+        let result = handle_repo_add(
+            add_args,
+            temp_dir.path().to_path_buf(),
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+        )
+        .await;
+
+        assert!(result.is_ok(), "handle_repo_add failed: {:?}", result.err());
+        let repo_config_res = result.unwrap();
+        assert_eq!(repo_config_res.name, repo_name_str);
+        assert_eq!(repo_config_res.url, "https://example.com/existing_repo.git");
+        assert!(repo_config_res.added_as_local_path);
+
+        // Verify mock calls
+        assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
+        assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
+        assert!(manual_mock_client.verify_create_collection_called());
+        assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
+    }
+    
+    #[tokio::test]
+    async fn test_handle_repo_add_new_clone() {
+        let temp_dir = tempdir().unwrap();
+        
+        // 1. Create a source repository with an initial commit
+        let source_repo_path = temp_dir.path().join("source_repo_for_bare");
+        fs::create_dir_all(&source_repo_path).unwrap();
+        let source_repo = git2::Repository::init(&source_repo_path).unwrap();
+        create_initial_commit(&source_repo, "initial.txt", "Initial content for clone test").expect("Failed to create initial commit in source repo");
+        
+        // 2. Create the bare repository by cloning the source repository using RepoBuilder
+        let bare_repo_target_path = temp_dir.path().join("test_cloned_repo.git");
+        let mut builder = RepoBuilder::new();
+        builder.bare(true);
+        let _bare_repo = builder.clone(
+            source_repo_path.to_str().unwrap(),
+            &bare_repo_target_path
+        ).expect("Failed to clone bare repository using RepoBuilder");
+
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+
+        let config = AppConfig {
+            qdrant_url: "dummy_qdrant_url".to_string(),
+            repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            vocabulary_base_path: None,
+            repositories: vec![],
+            active_repository: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                vector_dimension: 10,
+                collection_name_prefix: "test_cloned_".to_string(),
+                ..PerformanceConfig::default()
+            }
+        };
+
+        let repo_name_str = "test_cloned_repo";
+
+        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_dimension = config.performance.vector_dimension;
+
+        manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
+        manual_mock_client.expect_create_collection(Ok(true));
+
+
+        let add_args = AddRepoArgs {
+            local_path: None, // We want to test cloning, so no local_path initially
+            url: Some(bare_repo_target_path.to_str().unwrap().to_string()), // URL is the path to the bare repo
+            name: Some(repo_name_str.to_string()), 
+            branch: None, // Should pick up default from bare repo
+            remote: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+            repositories_base_path: None, // Will use the one from temp_dir
+            target_ref: None, // Test default branch behavior first
+        };
+
+        // The actual local path where the clone will happen will be derived inside handle_repo_add
+        // e.g., <repositories_base_path>/<repo_name_str>
+        let expected_final_clone_path = temp_dir.path().join(repo_name_str);
+
+        let result = handle_repo_add(
+            add_args,
+            temp_dir.path().to_path_buf(), // This is the repo_base_path_for_add
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+        )
+        .await;
+
+        assert!(result.is_ok(), "Expected Ok, got Err: {:?}", result.err());
+        if let Ok(ref repo_config_res) = result {
+            assert_eq!(repo_config_res.name, repo_name_str);
+            assert_eq!(repo_config_res.url, bare_repo_target_path.to_str().unwrap().to_string());
+            assert_eq!(repo_config_res.local_path, expected_final_clone_path);
+            assert!(!repo_config_res.added_as_local_path);
+            // Check if default branch was picked up (e.g., "main" or "master" depending on git version/config)
+            // For this test, create_initial_commit uses HEAD which should resolve to the default branch name
+            // after the first commit.
+            assert!(repo_config_res.default_branch == "main" || repo_config_res.default_branch == "master");
+            assert_eq!(repo_config_res.active_branch.as_deref(), Some(repo_config_res.default_branch.as_str()));
+        }
+
+        // Verify mock calls
+        assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
+        assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
+        assert!(manual_mock_client.verify_create_collection_called());
+        assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
+    }
+}

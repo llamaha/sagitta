@@ -21,6 +21,7 @@ use vectordb_core::{
     error::{VectorDBError, Result as CoreResult},
     sync::{sync_repository, SyncOptions},
     fs_utils::{find_files_matching_pattern, read_file_range},
+    config::PerformanceConfig,
 };
 use crate::server::{map_add_repo_error, create_error_data}; // Import updated helpers
 use tempdir;
@@ -621,6 +622,7 @@ mod tests {
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             vocabulary_base_path: Some(PathBuf::from("/vocab").to_string_lossy().into_owned()),
+            performance: PerformanceConfig::default(),
         };
         let config_arc = Arc::new(RwLock::new(config));
 
