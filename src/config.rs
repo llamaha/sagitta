@@ -10,7 +10,7 @@ use anyhow::anyhow;
 use crate::error::VectorDBError;
 use crate::constants::COLLECTION_NAME_PREFIX;
 
-const APP_NAME: &str = "vectordb-cli";
+const APP_NAME: &str = "vectordb";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const REPO_DIR_NAME: &str = "repositories";
 const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
@@ -185,7 +185,7 @@ pub fn get_config_path() -> Result<PathBuf> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow!("Could not find config directory"))?
         .join("vectordb");
-    Ok(config_dir.join(APP_NAME).join(CONFIG_FILE_NAME))
+    Ok(config_dir.join(CONFIG_FILE_NAME))
 }
 
 /// Returns the default base path for vocabulary files based on OS conventions.
@@ -522,7 +522,7 @@ mod tests {
         let default_repo_path_result = get_repo_base_path(None);
         assert!(default_repo_path_result.is_ok());
         let default_repo_path = default_repo_path_result.unwrap();
-        assert!(default_repo_path.to_string_lossy().contains("vectordb-cli/repositories"));
+        assert!(default_repo_path.to_string_lossy().contains("vectordb/repositories"));
         assert!(default_repo_path.exists()); // Verify it created the default dir
         
         // Create a repo config with a local path based on the temp base_path

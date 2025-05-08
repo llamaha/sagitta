@@ -4,6 +4,10 @@ This crate implements a server adhering to the Model Context Protocol (MCP), pro
 
 Refer to the main [root README.md](../../README.md) for prerequisites and setup.
 
+## Configuration
+
+The server loads its configuration (Qdrant URL, repository paths, model settings) from the central configuration file, typically located at `~/.config/vectordb/config.toml`. Ensure this file is correctly configured before running the MCP server.
+
 ## Capabilities (JSON-RPC Methods)
 
 *(Note: Refer to `mcp-e2e-test-plan.md` or the MCP specification for detailed request/response formats.)*
@@ -50,3 +54,5 @@ Add a server configuration like this to your MCP client:
 *   `env.RAYON_NUM_THREADS` (optional): Limit parallel threads.
 
 *(Logs are sent to stderr)*
+
+3.  **Qdrant:** A running Qdrant vector database instance must be accessible.

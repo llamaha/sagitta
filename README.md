@@ -72,7 +72,7 @@ The resulting binaries will be located in the `target/release/` directory (e.g.,
 
 Both `vectordb-cli` and `vectordb-mcp` load settings (like Qdrant URL, repository paths, model paths if not overridden by environment variables or arguments) from a central configuration file. This file is typically located at:
 
-`~/.config/vectordb/vectordb-cli/config.toml`
+`~/.config/vectordb/config.toml`
 
 You can initialize a default configuration using `vectordb-cli init` (see the `vectordb-cli` README).
 
