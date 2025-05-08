@@ -5,12 +5,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for JavaScript language files using Tree-sitter.
 pub struct JavaScriptParser {
     parser: Parser,
     query: Query,
 }
 
 impl JavaScriptParser {
+    /// Creates a new `JavaScriptParser` with the JS grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_javascript::language();

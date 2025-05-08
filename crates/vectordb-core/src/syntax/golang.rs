@@ -7,12 +7,14 @@ use super::parser::{CodeChunk, SyntaxParser};
 
 const FALLBACK_CHUNK_SIZE: usize = 200; // Define chunk size in lines
 
+/// Parser for Go language files using Tree-sitter.
 pub struct GolangParser {
     parser: Parser,
     query: Query,
 }
 
 impl GolangParser {
+    /// Creates a new `GolangParser` with the Go grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_go::language();

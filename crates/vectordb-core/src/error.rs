@@ -14,95 +14,151 @@ pub type Result<T> = std::result::Result<T, VectorDBError>;
 #[derive(Error, Debug)]
 pub enum VectorDBError {
     #[error("File not found: {0}")]
+    /// Error indicating that a specified file was not found at the given path.
     FileNotFound(String),
 
     #[error("Failed to read file {path}: {source}")]
-    FileReadError { path: PathBuf, source: io::Error },
+    /// Error indicating a failure to read from a file.
+    FileReadError {
+        /// The path to the file that could not be read.
+        path: PathBuf, 
+        /// The underlying I/O error that occurred.
+        source: io::Error 
+    },
 
     #[error("Failed to write file {path}: {source}")]
-    FileWriteError { path: PathBuf, source: io::Error },
+    /// Error indicating a failure to write to a file.
+    FileWriteError { 
+        /// The path to the file that could not be written.
+        path: PathBuf, 
+        /// The underlying I/O error that occurred.
+        source: io::Error 
+    },
 
     #[error("Failed to create directory {path}: {source}")]
-    DirectoryCreationError { path: PathBuf, source: io::Error },
+    /// Error indicating a failure to create a directory.
+    DirectoryCreationError { 
+        /// The path to the directory that could not be created.
+        path: PathBuf, 
+        /// The underlying I/O error that occurred.
+        source: io::Error 
+    },
 
     #[error("Failed to access file metadata for {path}: {source}")]
-    MetadataError { path: PathBuf, source: io::Error },
+    /// Error indicating a failure to access file metadata (e.g., size, modification time).
+    MetadataError { 
+        /// The path to the file whose metadata could not be accessed.
+        path: PathBuf, 
+        /// The underlying I/O error that occurred.
+        source: io::Error 
+    },
 
     #[error("Error serializing or deserializing data: {0}")]
+    /// Error related to data serialization (e.g., to JSON, TOML) or deserialization.
     SerializationError(String),
 
     #[error("Error generating embedding: {0}")]
+    /// Error occurring during the generation of text embeddings.
     EmbeddingError(String),
 
     #[error("Database error: {0}")]
+    /// Generic error related to database operations (e.g., Qdrant, SQLite).
     DatabaseError(String),
 
     #[error("AST traversal error: {0}")]
+    /// Error occurring during the traversal or processing of an Abstract Syntax Tree (AST).
     ASTTraversalError(String),
 
     #[error("Invalid parameter: {0}")]
+    /// Error indicating that an invalid parameter was provided to a function or method.
     InvalidParameter(String),
 
     #[error("Invalid path: {0}")]
+    /// Error indicating that a file or directory path is invalid.
     InvalidPath(String),
 
     #[error("Cache error: {0}")]
+    /// Error related to caching operations (e.g., read/write failures, cache misses).
     CacheError(String),
 
     #[error("Parser error: {0}")]
+    /// Error occurring during parsing of source code or other structured text.
     ParserError(String),
 
     #[error("Unsupported language: {0}")]
+    /// Error indicating that a specified programming language is not supported.
     UnsupportedLanguage(String),
 
     #[error("HNSW index error: {0}")]
+    /// Error related to HNSW (Hierarchical Navigable Small World) indexing or search.
     HNSWError(String),
 
     #[error("HNSW index dimension ({expected}) does not match query/data dimension ({found})")]
-    DimensionMismatch { expected: usize, found: usize },
+    /// Error indicating a mismatch between expected and actual embedding dimensions.
+    DimensionMismatch { 
+        /// The expected embedding dimension.
+        expected: usize, 
+        /// The found embedding dimension.
+        found: usize 
+    },
 
     #[error("IO error: {0}")]
+    /// A generic I/O error, often wrapping `std::io::Error`.
     IOError(#[from] io::Error),
 
     #[error("Code analysis error: {0}")]
+    /// Error occurring during static analysis or parsing of code.
     CodeAnalysisError(String),
 
     #[error("General error: {0}")]
+    /// A general-purpose error type for miscellaneous errors.
     GeneralError(String),
 
     #[error("Directory not found: {0}")]
+    /// Error indicating that a specified directory was not found.
     DirectoryNotFound(String),
 
     #[error("Repository error: {0}")]
+    /// Error related to Git repository operations (e.g., clone, pull, checkout).
     RepositoryError(String),
 
     #[error("Repository not found: {0}")]
+    /// Error indicating that a configured repository could not be found.
     RepositoryNotFound(String),
 
     #[error("Error deserializing data: {0}")]
+    /// Error occurring during data deserialization (distinct from `SerializationError` if needed for clarity).
     DeserializationError(String),
 
     #[error("Search error: {0}")]
+    /// Error occurring during a search or query operation.
     SearchError(String),
 
     #[error("Other error: {0}")]
+    /// A catch-all error type for unclassified errors, often converted from `anyhow::Error`.
     Other(String),
 
     #[error("Configuration error: {0}")]
+    /// Error related to application configuration (e.g., missing settings, invalid values).
     ConfigurationError(String),
 
     #[error("Indexing error: {0}")]
+    /// Error occurring during the indexing process.
     IndexingError(String),
 
+    /// Directory is not present in the index.
     #[error("Directory '{0}' is not present in the index")]
     DirectoryNotIndexed(String),
 
+    /// Search index not found or not built.
     #[error("Search index not found or not built")]
     IndexNotFound,
 
+    /// Operation cancelled by user.
     #[error("Operation cancelled by user")]
     OperationCancelled,
 
+    /// Mutex lock error.
     #[error("Mutex lock error: {0}")]
     MutexLockError(String),
 
@@ -123,10 +179,12 @@ pub enum VectorDBError {
     NotImplemented(String),
 
     #[cfg(feature = "ort")]
+    /// ONNX Runtime session error.
     #[error("ONNX Runtime session error: {0}")]
     OrtSession(#[from] ort::Error),
 
     #[cfg(feature = "ort")]
+    /// ONNX Runtime initialization error.
     #[error("ONNX Runtime initialization error: {0}")]
     OrtInitialization(ort::Error),
 
@@ -134,9 +192,11 @@ pub enum VectorDBError {
     #[error("Required feature not enabled: {0}")]
     FeatureNotEnabled(String),
 
+    /// Git error with a custom message.
     #[error("Git error: {0}")]
     GitMessageError(String),
 
+    /// Configuration error with a custom message.
     #[error("Config error: {0}")]
     ConfigError(String),
 }

@@ -10,10 +10,12 @@ use crate::error::VectorDBError as Error;
 use crate::QdrantClientTrait;
 use crate::config::AppConfig;
 
+/// Generates the Qdrant collection name for a given repository name based on the config prefix.
 pub fn get_collection_name(repo_name: &str, config: &AppConfig) -> String {
     format!("{}{}", config.performance.collection_name_prefix, repo_name)
 }
 
+/// Deletes points associated with specific file paths within a given branch from a Qdrant collection.
 pub async fn delete_points_for_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
@@ -93,6 +95,8 @@ pub async fn delete_points_for_files<
     Ok(())
 }
 
+/// Ensures that a Qdrant collection exists for the repository, creating it if necessary.
+/// Also sets up required payload indexes.
 pub async fn ensure_repository_collection_exists<C>(
     client: &C,
     collection_name: &str,
@@ -127,12 +131,14 @@ where
     }
 }
 
+/// Creates a Qdrant filter to match points belonging to a specific branch.
 pub fn create_branch_filter(branch_name: &str) -> Filter {
     Filter::must([
         Condition::matches(FIELD_BRANCH, branch_name.to_string()),
     ])
 }
 
+/// Deletes all points associated with a specific branch from a Qdrant collection.
 pub async fn delete_points_by_branch(
     client: &impl QdrantClientTrait,
     collection_name: &str,

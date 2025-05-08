@@ -25,20 +25,29 @@ use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
 use log::{info, warn, debug, trace};
 
+/// Contains the results of a repository synchronization operation.
 #[derive(Debug, Clone)]
 pub struct SyncResult {
+    /// Indicates whether the sync operation completed without fatal errors.
     pub success: bool,
+    /// A summary message describing the outcome of the sync.
     pub message: String,
+    /// List of programming languages detected and indexed in the repository after the sync.
     pub indexed_languages: Vec<String>,
+    /// The Git commit hash that the repository was synced to.
     pub last_synced_commit: Option<String>,
+    /// The number of files newly indexed or updated during the sync.
     pub files_indexed: usize,
+    /// The number of files deleted from the index during the sync.
     pub files_deleted: usize,
 }
 
-/// Options for repository sync
+/// Options to control the behavior of the repository synchronization process.
 #[derive(Debug, Clone, Default)]
 pub struct SyncOptions {
+    /// If true, forces a full re-indexing of the repository, ignoring the last synced commit.
     pub force: bool,
+    /// If set, only files with these extensions will be indexed.
     pub extensions: Option<Vec<String>>,
     // Add other potential options here if needed later, e.g., prune
 }

@@ -147,6 +147,10 @@ pub struct ThreadSafeSessionPool {
 }
 
 impl ThreadSafeSessionPool {
+    /// Creates a new `ThreadSafeSessionPool`.
+    ///
+    /// Initializes with paths for model and tokenizer, and the number of ONNX sessions
+    /// to maintain per thread. Thread-local pools are created on demand.
     pub fn new(
         model_path: PathBuf,
         tokenizer_path: PathBuf,
@@ -160,6 +164,10 @@ impl ThreadSafeSessionPool {
         })
     }
 
+    /// Retrieves or creates a thread-local `OnnxSessionPool`.
+    ///
+    /// If a pool already exists for the current thread, it is returned.
+    /// Otherwise, a new pool is created, added to the central list, and returned.
     pub fn get_pool(&self) -> Result<OnnxSessionPool> {
         let thread_id = thread::current().id();
         let mut pools = self.thread_pools.lock().unwrap();
@@ -182,6 +190,9 @@ impl ThreadSafeSessionPool {
         Ok(pool_clone)
     }
 
+    /// Generates embeddings for a batch of texts using a thread-local session pool.
+    ///
+    /// Retrieves or creates a pool for the current thread and uses it to embed the texts.
     pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let pool = self.get_pool()?;
         pool.embed_batch(texts)

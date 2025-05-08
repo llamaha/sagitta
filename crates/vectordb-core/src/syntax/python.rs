@@ -4,12 +4,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for Python language files using Tree-sitter.
 pub struct PythonParser {
     parser: Parser,
     query: Query,
 }
 
 impl PythonParser {
+    /// Creates a new `PythonParser` with the Python grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_python::language();

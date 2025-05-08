@@ -5,9 +5,12 @@ use super::parser::{CodeChunk, SyntaxParser};
 
 const MAX_CHUNK_LINES: usize = 500;
 
+/// A fallback parser that splits code into fixed-size line chunks.
+/// Used for unsupported languages or when other parsers fail.
 pub struct FallbackParser;
 
 impl FallbackParser {
+    /// Creates a new `FallbackParser`.
     pub fn new() -> Self {
         FallbackParser
     }

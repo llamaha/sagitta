@@ -3,12 +3,15 @@ use anyhow::Result;
 use super::parser::{CodeChunk, SyntaxParser};
 use super::fallback::FallbackParser; // Use fallback logic internally for now
 
+/// Parser for HTML files. Currently uses fallback line-based chunking.
+/// TODO: Implement proper Tree-sitter parsing for HTML elements.
 pub struct HtmlParser {
     // We can use the fallback parser's logic initially
     fallback_parser: FallbackParser,
 }
 
 impl HtmlParser {
+    /// Creates a new `HtmlParser`.
     pub fn new() -> Self {
         // Although we have the grammar, implementing a proper tree-sitter query 
         // for meaningful HTML chunks can be complex (scripts, styles, nested tags).

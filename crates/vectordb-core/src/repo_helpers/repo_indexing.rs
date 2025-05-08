@@ -19,6 +19,8 @@ use anyhow::anyhow;
 use std::process::{Command, Stdio};
 use walkdir::WalkDir;
 
+/// Updates the last synced commit for a branch in the AppConfig and refreshes the
+/// list of indexed languages for that branch by querying Qdrant.
 pub async fn update_sync_status_and_languages<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
@@ -83,6 +85,9 @@ pub async fn update_sync_status_and_languages<
     Ok(())
 }
 
+/// Indexes a list of relative file paths within a repository.
+/// Handles embedding generation and upserting points to Qdrant in batches.
+/// This function utilizes parallel processing for CPU-bound tasks (parsing, embedding).
 pub async fn index_files<
     C: QdrantClientTrait + Send + Sync + 'static,
 >(
@@ -130,6 +135,10 @@ pub async fn index_files<
     ).await
 }
 
+/// Prepares a repository for use, either by cloning it or ensuring the local path exists.
+/// Checks out the specified branch or target ref.
+/// Ensures the corresponding Qdrant collection exists.
+/// Returns the generated `RepositoryConfig` (does not save it to AppConfig).
 pub async fn prepare_repository<C>(
     url: &str,
     name_opt: Option<&str>,
@@ -311,6 +320,7 @@ where
     })
 }
 
+/// Deletes all data associated with a repository, including the Qdrant collection and the local directory.
 pub async fn delete_repository_data<C>(
     repo_config: &RepositoryConfig,
     client: Arc<C>,
@@ -371,7 +381,9 @@ where
 /// Represents basic information about a Git commit.
 #[derive(Debug, Clone)]
 pub struct CommitInfo {
+    /// The Git commit object ID (hash).
     pub oid: git2::Oid,
+    /// The commit summary (first line of the commit message).
     pub summary: String,
 }
 
@@ -638,6 +650,8 @@ fn checkout_branch(repo_path: &Path, branch_name: &str) -> Result<(), anyhow::Er
     Ok(())
 }
 
+/// Indexes all supported files within a given repository path for a specific branch and commit.
+/// This is typically called after `sync_repository_branch` has updated the repository.
 pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
     client: Arc<C>,
     repo_path: &Path,

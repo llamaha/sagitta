@@ -5,12 +5,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for YAML language files using Tree-sitter.
 pub struct YamlParser {
     parser: Parser,
     query: Query, // Query to find YAML documents
 }
 
 impl YamlParser {
+    /// Creates a new `YamlParser` with the YAML grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_yaml::language();

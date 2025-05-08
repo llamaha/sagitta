@@ -5,12 +5,14 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
 
+/// Parser for Rust language files using Tree-sitter.
 pub struct RustParser {
     parser: Parser,
     query: Query,
 }
 
 impl RustParser {
+    /// Creates a new `RustParser` with the Rust grammar and queries.
     pub fn new() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_rust::language();

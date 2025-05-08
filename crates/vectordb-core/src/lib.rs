@@ -46,27 +46,47 @@
 // crates/vectordb-core/src/lib.rs
 
 // Public modules
+/// Configuration management for the application.
 pub mod config;
+/// Embedding generation and handling.
 pub mod embedding;
+/// Defines the core error types and Result alias.
 pub mod error;
+/// Trait defining the interface for a Qdrant client, enabling mocking.
 pub mod qdrant_client_trait;
+/// Low-level Qdrant client operations.
 pub mod qdrant_ops;
+/// Code parsing and chunking logic for different languages.
 pub mod syntax;
+/// Shared constants used across the library.
 pub mod constants;
+/// Code editing and validation logic.
 pub mod edit;
+/// Implementation of search functionality.
 pub mod search_impl;
+/// Git helper utilities (deprecated or internal).
 pub mod git_helpers;
+/// Caching mechanisms, primarily for embeddings.
 pub mod cache; // Added cache module
+/// Core logic for indexing repositories and files.
 pub mod indexing; // Added indexing module
+/// Logic for adding new repositories.
 pub mod repo_add;
+/// Helper functions for repository operations (Git, Qdrant, Indexing).
 pub mod repo_helpers;
+/// Extracts code snippets with context.
 pub mod snippet_extractor;
+/// Code tokenization logic.
 pub mod tokenizer;
+/// Manages vocabulary for sparse vectors.
 pub mod vocabulary;
+/// Filesystem utilities.
 pub mod fs_utils; // Added fs_utils module
+/// Repository synchronization logic.
 pub mod sync; // Added sync module
 
 #[cfg(test)]
+/// Utilities specific to testing within the core library.
 pub mod test_utils;
 
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
@@ -91,7 +111,7 @@ pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-expor
 // Re-export qdrant types needed by mcp or other crates
 pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
 
-// Keep the basic add function and test for now
+/// Basic addition function (example/placeholder).
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
