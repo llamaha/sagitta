@@ -25,7 +25,7 @@ Adds a new repository configuration and clones it if necessary.
 ```bash
 vectordb-cli repo add /path/to/your/repository --name my-repo
 # Or clone from URL
-vectordb-cli repo add --url https://github.com/user/repo.git --name my-repo
+vectordb-cli repo add --url https://gitlab.com/user/repo.git --name my-repo
 ```
 
 ### List Repositories

@@ -49,6 +49,7 @@ use crate::handlers::repository::{
 use crate::handlers::tool::{handle_tools_call, get_tool_definitions};
 use crate::handlers::initialize::handle_initialize;
 
+#[derive(Debug)]
 pub struct Server<C: QdrantClientTrait + Send + Sync + 'static> {
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
@@ -114,7 +115,6 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         let mut writer = BufWriter::new(stdout);
 
         let mut line_buf = String::new();
-        let mut initialized = false;
 
         loop {
             line_buf.clear();
@@ -134,14 +134,8 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                     let response = match serde_json::from_str::<Request>(trimmed_line) {
                         Ok(request) => {
                             let request_id = request.id.clone();
-                            let server_config = Arc::clone(&self.config);
-                            let qdrant_client_clone = Arc::clone(&self.qdrant_client);
                             
-                            let result = self.handle_request(
-                                request,
-                                server_config,
-                                qdrant_client_clone,
-                            ).await;
+                            let result = self.handle_request(request).await;
 
                             match result {
                                 Ok(Some(result)) => Some(Response::success(result, request_id)),
@@ -195,12 +189,10 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
         Ok(())
     }
 
-    #[instrument(skip(self, config, qdrant_client), fields(request_id = ?request.id, method = %request.method))]
+    #[instrument(skip(self), fields(request_id = ?request.id, method = %request.method))]
     pub async fn handle_request(
         &self,
         request: Request,
-        config: Arc<RwLock<AppConfig>>,
-        qdrant_client: Arc<C>,
     ) -> Result<Option<serde_json::Value>, ErrorObject> {
         if request.jsonrpc != "2.0" {
             return Err(ErrorObject {
@@ -209,6 +201,9 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                 data: None,
             });
         }
+
+        let config = Arc::clone(&self.config);
+        let qdrant_client = Arc::clone(&self.qdrant_client);
 
         match request.method.as_str() {
             "initialize" | "mcp_vectordb_mcp_initialize" => {
@@ -278,6 +273,57 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }),
         }
     }
+
+    /// Processes a raw JSON-RPC request string, calls handle_request, and returns a raw JSON-RPC response string.
+    pub async fn process_json_rpc_request_str(&self, json_request_str: &str) -> Option<String> {
+        match serde_json::from_str::<crate::mcp::types::Request>(json_request_str) {
+            Ok(request_to_process) => {
+                let request_id_for_response = request_to_process.id.clone();
+                match self.handle_request(request_to_process).await {
+                    Ok(Some(result_value)) => {
+                        let response = crate::mcp::types::Response::success(result_value, request_id_for_response.clone());
+                        Some(serde_json::to_string(&response).unwrap_or_else(|e| {
+                            warn!(error = %e, "Failed to serialize successful MCP response");
+                            let err_obj = ErrorObject {
+                                code: error_codes::INTERNAL_ERROR,
+                                message: "Failed to serialize response".to_string(),
+                                data: None,
+                            };
+                            serde_json::to_string(&crate::mcp::types::Response::error(err_obj, request_id_for_response)).unwrap()
+                        }))
+                    }
+                    Ok(None) => { 
+                        None 
+                    }
+                    Err(error_object) => { 
+                        let response = crate::mcp::types::Response::error(error_object, request_id_for_response.clone());
+                        Some(serde_json::to_string(&response).unwrap_or_else(|e| {
+                             warn!(error = %e, "Failed to serialize error MCP response");
+                             let err_obj = ErrorObject {
+                                code: error_codes::INTERNAL_ERROR,
+                                message: "Failed to serialize error response object".to_string(),
+                                data: None,
+                            };
+                             serde_json::to_string(&crate::mcp::types::Response::error(err_obj, request_id_for_response.or(Some(serde_json::Value::Null)))).unwrap()
+                        }))
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to parse JSON-RPC request string into mcp::types::Request");
+                let err_obj = ErrorObject {
+                    code: error_codes::PARSE_ERROR,
+                    message: format!("Failed to parse request: {}", e),
+                    data: None,
+                };
+                let response = crate::mcp::types::Response::error(err_obj, Some(serde_json::Value::Null));
+                Some(serde_json::to_string(&response).unwrap_or_else(|serialize_err| {
+                     warn!(error = %serialize_err, "Failed to serialize parse error response");
+                     format!("{{\"jsonrpc\": \"2.0\", \"error\": {{\"code\": {}, \"message\": \"{}\"}}, \"id\": null}}", error_codes::PARSE_ERROR, "Parse error and failed to serialize error object")
+                 }))
+            }
+        }
+    }
 }
 
 pub fn map_add_repo_error(e: AddRepoError) -> ErrorObject {
@@ -295,18 +341,16 @@ pub fn map_add_repo_error(e: AddRepoError) -> ErrorObject {
         AddRepoError::UrlDeterminationError => (error_codes::URL_DETERMINATION_FAILED, "Failed to determine repository URL.".to_string()),
     };
     
-    // Create detailed error data using the original error `e`
     let error_data = json!({
-        "error_type": format!("{:?}", e), // Use Debug representation for the specific AddRepoError variant
+        "error_type": format!("{:?}", e),
         "details": e.to_string(),
-        // Add source if available (AddRepoError might wrap other errors)
         "source": e.source().map(|s| s.to_string()), 
     });
 
     ErrorObject {
         code,
-        message, // Use the concise message derived above
-        data: Some(error_data), // Add structured data
+        message,
+        data: Some(error_data),
     }
 }
 
@@ -369,9 +413,8 @@ pub fn create_error_data(e: &anyhow::Error) -> serde_json::Value {
         "message": e.to_string(),
         "root_cause": e.root_cause().to_string(),
         "sources": sources,
-        // Add specific VectorDBError type if applicable
         "vectordb_error_type": e.source()
             .and_then(|source| source.downcast_ref::<VectorDBError>())
-            .map(|specific| format!("{:?}", specific)), // Use Debug representation for type
+            .map(|specific| format!("{:?}", specific)),
     })
 }
