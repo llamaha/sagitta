@@ -6,6 +6,8 @@ This repository also contains:
 - [`crates/vectordb-cli`](./crates/vectordb-cli/README.md): A command-line interface for `vectordb-core`.
 - [`crates/vectordb-mcp`](./crates/vectordb-mcp/README.md): A server component (MCP) for `vectordb-core`.
 
+**Note:** This tool is under development and not ready for production use.
+
 ## Performance
 
 `vectordb-core` is designed for high-performance indexing and search operations, enabling tools like `vectordb-cli` to achieve significant speed. Through careful tuning of parallel processing, GPU utilization (via ONNX Runtime), and embedding model selection, we've focused on achieving substantial speed improvements while maintaining high-quality search results. The library aims to intelligently balance resource usage based on hardware capabilities, making it efficient even on systems with limited GPU memory when used appropriately by a frontend application.
