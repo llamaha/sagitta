@@ -28,3 +28,5 @@ qdrant_storage/
 repo-collection/
 
 onnx/
+
+query_benchmark/benchmark_results.md

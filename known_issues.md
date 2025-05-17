@@ -49,3 +49,36 @@ This document outlines known issues, limitations in the current testing strategy
         -   `list-repos --tenant-id <tenant_id_or_all>` (requires corresponding MCP server API)
         -   `add-repo --tenant-id <tenant_id> --name <name> --url <url>` (requires corresponding MCP server API)
     -   This would make `vectordb-cli` a more complete client for both user-scoped operations (via local config) and administrative operations against an MCP server instance. 
+
+## 6. Query Quality Benchmark Script Issues
+
+-   **Issue:** The benchmark script (`query_benchmark/run_benchmark.sh`) fails to add repositories `tsnode-typescript` and `tsnode-javascript`.
+-   **Details:** Both repositories point to `https://github.com/microsoft/TypeScript-Node-Starter`. The `repo add` command fails with the error `fatal: Remote branch main not found in upstream origin`.
+-   **Cause:** The `TypeScript-Node-Starter` repository likely does not have a branch named `main` (its default might be `master` or another name). The script is configured to use `main` for these repositories.
+-   **Recommendation:**
+    -   Verify the actual default branch for `https://github.com/microsoft/TypeScript-Node-Starter`.
+    -   Update `query_benchmark/benchmark_config.yaml` to specify the correct `default_branch` for `tsnode-typescript` and `tsnode-javascript`.
+    -   Consider enhancing `vectordb-cli repo add` or the server's `repository/add` logic to automatically fall back to `master` if `main` is not found (or vice-versa), or to query the default branch from the remote if no branch is specified. 
+
+### 6.1. Query Result Scores Appear Low
+
+-   **Observation:** Query result scores in `benchmark_results.md` frequently appear to max out around 0.5, even for seemingly relevant results. For instance, the top results for `ripgrep-rust` query `"how does ripgrep handle large regex patterns?"` both had a score of `0.5`.
+-   **Impact:** This makes it difficult to use the raw score as a direct measure of confidence or top-tier relevancy if the effective maximum is not 1.0. Users rating results might be confused if a "good" match still receives a relatively low numerical score.
+-   **Questions/Areas for Investigation:**
+    -   Is this score scaling expected behavior for the current embedding models and scoring algorithms?
+    -   What does a score of 0.5, 0.7, or 0.9 truly represent in terms of match quality?
+    -   Could there be a normalization issue, or is the scale inherently compressed?
+    -   This needs further investigation with the `vectordb-core` team to understand the scoring mechanism and expected score distributions.
+
+### 6.2. Initial Query Relevancy Assessment (Example)
+
+-   **Repository & Query:** `ripgrep-rust`, `"how does ripgrep handle large regex patterns?" --lang rust`
+-   **Result 1 (Score: 0.5):** `crates/core/main.rs` (main `run` function).
+    -   **Assessment:** Moderately relevant (5/10). It shows the main program flow but lacks specific details on large regex handling techniques (e.g., specific algorithms, engine details, memory management for large patterns).
+-   **Result 2 (Score: 0.5):** `crates/core/searcher/glue.rs` (a test module).
+    -   **Assessment:** Low relevancy (3/10). Contains test cases for various search functionalities but doesn\'t address the query about handling large regex patterns.
+-   **General Observation:** For this specific query, while the files are from the core of `ripgrep`, the returned snippets are not highly specific to the "large regex patterns" aspect. This might indicate a need for more targeted queries, or it could reflect limitations in how the current indexing/search surfaces deep technical details.
+-   **Recommendation:** 
+    -   Continue analysis across more queries and repositories in `benchmark_results.md` to identify patterns.
+    -   Consider if query refinement in `benchmark_config.yaml` (e.g., adding more specific keywords or using different `type` filters) could improve results for certain types of questions.
+    -   If relevancy issues are widespread, it may point to areas for improvement in the core `vectordb-core` search algorithms or embedding models. 
