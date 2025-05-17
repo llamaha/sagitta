@@ -23,7 +23,7 @@ qdrant-client = "1.9.0"
 hyper = { version = "1.6.0", features = ["full"] }
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-tempdir = "0.3"
+tempfile = "3.10.1"
 git2 = "0.18"
 clap = { version = "4.5.4", features = ["derive"] }
 axum = { version = "0.7.5", features = ["macros"] }
@@ -33,6 +33,17 @@ dashmap = "5.5.3"
 futures-util = "0.3.30"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
 async-stream = "0.3.5"
+oauth2 = "4.4.1"
+jsonwebtoken = "9.2"
+base64 = "0.21"
+rand = "0.8"
+reqwest = { version = "0.11", features = ["json"] }
+thiserror = "1.0"
+async-trait = "0.1"
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5.2", features = ["trace", "cors"] }
+axum-limit = "0.1.0-alpha.2"
+axum-server = { version = "0.6.0", features = ["tls-rustls"] }
 
 # Add other necessary dependencies here
 
@@ -45,6 +56,7 @@ rand = "0.8" # Add rand dependency
 # Add core dependency with features needed for tests
 vectordb_core = { path = "../../", features = ["onnx"] }
 serde_json = "1.0"
+tower = { version = "0.4", features = ["full"] }
 # Add other dev dependencies as needed
 
 [features]

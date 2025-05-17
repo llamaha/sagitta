@@ -11,8 +11,8 @@ use crate::QdrantClientTrait;
 use crate::config::AppConfig;
 
 /// Generates the Qdrant collection name for a given repository name based on the config prefix.
-pub fn get_collection_name(repo_name: &str, config: &AppConfig) -> String {
-    format!("{}{}", config.performance.collection_name_prefix, repo_name)
+pub fn get_collection_name(tenant_id: &str, repo_name: &str, config: &AppConfig) -> String {
+    format!("{}{}_{}", config.performance.collection_name_prefix, tenant_id, repo_name)
 }
 
 /// Deletes points associated with specific file paths within a given branch from a Qdrant collection.

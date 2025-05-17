@@ -223,37 +223,37 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             }
             "query" | "mcp_vectordb_mcp_query" => {
                 let params: QueryParams = deserialize_params(request.params, "query")?;
-                let result = handle_query(params, config, qdrant_client).await?;
+                let result = handle_query(params, config, qdrant_client, None).await?;
                 ok_some(result)
             }
             "repository/add" | "mcp_vectordb_mcp_repository_add" => {
                 let params: RepositoryAddParams = deserialize_params(request.params, "repository/add")?;
-                let result = handle_repository_add(params, config, qdrant_client).await?;
+                let result = handle_repository_add(params, config, qdrant_client, None).await?;
                 ok_some(result)
             }
             "repository/list" | "mcp_vectordb_mcp_repository_list" => {
                 let params: RepositoryListParams = deserialize_params(request.params, "repository/list")?;
-                let result = handle_repository_list(params, config).await?;
+                let result = handle_repository_list(params, config, None).await?;
                 ok_some(result)
             }
             "repository/remove" | "mcp_vectordb_mcp_repository_remove" => {
                 let params: RepositoryRemoveParams = deserialize_params(request.params, "repository/remove")?;
-                let result = handle_repository_remove(params, config, qdrant_client).await?;
+                let result = handle_repository_remove(params, config, qdrant_client, None).await?;
                 ok_some(result)
             }
             "repository/sync" | "mcp_vectordb_mcp_repository_sync" => {
                 let params: RepositorySyncParams = deserialize_params(request.params, "repository/sync")?;
-                let result = handle_repository_sync(params, config, qdrant_client).await?;
+                let result = handle_repository_sync(params, config, qdrant_client, None).await?;
                 ok_some(result)
             }
             "repository/search_file" | "mcp_vectordb_mcp_repository_search_file" => {
                 let params: RepositorySearchFileParams = deserialize_params(request.params, "repository/search_file")?;
-                let result = handle_repository_search_file(params, config).await?;
+                let result = handle_repository_search_file(params, config, None).await?;
                 ok_some(result)
             }
             "repository/view_file" | "mcp_vectordb_mcp_repository_view_file" => {
                 let params: RepositoryViewFileParams = deserialize_params(request.params, "repository/view_file")?;
-                let result = handle_repository_view_file(params, config).await?;
+                let result = handle_repository_view_file(params, config, None).await?;
                 ok_some(result)
             }
             "tools/list" | "mcp_vectordb_mcp_tools_list" => {
@@ -323,6 +323,11 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                  }))
             }
         }
+    }
+
+    pub async fn get_config(&self) -> Result<AppConfig> {
+        let config = self.config.read().await;
+        Ok(config.clone())
     }
 }
 

@@ -36,6 +36,9 @@ use crate::vocabulary::VocabularyManager; // Import vocabulary manager
 use qdrant_client::qdrant::{Vector, NamedVectors};
 use std::collections::{HashMap};
 use crate::config; // Import config module
+use anyhow::anyhow; // Added for context in ensure_collection_exists
+use crate::qdrant_ops; // Ensure qdrant_ops module is accessible for delete_collection_by_name
+use crate::qdrant_ops::delete_collection_by_name;
 
 // Add chunk size optimization constants
 const MIN_CHUNK_SIZE: usize = 100;  // Merge chunks smaller than this
@@ -76,7 +79,7 @@ pub async fn index_paths<
     // --- 1. Ensure Collection Exists ---
     let embedding_dim = embedding_handler.dimension()?;
     // Collection creation now handles both dense and sparse implicitly via the trait impl
-    ensure_collection_exists(&*client, collection_name, embedding_dim as u64).await?; 
+    ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?; 
     log::debug!("Core: Collection \"{}\" ensured.", collection_name);
 
     // --- Vocabulary Manager --- 
@@ -501,7 +504,7 @@ pub async fn index_repo_files<
 
     // --- 1. Ensure Collection Exists ---
     let embedding_dim = embedding_handler.dimension()?; // Use the passed handler
-    ensure_collection_exists(&*client, collection_name, embedding_dim as u64).await?; // Pass dereferenced client
+    ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?; // Pass dereferenced client
     log::debug!("Core: Collection \"{}\" ensured.", collection_name);
 
     // --- 2. Process Files in Parallel (CPU Bound) ---
@@ -1189,35 +1192,77 @@ pub fn gather_files(
 }
 
 /// Ensures a Qdrant collection exists with the specified dimension.
+/// If it exists with a different dimension, it will be deleted and recreated.
 /// TODO: Move payload index creation logic here from src/cli/commands/mod.rs
 pub async fn ensure_collection_exists<
-    C: QdrantClientTrait // Make generic
+    C: QdrantClientTrait + Send + Sync + 'static // Add Send + Sync + 'static for Arc<C>
 >(
-    client: &C, // Use generic client trait ref
+    client: Arc<C>, // Changed to Arc<C> to allow calling delete_collection_by_name
     collection_name: &str,
     embedding_dimension: u64,
-) -> Result<()> {
-    if !client.collection_exists(collection_name.to_string()).await? {
-        log::info!(
-            "Collection \"{}\" not found. Creating it with dimension {}.",
-            collection_name,
-            embedding_dimension
-        );
-        // Call the trait method directly with name and dimension
-        client.create_collection(collection_name, embedding_dimension).await?;
+) -> Result<()> { // Result is anyhow::Result from the context of vectordb_core::indexing
+    if client.collection_exists(collection_name.to_string()).await? {
+        log::debug!("Collection '{}' already exists. Verifying dimension...", collection_name);
+        let collection_info = client.get_collection_info(collection_name.to_string()).await?;
+        
+        let mut current_dimension: Option<u64> = None;
+        if let Some(config) = collection_info.config {
+            if let Some(params) = config.params {
+                if let Some(vectors_config) = params.vectors_config {
+                    if let Some(config) = vectors_config.config {
+                        match config {
+                            qdrant_client::qdrant::vectors_config::Config::ParamsMap(params_map) => {
+                                if let Some(dense_params) = params_map.map.get("dense") {
+                                    current_dimension = Some(dense_params.size);
+                                }
+                            }
+                            _ => {
+                                log::warn!("Collection '{}' has unexpected vector config type", collection_name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-        log::info!("Collection \"{}\" created successfully.", collection_name);
-
-        // TODO: Add payload index creation here after moving ensure_payload_index
-        // ensure_payload_index(client, collection_name, FIELD_LANGUAGE).await?;
-        // ensure_payload_index(client, collection_name, FIELD_ELEMENT_TYPE).await?;
-        // ensure_payload_index(client, collection_name, FIELD_FILE_PATH).await?; // Ensure file path is indexed
-
-    } else {
-        log::debug!("Collection \"{}\" already exists.", collection_name);
-        // Optionally: Validate existing collection's dimension?
+        if let Some(dim) = current_dimension {
+            if dim != embedding_dimension {
+                log::warn!(
+                    "Collection '{}' exists but has dimension {} instead of expected {}. Recreating...",
+                    collection_name,
+                    dim,
+                    embedding_dimension
+                );
+                delete_collection_by_name(client.clone(), collection_name).await?;
+            } else {
+                log::debug!("Collection '{}' exists with correct dimension {}.", collection_name, dim);
+                return Ok(());
+            }
+        } else {
+            log::warn!(
+                "Collection '{}' exists but could not determine its dimension. Recreating...",
+                collection_name
+            );
+            delete_collection_by_name(client.clone(), collection_name).await?;
+        }
     }
-    Ok(())
+
+    log::info!("Creating collection '{}' with dimension {}...", collection_name, embedding_dimension);
+    match client.create_collection(collection_name, embedding_dimension).await {
+        Ok(true) => {
+            log::info!("Collection '{}' created/recreated successfully.", collection_name);
+            Ok(())
+        }
+        Ok(false) => {
+            log::error!("Qdrant reported false for collection creation/recreation of '{}', though no direct error was returned.", collection_name);
+            Err(VectorDBError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{}'", collection_name)))
+        }
+        Err(e) => {
+            log::error!("Failed to create/recreate collection '{}': {:?}", collection_name, e);
+            Err(e)
+        }
+    }
+    // TODO: Payload index creation logic should be here, called after collection is confirmed to exist with correct schema.
 }
 
 // Helper functions for filtering files (moved from src/vectordb/indexing.rs)

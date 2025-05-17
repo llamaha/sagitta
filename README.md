@@ -83,6 +83,28 @@ Both `vectordb-cli` and `vectordb-mcp` load settings (like Qdrant URL, repositor
 
 You can initialize a default configuration using `vectordb-cli init` (see the `vectordb-cli` README).
 
+**See [docs/configuration.md](./docs/configuration.md) for a full list and documentation of all configuration options.**
+
+### 4a. Example: Setting ONNX Model and Tokenizer Paths in config.toml
+
+To avoid errors like:
+
+    Error: ONNX model path or tokenizer path not specified. Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir) or ensure they are set in the configuration file.
+
+Add the following lines to your `~/.config/vectordb/config.toml` (adjust the paths as needed):
+
+```toml
+onnx_model_path = "/absolute/path/to/model.onnx"
+onnx_tokenizer_path = "/absolute/path/to/tokenizer.json" # or directory containing tokenizer.json
+```
+
+- `onnx_model_path` should point to your ONNX model file (e.g., `model.onnx`).
+- `onnx_tokenizer_path` should point to your tokenizer file or directory (e.g., `tokenizer.json` or a directory containing it).
+
+You can also override these via CLI arguments:
+- `--onnx-model-path /path/to/model.onnx`
+- `--onnx-tokenizer-dir /path/to/tokenizer.json`
+
 ### 5. Using GPU Acceleration (Optional but highly recommended)
 
 `vectordb-core` can leverage GPU acceleration if you have a compatible ONNX Runtime build installed and correctly configured.
@@ -112,6 +134,20 @@ You can initialize a default configuration using `vectordb-cli init` (see the `v
     3.  Deactivate: `deactivate`.
 *   **Configure Model Paths**: Update the central configuration (see section 4) to point to the new model's `.onnx` file and tokenizer directory. Tools may also allow overrides via environment variables or arguments.
 *   **Index Compatibility**: Different models produce embeddings of different dimensions. Qdrant indexes are tied to a specific dimension. If the core library (used by tools like `vectordb-cli`) detects a model dimension mismatch for an existing index, it will likely need to clear and recreate the index.
+
+## Model Conversion Scripts
+
+The following scripts in the `./scripts` directory help you download and convert popular Hugging Face models to ONNX format for use with vectordb-core:
+
+| Script Name                   | Model Name / HF Repo                  | Embedding Dimension | Description                                      |
+|------------------------------ |---------------------------------------|--------------------|--------------------------------------------------|
+| convert_all_minilm_model.py   | sentence-transformers/all-MiniLM-L6-v2| 384                | Fast, small, general-purpose semantic model      |
+| convert_st_code_model.py      | (customize in script)                 | varies (e.g. 768)  | For code-specific models, e.g. code-search-net   |
+| convert_e5_large_v2_model.py  | intfloat/e5-large-v2                  | 1024               | State-of-the-art, high-quality retrieval model   |
+
+- Each script will output an ONNX model and tokenizer directory.
+- Update your `config.toml` to point to the generated files and set the correct `performance.vector_dimension` if needed.
+- You can add your own scripts for other models as needed.
 
 ## License
 

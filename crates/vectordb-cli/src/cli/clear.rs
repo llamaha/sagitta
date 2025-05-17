@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use colored::*;
 use qdrant_client::Qdrant;
@@ -24,33 +24,35 @@ pub async fn handle_clear(
     args: &ClearArgs, // Changed to reference
     config: AppConfig, // Keep ownership
     client: Arc<Qdrant>, // Accept client
+    cli_args: &crate::cli::CliArgs, // Added cli_args
 ) -> Result<()> {
-    // --- Determine Target Repository and Collection --- 
-    let repo_to_clear: &RepositoryConfig = if let Some(ref name) = args.repo_name {
-        // Find the specified repository in the config
-        config.repositories.iter().find(|r| r.name == *name).ok_or_else(|| {
-            anyhow::anyhow!("Repository '{}' not found in configuration.", name)
-        })?
-    } else {
-        // Use the active repository
-        let active_repo_name = config.active_repository.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("No repository specified with --repo-name and no active repository set. Use 'repo use <name>' first.")
-        })?;
-        config.repositories.iter().find(|r| r.name == *active_repo_name).ok_or_else(||{
-             // This should theoretically not happen if active_repository is set correctly
-             anyhow::anyhow!("Active repository '{}' configured but not found in repository list.", active_repo_name)
-        })?
+    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
+        Some(id) => id,
+        None => {
+            bail!("--tenant-id is required to clear a repository.");
+        }
     };
 
-    let target_repo_name = &repo_to_clear.name;
-    let collection_name = get_collection_name(target_repo_name, &config);
-    log::info!("Preparing to clear data for repository: '{}', collection: '{}'", target_repo_name, collection_name);
+    let repo_name_to_clear = match args.repo_name.as_ref().or(config.active_repository.as_ref()) {
+        Some(name) => name.clone(),
+        None => bail!("No active repository set and no repository name provided for tenant '{}'.", cli_tenant_id),
+    };
+
+    let repo_config_index = config
+        .repositories
+        .iter()
+        .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
+        .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
+
+    // --- Check Qdrant Collection Status (Informational) ---
+    let collection_name = get_collection_name(cli_tenant_id, &repo_name_to_clear, &config);
+    log::info!("Preparing to clear data for repository: '{}', collection: '{}'", repo_name_to_clear, collection_name);
 
     // --- Confirmation --- 
     if !args.yes {
         let prompt_message = format!(
             "Are you sure you want to delete ALL indexed data for repository '{}' (collection '{}')?",
-            target_repo_name.yellow().bold(),
+            repo_name_to_clear.yellow().bold(),
             collection_name.yellow().bold()
         );
         print!("{} (yes/No): ", prompt_message);

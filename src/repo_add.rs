@@ -114,6 +114,7 @@ pub async fn handle_repo_add<C>(
     embedding_dim: u64,
     client: Arc<C>,
     config: &AppConfig,
+    tenant_id: &str,
 ) -> Result<RepositoryConfig, AddRepoError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -156,184 +157,52 @@ where
     // Determine the final local path for the repository
     let local_path = args.local_path.clone().unwrap_or_else(|| repo_base_path.join(&repo_name));
 
-    // If URL is not provided but required
-    let mut repo_url = args.url.clone();
+    // If URL is not provided but required for a new clone scenario (checked by prepare_repository)
+    let repo_url = args.url.clone();
 
     // Flag to indicate if the repo was added by specifying a local path initially
     let added_as_local_path_flag = args.local_path.is_some();
 
-    let repo = if local_path.exists() {
-         info!(
-            "Local directory '{}' already exists. Assuming it's the intended clone. Skipping clone.",
-            local_path.display()
-        );
-        let git_repo = Repository::open(&local_path)
-            .map_err(|e| AddRepoError::RepoOpenError(local_path.clone(), e.into()))?;
-        
-        // If URL wasn't provided, try to extract it from the repository's remote
-        if repo_url.is_none() {
-            let remote_name = args.remote.as_deref().unwrap_or("origin");
-            match git_repo.find_remote(remote_name) {
-                Ok(remote) => {
-                    if let Some(url) = remote.url() {
-                        repo_url = Some(url.to_string());
-                    } else {
-                        warn!("Remote '{remote_name}' found but has no URL configured.");
-                    }
-                }
-                Err(_) => {
-                    return Err(AddRepoError::InvalidArgs(format!("Could not find remote '{remote_name}' in existing repository. Please specify --url.")));
-                }
-            }
-        }
-        
-        git_repo
-    } else {
-        // For new clones, URL is required
-        if repo_url.is_none() {
-            return Err(AddRepoError::InvalidArgs("URL is required when adding a new repository (--local-path does not exist).".to_string()));
-        }
-        
-        let url = repo_url.as_ref().unwrap(); // Safe because we checked above
-        
-        info!("\nSTEP 1/2: Cloning repository '{}' from {}", repo_name, url);
-        
-        // Create the directory if it doesn't exist
-        fs::create_dir_all(&local_path)
-            .map_err(AddRepoError::IoError)?;
-        
-        // Use direct git command instead of git2-rs for SSH authentication
-        let mut cmd = std::process::Command::new("git");
-        cmd.arg("clone")
-           .arg(url)
-           .arg(&local_path);
-        
-        // If SSH key is provided, use GIT_SSH_COMMAND to specify the key
-        if let Some(ssh_key) = &args.ssh_key {
-            let ssh_cmd = if let Some(_passphrase) = &args.ssh_passphrase {
-                // With passphrase - note: for SSH keys with passphrase, the SSH agent should be running
-                // and should have the key loaded, as Git can't handle passphrase input non-interactively
-                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
-            } else {
-                // Without passphrase
-                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
-            };
-            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-            let key_path_display = ssh_key.display();
-            info!("Using SSH key: {}", key_path_display);
-        }
-            
-        let status = cmd.status()
-            .map_err(|e| AddRepoError::GitError(e.into()))?;
-        
-        if !status.success() {
-            return Err(AddRepoError::GitError(anyhow!("Git clone command failed with exit code: {}", status)));
-        }
-        
-        info!("\nRepository cloned successfully to {}", local_path.display());
-        
-        // Open the repository after cloning
-        Repository::open(&local_path)
-            .map_err(|e| AddRepoError::RepoOpenError(local_path.clone(), e.into()))?
-    };
+    info!("Preparing repository setup for tenant '{}', repo '{}'", tenant_id, repo_name);
 
-    // --- Add Git Checkout Logic --- 
-    if let Some(ref_name) = &args.target_ref {
-        info!("Attempting to checkout target ref: {}", ref_name);
-        let mut cmd = std::process::Command::new("git");
-        cmd.current_dir(&local_path) // Run checkout in the repo directory
-           .arg("checkout")
-           .arg(ref_name);
-        
-        // Add GIT_SSH_COMMAND env var if SSH key was provided, needed for checkout if ref involves remote objects
-        if let Some(ssh_key) = &args.ssh_key {
-            let ssh_cmd = if args.ssh_passphrase.is_some() {
-                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
-            } else {
-                format!("ssh -i {} -o IdentitiesOnly=yes", ssh_key.display())
-            };
-            cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+    // Call prepare_repository for both new clones and existing local paths.
+    // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
+    let new_repo_config = helpers::prepare_repository(
+        repo_url.as_deref().unwrap_or_default(), // Pass URL, or empty if only local path given
+        Some(&repo_name),
+        if added_as_local_path_flag { Some(&local_path) } else { None }, // Pass local_path if it was an arg
+        args.branch.as_deref(),
+        args.target_ref.as_deref(),
+        args.remote.as_deref(),
+        args.ssh_key.as_ref(),
+        args.ssh_passphrase.as_deref(),
+        &repo_base_path, // Base path for new clones if local_path is not set by arg
+        client.clone(),
+        embedding_dim,
+        config,      // Pass AppConfig for collection_name_prefix and other settings
+        tenant_id,   // Pass tenant_id
+    ).await.map_err(|e| {
+        // Map internal Error to AddRepoError
+        match e {
+            crate::error::VectorDBError::GitMessageError(msg) => AddRepoError::GitError(anyhow!(msg)),
+            crate::error::VectorDBError::QdrantError(msg) => AddRepoError::QdrantError(anyhow!(msg)),
+            // Add other specific mappings as needed
+            _ => AddRepoError::ConfigError(anyhow!(e.to_string())),
         }
+    })?;
 
-        let checkout_output = cmd.output()
-            .map_err(|e| AddRepoError::GitError(anyhow!("Failed to execute git checkout command: {}", e)))?;
-        
-        if !checkout_output.status.success() {
-            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-            let stdout = String::from_utf8_lossy(&checkout_output.stdout);
-            error!(
-                "Git checkout command failed for ref '{}'. Status: {}. Stderr: {}. Stdout: {}", 
-                ref_name, checkout_output.status, stderr, stdout
-            );
-            return Err(AddRepoError::GitError(anyhow!(
-                "Git checkout command failed for ref '{}'. Status: {}. Stderr: {}. Stdout: {}",
-                ref_name, checkout_output.status, stderr, stdout
-            )));
-        }
-        info!("Successfully checked out ref: {}", ref_name);
-    }
-    // --- End Git Checkout Logic ---
-
-    let initial_branch_name = match args.branch {
-        Some(branch_name) => branch_name.clone(),
-        None => {
-            // If target_ref was specified, we might be in detached HEAD, 
-            // so finding the default branch via HEAD might not be reliable or desired.
-            // Let's prioritize target_ref if provided, otherwise determine from HEAD.
-            if let Some(ref_name) = &args.target_ref {
-                 ref_name.clone() // Use target_ref as the initial "branch" identifier
-            } else {
-                 let head_ref = repo.find_reference("HEAD").map_err(|e| AddRepoError::GitError(e.into()))?;
-                 let head_ref_resolved = head_ref.resolve().map_err(|e| AddRepoError::GitError(e.into()))?;
-                 head_ref_resolved.shorthand()
-                     .ok_or_else(|| AddRepoError::BranchDetectionError(anyhow!("Could not determine default branch name from HEAD")))?
-                     .to_string()
-            }
-        }
-    };
-    // Only print if we didn't use target_ref above
-    if args.target_ref.is_none() {
-        info!("Default/Initial branch detected: {}", initial_branch_name);
-    }
-
-    info!("\n{}", 
-        format!("STEP 2/2: Setting up vector database infrastructure for '{}'", repo_name).bold().cyan()
-    );
+    // Ensure the returned config has the correct added_as_local_path flag if it was derived
+    // prepare_repository now sets this, but we can ensure it aligns if needed, though it should be correct.
+    // The URL used by prepare_repository also needs to be the one from args if present, or derived.
+    // The `new_repo_config` from `prepare_repository` should be mostly complete.
+    // We might need to adjust its `url` field if `args.url` was Some and `prepare_repository` didn't pick it up as primary.
+    // However, `prepare_repository` logic tries to use the provided URL.
     
-    // Use helpers from crate::repo_helpers
-    let collection_name = helpers::get_collection_name(&repo_name, config);
-    info!("Ensuring Qdrant collection '{}' exists...", collection_name.cyan());
-    
-    // Use the passed-in embedding_dim
-    info!("Using embedding dimension: {}", embedding_dim);
-    
-    // Use helpers from crate::repo_helpers
-    helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim).await
-        .map_err(|e| AddRepoError::QdrantError(e.into()))?;
+    // The existing logic to open repo, extract URL if missing, and checkout target_ref
+    // is now largely handled within `prepare_repository`. 
+    // `handle_repo_add` becomes simpler.
 
-    // Ensure we have the final URL
-    let final_url = repo_url.ok_or(AddRepoError::UrlDeterminationError)?;
-    
-    // Determine active_branch based on target_ref presence
-    let final_active_branch = args.target_ref.clone().unwrap_or_else(|| initial_branch_name.clone());
-
-    // Use RepositoryConfig from crate::config
-    let new_repo_config = RepositoryConfig {
-        name: repo_name.clone(),
-        url: final_url,
-        local_path: local_path.clone(),
-        default_branch: initial_branch_name.clone(), // Keep initial/default branch info
-        tracked_branches: vec![initial_branch_name.clone()], // Only track initial for now
-        active_branch: Some(final_active_branch), // Store target_ref or initial branch
-        remote_name: Some(args.remote.clone().unwrap_or_else(|| "origin".to_string())),
-        ssh_key_path: args.ssh_key.clone(),
-        ssh_key_passphrase: args.ssh_passphrase.clone(),
-        last_synced_commits: HashMap::new(),
-        indexed_languages: None,
-        added_as_local_path: added_as_local_path_flag,
-        target_ref: args.target_ref.clone(), // Store the target_ref
-    };
-
+    // The `new_repo_config` returned by `prepare_repository` already contains the tenant_id.
     Ok(new_repo_config)
 }
 
@@ -394,6 +263,13 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
@@ -412,23 +288,34 @@ mod tests {
         let repo_name_str = "test_repo";
 
         let config = AppConfig {
-            qdrant_url: "dummy_url".to_string(),
-            repositories: vec![],
-            active_repository: None,
+            qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories_base_path: Some(temp_dir.path().to_str().unwrap().to_string()),
             vocabulary_base_path: None,
+            repositories: vec![],
+            active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig {
                  vector_dimension: 10,
                  collection_name_prefix: "test_prefix_".to_string(),
                  ..PerformanceConfig::default()
             },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
         
-        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_collection_name = format!("{}{}_{}", 
+            config.performance.collection_name_prefix, 
+            "test_tenant", // Hardcoded tenant_id for this test
+            repo_name_str
+        );
         let expected_dimension = config.performance.vector_dimension;
 
         manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
@@ -453,6 +340,7 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
+            "test_tenant", // Pass hardcoded tenant_id for this test
         )
         .await;
 
@@ -495,6 +383,13 @@ mod tests {
                 collection_name_prefix: "test_collection_".to_string(),
                 ..PerformanceConfig::default()
             },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
@@ -514,7 +409,7 @@ mod tests {
         let repo_name_str = "existing_repo";
 
         let config = AppConfig {
-            qdrant_url: "dummy_url".to_string(),
+            qdrant_url: "http://localhost:6334".to_string(),
             repositories: vec![],
             active_repository: None,
             onnx_model_path: None,
@@ -528,9 +423,20 @@ mod tests {
                  collection_name_prefix: "test_prefix_".to_string(),
                  ..PerformanceConfig::default()
             },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
         
-        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_collection_name = format!("{}{}_{}", 
+            config.performance.collection_name_prefix, 
+            "test_tenant", // Hardcoded tenant_id for this test
+            repo_name_str
+        );
         let expected_dimension = config.performance.vector_dimension;
 
         manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
@@ -554,6 +460,7 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
+            "test_tenant", // Pass hardcoded tenant_id for this test
         )
         .await;
 
@@ -593,7 +500,7 @@ mod tests {
         let client_arc = Arc::new(manual_mock_client.clone());
 
         let config = AppConfig {
-            qdrant_url: "dummy_qdrant_url".to_string(),
+            qdrant_url: "http://localhost:6334".to_string(),
             repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
@@ -606,12 +513,23 @@ mod tests {
                 vector_dimension: 10,
                 collection_name_prefix: "test_cloned_".to_string(),
                 ..PerformanceConfig::default()
-            }
+            },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
 
         let repo_name_str = "test_cloned_repo";
 
-        let expected_collection_name = format!("{}{}", config.performance.collection_name_prefix, repo_name_str);
+        let expected_collection_name = format!("{}{}_{}", 
+            config.performance.collection_name_prefix, 
+            "test_tenant", // Hardcoded tenant_id for this test
+            repo_name_str
+        );
         let expected_dimension = config.performance.vector_dimension;
 
         manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
@@ -640,6 +558,7 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
+            "test_tenant", // Pass hardcoded tenant_id for this test
         )
         .await;
 

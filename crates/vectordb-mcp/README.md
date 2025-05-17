@@ -120,3 +120,16 @@ Add a server configuration like this to your Cursor `mcp.json` file:
 ## General Prerequisites
 
 1.  **Qdrant:** A running Qdrant vector database instance must be accessible by `vectordb-mcp` (configured in its `config.toml`).
+
+## Multi-Tenancy, API Keys, and Tenant Isolation
+
+For detailed documentation on multi-tenancy, API key management, and tenant data isolation in vectordb-mcp, see:
+
+- [Multi-Tenancy & API Keys Documentation](./../docs/multi_tenancy_api_keys.md)
+
+This covers:
+- How to create and manage tenants
+- How to create and use API keys
+- Data isolation model and Qdrant collection naming
+- CORS and client integration details
+- Current status of OAuth and global repositories

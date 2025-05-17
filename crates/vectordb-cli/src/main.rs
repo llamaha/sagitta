@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
 
     // Parse command-line arguments
-    let args = CliArgs::parse();
+    let mut args = CliArgs::parse();
 
     // Determine configuration path
     let config_path_override: Option<PathBuf> = None; // Placeholder, fix if needed
@@ -33,6 +33,19 @@ async fn main() -> Result<()> {
         }
     };
 
+    // If --tenant-id is not provided, use tenant_id from config if present
+    if args.tenant_id.is_none() {
+        if let Some(cfg_tenant_id) = config.tenant_id.clone() {
+            args.tenant_id = Some(cfg_tenant_id);
+        }
+    }
+
+    // If still no tenant_id, error out for tenant-aware commands
+    let needs_tenant = matches!(args.command, vectordb_cli::cli::Commands::Repo(_) | vectordb_cli::cli::Commands::Edit(_));
+    if needs_tenant && args.tenant_id.is_none() {
+        return Err(anyhow!("No tenant_id specified. Please provide --tenant-id or set tenant_id in config.toml (see vectordb-cli init)."));
+    }
+
     // Handle ONNX model/tokenizer path overrides from CLI args
     if let Some(model_path_str) = &args.onnx_model_path_arg {
         config.onnx_model_path = Some(PathBuf::from(model_path_str).to_string_lossy().into_owned());
@@ -43,12 +56,15 @@ async fn main() -> Result<()> {
 
     // Ensure required ONNX files exist if not provided by default config
     if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
-        // Simplified error message - check config/CLI args for paths
-         return Err(anyhow!(
-             "ONNX model path or tokenizer path not specified. \
-              Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir) \
-              or ensure they are set in the configuration file."
-         ));
+        return Err(anyhow!(
+            "ONNX model path or tokenizer path not specified.\n\
+Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir), \
+or ensure they are set in the configuration file.\n\
+\nExample config.toml entries:\n\
+    onnx_model_path = \"/absolute/path/to/model.onnx\"\n\
+    onnx_tokenizer_path = \"/absolute/path/to/tokenizer.json\"\n\
+\nSee the README section 'Setting ONNX Model and Tokenizer Paths in config.toml' for more details."
+        ));
     }
 
     // Initialize Qdrant client

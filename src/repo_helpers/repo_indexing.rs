@@ -18,6 +18,10 @@ use crate::repo_helpers::qdrant_utils::get_collection_name;
 use anyhow::anyhow;
 use std::process::{Command, Stdio};
 use walkdir::WalkDir;
+use git2;
+use std::fs;
+use git2::Repository;
+use std::os::unix::fs::PermissionsExt;
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
 /// list of indexed languages for that branch by querying Qdrant.
@@ -152,6 +156,7 @@ pub async fn prepare_repository<C>(
     client: Arc<C>,
     embedding_dim: u64,
     config: &AppConfig,
+    tenant_id: &str,
 ) -> Result<RepositoryConfig, Error>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -171,12 +176,12 @@ where
 
     let url_str = url.to_string(); // Clone url for closure
     let repo_name_str = repo_name.to_string(); // Clone repo_name for closure
-    let collection_name = get_collection_name(&repo_name_str, config);
+    let collection_name = get_collection_name(tenant_id, &repo_name_str, config);
 
     let mut was_cloned = false;
     if !final_local_path.exists() {
         info!("Ensuring Qdrant collection '{collection_name}' exists (dim={embedding_dim})...");
-        ensure_collection_exists(client.as_ref(), &collection_name, embedding_dim).await?;
+        ensure_collection_exists(client.clone(), &collection_name, embedding_dim).await?;
         info!("Qdrant collection ensured for new clone.");
 
         info!("Cloning repository '{repo_name_str}' from {url_str} into {}...", final_local_path.display());
@@ -225,7 +230,7 @@ where
         let path_str = final_local_path.display().to_string();
         info!("Repository already exists locally at {path_str}, ensuring collection exists...");
         info!("Ensuring Qdrant collection '{collection_name}' exists (dim={embedding_dim}) for existing clone...");
-        ensure_collection_exists(client.as_ref(), &collection_name, embedding_dim).await?;
+        ensure_collection_exists(client.clone(), &collection_name, embedding_dim).await?;
         info!("Qdrant collection ensured for existing clone.");
     }
 
@@ -299,15 +304,42 @@ where
         final_active_branch = final_branch.to_string();
     }
 
+    // Determine the final URL for the RepositoryConfig
+    let mut final_url_to_store = url_str.clone(); // url_str is from the function input `url`
+    if final_url_to_store.is_empty() && final_local_path.exists() {
+        // If no URL was provided and it's an existing local path, try to get it from the git remote
+        match git2::Repository::open(&final_local_path) {
+            Ok(repo) => {
+                let remote_to_check = remote_opt.unwrap_or("origin");
+                match repo.find_remote(remote_to_check) {
+                    Ok(remote) => {
+                        if let Some(git_remote_url) = remote.url() {
+                            info!("No URL provided for local repo, using remote '{}' URL: {}", remote_to_check, git_remote_url);
+                            final_url_to_store = git_remote_url.to_string();
+                        } else {
+                            warn!("Local repo at '{}' has remote '{}' but no URL is configured for it.", final_local_path.display(), remote_to_check);
+                        }
+                    }
+                    Err(_) => {
+                        warn!("Local repo at '{}' does not have a remote named '{}'. URL will be empty.", final_local_path.display(), remote_to_check);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to open local repo at '{}' to check for remote URL: {}. URL will be empty.", final_local_path.display(), e);
+            }
+        }
+    }
+
     Ok(RepositoryConfig {
         name: repo_name.to_string(),
-        url: url_str,
+        url: final_url_to_store, // Use the potentially updated URL
         local_path: final_local_path,
         default_branch: final_active_branch.clone(),
-        tracked_branches: if final_active_branch != final_branch {
-             vec![final_branch.to_string(), final_active_branch.clone()]
+        tracked_branches: if final_active_branch != final_branch && target_ref_opt.is_some() {
+            vec![final_branch.to_string(), final_active_branch.clone()]
         } else {
-            vec![final_branch.to_string()]
+            vec![final_active_branch.clone()]
         },
         active_branch: Some(final_active_branch),
         remote_name: Some(final_remote.to_string()),
@@ -317,6 +349,7 @@ where
         ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
         added_as_local_path: local_path_opt.is_some(),
         target_ref: target_ref_opt.map(|s| s.to_string()),
+        tenant_id: Some(tenant_id.to_string()),
     })
 }
 
@@ -330,8 +363,11 @@ where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let repo_name = &repo_config.name;
-    let collection_name = get_collection_name(repo_name, config);
-    info!("Attempting to delete Qdrant collection '{collection_name}'...");
+    let tenant_id = repo_config.tenant_id.as_deref()
+        .ok_or_else(|| Error::Other(format!("Tenant ID missing in RepositoryConfig for repository '{}' during delete operation", repo_name)))?;
+    
+    let collection_name = get_collection_name(tenant_id, repo_name, config);
+    info!("Attempting to delete Qdrant collection '{collection_name}' for tenant '{tenant_id}'...");
     match client.delete_collection(collection_name.clone()).await {
         Ok(deleted) => {
             if deleted {
@@ -351,14 +387,11 @@ where
         info!("Local directory '{}' does not exist. Skipping removal.", local_path.display());
         return Ok(());
     }
+    
+    // Safety checks
     let path_str = local_path.to_string_lossy();
     if path_str.len() < 10 { 
-        error!("Path '{path_str}' is suspiciously short. Skipping removal for safety.");
-        return Ok(());
-    }
-    let git_dir = local_path.join(".git");
-    if !git_dir.exists() || !git_dir.is_dir() {
-        warn!("No .git directory found at '{}'. This may not be a git repository. Skipping removal for safety.", local_path.display());
+        error!("Path '{path_str}' is suspiciously short (len {}). Skipping removal for safety.", path_str.len());
         return Ok(());
     }
     let dangerous_paths = ["/", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
@@ -366,16 +399,122 @@ where
         error!("Path '{path_str}' appears to be a system directory. Refusing to delete for safety.");
         return Ok(());
     }
-    info!("Removing local repository directory '{}'...", local_path.display());
-    match std::fs::remove_dir_all(local_path) {
-        Ok(()) => info!("Successfully removed local repository directory '{}'.", local_path.display()),
-        Err(e) => {
-             let error_str = e.to_string();
-            error!("Failed to remove local repository directory '{}': {error_str}. Manual cleanup may be required.", local_path.display());
+    
+    info!("Safety checks passed. Starting repository directory removal process...");
+    
+    // Close any open Git handles
+    if let Ok(repo) = Repository::open(local_path) {
+        info!("Closing any open Git repository handles...");
+        drop(repo);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    
+    // Try using external rm command for Unix systems (more reliable)
+    if cfg!(unix) {
+        info!("Attempting to use external rm command for forceful deletion...");
+        let output = std::process::Command::new("rm")
+            .arg("-rf")
+            .arg(local_path.as_os_str())
+            .output();
+            
+        match output {
+            Ok(output) if output.status.success() => {
+                info!("External rm command reported success");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                
+                if !local_path.exists() {
+                    info!("Successfully verified repository directory removal via external command");
+                    return Ok(());
+                } else {
+                    warn!("External rm command reported success but directory still exists");
+                }
+            }
+            Ok(output) => {
+                warn!("External rm command failed: {}", String::from_utf8_lossy(&output.stderr));
+            }
+            Err(e) => {
+                warn!("Failed to execute external rm command: {}", e);
+            }
         }
     }
-
-    Ok(())
+    
+    // If external command didn't work, fall back to staged deletion
+    info!("Falling back to staged directory deletion...");
+    
+    // Make all files writable first
+    for entry in WalkDir::new(local_path).into_iter().filter_map(|e| e.ok()) {
+        if let Err(e) = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o777)) {
+            debug!("Failed to set permissions on {}: {}", entry.path().display(), e);
+        }
+    }
+    
+    // Delete all files first, then build a list of directories to delete
+    let mut dirs_to_delete = Vec::new();
+    
+    for entry in WalkDir::new(local_path).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            if let Err(e) = fs::remove_file(entry.path()) {
+                warn!("Failed to delete file {}: {}", entry.path().display(), e);
+            }
+        } else if entry.file_type().is_dir() {
+            dirs_to_delete.push(entry.path().to_path_buf());
+        }
+    }
+    
+    // Sort directories by depth (deepest first)
+    dirs_to_delete.sort_by_key(|path| {
+        path.components().count()
+    });
+    dirs_to_delete.reverse();
+    
+    // Now delete directories from deepest to shallowest
+    for dir in dirs_to_delete {
+        if dir == *local_path {
+            continue; // Skip the root directory, we'll delete it last
+        }
+        if let Err(e) = fs::remove_dir(&dir) {
+            warn!("Failed to delete directory {}: {}", dir.display(), e);
+            // Try remove_dir_all as a fallback
+            if let Err(e) = fs::remove_dir_all(&dir) {
+                warn!("Failed to delete directory with remove_dir_all {}: {}", dir.display(), e);
+            }
+        }
+    }
+    
+    // Finally, try to remove the repository root directory
+    let mut attempts = 0;
+    let max_attempts = 3;
+    
+    while attempts < max_attempts {
+        attempts += 1;
+        info!("Attempt {} to remove repository root directory", attempts);
+        
+        if let Err(e) = fs::remove_dir(local_path) {
+            warn!("Failed to remove repository root directory: {}", e);
+            std::thread::sleep(std::time::Duration::from_millis(200 * attempts));
+            
+            // If remove_dir fails, try remove_dir_all
+            if let Err(e) = fs::remove_dir_all(local_path) {
+                warn!("Failed to remove repository root directory with remove_dir_all: {}", e);
+            } else {
+                info!("Successfully removed repository directory with remove_dir_all");
+                break;
+            }
+        } else {
+            info!("Successfully removed repository directory");
+            break;
+        }
+    }
+    
+    // Final verification
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if !local_path.exists() {
+        info!("Successfully verified repository directory removal");
+        Ok(())
+    } else {
+        error!("Failed to delete repository directory after all attempts");
+        Err(Error::Other(format!("Failed to delete repository directory")))
+    }
 }
 
 /// Represents basic information about a Git commit.
@@ -734,4 +873,62 @@ pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
 
     pb.finish_with_message("Indexing complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs;
+    use crate::qdrant_client_trait::MockQdrantClientTrait; // For a mock client
+
+    #[tokio::test]
+    async fn test_delete_repository_data_simple() -> Result<(), Error> {
+        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        let repo_path = temp_dir.path().join("my_test_repo");
+        fs::create_dir_all(&repo_path).map_err(|e| Error::Other(format!("Failed to create repo_path: {}", e)))?;
+        fs::create_dir(repo_path.join(".git")).map_err(|e| Error::Other(format!("Failed to create .git dir: {}", e)))?;
+        fs::write(repo_path.join("file.txt"), "hello").map_err(|e| Error::Other(format!("Failed to write file: {}", e)))?;
+
+        assert!(repo_path.exists());
+        assert!(repo_path.join(".git").exists());
+
+        let repo_config = RepositoryConfig {
+            name: "my_test_repo".to_string(),
+            url: "http://localhost:6334".to_string(),
+            local_path: repo_path.clone(),
+            default_branch: "main".to_string(),
+            active_branch: Some("main".to_string()),
+            tenant_id: Some("test-tenant".to_string()),
+            tracked_branches: vec!["main".to_string()],
+            remote_name: Some("origin".to_string()),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            last_synced_commits: HashMap::new(),
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+        };
+
+        let app_config = AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let mut mock_qdrant_client = MockQdrantClientTrait::new();
+        // Expect delete_collection to be called and return success
+        mock_qdrant_client.expect_delete_collection()
+            .returning(|_| Ok(true) ); // Return the Result directly
+        
+        let client = Arc::new(mock_qdrant_client);
+
+        delete_repository_data(&repo_config, client, &app_config).await?;
+
+        drop(temp_dir); // Explicitly drop temp_dir before the final assert
+
+        assert!(!repo_path.exists(), "Repository directory should have been deleted.");
+
+        Ok(())
+    }
 } 

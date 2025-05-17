@@ -50,6 +50,10 @@ pub struct CliArgs {
     /// Path to ONNX tokenizer config directory (overrides config & env var)
     #[arg(short = 't', long = "onnx-tokenizer-dir", global = true, env = "VECTORDB_ONNX_TOKENIZER_DIR")]
     pub onnx_tokenizer_dir_arg: Option<String>,
+
+    /// Tenant ID for operations (overrides config & env var)
+    #[arg(long = "tenant-id", global = true, env = "VECTORDB_TENANT_ID")]
+    pub tenant_id: Option<String>,
 }
 
 // Implement Default for CliArgs for use in server code
@@ -67,6 +71,7 @@ impl Default for CliArgs {
             }),
             onnx_model_path_arg: None,
             onnx_tokenizer_dir_arg: None,
+            tenant_id: None,
         }
     }
 }
@@ -125,6 +130,8 @@ pub enum Commands {
     /// Edit code using semantic understanding
     #[command(subcommand_negates_reqs = true)]
     Edit(crate::edit::cli::EditArgs),
+    /// Initialize a new configuration file (with tenant_id, etc.)
+    Init,
 }
 
 // --- Main Command Handler Function ---
@@ -143,6 +150,36 @@ pub async fn handle_command(
         Commands::Repo(ref cmd_args) => super::repo_commands::handle_repo_command(cmd_args.clone(), &args, config, client, None).await,
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
         Commands::Edit(ref cmd_args) => crate::edit::cli::handle_edit_command(cmd_args.clone(), &args, config.clone(), client).await,
+        Commands::Init => {
+            // Determine config path (use get_config_path_or_default from vectordb_core)
+            let config_path = vectordb_core::config::get_config_path_or_default(None)?;
+            let config_path = config_path.as_path();
+            let config_dir = config_path.parent().unwrap();
+            std::fs::create_dir_all(config_dir)?;
+
+            // If config exists, back it up
+            if config_path.exists() {
+                let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                let backup_path = config_dir.join(format!("config.toml.bak.{}", timestamp));
+                std::fs::copy(config_path, &backup_path)?;
+                println!("Backed up existing config to {}", backup_path.display());
+            }
+
+            // Generate tenant_id
+            let tenant_id = uuid::Uuid::new_v4().to_string();
+
+            // Create default config and set tenant_id
+            let mut new_config = vectordb_core::config::AppConfig::default();
+            new_config.tenant_id = Some(tenant_id.clone());
+
+            // Write config
+            vectordb_core::config::save_config(&new_config, Some(&config_path.to_path_buf()))?;
+
+            println!("Initialized new config at {}", config_path.display());
+            println!("Generated tenant_id: {}", tenant_id);
+            println!("You can now edit the config file to set ONNX model/tokenizer paths, Qdrant URL, etc.");
+            Ok(())
+        }
     }
 }
 

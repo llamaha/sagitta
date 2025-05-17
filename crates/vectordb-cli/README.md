@@ -71,6 +71,12 @@ vectordb-cli repo remove my-repo
 vectordb-cli repo remove my-repo --delete-local
 ```
 
+### Initialize Configuration
+Creates a new configuration file at the default location, backing up any existing config and generating a unique tenant_id. Run this before using other commands if you don't have a config yet.
+```bash
+vectordb-cli init
+```
+
 *(Note: Many commands operate on the 'active' repository by default. Use `vectordb-cli repo use <name>` to set the active repository.)*
 
 For more detailed command options, you can use the `--help` flag:

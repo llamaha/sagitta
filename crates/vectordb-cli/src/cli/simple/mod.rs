@@ -26,9 +26,11 @@ use crate::cli::commands::{ // Only import necessary items from commands
     FIELD_FILE_PATH, FIELD_LANGUAGE, FIELD_START_LINE,
 };
 use vectordb_core::search_collection;
-use vectordb_core::qdrant_ops::delete_all_points; // Import core helpers
+use vectordb_core::qdrant_ops::{delete_collection_by_name, delete_all_points};
 use vectordb_core::error::VectorDBError; // Import VectorDBError
 use vectordb_core::config::load_config; // Import load_config
+use vectordb_core::indexing::ensure_collection_exists; // Import ensure_collection_exists
+use colored::Colorize; // Added import for Colorize trait
 
 // Local module imports
 // pub mod index; // Remove index module
@@ -152,33 +154,38 @@ async fn handle_simple_index(
     let collection_name = LEGACY_INDEX_COLLECTION;
     log::info!("Using default collection: '{}'", collection_name);
 
-    // --- Clear existing collection before indexing ---
-    println!("Clearing default collection '{}' before indexing...", collection_name);
-    log::info!("Calling core delete_all_points for collection '{}'...", collection_name);
+    // --- Ensure Collection Exists with Correct Dimension --- 
+    let vector_dim = config.performance.vector_dimension as u64;
+
+    ensure_collection_exists(client.clone(), collection_name, vector_dim)
+        .await
+        .with_context(|| format!("Failed to ensure collection '{}' exists with dimension {}", collection_name, vector_dim))?;
+    log::info!("Ensured collection '{}' exists with dimension {}.", collection_name, vector_dim);
+
+    // --- Clear existing points from collection before indexing (optional, original behavior) ---
+    // If ensure_collection_exists recreates on dimension mismatch, this might not be strictly necessary
+    // but clearing points ensures a fresh index if the collection already existed with the correct dimension.
+    println!("Clearing points from default collection '{}' before indexing...", collection_name);
     match delete_all_points(client.clone(), collection_name).await {
         Ok(_) => {
-            log::info!("Successfully cleared collection '{}'.", collection_name);
-            println!("Collection cleared.");
+            log::info!("Successfully cleared points from collection '{}'.", collection_name);
+            println!("Collection points cleared.");
         }
         Err(e) => {
-            // Log the error but proceed with indexing anyway
-            log::error!("Failed to clear collection '{}' before indexing: {}. Proceeding anyway.", collection_name, e);
-            eprintln!("Warning: Failed to clear collection '{}' before indexing: {}. Proceeding anyway.", collection_name, e);
-            // Consider if we should bail here instead?
-            // bail!("Failed to clear collection before indexing: {}", e);
+            log::error!("Failed to clear points from collection '{}': {}. Proceeding anyway.", collection_name, e);
+            eprintln!("Warning: Failed to clear points from collection '{}': {}. Proceeding anyway.", collection_name, e);
         }
     }
 
     // Validate input paths exist (basic check)
     for path in &cmd_args.paths {
         if !path.exists() {
-            bail!("Input path does not exist: {}", path.display());
+            bail!("Path does not exist: {}", path.display());
         }
     }
     log::debug!("Input paths: {:?}", cmd_args.paths);
 
     // --- Validate Config for ONNX paths for simple index ---
-    // For simple index, paths *must* come only from the config file.
     if cli_args.onnx_model_path_arg.is_some() || std::env::var("VECTORDB_ONNX_MODEL").is_ok() {
         return Err(anyhow!("For 'simple index', ONNX model path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
@@ -188,13 +195,11 @@ async fn handle_simple_index(
     if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
          return Err(anyhow!("ONNX model and tokenizer paths must be set in the configuration file when using 'simple index'"));
     }
-    // Path existence/validity is checked later by EmbeddingHandler::new
     log::info!("Using ONNX paths from configuration file for simple index.");
 
-    // --- Initialize Embedding Handler (uses paths from config) ---
     let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple index")?;
-    log::info!("Embedding dimension: {}", embedding_handler.dimension()?);
+    log::info!("Embedding dimension (from handler): {}", embedding_handler.dimension()?);
 
     // --- Prepare Filters ---
     let file_extensions_set: Option<HashSet<String>> = cmd_args
@@ -220,13 +225,13 @@ async fn handle_simple_index(
     // --- Call Core Indexing Logic ---
     let app_config = load_config(None)?;
     let index_result = vectordb_core::indexing::index_paths(
-        &cmd_args.paths, // Pass the raw paths from args
+        &cmd_args.paths, 
         file_extensions_set,
         collection_name,
         client.clone(),
         &embedding_handler,
         Some(&pb),
-        &app_config, // <-- Pass the loaded config
+        &app_config, 
     ).await;
 
     // --- Handle Result ---
@@ -239,7 +244,6 @@ async fn handle_simple_index(
         }
         Err(e) => {
             log::error!("Simple indexing failed: {}", e);
-            // Print a user-friendly error based on VectorDBError type
             match e {
                 vectordb_core::error::VectorDBError::ConfigurationError(ref msg) => {
                     eprintln!("Configuration Error: {}", msg);
@@ -271,18 +275,21 @@ async fn handle_simple_query(
     config: &AppConfig,
     client: Arc<Qdrant>,
 ) -> Result<()> {
-    log::debug!("Handling simple query...");
-
-    // Config validation and embedding handler initialization
-    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
-        bail!("ONNX model and tokenizer paths must be set in the config for simple query");
-    }
-    let embedding_handler = EmbeddingHandler::new(config)
-        .context("Failed to initialize embedding handler for simple query")?;
-
     let collection_name = LEGACY_INDEX_COLLECTION;
+    log::info!("Searching collection '{}' for query: '{}', limit: {}, filter: {:?}", 
+        collection_name, args.query, args.limit, 
+        (args.lang.as_ref(), args.element_type.as_ref()));
+
+    // Ensure collection exists before querying
+    if !client.collection_exists(collection_name).await? {
+        log::warn!("Collection '{}' doesn't exist. Creating it before searching.", collection_name);
+        let vector_dim = config.performance.vector_dimension as u64;
+        ensure_collection_exists(client.clone(), collection_name, vector_dim).await?;
+        println!("No results found (new collection created).");
+        return Ok(());
+    }
     
-    // Build filter directly here
+    // Build search filters based on args
     let mut filter_conditions = Vec::new();
     if let Some(lang_name) = &args.lang {
         filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang_name.clone()));
@@ -306,6 +313,9 @@ async fn handle_simple_query(
     // Need the full AppConfig here
     let app_config = load_config(None)?;
     
+    let embedding_handler = EmbeddingHandler::new(&app_config)
+        .context("Failed to initialize embedding handler for simple query")?;
+    
     let start_time = std::time::Instant::now(); // Define start_time here
     let search_response_result: Result<QueryResponse, VectorDBError> = search_collection(
         client.clone(),
@@ -323,9 +333,8 @@ async fn handle_simple_query(
         Ok(response) => {
             if args.json {
                 // Output JSON
-                let output_results: Vec<_> = response.result.into_iter()
+                let hits: Vec<_> = response.result.into_iter()
                     .map(|point| {
-                        // Convert payload Map<String, Value> to serde_json::Value
                         let payload_json = serde_json::to_value(point.payload)
                             .unwrap_or(serde_json::Value::Null);
                         serde_json::json!({
@@ -334,7 +343,10 @@ async fn handle_simple_query(
                             "payload": payload_json
                         })
                     }).collect();
-                println!("{}", serde_json::to_string_pretty(&output_results)?);
+                
+                // Wrap the hits in a "results" field
+                let output_json = serde_json::json!({ "results": hits });
+                println!("{}", serde_json::to_string_pretty(&output_json)?);
             } else {
                 // Output human-readable
                 if response.result.is_empty() {
@@ -394,57 +406,42 @@ async fn handle_simple_query(
 
 async fn handle_simple_clear(
     _args: &SimpleClearArgs,
-    _config: &AppConfig, // config might not be needed now
+    config: &AppConfig, // Keep config in case it's needed by other logic later, or for consistency
     client: Arc<Qdrant>,
 ) -> Result<()> {
     let collection_name = LEGACY_INDEX_COLLECTION;
-    log::info!("Starting simple clear process for collection: '{}'", collection_name);
+    log::info!("Starting simple clear (delete collection) process for: '{}'", collection_name);
 
-    // --- Check Collection Existence (CLI Logic) ---
-    if !client.collection_exists(collection_name).await? {
+    if !client.collection_exists(collection_name).await.unwrap_or(false) {
         println!("Default collection '{}' does not exist. Nothing to clear.", collection_name);
         return Ok(());
     }
 
-    // --- Confirmation and Call Core Delete (CLI Logic) ---
-    println!("Clearing all data from default collection '{}'...", collection_name);
-    log::info!("Calling core delete_all_points for collection '{}'...", collection_name);
+    println!("Deleting default collection '{}'...", collection_name);
+    log::info!("Calling core delete_collection_by_name for collection '{}'...", collection_name);
 
-    let delete_result = delete_all_points(client.clone(), collection_name).await;
-
-    // --- Handle Result Status (CLI Logic) ---
-    match delete_result {
-        Ok(response) => {
-             // Access the UpdateResult within the response
-             if let Some(update_result) = response.result {
-                 // Now try_from on the status within UpdateResult
-                 match UpdateStatus::try_from(update_result.status) {
-                     Ok(UpdateStatus::Completed) => {
-                         println!("Successfully cleared all data from collection '{}'.", collection_name);
-                         log::info!("Cleared all points from collection '{}'.", collection_name);
-                     }
-                     Ok(status) => {
-                         println!("Clear operation finished with status: {:?}", status);
-                         log::warn!("Clear operation for '{}' finished with status: {:?}", collection_name, status);
-                     }
-                     Err(_) => {
-                         // Use update_result.status for the unknown code
-                         println!("Clear operation finished with unknown status code: {}", update_result.status);
-                         log::warn!("Clear operation for '{}' finished with unknown status code: {}", collection_name, update_result.status);
-                     }
-                 }
-             } else {
-                 // Handle case where the response has no UpdateResult
-                 println!("Clear operation response did not contain result details.");
-                 log::warn!("Clear operation response for '{}' did not contain result details.", collection_name);
-             }
+    match delete_collection_by_name(client.clone(), collection_name).await {
+        Ok(_) => {
+            // The delete_collection_by_name function in core already logs success/warnings based on response.result
+            println!("Successfully deleted default collection '{}'.", collection_name);
+            log::info!("Successfully initiated deletion of collection '{}'.", collection_name);
         }
         Err(e) => {
-            log::error!("Failed to clear collection '{}': {}", collection_name, e);
-            eprintln!("Error during clear operation: {}", e);
-            return Err(anyhow!(e)); // Convert to anyhow::Error
+            if e.to_string().contains("Not found") || e.to_string().contains("doesn\'t exist") {
+                println!(
+                    "{}",
+                    format!("Collection '{}' did not exist.", collection_name).yellow()
+                );
+                log::warn!("Collection '{}' not found during delete attempt.", collection_name);
+            } else {
+                // For other errors, report them
+                eprintln!(
+                    "{}",
+                    format!("Failed to delete collection '{}': {}", collection_name, e).red()
+                );
+                return Err(e).context(format!("Failed to delete collection '{}'", collection_name));
+            }
         }
     }
-
     Ok(())
 } 

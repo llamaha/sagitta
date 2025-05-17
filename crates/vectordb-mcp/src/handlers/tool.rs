@@ -38,7 +38,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_add" => {
             let add_params: RepositoryAddParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_add(add_params, config, qdrant_client).await {
+            match handle_repository_add(add_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -46,7 +46,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_list" => {
             let list_params: RepositoryListParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_list(list_params, config).await {
+            match handle_repository_list(list_params, config, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -54,7 +54,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_remove" => {
             let remove_params: RepositoryRemoveParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_remove(remove_params, config, qdrant_client).await {
+            match handle_repository_remove(remove_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -62,7 +62,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_sync" => {
             let sync_params: RepositorySyncParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_repository_sync(sync_params, config, qdrant_client).await {
+            match handle_repository_sync(sync_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -70,21 +70,21 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "query" => {
             let query_params: QueryParams = deserialize_value(arguments, tool_name)?;
              // Call imported handler
-            match handle_query(query_params, config, qdrant_client).await {
+            match handle_query(query_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
         }
         "repository_search_file" => {
             let search_params: RepositorySearchFileParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_search_file(search_params, config).await {
+             match handle_repository_search_file(search_params, config, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
         }
         "repository_view_file" => {
             let view_params: RepositoryViewFileParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_view_file(view_params, config).await {
+             match handle_repository_view_file(view_params, config, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }

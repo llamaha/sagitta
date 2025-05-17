@@ -52,6 +52,9 @@ pub struct RepositoryConfig {
     /// If set, `repo sync` will index this specific ref statically and will *not* pull updates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_ref: Option<String>,
+    /// ID of the tenant this repository belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -126,6 +129,44 @@ fn default_vector_dimension() -> u64 {
     384
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// Configuration for OAuth2 authentication
+pub struct OAuthConfig {
+    /// OAuth client ID
+    pub client_id: String,
+    /// OAuth client secret
+    pub client_secret: String,
+    /// OAuth authorization endpoint
+    pub auth_url: String,
+    /// OAuth token endpoint
+    pub token_url: String,
+    /// OAuth user info endpoint
+    pub user_info_url: String,
+    /// Redirect URI for OAuth flow
+    pub redirect_uri: String,
+    /// Optional OAuth introspection endpoint URL for token validation
+    #[serde(skip_serializing_if = "Option::is_none")] // Keep field optional in TOML
+    pub introspection_url: Option<String>,
+    /// Optional scopes to request
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+impl Default for OAuthConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: String::new(),
+            auth_url: String::new(),
+            token_url: String::new(),
+            user_info_url: String::new(),
+            redirect_uri: String::new(),
+            introspection_url: None, // Default to None
+            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+        }
+    }
+}
+
 /// Main application configuration structure.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppConfig {
@@ -153,10 +194,27 @@ pub struct AppConfig {
     /// Performance-related configuration settings
     #[serde(default)]
     pub performance: PerformanceConfig,
-}
+    /// Optional OAuth configuration
+    #[serde(default)]
+    pub oauth: Option<OAuthConfig>,
 
-/// Configuration specific to a single repository.
-// ... (RepositoryConfig remains the same) ...
+    // TLS Configuration for HTTP Server
+    #[serde(default)]
+    pub tls_enable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_cert_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_key_path: Option<String>,
+
+    // CORS Configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cors_allowed_origins: Option<Vec<String>>, // e.g., ["http://localhost:3000", "https://app.example.com"]
+    #[serde(default = "default_cors_allow_credentials")]
+    pub cors_allow_credentials: bool,
+    /// Optional tenant ID for this configuration (used as default for CLI/server operations)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+}
 
 /// Configuration settings related to indexing.
 // ... (IndexingConfig remains the same) ...
@@ -176,6 +234,13 @@ impl Default for AppConfig {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None, // Default to None (no CORS headers or restrictive default by tower-http)
+            cors_allow_credentials: default_cors_allow_credentials(),
+            tenant_id: None,
         }
     }
 }
@@ -339,20 +404,29 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
     fs::create_dir_all(app_config_dir)
         .with_context(|| format!("Failed to create config directory: {}", app_config_dir.display()))?;
 
+    // Serialize the main config structure first
     let mut config_content = toml::to_string_pretty(config)
         .with_context(|| "Failed to serialize configuration to TOML")?;
 
-    // Add commented-out examples for ONNX paths if they are not set
+    // Prepare the commented-out ONNX examples as a separate string
+    let mut onnx_comments = String::new();
     if config.onnx_model_path.is_none() {
-        config_content.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
-        config_content.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
-        config_content.push_str("\n# Example: /path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx");
-
+        onnx_comments.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
+        onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
+        onnx_comments.push_str("\n# Example: /path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx");
     }
     if config.onnx_tokenizer_path.is_none() {
-        config_content.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
-        config_content.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
-        config_content.push_str("\n# Example: /path/to/vectordb-cli/onnx/");
+        if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
+            onnx_comments.push_str("\n");
+        }
+        onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
+        onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
+        onnx_comments.push_str("\n# Example: /path/to/vectordb-cli/onnx/");
+    }
+
+    // Prepend ONNX comments if any, ensuring they are at the top level
+    if !onnx_comments.is_empty() {
+        config_content = format!("{}\n\n{}", onnx_comments.trim_start(), config_content);
     }
 
     fs::write(&config_file_path, config_content)
@@ -378,6 +452,10 @@ pub fn get_managed_repos_from_config(config: &AppConfig) -> ManagedRepositories 
         repositories: config.repositories.clone(),
         active_repository: config.active_repository.clone(),
     }
+}
+
+fn default_cors_allow_credentials() -> bool {
+    true // Common default for development, might be stricter in production
 }
 
 #[cfg(test)]
@@ -427,6 +505,7 @@ mod tests {
             indexed_languages: Some(vec!["rs".to_string()]),
             added_as_local_path: false,
             target_ref: None,
+            tenant_id: None,
         };
 
         let repo2_path = data_path.join("repo2");
@@ -444,6 +523,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            tenant_id: None,
         };
 
         let config = AppConfig {
@@ -457,6 +537,13 @@ mod tests {
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: default_cors_allow_credentials(),
+            tenant_id: None,
         };
 
         // Save and load
@@ -510,6 +597,13 @@ mod tests {
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: default_cors_allow_credentials(),
+            tenant_id: None,
         };
         
         // Should use the custom path from config
@@ -540,6 +634,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            tenant_id: None,
         };
         assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
     }

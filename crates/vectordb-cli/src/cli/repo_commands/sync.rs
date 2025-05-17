@@ -29,21 +29,30 @@ pub async fn handle_repo_sync<C>(
     args: SyncRepoArgs, 
     config: &mut AppConfig,
     client: Arc<C>,
+    cli_args: &crate::cli::CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let start_time = Instant::now();
-    let repo_name = args.name.as_ref().or(config.active_repository.as_ref())
+
+    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
+        Some(id) => id,
+        None => {
+            return Err(anyhow!("--tenant-id is required to sync a repository."));
+        }
+    };
+
+    let repo_name_str = args.name.as_ref().or(config.active_repository.as_ref())
         .ok_or_else(|| anyhow!("No active repository set and no repository name provided with --name."))?
         .clone();
 
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == *repo_name)
-        .ok_or_else(|| anyhow!("Repository '{}' not found in configuration.", repo_name))?;
+        .position(|r| r.name == repo_name_str && r.tenant_id.as_deref() == Some(cli_tenant_id))
+        .ok_or_else(|| anyhow!("Repository '{}' for tenant '{}' not found in configuration.", repo_name_str, cli_tenant_id))?;
     
     let repo_config = &config.repositories[repo_config_index];
     
@@ -51,13 +60,13 @@ where
 
     let active_branch_str = repo_config.active_branch
         .as_ref()
-        .ok_or_else(|| anyhow!("Repository '{}' has no active branch set. Use 'use-branch' command.", repo_name))?;
+        .ok_or_else(|| anyhow!("Repository '{}' has no active branch set. Use 'use-branch' command.", repo_name_str))?;
     let target_ref_str_opt = repo_config.target_ref.clone();
     let current_sync_identifier = target_ref_str_opt.as_deref().unwrap_or(active_branch_str).to_string();
 
     println!(
         "Syncing repository '{}' (Branch/Ref: {})...", 
-        repo_name.cyan(), 
+        repo_name_str.cyan(), 
         current_sync_identifier.cyan()
     );
 
@@ -76,7 +85,7 @@ where
             if sync_result.success {
                 info!(
                     "{}",
-                    format!("Successfully synced repository '{}'", repo_name).green()
+                    format!("Successfully synced repository '{}'", repo_name_str).green()
                 );
                 println!("{}", sync_result.message.green());
                  println!(
@@ -106,7 +115,7 @@ where
                      println!("{}", "Configuration saved.".dimmed());
                 }
             } else {
-                warn!("Sync report for '{}': {}", repo_name, sync_result.message);
+                warn!("Sync report for '{}': {}", repo_name_str, sync_result.message);
                 println!("{}", sync_result.message.yellow());
                  println!(
                     "Files Indexed: {}, Files Deleted: {}", 
@@ -116,10 +125,10 @@ where
             }
         }
         Err(e) => {
-             error!("Sync failed for repository '{}': {:?}", repo_name, e);
-             println!("{}", format!("Error during sync for repository '{}'.", repo_name).red());
+             error!("Sync failed for repository '{}': {:?}", repo_name_str, e);
+             println!("{}", format!("Error during sync for repository '{}'.", repo_name_str).red());
              println!("{}", format!("  Details: {}", e).red());
-            return Err(anyhow!(e).context(format!("Failed to sync repository '{}'", repo_name)));
+            return Err(anyhow!(e).context(format!("Failed to sync repository '{}'", repo_name_str)));
         }
     }
 

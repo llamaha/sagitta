@@ -48,6 +48,41 @@ where
     client.delete_points(delete_request.into()).await.map_err(VectorDBError::from)
 }
 
+/// Deletes a Qdrant collection by its name.
+///
+/// # Arguments
+/// * `client` - An Arc-wrapped Qdrant client.
+/// * `collection_name` - The name of the collection to delete.
+///
+/// # Returns
+/// * `CoreResult<()>` - Ok if successful, or an error.
+pub async fn delete_collection_by_name<C>(
+    client: Arc<C>,
+    collection_name: &str,
+) -> CoreResult<()>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    log::info!("Deleting collection: {}", collection_name);
+    match client.delete_collection(collection_name.to_string()).await {
+        Ok(success) => { // `success` is the boolean result from the QdrantClientTrait
+            if success { // `success` is used directly as the boolean
+                log::info!("Successfully deleted collection: {}", collection_name);
+            } else {
+                log::warn!(
+                    "Delete collection operation for '{}' acknowledged by Qdrant but result was false (e.g., collection might not have existed).",
+                    collection_name
+                );
+            }
+            Ok(())
+        }
+        Err(core_err) => { // The trait method returns CoreResult (Result<T, VectorDBError>)
+            log::error!("Qdrant client error while deleting collection '{}': {:?}", collection_name, core_err);
+            Err(core_err) // Propagate the VectorDBError
+        }
+    }
+}
+
 /// Helper to ensure a specific payload field index exists in Qdrant.
 #[allow(clippy::too_many_arguments)]
 pub async fn ensure_payload_index(

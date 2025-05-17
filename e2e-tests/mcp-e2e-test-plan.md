@@ -33,7 +33,7 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 
 ### 1. Add Repository (`repository_add`)
 
-**Goal:** Add a new repository configuration to the server and trigger the initial clone/collection creation.
+**Goal:** Add a new repository configuration to the server and trigger the initial clone/collection creation. This repository will be associated with a specific tenant.
 
 **Request:**
 ```json
@@ -42,13 +42,14 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "method": "repository/add",
   "params": {
     "url": "https://github.com/sinatra/sinatra.git",
-    "name": "test-sinatra"
+    "name": "test-sinatra",
+    "tenantId": "e2e_tenant_1"
   },
   "id": 1
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Success for Add):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -66,11 +67,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 **Verification:**
 *   Check server logs for successful clone and collection creation messages.
 *   Verify the repository files exist in the `localPath`.
-*   Verify the Qdrant collection `test-sinatra` exists (may be empty initially).
+*   Verify the Qdrant collection (e.g., `<tenant_prefix>_e2e_tenant_1_test-sinatra`) exists. The exact naming convention for tenant-specific collections should be confirmed.
 
 ### 2. List Repositories (`repository_list`)
 
-**Goal:** Verify the newly added repository is listed.
+**Goal:** Verify the newly added tenant-specific repository is *not* listed when a global user (simulated by direct MCP call) lists repositories.
 
 **Request:**
 ```json
@@ -82,18 +83,14 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Success, but empty or not containing `test-sinatra`):**
 ```json
 {
   "jsonrpc": "2.0",
   "result": {
     "repositories": [
-      {
-        "name": "test-sinatra",
-        "remote": "https://github.com/sinatra/sinatra.git",
-        "branch": "main"
-      }
-      // Potentially other repositories if added previously
+      // "test-sinatra" should NOT be listed here
+      // Potentially other *global* repositories if added previously
     ]
   },
   "id": 2
@@ -101,11 +98,11 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 ```
 
 **Verification:**
-*   Confirm the `test-sinatra` repository is present in the `repositories` array with correct details.
+*   Confirm the `test-sinatra` repository is *not* present in the `repositories` array.
 
 ### 3. Sync Repository (`repository_sync`)
 
-**Goal:** Fetch latest changes (if any) from the remote, update the local copy, and index the repository contents.
+**Goal:** Verify that attempting to sync the tenant-specific repository by a global user results in an access denied error.
 
 **Request:**
 ```json
@@ -119,24 +116,26 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "message": "Successfully synced repository 'test-sinatra' branch/ref 'main' to commit <COMMIT_HASH>" // Example: "91cfb548c9e50a65324a9ce9e4ea5f10cd897027"
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: This repository requires a tenant ID for sync." // Or similar message
+    // "data": { ... } // Optional error data
   },
   "id": 3
 }
 ```
 
 **Verification:**
-*   Check server logs for git pull/fetch, parsing, embedding, and upsert operations.
-*   Verify the Qdrant collection `test-sinatra` now contains points (check Qdrant UI or API). The number should correspond to the code chunks found (e.g., > 0).
+*   Check server logs for access denied messages for `test-sinatra`.
+*   Verify the Qdrant collection for `test-sinatra` remains unchanged (not synced).
 
 ### 4. Query Repository (`query`)
 
-**Goal:** Perform a semantic search query against the indexed repository data.
+**Goal:** Verify that attempting to query the tenant-specific repository by a global user results in an access denied error.
 
 **Request (Note: parameters are camelCase):**
 ```json
@@ -147,40 +146,30 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
     "repositoryName": "test-sinatra",
     "queryText": "define a route",
     "limit": 5
-    // "branchName": "main" // Optional
   },
   "id": 4
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "results": [
-      {
-        "filePath": "test/route_added_hook_test.rb", // Example result for Sinatra
-        "startLine": 5,
-        "endLine": 11,
-        "score": 0.5, // Example score
-        "content": "def self.routes ; @routes ; end\ndef self.procs ; @procs ; end\ndef self.route_added(verb, path, proc)\n    @routes << [verb, path]\n    @procs << proc\n  end"
-      }
-      // ... other results up to limit
-    ]
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: Tenant ID mismatch for query operation." // Or similar query-specific denial message
+    // "data": { ... } // Optional error data
   },
   "id": 4
 }
 ```
 
 **Verification:**
-*   Check the `results` array contains relevant code snippets or file content matching the query.
-*   Verify `filePath`, line numbers, and `content` seem correct.
-*   Verify the number of results matches the `limit` requested (or fewer if less results available).
+*   Check server logs for access denied messages.
 
 ### 5. Add Repository with Target Ref (`repository_add`)
 
-**Goal:** Add a repository configuration targeting a specific tag or commit.
+**Goal:** Add another tenant-specific repository configuration targeting a specific tag or commit.
 
 **Repository Details:**
 *   Name: `test-sinatra-tag`
@@ -195,13 +184,14 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "params": {
     "url": "https://github.com/sinatra/sinatra.git",
     "name": "test-sinatra-tag",
-    "targetRef": "f74f968a007a3a578064d079c23631f90cb63404" 
+    "targetRef": "f74f968a007a3a578064d079c23631f90cb63404",
+    "tenantId": "e2e_tenant_2" 
   },
   "id": 6
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Success for Add):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -209,23 +199,19 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
     "name": "test-sinatra-tag",
     "url": "https://github.com/sinatra/sinatra.git",
     "localPath": "/path/to/your/repositories/test-sinatra-tag", // Actual path will vary
-    "defaultBranch": "f74f968a007a3a578064d079c23631f90cb63404", // Should reflect the targetRef
-    "activeBranch": "f74f968a007a3a578064d079c23631f90cb63404"  // Should reflect the targetRef
+    "defaultBranch": "f74f968a007a3a578064d079c23631f90cb63404", 
+    "activeBranch": "f74f968a007a3a578064d079c23631f90cb63404"
   },
   "id": 6
 }
 ```
 
 **Verification:**
-*   Check server logs for successful clone and checkout messages.
-*   Verify the repository files exist in the `localPath`.
-*   Run `git -C /path/to/your/repositories/test-sinatra-tag rev-parse HEAD` and verify it matches the `targetRef`.
-*   Verify the Qdrant collection `test-sinatra-tag` exists.
-*   Run `repository/list` and verify `test-sinatra-tag` appears with the `targetRef` as its `branch` (or `activeBranch` if list output changes).
+*   Verify Qdrant collection (e.g., `<tenant_prefix>_e2e_tenant_2_test-sinatra-tag`) exists.
 
 ### 6. Sync Repository with Target Ref (`repository_sync`)
 
-**Goal:** Ensure syncing a repository with a `targetRef` checks out the correct ref and indexes its content without fetching/pulling.
+**Goal:** Verify that attempting to sync the second tenant-specific repository by a global user results in an access denied error.
 
 **Request:**
 ```json
@@ -239,25 +225,24 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "message": "Successfully synced repository 'test-sinatra-tag' branch/ref 'f74f968a007a3a578064d079c23631f90cb63404' to commit f74f968a007a3a578064d079c23631f90cb63404"
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: This repository requires a tenant ID for sync." // Or similar
   },
   "id": 7
 }
 ```
 
 **Verification:**
-*   Check server logs: Verify `git checkout` and `git rev-parse` messages appear, but **NO** `git fetch` or `git pull` messages.
-*   Verify logs show parsing, embedding, and upsert operations for the content at the specified commit.
-*   Verify the Qdrant collection `test-sinatra-tag` contains points corresponding to the code at the target commit.
+*   Check server logs for access denied messages.
 
 ### 7. Query Repository with Target Ref (`query`)
 
-**Goal:** Query the specifically indexed static version of the repository.
+**Goal:** Verify that attempting to query the second tenant-specific repository by a global user results in an access denied error.
 
 **Request:**
 ```json
@@ -266,42 +251,31 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "method": "query",
   "params": {
     "repositoryName": "test-sinatra-tag",
-    "queryText": "get request", // Query relevant to the content at the specific tag
+    "queryText": "get request", 
     "limit": 3
   },
   "id": 8
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "results": [
-      // Results should reflect content present *only* at the target commit/tag,
-      // NOT content added in later commits on the main branch.
-      {
-        "filePath": "lib/sinatra/base.rb", // Example from Sinatra v3.0.0
-        "startLine": 690, // Line numbers are illustrative
-        "endLine": 695,
-        "score": 0.6, // Example score
-        "content": "      # Defining a `GET` handler also automatically defines\n      # a `HEAD` handler.\n      def get(path, opts = {}, &block)\n        conditions = @conditions.dup\n        route('GET', path, opts, &block)\n\n        @conditions = conditions\n        route('HEAD', path, opts, &block)\n      end"
-      }
-      // ... other relevant results ...
-    ]
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: Tenant ID mismatch for query operation." // Or similar
   },
   "id": 8
 }
 ```
 
 **Verification:**
-*   Verify the results are relevant to the code state at the `targetRef` (`f74f968...`).
-*   Verify results *do not* include content added after that commit (e.g., changes in the `main` branch of `sinatra/sinatra.git` after v3.0.0).
+*   Check server logs for access denied messages.
 
 ### 8. Remove Repository with Target Ref (`repository_remove`)
 
-**Goal:** Remove the tagged repository configuration and data.
+**Goal:** Verify that attempting to remove the second tenant-specific repository by a global user results in an access denied error.
 
 **Request:**
 ```json
@@ -311,32 +285,29 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "params": {
     "name": "test-sinatra-tag"
   },
-  "id": 9 // Original plan used 9 for both removes, let's keep this one 9
+  "id": 9 
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "name": "test-sinatra-tag",
-    "status": "Removed"
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: This repository requires a tenant ID for removal." // Or similar
   },
   "id": 9
 }
 ```
 
 **Verification:**
-*   Run `repository_list` again; `test-sinatra-tag` should no longer be listed.
-*   Verify the local directory `/path/to/your/repositories/test-sinatra-tag` is deleted.
-*   Verify the Qdrant collection `test-sinatra-tag` is deleted.
+*   Run `repository_list` again; `test-sinatra-tag` should still not be listed (as it was tenant-specific).
+*   Verify the local directory and Qdrant collection for `test-sinatra-tag` still exist (as removal was denied).
 
 ### 9. Remove Repository (`repository_remove`)
 
-(Renumbering to avoid ID conflict, though test plan re-used ID 9)
-
-**Goal:** Remove the original `test-sinatra` repository configuration and associated data.
+**Goal:** Verify that attempting to remove the first tenant-specific repository by a global user results in an access denied error.
 
 **Request:**
 ```json
@@ -346,25 +317,31 @@ We will use a sample repository for testing. Adjust URLs and paths as needed.
   "params": {
     "name": "test-sinatra"
   },
-  "id": 10 // New ID to avoid conflict with previous step 8 which used ID 9.
+  "id": 10 
 }
 ```
 
-**Expected Response (Success):**
+**Expected Response (Error - Access Denied):**
 ```json
 {
   "jsonrpc": "2.0",
-  "result": {
-    "name": "test-sinatra",
-    "status": "Removed"
+  "error": {
+    "code": -32030, // ACCESS_DENIED
+    "message": "Access denied: This repository requires a tenant ID for removal." // Or similar
   },
   "id": 10
 }
 ```
 
 **Verification:**
-*   Run `repository_list` again; `test-sinatra` should no longer be listed.
-*   Check the server logs for deletion messages.
-*   Verify the local repository directory (`/path/to/your/repositories/test-sinatra`) has been deleted.
-*   Verify the Qdrant collection `test-sinatra` has been deleted or cleared.
+*   Verify `test-sinatra` local directory and Qdrant collection still exist.
+
+---
+
+**Note on E2E Tenant Isolation Testing:**
+The above tests reflect the behavior when interacting with the MCP server directly via its JSON-RPC stdin/stdout interface. In this mode, no authenticated user context (like `AuthenticatedUser` from HTTP middleware) is available.
+- `repository/add` requires a `tenantId` in its parameters.
+- Subsequent operations (`list`, `sync`, `query`, `remove`) on these tenant-specific repositories will be treated as attempted by a "global" user (no tenant ID). The implemented tenant isolation logic will deny these operations, which is the expected behavior being tested here.
+
+To test the full lifecycle (add, sync, query, remove) for a tenant-specific repository *by a user belonging to that tenant*, tests would need to be run through an interface that populates the `AuthenticatedUser` context (e.g., an HTTP server with authentication middleware) or use a test harness that can mock this context for the MCP handlers.
 
