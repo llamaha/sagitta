@@ -83,7 +83,10 @@ async fn main() -> Result<()> {
             info!(address = %addr, "Running in HTTP/SSE mode");
             // HTTP mode also consumes the server instance for its AppState
             if let Err(e) = run_http_server(addr, server_instance).await {
-                tracing::error!(error = %e, "HTTP/SSE server encountered an error");
+                tracing::error!("HTTP/SSE server encountered an error: {:?}", e);
+                for cause in e.chain().skip(1) {
+                    tracing::error!("Caused by: {}", cause);
+                }
                 std::process::exit(1);
             }
         }

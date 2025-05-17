@@ -2,60 +2,264 @@ use axum::{
     routing::{get, post},
     Router,
     extract::{State, Query},
-    response::{sse::Sse, sse::Event, IntoResponse, Response as AxumResponse},
+    response::{sse::Sse, sse::Event, IntoResponse},
     http::{StatusCode, HeaderMap},
     Json,
 };
 use dashmap::DashMap;
-use futures_util::stream::{Stream, Abortable, AbortHandle};
+use futures_util::stream::Stream;
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, broadcast};
-use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tracing::{error, info, warn, instrument};
 use uuid::Uuid;
-use futures_util::stream::{StreamExt, AbortRegistration};
-use tokio_stream::StreamMap; // For managing multiple streams if needed, not directly for this
-use async_stream; // Make sure it's in scope if `async_stream::stream!` is used
-use serde_json::json; // Add this import
-use serde::Deserialize; // For Query extractor
+use serde_json::json;
+use serde::Deserialize;
+use axum_extra::TypedHeader;
+use axum_extra::headers::Authorization;
+use axum_extra::headers::authorization::Bearer;
+use async_stream;
+use std::sync::RwLock;
+use crate::tenant::InMemoryTenantStore;
+use crate::api_key::InMemoryApiKeyStore;
+use tower::ServiceBuilder;
+use tower_http::trace::TraceLayer;
+use vectordb_core::config::AppConfig;
+use tower_http::cors::{CorsLayer, Any as CorsAny};
+use axum::http::Method as HttpMethod;
 
 use crate::server::Server;
 use qdrant_client::Qdrant;
-use crate::mcp::types::{Request as McpRequest, Response as McpResponse, ErrorObject};
+use crate::mcp::types::{Request as McpRequest};
 use crate::mcp::error_codes;
+use crate::auth::{AuthClient, AuthClientOperations, UserInfo as AuthUserInfo};
+use crate::api_key::ApiKeyStore;
+use crate::handlers::api_key_handler::{create_api_key_handler, list_api_keys_handler, delete_api_key_handler};
+use crate::middleware::auth_middleware::{auth_layer, AuthenticatedUser};
+use axum::middleware;
+use crate::tenant::TenantStore;
+use crate::handlers::tenant_handler::{handle_create_tenant, handle_list_tenants, handle_get_tenant, handle_update_tenant, handle_delete_tenant};
+use crate::middleware::rate_limit_middleware::TenantKey;
+use axum_limit::LimitState;
+use axum::extract::FromRef;
+use crate::middleware::secure_headers_middleware;
+use axum_server::tls_rustls::RustlsConfig;
+use std::net::SocketAddr;
+use anyhow::Context;
+use crate::oauth_user_mapping::{OAuthUserTenantMappingStore, InMemoryOAuthUserTenantMappingStore};
+use crate::handlers::oauth_mapping_handler;
 
 // Shared state for the Axum application
 #[derive(Clone)]
 pub struct AppState {
     pub server: Arc<Server<Qdrant>>,
     pub active_connections: Arc<DashMap<Uuid, mpsc::Sender<String>>>,
+    pub auth_client: Arc<dyn AuthClientOperations + Send + Sync>,
+    pub api_key_store: Arc<dyn ApiKeyStore>,
+    pub tenant_store: Arc<dyn TenantStore>,
+    pub oauth_user_mapping_store: Arc<dyn OAuthUserTenantMappingStore + Send + Sync>,
+    pub rate_limit_state: Arc<LimitState<TenantKey>>,
+}
+
+// Implement FromRef so Axum knows how to get LimitState<TenantKey> from AppState
+// The axum_limit extractors will look for LimitState<K> directly.
+impl FromRef<AppState> for LimitState<TenantKey> {
+    fn from_ref(app_state: &AppState) -> Self {
+        // LimitState should be Clone as it likely holds an Arc to the internal DashMap.
+        (*app_state.rate_limit_state).clone()
+    }
 }
 
 // No longer generic over C
 pub async fn run_http_server(
-    addr: String,
+    addr_str: String,
     mcp_server_concrete: Server<Qdrant>,
 ) -> anyhow::Result<()> {
-    let shared_state = AppState {
+    let config = mcp_server_concrete.get_config().await?;
+    let concrete_auth_client = AuthClient::new(config.oauth.clone())?;
+    let auth_client: Arc<dyn AuthClientOperations + Send + Sync> = Arc::new(concrete_auth_client);
+
+    // Use the concrete type for bootstrapping, then cast to trait object
+    let api_key_store_concrete = Arc::new(InMemoryApiKeyStore::default());
+
+    // Bootstrap admin API key from env for test/dev
+    if let Ok(bootstrap_admin_key) = std::env::var("VECTORDB_BOOTSTRAP_ADMIN_KEY") {
+        println!("VECTORDB_BOOTSTRAP_ADMIN_KEY={:?}", std::env::var("VECTORDB_BOOTSTRAP_ADMIN_KEY"));
+        if api_key_store_concrete.get_key_by_value(&bootstrap_admin_key).await.is_none() {
+            let _ = api_key_store_concrete.insert_key_with_value(
+                bootstrap_admin_key.clone(),
+                "admin_tenant".to_string(),
+                Some("admin_user".to_string()),
+                Some("Bootstrap Admin Key".to_string()),
+                vec!["manage:tenants".to_string()],
+                None
+            ).await;
+            tracing::info!("Admin key inserted: {}", bootstrap_admin_key);
+        } else {
+            tracing::info!("Admin key already present: {}", bootstrap_admin_key);
+        }
+    } else {
+        println!("VECTORDB_BOOTSTRAP_ADMIN_KEY not set");
+    }
+
+    // Now cast to trait object for AppState
+    let api_key_store: Arc<dyn ApiKeyStore> = api_key_store_concrete.clone();
+
+    let tenant_store: Arc<dyn TenantStore> = Arc::new(InMemoryTenantStore::default());
+    let oauth_user_mapping_store: Arc<dyn OAuthUserTenantMappingStore + Send + Sync> = Arc::new(InMemoryOAuthUserTenantMappingStore::default());
+    let rate_limit_state = Arc::new(LimitState::<TenantKey>::default());
+
+    let app_state = AppState {
         server: Arc::new(mcp_server_concrete),
         active_connections: Arc::new(DashMap::new()),
+        auth_client,
+        api_key_store,
+        tenant_store,
+        oauth_user_mapping_store,
+        rate_limit_state,
+    };
+
+    // TEMPORARY DEBUGGING ROUTE
+    // let temp_debug_router = Router::new()
+    //     .route("/api/v1/tenants/", post(handle_create_tenant))
+    //     .route_layer(axum::middleware::from_fn_with_state(app_state.clone(), auth_layer));
+    // END TEMPORARY DEBUGGING ROUTE
+
+    // --- CORS Layer Setup ---
+    let cors_layer = if let Some(allowed_origins) = &config.cors_allowed_origins {
+        let origins: Vec<axum::http::HeaderValue> = allowed_origins.iter()
+            .map(|origin| origin.parse().expect("Invalid CORS origin in config"))
+            .collect();
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(vec![
+                HttpMethod::GET, 
+                HttpMethod::POST, 
+                HttpMethod::PUT, 
+                HttpMethod::DELETE, 
+                HttpMethod::OPTIONS,
+                HttpMethod::HEAD, // HEAD is often implicitly allowed with GET by some frameworks
+                HttpMethod::PATCH,
+            ])
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+                axum::http::header::HeaderName::from_static("x-api-key"),
+            ])
+            .allow_credentials(config.cors_allow_credentials)
+    } else {
+        // Default: restrictive or no CORS headers. 
+        // Or use CorsLayer::very_permissive() for local dev if no origins configured.
+        // For now, let's make it permissive if not configured, common for local dev.
+        // In production, cors_allowed_origins should be explicitly set.
+        CorsLayer::new()
+            .allow_origin(CorsAny) // WARNING: Permissive default, ensure this is reviewed for production
+            .allow_methods([
+                HttpMethod::GET,
+                HttpMethod::POST,
+                HttpMethod::PUT,
+                HttpMethod::DELETE,
+                HttpMethod::OPTIONS,
+                HttpMethod::HEAD,
+                HttpMethod::PATCH,
+            ])
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+                axum::http::header::HeaderName::from_static("x-api-key"),
+            ])
+            .allow_credentials(config.cors_allow_credentials) 
     };
 
     // Extract host and port from the addr string
-    let server_url = format!("http://{}", addr);
+    let server_url = format!("http://{}", addr_str);
     info!(server_url = %server_url, "Server URL for SSE endpoint");
+
+    // Define OAuth routes (user-facing, typically less restricted or handled by IdP redirects)
+    let oauth_routes = Router::new()
+        .route("/auth/login", get(login_handler))
+        .route("/auth/callback", get(callback_handler))
+        .route("/auth/userinfo", get(userinfo_handler));
+        // Note: auth_layer is applied to /api/v1 which might cover some of these if they were nested differently,
+        // or they might have their own specific auth/session handling after code exchange.
+
+    // Define API Key Management Routes with explicit prefix
+    let api_key_routes_direct = Router::new()
+        .route("/keys/", post(create_api_key_handler).get(list_api_keys_handler))
+        .route("/keys/:key_id", axum::routing::delete(delete_api_key_handler));
+
+    // Define Tenant Management API Routes for /api/v1/tenants
+    let tenant_routes_direct = Router::new()
+        .route("/tenants/", post(handle_create_tenant).get(handle_list_tenants)) // Explicit trailing slash for collection
+        .route("/tenants/:id", get(handle_get_tenant).put(handle_update_tenant).delete(handle_delete_tenant));
+
+    // Define OAuth User-Tenant Mapping Admin Routes for /api/v1/admin/oauth-mappings
+    let api_v1_admin_oauth_mapping_routes = oauth_mapping_handler::oauth_mapping_admin_routes();
+
+    // --- MCP JSON-RPC over HTTP (if still needed alongside RESTful APIs) ---
+    let mcp_route = Router::new().route("/mcp", post(mcp_json_rpc_handler));
+
+    let api_v1_router = Router::new()
+        .merge(api_key_routes_direct) // Use merge with the new direct-path router
+        .merge(tenant_routes_direct) // Tenant routes are already using this pattern
+        .nest("/admin/oauth-mappings", api_v1_admin_oauth_mapping_routes)
+        .route_layer(axum::middleware::from_fn_with_state(app_state.clone(), auth_layer));
 
     let app = Router::new()
         .route("/sse", get(sse_handler))
         .route("/message", post(message_handler))
-        .with_state(shared_state);
+        .merge(oauth_routes) // User-facing OAuth routes, typically not under /api/v1 or same auth as resource APIs
+        // .merge(temp_debug_router) // Merge the temporary debug route
+        .nest("/api/v1", api_v1_router) // All /api/v1 routes are authenticated
+        .merge(mcp_route) // MCP might have its own auth considerations or use the same /api/v1 layer if nested
+        .route("/health", get(health_check_handler))
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(axum::middleware::from_fn(secure_headers_middleware::secure_headers_middleware))
+                .layer(cors_layer)
+        )
+        .with_state(app_state.clone())
+        // Add catch-all route for unmatched requests
+        .fallback(|req: axum::http::Request<axum::body::Body>| async move {
+            println!("CATCH-ALL: Unmatched request: {} {}", req.method(), req.uri().path());
+            (StatusCode::NOT_FOUND, format!("Not found: {} {}", req.method(), req.uri().path()))
+        });
 
-    info!(address = %addr, "MCP HTTP server listening (SSE on /sse, POST on /message)");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let bind_addr: SocketAddr = addr_str.parse().context(format!("Invalid bind address: {}", addr_str))?;
+    info!(address = %bind_addr, "Preparing to start HTTP server");
+
+    if config.tls_enable {
+        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert_path, &config.tls_key_path) {
+            info!("TLS enabled. Attempting to load cert from '{}' and key from '{}'", cert_path, key_path);
+            let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
+                .await
+                .context(format!("Failed to load TLS certificate/key from paths: cert='{}', key='{}'", cert_path, key_path))?;
+            
+            info!(address = %bind_addr, "Starting HTTPS server with TLS");
+            axum_server::bind_rustls(bind_addr, tls_config)
+                .serve(app.into_make_service())
+                .await
+                .context("HTTPS server error")?;
+        } else {
+            error!("TLS is enabled in config, but cert_path or key_path is missing. Falling back to HTTP.");
+            info!(address = %bind_addr, "Starting HTTP server (TLS configuration incomplete)");
+            axum_server::bind(bind_addr)
+                .serve(app.into_make_service())
+                .await
+                .context("HTTP server error (fallback due to TLS config)")?;
+        }
+    } else {
+        info!(address = %bind_addr, "Starting HTTP server (TLS disabled)");
+        axum_server::bind(bind_addr)
+            .serve(app.into_make_service())
+            .await
+            .context("HTTP server error")?;
+    }
 
     Ok(())
 }
@@ -280,4 +484,117 @@ async fn message_handler(
             (StatusCode::NOT_FOUND, Json(err_obj)).into_response()
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginQuery {
+    redirect_uri: Option<String>,
+}
+
+#[axum::debug_handler]
+async fn login_handler(
+    State(state): State<AppState>,
+    Query(query): Query<LoginQuery>,
+) -> impl IntoResponse {
+    match state.auth_client.get_authorization_url().await {
+        Ok(url) => {
+            if let Some(redirect_uri) = query.redirect_uri {
+                (StatusCode::FOUND, [("Location", url)]).into_response()
+            } else {
+                Json(url).into_response()
+            }
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(format!("Failed to generate authorization URL: {}", e)),
+        ).into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CallbackQuery {
+    code: String,
+    state: Option<String>,
+}
+
+#[axum::debug_handler]
+async fn callback_handler(
+    State(state): State<AppState>,
+    Query(query): Query<CallbackQuery>,
+) -> impl IntoResponse {
+    match state.auth_client.exchange_code(&query.code).await {
+        Ok(token_response) => {
+            // TODO: Store token in session/database
+            Json(token_response).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(format!("Failed to exchange code: {}", e)),
+        ).into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthHeader {
+    authorization: String,
+}
+
+#[axum::debug_handler]
+async fn userinfo_handler(
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.auth_client.get_user_info(auth.token()).await {
+        Ok(user_info) => Json(user_info).into_response(),
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            Json(format!("Failed to get user info: {}", e)),
+        ).into_response()
+    }
+}
+
+// Helper function to create the main app router for testing purposes
+#[cfg(test)] // Only compile this for test builds
+pub fn app_router_for_tests(app_state: AppState) -> Router {
+    let api_v1_key_routes = Router::new()
+        .route("/keys", post(create_api_key_handler).get(list_api_keys_handler))
+        .route("/keys/:key_id", axum::routing::delete(delete_api_key_handler));
+
+    let api_v1_tenant_routes = Router::new()
+        .route("/", post(handle_create_tenant).get(handle_list_tenants))
+        .route("/:id", get(handle_get_tenant).put(handle_update_tenant).delete(handle_delete_tenant));
+
+    let api_v1_router_for_test = Router::new()
+        .merge(api_v1_key_routes)
+        .nest("/tenants", api_v1_tenant_routes)
+        .route_layer(axum::middleware::from_fn_with_state(app_state.clone(), auth_layer));
+
+    Router::new()
+        .nest("/api/v1", api_v1_router_for_test)
+        .with_state(app_state)
+}
+
+// Stub for mcp_json_rpc_handler
+async fn mcp_json_rpc_handler(State(app_state): State<AppState>, Json(request): Json<serde_json::Value>) -> impl IntoResponse {
+    info!("MCP JSON-RPC request: {:?}", request);
+    // In a real scenario, this would call app_state.server.process_json_rpc_request_str or similar
+    (StatusCode::NOT_IMPLEMENTED, "MCP JSON-RPC handler not fully implemented in HTTP transport").into_response()
+}
+
+// Updated health_check_handler
+#[axum::debug_handler] // Ensures handler function signature is compatible with Axum
+async fn health_check_handler(State(app_state): State<AppState>) -> impl IntoResponse {
+    // Potentially check Qdrant status in the future
+    // let qdrant_ok = app_state.qdrant_client.health_check().await.is_ok();
+    
+    let server_name = "vectordb-mcp";
+    // Ideally, get version from Cargo.toml or build script
+    let version = env!("CARGO_PKG_VERSION"); 
+
+    (StatusCode::OK, Json(json!({ 
+        "status": "ok",
+        "server_name": server_name,
+        "version": version,
+        // "qdrant_status": if qdrant_ok { "ok" } else { "error" } 
+    }))).into_response()
 } 

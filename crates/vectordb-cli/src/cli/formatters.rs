@@ -68,8 +68,9 @@ pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_outp
             })
             .collect();
 
-        // Serialize the results to JSON
-        let json_string = serde_json::to_string_pretty(&serializable_results)?;
+        // Serialize the results to JSON, wrapped in a "results" field
+        let output_json = serde_json::json!({ "results": serializable_results });
+        let json_string = serde_json::to_string_pretty(&output_json)?;
         println!("{}", json_string);
     } else {
         // Original human-readable output

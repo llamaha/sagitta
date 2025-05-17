@@ -5,11 +5,11 @@ use crate::constants::FIELD_LANGUAGE;
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::repo_helpers; // Use core repo_helpers
 use crate::error::Result; // Use core Result
+use anyhow::{anyhow, Context}; // Ensure anyhow macro is imported
 
 // Remove CLI specific import
 // use crate::cli::CliArgs;
 
-use anyhow::{Context};
 use qdrant_client::qdrant::{
     ScrollPointsBuilder,
     PayloadIncludeSelector,
@@ -278,7 +278,9 @@ where
     info!("Files to index/update: {}, Files to delete: {}", files_to_index_count, files_to_delete_count);
     
     // --- Qdrant Operations ---
-    let collection_name = repo_helpers::get_collection_name(repo_name, app_config);
+    let tenant_id = repo_config.tenant_id.as_deref()
+        .ok_or_else(|| anyhow!("Tenant ID missing in RepositoryConfig for repository '{}' during sync operation", repo_name))?;
+    let collection_name = repo_helpers::get_collection_name(tenant_id, repo_name, app_config);
     let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
     
     // Ensure collection exists (might need embedding dimension)

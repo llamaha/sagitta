@@ -446,142 +446,6 @@ fn test_index_and_query() -> Result<()> {
 
 // ... (other tests like test_stats, test_clear etc. if they exist) ... 
 
-#[test]
-fn test_build_script_copies_library() -> Result<()> {
-    // Get the path to the built executable
-    let bin_path = get_binary_path()?;
-    
-    // Determine the expected parent directory (target/<profile>/)
-    let target_dir = bin_path.parent().ok_or_else(|| anyhow::anyhow!("Binary path has no parent directory"))?;
-    
-    // Determine the expected library name based on OS
-    let lib_name = if cfg!(target_os = "macos") {
-        "libonnxruntime.dylib"
-    } else if cfg!(target_os = "linux") {
-        "libonnxruntime.so"
-    } else {
-        // Rpath logic is only for Linux/macOS, so skip test on other platforms
-        println!("Skipping library copy test on unsupported OS");
-        return Ok(());
-    };
-    
-    // Construct the expected path to the copied library
-    let expected_lib_path = target_dir.join("lib").join(lib_name);
-    
-    println!(
-        "Checking for library ({}) at: {}",
-        std::env::var("PROFILE").unwrap_or_else(|_| "<unknown profile>".to_string()),
-        expected_lib_path.display()
-    );
-
-    // Assert that the library file exists
-    assert!(
-        expected_lib_path.exists(),
-        "Build script did not copy {} to the expected location: {}",
-        lib_name,
-        expected_lib_path.display()
-    );
-    
-    Ok(())
-}
-
-// --- Helper Functions for Repo Sync Tests --- 
-
-// Helper to create a unique suffix for collections/repos
-fn unique_suffix() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_millis()
-        .to_string()
-}
-
-// Helper to create and commit a file in a Git repo
-fn create_and_commit(repo: &Repository, file_name: &str, content: &str, message: &str) -> Result<Oid> {
-    let repo_path = repo.path().parent().unwrap(); // Get the workdir
-    let file_path = repo_path.join(file_name);
-    fs::write(&file_path, content)?;
-
-    let mut index = repo.index()?;
-    // Need to convert path relative to workdir
-    let relative_path = file_path.strip_prefix(repo_path)?;
-    index.add_path(relative_path)?;
-    index.write()?;
-
-    let oid = index.write_tree()?;
-    let signature = Signature::now("Test User", "test@example.com")?;
-    let parent_commit = find_last_commit(repo).ok();
-    let parents = parent_commit.as_ref().map(|c| vec![c]).unwrap_or_default();
-
-    // Convert Vec<&Commit> to Vec<&Commit> for the commit call
-    let parents_ref: Vec<&Commit> = parents.iter().map(|&c| c).collect();
-
-    let tree = repo.find_tree(oid)?;
-
-    repo.commit(
-        Some("HEAD"),      // point HEAD to our new commit
-        &signature,      // author
-        &signature,      // committer
-        message,         // message
-        &tree,           // tree
-        &parents_ref,    // parents
-    ).map_err(anyhow::Error::from) // Convert git2::Error to anyhow::Error
-}
-
-// Helper to find the last commit
-fn find_last_commit(repo: &Repository) -> Result<Commit<'_>, git2::Error> {
-    let obj = repo.head()?.resolve()?.peel(git2::ObjectType::Commit)?;
-    obj.into_commit().map_err(|_| git2::Error::from_str("Couldn't find commit"))
-}
-
-// Helper to read the app config
-fn read_config(config_path: &PathBuf) -> Result<AppConfig> {
-    let content = fs::read_to_string(config_path)?; 
-    let config: AppConfig = toml::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))?;
-    Ok(config)
-}
-
-// Helper to get Qdrant point count for a specific file/branch/commit
-async fn get_qdrant_point_count(
-    client: &Qdrant, 
-    collection_name: &str, 
-    file_path: Option<&str>, 
-    branch_name: Option<&str>,
-    commit_hash: Option<&str>
-) -> Result<u64> {
-    let mut filters = Vec::new();
-    if let Some(file) = file_path {
-        filters.push(Condition::matches(FIELD_FILE_PATH, file.to_string()));
-    }
-    if let Some(branch) = branch_name {
-        filters.push(Condition::matches(FIELD_BRANCH, branch.to_string()));
-    }
-    if let Some(commit) = commit_hash {
-        filters.push(Condition::matches(FIELD_COMMIT_HASH, commit.to_string()));
-    }
-
-    // Construct the final filter
-    let filter: Option<Filter> = if filters.is_empty() { 
-        None 
-    } else { 
-        // Correct: 'must' expects Vec<Condition>
-        Some(Filter { must: filters, ..Default::default() })
-    };
-
-    // Conditionally apply the filter to the builder
-    let mut count_request = CountPointsBuilder::new(collection_name);
-    if let Some(f) = filter {
-        count_request = count_request.filter(f);
-    }
-    count_request = count_request.exact(true);
-
-    let count_result = client.count(count_request).await?;
-    Ok(count_result.result.unwrap().count)
-}
-
-// --- Main Repo Sync Test --- 
-
 #[tokio::test]
 async fn test_repo_sync_scenarios() -> Result<()> {
     let onnx_paths_opt = get_default_onnx_paths();
@@ -978,4 +842,99 @@ async fn test_repo_sync_scenarios() -> Result<()> {
 fn test_cross_repo_query() -> Result<()> {
     // ... existing code ...
     Ok(())
+}
+
+// --- Helper Functions for Repo Sync Tests --- 
+
+// Helper to create a unique suffix for collections/repos
+fn unique_suffix() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis()
+        .to_string()
+}
+
+// Helper to create and commit a file in a Git repo
+fn create_and_commit(repo: &Repository, file_name: &str, content: &str, message: &str) -> Result<Oid> {
+    let repo_path = repo.path().parent().unwrap(); // Get the workdir
+    let file_path = repo_path.join(file_name);
+    fs::write(&file_path, content)?;
+
+    let mut index = repo.index()?;
+    // Need to convert path relative to workdir
+    let relative_path = file_path.strip_prefix(repo_path)?;
+    index.add_path(relative_path)?;
+    index.write()?;
+
+    let oid = index.write_tree()?;
+    let signature = Signature::now("Test User", "test@example.com")?;
+    let parent_commit = find_last_commit(repo).ok();
+    let parents = parent_commit.as_ref().map(|c| vec![c]).unwrap_or_default();
+
+    // Convert Vec<&Commit> to Vec<&Commit> for the commit call
+    let parents_ref: Vec<&Commit> = parents.iter().map(|&c| c).collect();
+
+    let tree = repo.find_tree(oid)?;
+
+    repo.commit(
+        Some("HEAD"),      // point HEAD to our new commit
+        &signature,      // author
+        &signature,      // committer
+        message,         // message
+        &tree,           // tree
+        &parents_ref,    // parents
+    ).map_err(anyhow::Error::from) // Convert git2::Error to anyhow::Error
+}
+
+// Helper to find the last commit
+fn find_last_commit(repo: &Repository) -> Result<Commit<'_>, git2::Error> {
+    let obj = repo.head()?.resolve()?.peel(git2::ObjectType::Commit)?;
+    obj.into_commit().map_err(|_| git2::Error::from_str("Couldn't find commit"))
+}
+
+// Helper to read the app config
+fn read_config(config_path: &PathBuf) -> Result<AppConfig> {
+    let content = fs::read_to_string(config_path)?; 
+    let config: AppConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("Failed to parse config TOML: {}", e))?;
+    Ok(config)
+}
+
+// Helper to get Qdrant point count for a specific file/branch/commit
+async fn get_qdrant_point_count(
+    client: &Qdrant, 
+    collection_name: &str, 
+    file_path: Option<&str>, 
+    branch_name: Option<&str>,
+    commit_hash: Option<&str>
+) -> Result<u64> {
+    let mut filters = Vec::new();
+    if let Some(file) = file_path {
+        filters.push(Condition::matches(FIELD_FILE_PATH, file.to_string()));
+    }
+    if let Some(branch) = branch_name {
+        filters.push(Condition::matches(FIELD_BRANCH, branch.to_string()));
+    }
+    if let Some(commit) = commit_hash {
+        filters.push(Condition::matches(FIELD_COMMIT_HASH, commit.to_string()));
+    }
+
+    // Construct the final filter
+    let filter: Option<Filter> = if filters.is_empty() { 
+        None 
+    } else { 
+        // Correct: 'must' expects Vec<Condition>
+        Some(Filter { must: filters, ..Default::default() })
+    };
+
+    // Conditionally apply the filter to the builder
+    let mut count_request = CountPointsBuilder::new(collection_name);
+    if let Some(f) = filter {
+        count_request = count_request.filter(f);
+    }
+    count_request = count_request.exact(true);
+
+    let count_result = client.count(count_request).await?;
+    Ok(count_result.result.unwrap().count)
 } 

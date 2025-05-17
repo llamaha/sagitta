@@ -65,20 +65,27 @@ pub async fn handle_repo_query<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
+    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
+        Some(id) => id,
+        None => {
+            bail!("--tenant-id is required to query a repository.");
+        }
+    };
+
     let repo_name = match args.name.as_ref().or(config.active_repository.as_ref()) {
         Some(name) => name.clone(),
         None => bail!("No repository specified and no active repository set. Use 'repo use <name>' or provide --name."),
     };
 
     let repo_config = config.repositories.iter()
-        .find(|r| r.name == repo_name)
-        .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name))?;
+        .find(|r| r.name == repo_name && r.tenant_id.as_deref() == Some(cli_tenant_id))
+        .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name, cli_tenant_id))?;
 
     let branch_name = args.branch.clone()
         .or_else(|| repo_config.active_branch.clone())
         .unwrap_or_else(|| repo_config.default_branch.clone());
 
-    let collection_name = repo_helpers::get_collection_name(&repo_name, &config);
+    let collection_name = repo_helpers::get_collection_name(cli_tenant_id, &repo_name, config);
 
     let model_env_var = std::env::var("VECTORDB_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("VECTORDB_ONNX_TOKENIZER_DIR").ok();

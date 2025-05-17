@@ -1,12 +1,12 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use colored::*;
-use qdrant_client::qdrant::{Filter, PointsSelector, points_selector::PointsSelectorOneOf};
 use std::{sync::Arc, path::PathBuf};
 use vectordb_core::repo_helpers::{get_collection_name};
 use log;
 use vectordb_core::{AppConfig, save_config};
 use vectordb_core::qdrant_client_trait::QdrantClientTrait;
+use vectordb_core::qdrant_ops::{delete_collection_by_name, delete_all_points};
 use std::fmt::Debug;
 use std::io::{self, Write};
 
@@ -24,40 +24,49 @@ pub struct ClearRepoArgs {
 
 pub async fn handle_repo_clear<C>(
     args: ClearRepoArgs, 
-    config: &mut AppConfig, 
+    config: &mut AppConfig,
     client: Arc<C>,
+    cli_args: &crate::cli::CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let repo_name = match args.name.as_ref().or(config.active_repository.as_ref()) {
+    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
+        Some(id) => id,
+        None => {
+            config.tenant_id.as_deref().ok_or_else(|| anyhow!("--tenant-id is required (or set tenant_id in config) to clear a repository."))?
+        }
+    };
+
+    let repo_name_to_clear = match args.name.as_ref().or(config.active_repository.as_ref()) {
         Some(name) => name.clone(),
-        None => bail!("No active repository set and no repository name provided."),
+        None => bail!("No active repository set and no repository name provided for tenant '{}'.", cli_tenant_id),
     };
 
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == repo_name)
-        .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name))?;
+        .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
+        .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
 
-    // --- Check Qdrant Collection Status (Informational) ---
-    let collection_name = get_collection_name(&repo_name, &config);
-    let collection_did_exist = match client.collection_exists(collection_name.clone()).await {
+    let collection_name = get_collection_name(cli_tenant_id, &repo_name_to_clear, &config);
+    let collection_existed_before_clear = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {
             log::warn!("Failed to check existence of Qdrant collection '{}': {}. Proceeding with config clear anyway.", collection_name, e);
-            false // Assume it didn't exist or is inaccessible
+            false 
         }
     };
 
-    if collection_did_exist {
+    if collection_existed_before_clear {
         println!(
             "{}",
             format!(
-                "Preparing to clear the index for repository '{}'. This will remove all indexed data for this repository.",
-                repo_name.cyan()
+                "Preparing to clear repository '{}' (Tenant: '{}'). This will DELETE the Qdrant collection '{}'.",
+                repo_name_to_clear.cyan(),
+                cli_tenant_id.cyan(),
+                collection_name.cyan()
             ).yellow()
         );
         println!("{}", "This action CANNOT be undone.".red().bold());
@@ -74,41 +83,34 @@ where
             }
         }
 
-        println!("Deleting all points from collection '{}'...", collection_name.cyan());
-        // Clear all points using an empty filter
-        let selector = PointsSelector {
-            points_selector_one_of: Some(PointsSelectorOneOf::Filter(Filter {
-                must: vec![], 
-                should: vec![], 
-                must_not: vec![], 
-                min_should: None,
-            })),
-        };
-        let delete_request = qdrant_client::qdrant::DeletePoints {
-            collection_name: collection_name.to_string(),
-            wait: Some(true), // Wait for operation to complete
-            points: Some(selector),
-            ordering: None,
-            shard_key_selector: None,
-        };
-        client.delete_points(delete_request).await
-            .with_context(|| format!("Failed to delete points from collection '{}'", collection_name))?;
-            
+        println!("Deleting Qdrant collection '{}'...", collection_name.cyan());
+        match delete_collection_by_name(client.clone(), &collection_name).await {
+            Ok(_) => {
+                log::info!("Successfully initiated deletion of collection '{}' for repository '{}'.", collection_name, repo_name_to_clear);
+            }
+            Err(e) => {
+                log::error!("Failed to delete collection '{}' for repository '{}': {}", collection_name, repo_name_to_clear, e);
+                eprintln!("{}", format!("Warning: Failed to delete Qdrant collection '{}'. Error: {}. Proceeding to clear local sync state.", collection_name, e).red());
+            }
+        }
     } else {
-         log::warn!("Qdrant Collection '{}' does not exist or could not be verified. Skipping point deletion.", collection_name);
-         // No confirmation needed if we are only clearing config state
+         log::info!("Qdrant Collection '{}' did not exist. Only clearing local sync state.", collection_name);
+         println!("Qdrant Collection '{}' does not exist. Only clearing local sync state.", collection_name.cyan());
     }
 
-    // --- Always Clear Config Status and Save --- 
     println!("Clearing repository sync status in configuration...");
     let repo_config_mut = &mut config.repositories[repo_config_index];
     repo_config_mut.last_synced_commits.clear();
-    repo_config_mut.indexed_languages = None; // Also clear detected languages
+    repo_config_mut.indexed_languages = None; 
 
-    // Save the modified config
     save_config(config, override_path)
         .context("Failed to save configuration after clearing repository state")?;
-    println!("{}", "Repository index cleared and sync status reset.".green());
+    
+    if collection_existed_before_clear {
+        println!("{}", format!("Qdrant collection for repository '{}' marked for deletion and local sync status reset.", repo_name_to_clear).green());
+    } else {
+        println!("{}", format!("Local sync status for repository '{}' reset (Qdrant collection was not present).", repo_name_to_clear).green());
+    }
 
     Ok(())
 } 

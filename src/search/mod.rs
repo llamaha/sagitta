@@ -23,6 +23,7 @@ pub async fn search_semantic<C>(
     query: &str,
     limit: usize,
     filter: Option<Filter>,
+    tenant_id: &str,
     repo_name: &str,
     config: &Arc<AppConfig>, // Use Arc<AppConfig> for consistency
     client: Arc<C>,
@@ -43,7 +44,7 @@ where
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
     // 2. Determine Collection Name
-    let collection_name = get_collection_name(repo_name);
+    let collection_name = get_collection_name(tenant_id, repo_name, &**config);
     debug!("Searching collection: {}", collection_name);
 
     // 3. Build Qdrant Search Request

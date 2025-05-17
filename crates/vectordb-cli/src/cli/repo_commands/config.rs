@@ -2,12 +2,14 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
+use tempfile::tempdir;
 
 use vectordb_core::AppConfig;
 use vectordb_core::config::{save_config, get_config_path_or_default, IndexingConfig, load_config, PerformanceConfig};
 use crate::cli::CliArgs;
 use crate::cli::commands::Commands;
 use crate::cli::simple;
+use crate::cli::repo_commands::{RepoArgs, RepoCommand};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]
@@ -80,17 +82,29 @@ fn handle_set_repo_base_path(
 }
 
 fn get_default_config() -> AppConfig {
+    let temp_dir = tempdir().unwrap();
     AppConfig {
         qdrant_url: "http://localhost:6334".to_string(),
         onnx_model_path: None,
         onnx_tokenizer_path: None,
+        server_api_key_path: None,
+        repositories_base_path: Some(temp_dir.path().join("repos").to_string_lossy().into_owned()),
+        vocabulary_base_path: Some(temp_dir.path().join("vocab").to_string_lossy().into_owned()),
         repositories: Vec::new(),
         active_repository: None,
-        repositories_base_path: None,
-        server_api_key_path: None,
         indexing: IndexingConfig::default(),
-        vocabulary_base_path: None,
-        performance: PerformanceConfig::default(),
+        performance: PerformanceConfig {
+            vector_dimension: 128,
+            collection_name_prefix: "test_collection_".to_string(),
+            ..PerformanceConfig::default()
+        },
+        oauth: None,
+        tls_enable: false,
+        tls_cert_path: None,
+        tls_key_path: None,
+        cors_allowed_origins: None,
+        cors_allow_credentials: true,
+        tenant_id: Some("test-tenant".to_string()),
     }
 }
 
@@ -104,6 +118,7 @@ mod tests {
     use crate::cli::repo_commands::config::ConfigArgs;
     use crate::cli::simple;
     use std::path::PathBuf;
+    use crate::cli::repo_commands::{RepoArgs, RepoCommand};
 
     #[test]
     fn test_handle_set_repo_base_path() {
@@ -123,6 +138,13 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
         
         // Set repo base path
@@ -163,30 +185,38 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
         // Args to set paths
-        let _model_path = "/test/model.onnx".to_string();
-        let _tokenizer_path = "/test/tokenizer".to_string();
-        let _qdrant_url = "http://new-qdrant".to_string();
+        let model_path = "/test/model.onnx".to_string();
+        let tokenizer_path = "/test/tokenizer".to_string();
+        let qdrant_url = "http://new-qdrant".to_string();
 
-        let repo_base_path = dir.path().join("test_base_path");
-        let base_path_args = ConfigArgs {
-            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: repo_base_path.clone() })
+        let args = ConfigArgs {
+            command: ConfigCommand::SetRepoBasePath(SetRepoBasePathArgs { path: dir.path().join("test_base_path").clone() })
         };
 
         let cli_args = CliArgs { 
-            command: Commands::Simple(simple::SimpleArgs::default()),
+            command: Commands::Repo(RepoArgs {command: RepoCommand::Config(args.clone()) }),
             onnx_model_path_arg: None, 
-            onnx_tokenizer_dir_arg: None 
+            onnx_tokenizer_dir_arg: None,
+            tenant_id: None,
         };
-        let result_base_path = handle_config(base_path_args, &mut config, Some(&config_path));
-        assert!(result_base_path.is_ok(), "handle_config (SetRepoBasePath) failed: {:?}", result_base_path.err());
+
+        let result = handle_config(args, &mut config, Some(&config_path));
+        assert!(result.is_ok(), "handle_config (SetRepoBasePath) failed: {:?}", result.err());
 
         let loaded_config_base = load_config(Some(&config_path)).unwrap();
         assert!(loaded_config_base.repositories_base_path.is_some());
-        assert_eq!(loaded_config_base.repositories_base_path.unwrap(), repo_base_path.to_string_lossy().to_string());
+        assert_eq!(loaded_config_base.repositories_base_path.unwrap(), dir.path().join("test_base_path").to_string_lossy().to_string());
     }
     
     #[test]
@@ -207,6 +237,13 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         };
         save_config(&config, Some(&config_path)).unwrap();
 
@@ -215,10 +252,12 @@ mod tests {
         };
 
         let cli_args = CliArgs { 
-            command: Commands::Simple(simple::SimpleArgs::default()),
+            command: Commands::Repo(RepoArgs {command: RepoCommand::Config(args.clone()) }), 
             onnx_model_path_arg: None, 
-            onnx_tokenizer_dir_arg: None 
+            onnx_tokenizer_dir_arg: None,
+            tenant_id: None,
         };
+
         let result = handle_config(args, &mut config, Some(&config_path));
         assert!(result.is_ok(), "handle_config failed: {:?}", result.err());
 

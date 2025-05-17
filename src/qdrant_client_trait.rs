@@ -13,7 +13,7 @@ use qdrant_client::Qdrant;
 use crate::error::{VectorDBError, Result}; // Use crate::error
 
 // use mockall::automock for automatic mock generation in tests
-// #[cfg_attr(test, mockall::automock)] // Remove mockall
+#[cfg_attr(test, mockall::automock)] // Remove mockall
 #[async_trait]
 /// Trait defining the interface for a Qdrant client.
 /// This allows for mocking the client in tests.

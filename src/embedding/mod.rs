@@ -7,6 +7,7 @@ use crate::config::AppConfig; // Use config from core
 use crate::config::load_config;
 use crate::config::get_vocabulary_path;
 use crate::config::PerformanceConfig;
+use crate::config::IndexingConfig;
 
 // Provider related imports will need adjustment
 #[cfg(feature = "ort")]
@@ -61,6 +62,7 @@ pub struct EmbeddingModel {
     onnx_model_path: Option<PathBuf>,
     #[allow(dead_code)] // Allow dead code for now, may be used for identification/debugging
     onnx_tokenizer_path: Option<PathBuf>,
+    tenant_id: Option<String>,
 }
 
 impl EmbeddingModel {
@@ -78,6 +80,7 @@ impl EmbeddingModel {
             model_type: EmbeddingModelType::Onnx,
             onnx_model_path: Some(model_path.as_ref().to_path_buf()),
             onnx_tokenizer_path: Some(tokenizer_path.as_ref().to_path_buf()),
+            tenant_id: Some("test-tenant".to_string()),
         })
     }
 
@@ -115,6 +118,7 @@ pub struct EmbeddingHandler {
     onnx_tokenizer_path: Option<PathBuf>,
     #[cfg(feature = "ort")]
     onnx_provider: Option<Arc<Mutex<provider::onnx::OnnxEmbeddingModel>>>,
+    tenant_id: Option<String>,
 }
 
 impl EmbeddingHandler {
@@ -156,6 +160,7 @@ impl EmbeddingHandler {
             onnx_tokenizer_path: config.onnx_tokenizer_path.clone().map(PathBuf::from),
             #[cfg(feature = "ort")]
             onnx_provider: Some(onnx_provider),
+            tenant_id: Some("test-tenant".to_string()),
         })
     }
 
@@ -312,30 +317,29 @@ mod tests {
 
     fn create_test_config() -> AppConfig {
         let temp_dir = tempdir().unwrap();
-        let model_base = temp_dir.path().join("models");
+        let repo_base = temp_dir.path().join("repos");
         let vocab_base = temp_dir.path().join("vocab");
-        fs::create_dir_all(&model_base).unwrap();
-        fs::create_dir_all(&vocab_base).unwrap();
-
-        // Create dummy model/tokenizer files needed by the handler
-        let dummy_model = model_base.join("model.onnx");
-        let dummy_tokenizer_dir = model_base.join("tokenizer");
-        let dummy_tokenizer_file = dummy_tokenizer_dir.join("tokenizer.json");
-        fs::write(&dummy_model, "dummy model data").unwrap();
-        fs::create_dir(&dummy_tokenizer_dir).unwrap();
-        fs::write(&dummy_tokenizer_file, "{}").unwrap(); // Minimal valid JSON
+        let model_path = temp_dir.path().join("model.onnx");
+        let tokenizer_path = temp_dir.path().join("tokenizer.json");
 
         AppConfig {
-            repositories: vec![],
-            active_repository: None,
-            qdrant_url: "http://localhost:6333".to_string(),
-            onnx_model_path: Some(dummy_model.to_string_lossy().into_owned()), // Correct field name
-            onnx_tokenizer_path: Some(dummy_tokenizer_dir.to_string_lossy().into_owned()), // Correct field name
-            server_api_key_path: None, // Correct field name
-            repositories_base_path: None,
+            qdrant_url: "http://localhost:6334".to_string(),
+            onnx_model_path: Some(model_path.to_string_lossy().into_owned()),
+            onnx_tokenizer_path: Some(tokenizer_path.to_string_lossy().into_owned()),
+            server_api_key_path: None,
+            repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
-            indexing: Default::default(),
+            repositories: Vec::new(),
+            active_repository: None,
+            indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
