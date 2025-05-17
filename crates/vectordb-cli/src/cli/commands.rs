@@ -134,6 +134,38 @@ pub enum Commands {
     Init,
 }
 
+// --- New Function for Init Command ---
+pub async fn execute_init_command(config: &mut AppConfig) -> Result<()> {
+    let config_path = vectordb_core::config::get_config_path_or_default(None)?;
+    let config_path_buf = config_path.clone(); // Keep a PathBuf version for saving
+    let config_path_display = config_path_buf.display();
+
+    if !config_path.exists() {
+        println!("Configuration file not found at {}, creating a new one.", config_path_display);
+        // Ensure directory exists if creating for the first time
+        if let Some(parent_dir) = config_path.parent() {
+            std::fs::create_dir_all(parent_dir)?;
+        }
+    } else {
+        println!("Existing configuration found at {}. Checking tenant_id.", config_path_display);
+    }
+
+    // Check and set tenant_id if not already present in the loaded config
+    if config.tenant_id.is_none() {
+        let new_tenant_id = uuid::Uuid::new_v4().to_string();
+        config.tenant_id = Some(new_tenant_id.clone());
+        println!("Generated and set new tenant_id: {}", new_tenant_id);
+    } else {
+        println!("Existing tenant_id found: {}", config.tenant_id.as_ref().unwrap());
+    }
+
+    // Save the potentially modified config
+    vectordb_core::config::save_config(config, Some(&config_path_buf))?;
+
+    println!("Configuration saved to {}.\nEnsure ONNX model/tokenizer paths and Qdrant URL are correctly set.", config_path_display);
+    Ok(())
+}
+
 // --- Main Command Handler Function ---
 /// Parses the command-line arguments and dispatches to the appropriate command handler.
 ///
@@ -151,34 +183,9 @@ pub async fn handle_command(
         Commands::Simple(ref cmd_args) => super::simple::handle_simple_command(cmd_args.clone(), &args, config.clone(), client).await,
         Commands::Edit(ref cmd_args) => crate::edit::cli::handle_edit_command(cmd_args.clone(), &args, config.clone(), client).await,
         Commands::Init => {
-            // Determine config path (use get_config_path_or_default from vectordb_core)
-            let config_path = vectordb_core::config::get_config_path_or_default(None)?;
-            let config_path = config_path.as_path();
-            let config_dir = config_path.parent().unwrap();
-            std::fs::create_dir_all(config_dir)?;
-
-            // If config exists, back it up
-            if config_path.exists() {
-                let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-                let backup_path = config_dir.join(format!("config.toml.bak.{}", timestamp));
-                std::fs::copy(config_path, &backup_path)?;
-                println!("Backed up existing config to {}", backup_path.display());
-            }
-
-            // Generate tenant_id
-            let tenant_id = uuid::Uuid::new_v4().to_string();
-
-            // Create default config and set tenant_id
-            let mut new_config = vectordb_core::config::AppConfig::default();
-            new_config.tenant_id = Some(tenant_id.clone());
-
-            // Write config
-            vectordb_core::config::save_config(&new_config, Some(&config_path.to_path_buf()))?;
-
-            println!("Initialized new config at {}", config_path.display());
-            println!("Generated tenant_id: {}", tenant_id);
-            println!("You can now edit the config file to set ONNX model/tokenizer paths, Qdrant URL, etc.");
-            Ok(())
+            // This arm should ideally not be reached if `main.rs` handles `Init` and exits early.
+            // Adding it to make the match exhaustive.
+            unreachable!("Init command should be handled in main.rs and not reach handle_command");
         }
     }
 }

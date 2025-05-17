@@ -32,4 +32,20 @@ This document outlines known issues, limitations in the current testing strategy
 -   **Recommendation:**
     -   Investigate and ensure that test environments (both e2e tool-based tests and Rust unit tests) use temporary or test-specific configuration files.
     -   For Rust tests, utilize `tempfile::tempdir()` and ensure any calls to `save_config` are directed to a path within the temporary directory.
-    -   For e2e tests involving direct `vectordb-mcp` execution, explore mechanisms to point the binary to a test-specific config file if possible (e.g., via command-line arguments or environment variables if the server supports overriding the default config path). 
+    -   For e2e tests involving direct `vectordb-mcp` execution, explore mechanisms to point the binary to a test-specific config file if possible (e.g., via command-line arguments or environment variables if the server supports overriding the default config path).
+
+## 5. `vectordb-cli` as a Cross-Tenant Admin Tool
+
+-   **Issue:** The `vectordb-cli` tool is currently designed to operate within the context of a single tenant, as defined by its local `config.toml` (or `--tenant-id` argument). It does not have dedicated commands or mechanisms to directly administer all tenants or manage tenant-specific resources (like repositories) across an entire VectorDB-MCP server in a comprehensive administrative capacity.
+-   **Impact:** An administrator running `vectordb-cli` on the server machine cannot easily list all tenants, or list/add/remove repositories for a *specific, different* tenant directly through the CLI. Administrative actions on the MCP server (like tenant creation, cross-tenant API key management) are primarily intended to be done via the server's HTTP API using an admin-level API key (e.g., the bootstrap admin key).
+-   **Future Enhancement Considerations:**
+    -   Introduce new `vectordb-cli admin <subcommand>` set of commands.
+    -   These commands would authenticate to a specified MCP server's HTTP API using an admin API key.
+    -   Provide functionality such as:
+        -   `list-tenants`
+        -   `create-tenant --name <name>`
+        -   `list-api-keys --tenant-id <tenant_id_or_all>`
+        -   `create-api-key --tenant-id <tenant_id> ...`
+        -   `list-repos --tenant-id <tenant_id_or_all>` (requires corresponding MCP server API)
+        -   `add-repo --tenant-id <tenant_id> --name <name> --url <url>` (requires corresponding MCP server API)
+    -   This would make `vectordb-cli` a more complete client for both user-scoped operations (via local config) and administrative operations against an MCP server instance. 

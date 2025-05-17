@@ -33,17 +33,25 @@ async fn main() -> Result<()> {
         }
     };
 
-    // If --tenant-id is not provided, use tenant_id from config if present
+    // If --tenant-id is not provided via CLI, use tenant_id from loaded config if present
     if args.tenant_id.is_none() {
         if let Some(cfg_tenant_id) = config.tenant_id.clone() {
             args.tenant_id = Some(cfg_tenant_id);
         }
     }
+    // Note: The `Init` command itself will ensure config.tenant_id is populated before saving.
 
-    // If still no tenant_id, error out for tenant-aware commands
+    // Handle Init command separately and exit early
+    if matches!(args.command, vectordb_cli::cli::Commands::Init) {
+        return vectordb_cli::cli::commands::execute_init_command(&mut config).await;
+    }
+
+    // If still no tenant_id (and not Init cmd), error out for tenant-aware commands
     let needs_tenant = matches!(args.command, vectordb_cli::cli::Commands::Repo(_) | vectordb_cli::cli::Commands::Edit(_));
     if needs_tenant && args.tenant_id.is_none() {
-        return Err(anyhow!("No tenant_id specified. Please provide --tenant-id or set tenant_id in config.toml (see vectordb-cli init)."));
+        // For non-Init commands, if tenant_id is still None after checking args and config (from init),
+        // then it means the init step didn't set one or it was removed. This is an error for tenant-aware commands.
+        return Err(anyhow!("No tenant_id specified or found in config. Please provide --tenant-id or run 'vectordb-cli init' to set one."));
     }
 
     // Handle ONNX model/tokenizer path overrides from CLI args
