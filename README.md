@@ -85,6 +85,8 @@ You can initialize a default configuration using `vectordb-cli init` (see the `v
 
 **See [docs/configuration.md](./docs/configuration.md) for a full list and documentation of all configuration options.**
 
+For specific guidance on optimizing indexing performance, refer to the [Performance Tuning Guide](./docs/configuration.md#performance-tuning-guide) section in the configuration documentation.
+
 ### 4a. Example: Setting ONNX Model and Tokenizer Paths in config.toml
 
 To avoid errors like:
