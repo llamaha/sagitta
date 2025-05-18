@@ -125,7 +125,7 @@ Add a server configuration like this to your Cursor `mcp.json` file:
 
 For detailed documentation on multi-tenancy, API key management, and tenant data isolation in vectordb-mcp, see:
 
-- [Multi-Tenancy & API Keys Documentation](./../docs/multi_tenancy_api_keys.md)
+- [Multi-Tenancy & API Keys Documentation](docs/multi_tenancy_api_keys.md)
 
 This covers:
 - How to create and manage tenants

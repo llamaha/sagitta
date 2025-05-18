@@ -254,13 +254,13 @@ pub async fn index_paths<
         files_processed_count += 1;
 
         // --- Upsert Batch Logic (existing code) ---
-        if points_batch.len() >= BATCH_SIZE {
+        if points_batch.len() >= config.performance.batch_size {
             log::debug!("Upserting batch of {} points...", points_batch.len());
             if let Err(e) = upsert_batch(client.clone(), collection_name, points_batch).await {
                  log::error!("Failed to upsert batch: {}", e); // Log error but continue?
                  // Decide on error handling: skip file, stop indexing?
             }
-            points_batch = Vec::with_capacity(BATCH_SIZE); // Clear the batch
+            points_batch = Vec::with_capacity(config.performance.batch_size); // Clear the batch
         }
         // --- End Upsert Batch Logic ---
 
@@ -531,6 +531,7 @@ pub async fn index_repo_files<
         branch_name,
         commit_hash,
         progress,
+        config.performance.internal_embed_batch_size, // Pass config value
     );
 
     let total_points_generated = all_intermediate_data.len();
@@ -640,7 +641,7 @@ pub async fn index_repo_files<
     let mut total_points_attempted_upsert = 0;
 
     // Iterate over the final points and create concurrent upload tasks
-    for points_batch in final_points.chunks(BATCH_SIZE) {
+    for points_batch in final_points.chunks(config.performance.batch_size) {
         if points_batch.is_empty() {
             continue;
         }
@@ -721,6 +722,25 @@ pub async fn index_repo_files<
         files_processed_successfully,
         total_points_attempted_upsert
     );
+
+    // Print summary of processing errors to the console if any occurred
+    if !processing_errors.is_empty() {
+        println!("\n--- Indexing Summary ---");
+        println!(
+            "Warning: {} out of {} files encountered errors during processing and may not have been fully indexed.",
+            processing_errors.len(),
+            relative_paths.len()
+        );
+        println!("First few errors:");
+        for (i, error_msg) in processing_errors.iter().enumerate().take(5) {
+            println!("  {}. {}", i + 1, error_msg);
+        }
+        if processing_errors.len() > 5 {
+            println!("  ... and {} more errors (see logs for full details).", processing_errors.len() - 5);
+        }
+        println!("Please check the logs for detailed error messages.");
+    }
+
     Ok(total_points_attempted_upsert) // Return total points attempted to upsert
 }
 
@@ -822,6 +842,7 @@ fn process_repo_files_parallel(
     branch_name: &str,
     commit_hash: &str,
     progress: Option<&ProgressBar>,
+    internal_embed_batch_size: usize, // Added parameter
 ) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
     use std::cell::RefCell;
     use crate::embedding::provider::onnx::OnnxEmbeddingModel;
@@ -901,7 +922,7 @@ fn process_repo_files_parallel(
             let batch_content_size: usize = batch.iter().map(|c| c.chunk.content.len()).sum();
             
             if batch_content_size + chunk_meta.chunk.content.len() <= MAX_BATCH_CONTENT_SIZE 
-                && batch.len() < INTERNAL_EMBED_BATCH_SIZE {
+                && batch.len() < internal_embed_batch_size {
                 batch.push(chunk_meta);
             } else {
                 // Process current batch before adding new chunk
@@ -950,7 +971,15 @@ fn process_repo_files_parallel(
                             }
                         }
                         Err(e) => {
-                            return Err(format!("Failed to process batch: {}", e));
+                            let files_in_batch: std::collections::HashSet<String> = batch_to_process.iter()
+                                .map(|cwm| cwm.file_path.display().to_string())
+                                .collect();
+                            let error_msg = format!(
+                                "Failed to process batch (embedding error for chunks from file(s): [{}]): {}",
+                                files_in_batch.into_iter().collect::<Vec<_>>().join(", "),
+                                e
+                            );
+                            return Err(error_msg);
                         }
                     }
                 }
