@@ -1,0 +1,104 @@
+[package]
+name = "sagitta-code"
+version = "0.1.0"
+edition = "2021"
+description = "Sagitta AI code agent built on sagitta-search"
+
+[dependencies]
+# Core Sagitta dependency (local)
+sagitta_search = { path = "../../", features = ["onnx"] }
+repo-mapper = { path = "../repo-mapper" }
+reasoning-engine = { path = "../reasoning-engine" }
+git-manager = { path = "../git-manager" }
+
+# Async and concurrency
+tokio = { version = "1.0", features = ["full"] }
+tokio-stream = "0.1"
+async-trait = "0.1"
+futures-util = "0.3"
+async-stream = "0.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Networking (for Gemini API)
+reqwest = { version = "0.11", features = ["json", "stream"] }
+bytes = "1.5"
+
+qdrant-client = { version = "1.14.0", features = ["serde"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+dirs = "5.0"
+dashmap = "5.5"
+regex = "1.10"
+rand = "0.8"
+walkdir = "2.4"           # For project detection
+similar = "2.3"           # For text similarity
+
+# UI dependencies (optional, for GUI components)
+eframe = { version = "0.31.1", optional = true }
+egui = { version = "0.31.1", optional = true }
+egui_extras = { version = "0.31.1", optional = true }
+syntect = { version = "5.0", optional = true }
+rfd = { version = "0.15.3", optional = true }
+egui_code_editor = { version = "0.2.2", optional = true }
+
+# Plotting for egui
+egui_plot = { version = "0.31.0", optional = true }
+
+# Theming
+catppuccin = { version = "2.5.1", optional = true }
+catppuccin-egui = { version = "5.5.0", default-features = false, features = ["egui31"], optional = true }
+
+# Testing
+tempfile = "3.10"
+mockall = "0.12"
+egui_commonmark = { version = "0.20.0", optional = true }
+git2 = "0.18"
+
+directories = "5.0"
+
+lazy_static = "1.4"
+
+# Add these dependencies to the existing [dependencies] section
+egui-notify = { version = "0.15", optional = true }
+egui-modal = { version = "0.4", optional = true }
+
+[features]
+default = ["gui"]
+gui = [
+    "dep:eframe",
+    "dep:egui",
+    "dep:egui_extras",
+    "dep:egui-notify",
+    "dep:egui-modal",
+    "dep:syntect",
+    "dep:rfd",
+    "dep:catppuccin-egui",
+    "dep:egui_commonmark",
+    "dep:egui_code_editor",
+    "dep:egui_plot",
+]
+
+[[bin]]
+name = "sagitta-code"
+path = "src/main.rs"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.12"
+async-stream = "0.3"

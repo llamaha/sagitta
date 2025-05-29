@@ -1,7 +1,7 @@
 //! Embedding generation and handling logic.
 
-// Use error types from within vectordb_core
-use crate::error::{VectorDBError, Result};
+// Use error types from within sagitta_search
+use crate::error::{SagittaError, Result};
 use std::fmt;
 use crate::config::AppConfig; // Use config from core
 use crate::config::load_config;
@@ -14,7 +14,7 @@ use crate::config::IndexingConfig;
 // use crate::embedding::provider::onnx::OnnxEmbeddingModel; // Unused
 use self::provider::EmbeddingProvider; // Use internal provider trait
 
-// These need dependencies in vectordb_core
+// These need dependencies in sagitta_search
 use std::sync::{Arc, Mutex}; // Removed unused Mutex, MutexGuard
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
@@ -73,7 +73,7 @@ impl EmbeddingModel {
         let onnx_provider = crate::embedding::provider::onnx::OnnxEmbeddingModel::new(
             model_path.as_ref(), 
             tokenizer_path.as_ref()
-        ).map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX provider: {}", e)))?; // Explicitly map error
+        ).map_err(|e| SagittaError::EmbeddingError(format!("Failed to create ONNX provider: {}", e)))?; // Explicitly map error
         
         Ok(Self {
             provider: Arc::new(onnx_provider),
@@ -125,23 +125,23 @@ impl EmbeddingHandler {
     /// Creates a new `EmbeddingHandler` based on the provided application configuration.
     ///
     /// Initializes the appropriate embedding model provider (e.g., ONNX) based on `config`.
-    pub fn new(config: &AppConfig) -> std::result::Result<Self, VectorDBError> {
+    pub fn new(config: &AppConfig) -> std::result::Result<Self, SagittaError> {
         let model_type = EmbeddingModelType::Onnx; // Assume ONNX for now
         
         #[cfg(feature = "ort")]
         let onnx_provider_result = match model_type {
             EmbeddingModelType::Onnx | EmbeddingModelType::Default => {
                 let model_path_str = config.onnx_model_path.as_deref()
-                    .ok_or_else(|| VectorDBError::ConfigurationError("ONNX model path not set in AppConfig".to_string()))?;
+                    .ok_or_else(|| SagittaError::ConfigurationError("ONNX model path not set in AppConfig".to_string()))?;
                 let tokenizer_path_str = config.onnx_tokenizer_path.as_deref()
-                    .ok_or_else(|| VectorDBError::ConfigurationError("ONNX tokenizer path not set in AppConfig".to_string()))?;
+                    .ok_or_else(|| SagittaError::ConfigurationError("ONNX tokenizer path not set in AppConfig".to_string()))?;
                 
                 let model_path = PathBuf::from(model_path_str);
                 let tokenizer_path = PathBuf::from(tokenizer_path_str);
 
                 provider::onnx::OnnxEmbeddingModel::new(&model_path, &tokenizer_path)
                     .map(|p| Arc::new(Mutex::new(p)))
-                    .map_err(VectorDBError::from)
+                    .map_err(SagittaError::from)
             },
         };
 
@@ -152,7 +152,7 @@ impl EmbeddingHandler {
         };
 
         #[cfg(not(feature = "ort"))]
-        let onnx_provider_result = Err(VectorDBError::FeatureNotEnabled("ort".to_string()));
+        let onnx_provider_result = Err(SagittaError::FeatureNotEnabled("ort".to_string()));
 
         Ok(Self {
             embedding_model_type: model_type,
@@ -177,7 +177,7 @@ impl EmbeddingHandler {
         }
         #[cfg(not(feature = "ort"))]
         {
-            Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+            Err(SagittaError::FeatureNotEnabled("ort".to_string()))
         }
     }
 
@@ -194,7 +194,7 @@ impl EmbeddingHandler {
         }
         #[cfg(not(feature = "ort"))]
         {
-            Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+            Err(SagittaError::FeatureNotEnabled("ort".to_string()))
         }
     }
 
@@ -205,10 +205,10 @@ impl EmbeddingHandler {
         match self.embedding_model_type {
             EmbeddingModelType::Onnx => {
                 let model_path = self.onnx_model_path.as_ref().ok_or_else(|| {
-                    VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+                    SagittaError::EmbeddingError("ONNX model path not set in handler.".to_string())
                 })?;
                 let tokenizer_path = self.onnx_tokenizer_path.as_ref().ok_or_else(|| {
-                    VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+                    SagittaError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
                 })?;
                 let provider = Arc::new(Mutex::new(provider::onnx::OnnxEmbeddingModel::new(
                     model_path,
@@ -217,7 +217,7 @@ impl EmbeddingHandler {
                 Ok(provider)
             }
             EmbeddingModelType::Default => {
-                 Err(VectorDBError::NotImplemented("Default embedding model provider not yet implemented".to_string()))
+                 Err(SagittaError::NotImplemented("Default embedding model provider not yet implemented".to_string()))
             }
         }
     }
@@ -226,7 +226,7 @@ impl EmbeddingHandler {
     /// Creates and returns a new instance of the configured embedding model provider.
     /// This is a stub for when the "ort" feature is not enabled.
     pub fn create_embedding_model(&self) -> Result<Arc<Mutex<provider::onnx::OnnxEmbeddingModel>>> {
-        Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+        Err(SagittaError::FeatureNotEnabled("ort".to_string()))
     }
 
     /// Sets or updates the paths for the ONNX model and tokenizer.
@@ -241,7 +241,7 @@ impl EmbeddingHandler {
     ) -> Result<()> {
         if let Some(model_p) = &model_path {
             if !model_p.exists() {
-                return Err(VectorDBError::EmbeddingError(format!(
+                return Err(SagittaError::EmbeddingError(format!(
                     "ONNX model file not found: {}",
                     model_p.display()
                 )));
@@ -294,13 +294,13 @@ impl EmbeddingHandler {
             Arc::new(provider::onnx::ThreadSafeOnnxProvider::new(model)) as Arc<dyn EmbeddingProvider + Send + Sync>
         }).ok_or_else(|| {
             log::error!("Attempted to get ONNX provider, but it was not initialized.");
-            VectorDBError::EmbeddingError("ONNX provider not initialized".to_string())
+            SagittaError::EmbeddingError("ONNX provider not initialized".to_string())
         })
     }
 
     #[cfg(not(feature = "ort"))]
     pub fn get_onnx_provider(&self) -> Result<Arc<dyn EmbeddingProvider + Send + Sync>> {
-        Err(VectorDBError::FeatureNotEnabled("ort".to_string()))
+        Err(SagittaError::FeatureNotEnabled("ort".to_string()))
     }
 }
 
@@ -311,24 +311,18 @@ mod tests {
     use crate::config::AppConfig;
     
     use crate::embedding::{EmbeddingHandler, EmbeddingModelType, EmbeddingModel};
-    use crate::error::VectorDBError;
+    use crate::error::SagittaError;
     use std::fs;
     use tempfile::tempdir;
 
     fn create_test_config() -> AppConfig {
-        let temp_dir = tempdir().unwrap();
-        let repo_base = temp_dir.path().join("repos");
-        let vocab_base = temp_dir.path().join("vocab");
-        let model_path = temp_dir.path().join("model.onnx");
-        let tokenizer_path = temp_dir.path().join("tokenizer.json");
-
         AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some(model_path.to_string_lossy().into_owned()),
-            onnx_tokenizer_path: Some(tokenizer_path.to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
             server_api_key_path: None,
-            repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
-            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
+            repositories_base_path: None,
+            vocabulary_base_path: None,
             repositories: Vec::new(),
             active_repository: None,
             indexing: IndexingConfig::default(),
@@ -339,7 +333,8 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
+            tenant_id: None,
+            rayon_num_threads: 4,
         }
     }
 
@@ -375,7 +370,7 @@ mod tests {
 
         let result = EmbeddingHandler::new(&config); 
         // Now, this assertion should correctly expect a ConfigurationError
-        assert!(matches!(result, Err(VectorDBError::ConfigurationError(_))), "Expected ConfigurationError when ONNX paths are None, but got: {:?}", result);
+        assert!(matches!(result, Err(SagittaError::ConfigurationError(_))), "Expected ConfigurationError when ONNX paths are None, but got: {:?}", result);
     }
 
     #[cfg(feature = "ort")]
@@ -385,7 +380,7 @@ mod tests {
         let model_path = PathBuf::from("./nonexistent/model.onnx");
         let tokenizer_path = PathBuf::from("./nonexistent/tokenizer.json");
         let result = EmbeddingModel::new_onnx(&model_path, &tokenizer_path);
-        assert!(matches!(result, Err(VectorDBError::EmbeddingError(_))));
+        assert!(matches!(result, Err(SagittaError::EmbeddingError(_))));
     }
 
     #[test]
@@ -394,7 +389,7 @@ mod tests {
         assert_eq!(EmbeddingModelType::Default.to_string(), "Default");
     }
 
-    // Added test from src/vectordb/embedding.rs
+    // Added test from src/sagitta/embedding.rs
     #[test]
     fn test_onnx_embedding_fallback() {
         // Use the core constructor directly
@@ -411,7 +406,7 @@ mod tests {
             }
 
             // Create ONNX model using the core's constructor
-            // Note: This assumes the 'ort' feature is enabled for vectordb-core
+            // Note: This assumes the 'ort' feature is enabled for sagitta-search
             let onnx_model_result = EmbeddingModel::new_onnx(model_path, tokenizer_path);
             assert!(onnx_model_result.is_ok());
 
@@ -437,13 +432,13 @@ mod tests {
         }
         #[cfg(not(feature = "ort"))]
         {
-            println!("Skipping ONNX test because 'ort' feature is not enabled for vectordb-core");
+            println!("Skipping ONNX test because 'ort' feature is not enabled for sagitta-search");
         }
     }
 
     #[cfg(feature = "ort")]
     fn test_onnx_embedding_model_creation_and_use() {
-        // Added test from src/vectordb/embedding.rs
+        // Added test from src/sagitta/embedding.rs
 
         // Construct path relative to crate root, assuming models are in workspace_root/onnx/
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -451,10 +446,10 @@ mod tests {
         let default_model_path = workspace_root.join("onnx/all-minilm-l6-v2.onnx");
         let default_tokenizer_path = workspace_root.join("onnx/tokenizer.json");
 
-        let model_path = std::env::var("VECTORDB_ONNX_MODEL")
+        let model_path = std::env::var("SAGITTA_ONNX_MODEL")
             .map(PathBuf::from)
             .unwrap_or(default_model_path);
-        let tokenizer_path = std::env::var("VECTORDB_ONNX_TOKENIZER")
+        let tokenizer_path = std::env::var("SAGITTA_ONNX_TOKENIZER")
             .map(PathBuf::from)
             .unwrap_or(default_tokenizer_path);
 
@@ -489,7 +484,7 @@ mod tests {
     #[should_panic] // Expect panic because dummy model path doesn't exist
     fn test_handler_creation_fail_onnx() {
         if !cfg!(feature = "onnx") {
-            // Removed: println!("Skipping ONNX test because 'onnx' feature is not enabled for vectordb-core");
+            // Removed: println!("Skipping ONNX test because 'onnx' feature is not enabled for sagitta-search");
             panic!(); // Fail test if feature disabled
         }
         let config = AppConfig {
@@ -530,7 +525,7 @@ mod tests {
     #[ignore] // Needs actual model files and ONNX runtime
     fn test_onnx_embedding() -> crate::error::Result<()> {
         if !cfg!(feature = "onnx") {
-            // Removed: println!("Skipping ONNX test because 'ort' feature is not enabled for vectordb-core");
+            // Removed: println!("Skipping ONNX test because 'ort' feature is not enabled for sagitta-search");
             return Ok(());
         }
         // Assume model paths are correctly set via environment or config for this test

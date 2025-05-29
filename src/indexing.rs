@@ -1,6 +1,6 @@
 use crate::{
     embedding::EmbeddingHandler,
-    error::{Result, VectorDBError},
+    error::{Result, SagittaError},
     embedding::provider::EmbeddingProvider,
     qdrant_client_trait::QdrantClientTrait,
     syntax::{self},
@@ -24,7 +24,6 @@ use std::{
     time::Instant, // Added for timing
 };
 use walkdir::WalkDir;
-use indicatif::ProgressBar; // Keep for progress reporting type hint
 use uuid::Uuid; // Add Uuid import
 use tokio::sync::Semaphore; // Import Semaphore
 // use futures::future::try_join_all; // Removed unused
@@ -39,6 +38,8 @@ use crate::config; // Import config module
 use anyhow::anyhow; // Added for context in ensure_collection_exists
 use crate::qdrant_ops; // Ensure qdrant_ops module is accessible for delete_collection_by_name
 use crate::qdrant_ops::delete_collection_by_name;
+use crate::sync_progress::{SyncProgressReporter, SyncStage, NoOpProgressReporter, SyncProgress}; // Added
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Add chunk size optimization constants
 const MIN_CHUNK_SIZE: usize = 100;  // Merge chunks smaller than this
@@ -54,7 +55,7 @@ const MAX_BATCH_CONTENT_SIZE: usize = 1_000_000;  // 1MB of text per batch
 /// * `collection_name` - The Qdrant collection name.
 /// * `client` - An Arc-wrapped Qdrant client instance.
 /// * `embedding_handler` - Reference to the initialized EmbeddingHandler.
-/// * `progress` - Optional progress bar for reporting.
+/// * `progress_reporter` - Optional progress reporter for reporting.
 /// * `config` - The application configuration (needed for thread-local handlers).
 ///
 /// # Returns
@@ -67,9 +68,11 @@ pub async fn index_paths<
     collection_name: &str,
     client: Arc<C>, // Use generic client trait
     embedding_handler: &EmbeddingHandler,
-    progress: Option<&ProgressBar>, // Pass progress bar reference
+    progress_reporter: Option<Arc<dyn SyncProgressReporter>>, // Replace ProgressBar with SyncProgressReporter
     config: &AppConfig, // Add AppConfig reference
 ) -> Result<(usize, usize)> { // Updated return type
+    let reporter = progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
+    
     log::info!(
         "Core: Starting index process for {} paths into collection \"{}\"",
         paths.len(),
@@ -108,18 +111,24 @@ pub async fn index_paths<
 
     if files_to_process.is_empty() {
         log::warn!("Core: No files found matching the criteria. Indexing complete.");
-        if let Some(pb) = progress {
-            pb.finish_with_message("No files found to index ");
-        }
+        reporter.report(SyncProgress {
+            stage: SyncStage::Error {
+                message: format!("No files found to index"),
+            }
+        }).await;
         return Ok((0, 0)); // Return zero counts
     }
 
     // --- 3. Process Files (Sequential Loop) ---
-    if let Some(pb) = progress {
-        pb.set_length(files_to_process.len() as u64);
-        pb.set_position(0); // Reset position
-        pb.set_message("Processing files...");
-    }
+    reporter.report(SyncProgress {
+        stage: SyncStage::IndexFile {
+            current_file: None,
+            total_files: files_to_process.len(),
+            current_file_num: 0,
+            files_per_second: None,
+            message: Some("Starting file processing...".to_string()),
+        }
+    }).await;
 
     let mut points_batch = Vec::with_capacity(config.performance.batch_size);
     let mut files_processed_count = 0;
@@ -149,7 +158,6 @@ pub async fn index_paths<
                          config.performance.max_file_size_bytes,
                          file_path.display()
                      );
-                     if let Some(pb) = progress { pb.inc(1); }
                      continue;
                  }
              }
@@ -158,7 +166,6 @@ pub async fn index_paths<
                      "Failed to get metadata for file {}: {}. Skipping.",
                      file_path.display(), e
                  );
-                 if let Some(pb) = progress { pb.inc(1); }
                  continue;
              }
          }
@@ -169,9 +176,6 @@ pub async fn index_paths<
             Ok(c) => c,
             Err(e) => {
                 log::warn!("Skipping file due to parsing error: {} - {}", file_path.display(), e);
-                if let Some(pb) = progress {
-                    pb.inc(1); // Increment progress even if skipped
-                }
                 continue; // Skip this file
             }
         };
@@ -185,11 +189,19 @@ pub async fn index_paths<
 
         if chunks.is_empty() {
             log::debug!("No code chunks found in file: {}", file_path.display());
-            if let Some(pb) = progress {
-                pb.inc(1);
-            }
             continue;
         }
+
+        // Report progress for current file
+        reporter.report(SyncProgress {
+            stage: SyncStage::IndexFile {
+                current_file: Some(file_path.clone()),
+                total_files: total_files,
+                current_file_num: file_idx + 1,
+                files_per_second: None,
+                message: Some(format!("Processing file {}/{}", file_idx + 1, total_files)),
+            }
+        }).await;
 
         let chunk_contents: Vec<&str> = chunks.iter().map(|c| c.content.as_str()).collect();
 
@@ -244,9 +256,6 @@ pub async fn index_paths<
             }
             Err(e) => {
                 log::warn!("Skipping file due to embedding error: {} - {}", file_path.display(), e);
-                if let Some(pb) = progress {
-                    pb.inc(1);
-                }
                 continue;
             }
         }
@@ -263,10 +272,6 @@ pub async fn index_paths<
             points_batch = Vec::with_capacity(config.performance.batch_size); // Clear the batch
         }
         // --- End Upsert Batch Logic ---
-
-        if let Some(pb) = progress {
-            pb.inc(1);
-        }
     }
 
     // --- Upsert Final Batch (existing code) ---
@@ -286,13 +291,11 @@ pub async fn index_paths<
     }
     // --- End Save Vocabulary ---
 
-    if let Some(pb) = progress {
-        pb.finish_with_message(format!(
-            "Indexed {} files ({} points)",
-            files_processed_count,
-            points_processed_count
-        ));
-    }
+    reporter.report(SyncProgress {
+        stage: SyncStage::Completed {
+            message: format!("Indexed {} files ({} points)", files_processed_count, points_processed_count),
+        }
+    }).await;
 
     log::info!(
         "Core: Finished indexing {} files, {} points processed into collection \"{}\"",
@@ -467,7 +470,7 @@ fn process_single_file_for_indexing(
 /// * `commit_hash` - The current commit hash.
 /// * `client` - An Arc-wrapped Qdrant client instance.
 /// * `embedding_handler` - Reference to the main EmbeddingHandler (used for dimension check).
-/// * `progress` - Optional progress bar for reporting.
+/// * `progress_reporter` - Optional progress reporter for reporting.
 /// * `max_concurrent_upserts` - Maximum number of concurrent Qdrant upsert operations.
 ///
 /// # Returns
@@ -483,9 +486,14 @@ pub async fn index_repo_files<
     commit_hash: &str,
     client: Arc<C>, // Use generic client trait
     embedding_handler: Arc<EmbeddingHandler>, // Kept for dimension, but not used for parallel embedding
-    progress: Option<&ProgressBar>,
+    progress_reporter: Option<Arc<dyn SyncProgressReporter>>, 
     max_concurrent_upserts: usize,
 ) -> Result<usize> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    
+    let reporter = progress_reporter.as_ref().map(|r| r.clone()).unwrap_or_else(|| Arc::new(NoOpProgressReporter));
+    
     log::info!(
         "Core: Starting parallel repo index process for {} files into collection \"{}\" (branch: {}, commit: {})",
         relative_paths.len(),
@@ -496,9 +504,11 @@ pub async fn index_repo_files<
 
     if relative_paths.is_empty() {
         log::warn!("Core: No relative paths provided for repo indexing.");
-        if let Some(pb) = progress {
-            pb.finish_with_message("No files provided to index");
-        }
+        reporter.report(SyncProgress {
+            stage: SyncStage::Error {
+                message: format!("No files provided to index"),
+            }
+        }).await;
         return Ok(0);
     }
 
@@ -508,43 +518,109 @@ pub async fn index_repo_files<
     log::debug!("Core: Collection \"{}\" ensured.", collection_name);
 
     // --- 2. Process Files in Parallel (CPU Bound) ---
-    if let Some(pb) = progress {
-        pb.set_length(relative_paths.len() as u64);
-        pb.set_position(0); // Reset position
-        pb.set_message("Parsing & Embedding Files...");
-    }
-
     // Get ONNX model and tokenizer paths from the handler
     let onnx_model_path = embedding_handler.onnx_model_path().ok_or_else(|| {
-        VectorDBError::EmbeddingError("ONNX model path not set in handler.".to_string())
+        SagittaError::EmbeddingError("ONNX model path not set in handler.".to_string())
     })?;
     let onnx_tokenizer_path = embedding_handler.onnx_tokenizer_path().ok_or_else(|| {
-        VectorDBError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
+        SagittaError::EmbeddingError("ONNX tokenizer path not set in handler.".to_string())
     })?;
 
-    // Call the parallel processing function to get intermediate data
-    let (all_intermediate_data, all_token_sets, processing_errors) = process_repo_files_parallel(
+    // Report start of parallel processing
+    reporter.report(SyncProgress {
+        stage: SyncStage::IndexFile {
+            current_file: None,
+            total_files: relative_paths.len(),
+            current_file_num: 0, // Starting
+            files_per_second: None,
+            message: Some(format!("Starting parallel processing for {} files...", relative_paths.len())),
+        }
+    }).await;
+
+    // Create atomic counter for progress tracking
+    let files_processed = Arc::new(AtomicUsize::new(0));
+    let total_files = relative_paths.len();
+    let start_time = std::time::Instant::now();
+    
+    // Spawn a background task to periodically report progress
+    let progress_counter = files_processed.clone();
+    let progress_reporter_clone = reporter.clone();
+    let progress_task = tokio::spawn(async move {
+        let mut last_reported = 0;
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await; // Report every 500ms
+            let current_count = progress_counter.load(Ordering::Relaxed);
+            
+            // Only report if there's been progress
+            if current_count > last_reported && current_count < total_files {
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let files_per_second = if elapsed > 0.0 { current_count as f64 / elapsed } else { 0.0 };
+                
+                progress_reporter_clone.report(SyncProgress {
+                    stage: SyncStage::IndexFile {
+                        current_file: None,
+                        total_files,
+                        current_file_num: current_count,
+                        files_per_second: Some(files_per_second),
+                        message: Some(format!("Processing files... {}/{}", current_count, total_files)),
+                    }
+                }).await;
+                last_reported = current_count;
+            }
+            
+            // Exit when all files are processed
+            if current_count >= total_files {
+                break;
+            }
+        }
+    });
+
+    let (all_intermediate_data, all_token_sets, processing_errors) = process_repo_files_parallel_with_progress(
         onnx_model_path,
         onnx_tokenizer_path,
         repo_root,
         relative_paths,
         branch_name,
         commit_hash,
-        progress,
-        config.performance.internal_embed_batch_size, // Pass config value
+        config.performance.internal_embed_batch_size,
+        files_processed.clone(),
     );
 
-    let total_points_generated = all_intermediate_data.len();
+    // Cancel the progress reporting task
+    progress_task.abort();
+
+    // Report completion of parallel processing
     let files_processed_successfully = relative_paths.len() - processing_errors.len();
+    let elapsed = start_time.elapsed().as_secs_f64();
+    let files_per_second = if elapsed > 0.0 { files_processed_successfully as f64 / elapsed } else { 0.0 };
+    
+    reporter.report(SyncProgress {
+        stage: SyncStage::IndexFile {
+            current_file: None, 
+            total_files: relative_paths.len(),
+            current_file_num: files_processed_successfully, // Processed
+            files_per_second: Some(files_per_second),
+            message: Some(format!("Finished parallel processing. {} files processed, {} errors.", files_processed_successfully, processing_errors.len())),
+        }
+    }).await;
+
+    let total_points_generated = all_intermediate_data.len();
     log::info!(
         "Core: Parallel processing complete. Generated intermediate data for {} points from {} files ({} errors encountered).",
         total_points_generated,
         files_processed_successfully,
         processing_errors.len()
     );
-    if let Some(pb) = progress {
-        pb.set_position(relative_paths.len() as u64); 
-        pb.set_message("Building Vocabulary...");
+    if let Some(pb) = &progress_reporter {
+        pb.report(SyncProgress {
+            stage: SyncStage::IndexFile {
+                current_file: None, // Indicates completion of this stage with no specific file error
+                total_files: relative_paths.len(),
+                current_file_num: files_processed_successfully, // All processed files
+                files_per_second: None, // Not easily calculated here
+                message: Some(format!("Processed {} files, but no indexable content found.", files_processed_successfully)),
+            }
+        }).await;
     }
 
     // --- 3. Build/Update Vocabulary (Sequential) ---
@@ -579,8 +655,8 @@ pub async fn index_repo_files<
     log::info!("Attempting to save vocabulary for collection '{}' to path: {}", collection_name, vocab_path.display());
     vocabulary_manager.save(&vocab_path).map_err(|e| {
         log::error!("FATAL: Failed to save updated vocabulary to {}: {}", vocab_path.display(), e);
-        // Convert the vocabulary error into a VectorDBError
-        VectorDBError::Other(format!("Failed to save vocabulary: {}", e)) 
+        // Convert the vocabulary error into a SagittaError
+        SagittaError::Other(format!("Failed to save vocabulary: {}", e)) 
     })?; // Use ? to return error immediately if save fails
 
     log::info!("Updated vocabulary saved to {}", vocab_path.display());
@@ -589,20 +665,22 @@ pub async fn index_repo_files<
     // Check if there are any points to construct/upload before proceeding
     if all_intermediate_data.is_empty() {
         log::info!("No intermediate data generated (likely no indexable files found or processed). Skipping point construction and upload.");
-        // Ensure progress bar finishes cleanly if it exists
-        if let Some(pb) = progress {
-            pb.finish_with_message(format!("No indexable files found in {} files checked", relative_paths.len()));
+        // Report completion of indexing stage, even if no points, if files were processed without error
+        if processing_errors.is_empty() && files_processed_successfully > 0 {
+            reporter.report(SyncProgress {
+                stage: SyncStage::IndexFile {
+                    current_file: None, 
+                    total_files: relative_paths.len(),
+                    current_file_num: files_processed_successfully,
+                    files_per_second: None,
+                    message: Some(format!("No indexable content in {} files.", files_processed_successfully)),
+                }
+            }).await;
         }
-        // Return Ok(0) because no points were indexed, but the process (incl. vocab save) was successful
         return Ok(0); 
     }
 
     // --- 4. Construct Final Points (Sequential) ---
-    if let Some(pb) = progress {
-        pb.set_length(all_intermediate_data.len() as u64); // Total points to construct
-        pb.set_position(0);
-        pb.set_message("Constructing Points for Upload...");
-    }
     let mut final_points: Vec<PointStruct> = Vec::with_capacity(all_intermediate_data.len());
     for intermediate in all_intermediate_data {
         let mut sparse_indices = Vec::new();
@@ -627,9 +705,6 @@ pub async fn index_repo_files<
             intermediate.payload_map, // Pass HashMap directly, From will be called
         );
         final_points.push(point);
-         if let Some(pb) = progress {
-             pb.inc(1);
-         }
     }
     log::info!("Constructed {} final points with dense and sparse vectors.", final_points.len());
     // --- End Construct Points ---
@@ -660,14 +735,7 @@ pub async fn index_repo_files<
         upsert_tasks.push(task);
     }
 
-    if let Some(pb) = progress {
-         pb.reset(); // Reset progress bar for upload phase
-         pb.set_length(upsert_tasks.len() as u64); // Update progress bar length for upload tasks
-         pb.set_position(0);
-         pb.set_message(format!("Uploading {} batches...", upsert_tasks.len()));
-    }
-
-    let mut upsert_errors: Vec<VectorDBError> = Vec::new(); 
+    let mut upsert_errors: Vec<SagittaError> = Vec::new(); 
     let total_tasks = upsert_tasks.len();
     for (i, task) in upsert_tasks.into_iter().enumerate() {
          match task.await {
@@ -675,17 +743,16 @@ pub async fn index_repo_files<
                  // Batch succeeded
              },
              Ok(Err(e)) => { 
+                 let error_msg = format!("Qdrant batch upsert failed: {}", e);
                  log::error!("Batch upsert task failed: {}", e);
                  upsert_errors.push(e.into()); 
+                 reporter.report(SyncProgress { stage: SyncStage::Error { message: error_msg }}).await;
              },
              Err(join_err) => { 
                  log::error!("Tokio task join error during upsert: {}", join_err);
-                 upsert_errors.push(VectorDBError::Other(format!("Tokio task join error: {}", join_err)));
+                 upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {}", join_err)));
+                 reporter.report(SyncProgress { stage: SyncStage::Error { message: format!("Tokio task join error during upsert: {}", join_err) }}).await;
              },
-         }
-         if let Some(pb) = progress {
-             pb.inc(1);
-             // pb.set_message(format!("Uploaded {}/{} batches", i + 1, total_tasks));
          }
     }
 
@@ -711,10 +778,6 @@ pub async fn index_repo_files<
         }
         // Return the first upsert error encountered
         return Err(upsert_errors.remove(0).into());
-    }
-
-    if let Some(pb) = progress {
-        pb.finish_with_message(format!("Upload complete for {} points", total_points_attempted_upsert));
     }
 
     log::info!(
@@ -834,15 +897,15 @@ fn normalize_chunks(chunks: Vec<CodeChunk>) -> Vec<CodeChunk> {
 
 /// Parallel processing function for repository files.
 /// Returns intermediate data for point construction and sets of unique tokens per file.
-fn process_repo_files_parallel(
+fn process_repo_files_parallel_with_progress(
     onnx_model_path: &std::path::Path,
     onnx_tokenizer_path: &std::path::Path,
     repo_root: &PathBuf,
     relative_paths: &[PathBuf],
     branch_name: &str,
     commit_hash: &str,
-    progress: Option<&ProgressBar>,
-    internal_embed_batch_size: usize, // Added parameter
+    internal_embed_batch_size: usize,
+    files_processed: Arc<AtomicUsize>,
 ) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
     use std::cell::RefCell;
     use crate::embedding::provider::onnx::OnnxEmbeddingModel;
@@ -987,9 +1050,7 @@ fn process_repo_files_parallel(
         }
 
         // Update progress after processing each file
-        if let Some(pb) = progress {
-            pb.inc(1);
-        }
+        files_processed.fetch_add(1, Ordering::Relaxed);
 
         Ok((file_intermediate_data, file_tokens))
     }).collect();
@@ -1048,9 +1109,9 @@ fn process_repo_files_parallel(
         let main_thread_final_batch_model = OnnxEmbeddingModel::new(onnx_model_path, onnx_tokenizer_path)
             .map_err(|e| {
                 log::error!("Failed to create main-thread ONNX model for final batch: {:?}", e);
-                // Assuming VectorDBError can be created from a String or anyhow::Error
-                // Adjust error creation as per your VectorDBError definition
-                VectorDBError::EmbeddingError(format!("Failed to create main-thread ONNX model for final batch: {}", e))
+                // Assuming SagittaError can be created from a String or anyhow::Error
+                // Adjust error creation as per your SagittaError definition
+                SagittaError::EmbeddingError(format!("Failed to create main-thread ONNX model for final batch: {}", e))
             })
             .expect("Main thread ONNX model creation for final batch failed"); // Or handle Result if preferred
 
@@ -1229,7 +1290,7 @@ pub async fn ensure_collection_exists<
     client: Arc<C>, // Changed to Arc<C> to allow calling delete_collection_by_name
     collection_name: &str,
     embedding_dimension: u64,
-) -> Result<()> { // Result is anyhow::Result from the context of vectordb_core::indexing
+) -> Result<()> { // Result is anyhow::Result from the context of sagitta_search::indexing
     if client.collection_exists(collection_name.to_string()).await? {
         log::debug!("Collection '{}' already exists. Verifying dimension...", collection_name);
         let collection_info = client.get_collection_info(collection_name.to_string()).await?;
@@ -1284,7 +1345,7 @@ pub async fn ensure_collection_exists<
         }
         Ok(false) => {
             log::error!("Qdrant reported false for collection creation/recreation of '{}', though no direct error was returned.", collection_name);
-            Err(VectorDBError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{}'", collection_name)))
+            Err(SagittaError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{}'", collection_name)))
         }
         Err(e) => {
             log::error!("Failed to create/recreate collection '{}': {:?}", collection_name, e);
@@ -1294,7 +1355,7 @@ pub async fn ensure_collection_exists<
     // TODO: Payload index creation logic should be here, called after collection is confirmed to exist with correct schema.
 }
 
-// Helper functions for filtering files (moved from src/vectordb/indexing.rs)
+// Helper functions for filtering files (moved from src/sagitta/indexing.rs)
 /// Checks if a directory entry is hidden (starts with a dot). 
 pub fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry.file_name()
@@ -1393,4 +1454,6 @@ mod tests {
         assert!(!is_target_dir(&target_file_entry));
     }
 }
+
+
 

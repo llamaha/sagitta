@@ -1,4 +1,4 @@
-// crates/vectordb-core/src/syntax/mod.rs
+// crates/sagitta-search/src/syntax/mod.rs
 use std::fs;
 use std::path::Path;
 use anyhow::{Context, Result};

@@ -19,7 +19,7 @@ mcp_stderr.log
 # Large model files (should be managed separately)
 
 # Test/Output files
-vectordb_search_results.txt
+sagitta_search_results.txt
 
 # Qdrant
 qdrant_storage/

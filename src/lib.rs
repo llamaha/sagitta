@@ -1,49 +1,50 @@
 #![warn(missing_docs)] // Enforce documentation for all public items
 
-//! `vectordb-core` is the core library powering the `vectordb-cli` application.
-//! 
-//! It provides the foundational components for:
-//! - Configuration management (`config`)
-//! - Generating embeddings using ONNX models (`embedding`)
-//! - Interacting with the Qdrant vector database (`qdrant_ops`, `qdrant_client_trait`)
-//! - Indexing codebases (`indexing`, `syntax`, `snippet_extractor`)
-//! - Searching indexed code (`search_impl`)
-//! - Managing Git repositories (`git_helpers`, `repo_helpers`, `repo_add`)
-//! - Applying and validating code edits (`edit`)
-//! - Error handling (`error`)
-//! - Caching (`cache`)
-//! 
-//! ## Overview
-//! 
-//! This library orchestrates the process of converting source code into vector embeddings,
-//! storing them in Qdrant, and performing semantic searches based on natural language queries.
-//! It also includes utilities for managing the repositories being indexed and applying suggested
-//! code modifications.
-//! 
-//! ## Usage
-//! 
-//! While primarily designed for use by `vectordb-cli`, components of this library can be 
-//! used programmatically. See the [library README](./README.md) for a quickstart guide 
-//! on dependencies (especially ONNX Runtime) and basic initialization.
-//! 
-//! Key modules to explore:
-//! - `embedding`: For handling embedding models.
-//! - `indexing`: For the indexing workflow.
-//! - `search_impl`: For performing searches.
-//! - `qdrant_ops`: For direct Qdrant operations.
-//! - `config`: For loading and managing configuration.
-//! 
+//! # sagitta-search
+//! `sagitta-search` is the core library powering the `sagitta-cli` application.
+//! It provides semantic code search functionality, including:
+//!
+//! - **Indexing**: Parse and index codebases using tree-sitter for syntax analysis
+//! - **Embedding**: Generate embeddings using ONNX Runtime with sentence-transformer models
+//! - **Search**: Perform semantic similarity search using Qdrant vector database
+//! - **Configuration**: Manage application settings and repository configurations
+//! - **Caching**: Cache embeddings and other data for improved performance
+//!
 //! ## Features
-//! 
-//! - `onnx`: (Default) Enables the ONNX embedding provider.
-//! - `ort/cuda`: Enables CUDA acceleration for ONNX (Linux, requires toolkit).
-//! - `ort/coreml`: Enables Core ML acceleration for ONNX (macOS, requires code modification).
-//! - `ort/metal`: Enables Metal acceleration for ONNX (macOS, requires code modification).
-//! 
-//! **Note:** Using this library directly requires careful handling of runtime dependencies like
-//! the ONNX Runtime shared libraries, unlike the bundled `vectordb-cli` executable.
+//!
+//! - **Multi-language support**: Python, Rust, JavaScript, TypeScript, and more
+//! - **GPU acceleration**: Optional CUDA support for faster embedding generation
+//! - **Parallel processing**: Efficient multi-threaded indexing and search
+//! - **Flexible configuration**: TOML-based configuration with sensible defaults
+//! - **Repository management**: Git integration for tracking code changes
+//!
+//! ## Usage
+//!
+//! This library is primarily designed for internal use by the Sagitta ecosystem.
+//! While primarily designed for use by `sagitta-cli`, components of this library can be
+//! used independently for custom semantic search applications.
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use sagitta_search::{AppConfig, EmbeddingHandler};
+//!
+//! // Load configuration
+//! let config = AppConfig::default();
+//!
+//! // Initialize embedding handler
+//! let embedding_handler = EmbeddingHandler::new(&config)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Note on ONNX Runtime
+//!
+//! This library requires ONNX Runtime for embedding generation. When building
+//! applications that use this library, ensure you have the appropriate ONNX Runtime
+//! libraries installed on your system. The `ort` crate will attempt to download
+//! the ONNX Runtime shared libraries, unlike the bundled `sagitta-cli` executable.
 
-// crates/vectordb-core/src/lib.rs
+// crates/sagitta-search/src/lib.rs
 
 // Public modules
 /// Configuration management for the application.
@@ -64,8 +65,6 @@ pub mod constants;
 pub mod edit;
 /// Implementation of search functionality.
 pub mod search_impl;
-/// Git helper utilities (deprecated or internal).
-pub mod git_helpers;
 /// Caching mechanisms, primarily for embeddings.
 pub mod cache; // Added cache module
 /// Core logic for indexing repositories and files.
@@ -84,6 +83,8 @@ pub mod vocabulary;
 pub mod fs_utils; // Added fs_utils module
 /// Repository synchronization logic.
 pub mod sync; // Added sync module
+/// Repository synchronization progress logic.
+pub mod sync_progress;
 
 #[cfg(test)]
 /// Utilities specific to testing within the core library.
@@ -91,7 +92,7 @@ pub mod test_utils;
 
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 pub use embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
-pub use error::{VectorDBError, Result};
+pub use error::{SagittaError, Result};
 pub use qdrant_client_trait::QdrantClientTrait;
 pub use constants::*;
 pub use cache::EmbeddingCache; // Added cache re-export
@@ -104,7 +105,7 @@ pub use qdrant_ops::delete_all_points;
 
 // Re-export other necessary items if needed by CLI directly
 pub use edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationIssue, EngineValidationSeverity};
-pub use repo_helpers::{delete_repository_data, switch_repository_branch, get_collection_name, ensure_repository_collection_exists};
+pub use repo_helpers::{delete_repository_data, get_collection_name, ensure_repository_collection_exists};
 pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo_add is needed by CLI
 pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 

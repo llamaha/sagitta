@@ -10,7 +10,7 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
-use crate::error::{VectorDBError, Result}; // Use crate::error
+use crate::error::{SagittaError, Result}; // Use crate::error
 
 // use mockall::automock for automatic mock generation in tests
 #[cfg_attr(test, mockall::automock)] // Remove mockall
@@ -38,6 +38,8 @@ pub trait QdrantClientTrait: Send + Sync {
     async fn upsert_points(&self, request: UpsertPoints) -> Result<PointsOperationResponse>;
     /// Creates a new collection.
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool>;
+    /// Creates a new collection with detailed configuration.
+    async fn create_collection_detailed(&self, request: CreateCollection) -> Result<bool>;
     /// Deletes points from a collection.
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse>;
     /// Queries points in a collection using a query request.
@@ -50,7 +52,7 @@ pub trait QdrantClientTrait: Send + Sync {
 #[async_trait]
 impl QdrantClientTrait for Qdrant {
     async fn health_check(&self) -> Result<HealthCheckReply> {
-        self.health_check().await.map_err(|e| VectorDBError::QdrantError(e))
+        self.health_check().await.map_err(|e| SagittaError::QdrantError(e))
     }
 
     async fn delete_collection(&self, collection_name: String) -> Result<bool> {
@@ -58,33 +60,33 @@ impl QdrantClientTrait for Qdrant {
             collection_name: collection_name,
             ..Default::default()
         };
-        Ok(self.delete_collection(request).await.map_err(|e| VectorDBError::QdrantError(e))?.result)
+        Ok(self.delete_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?.result)
     }
 
     async fn search_points(&self, request: SearchPoints) -> Result<SearchResponse> {
-        self.search_points(request).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.search_points(request).await.map_err(|e| SagittaError::QdrantError(e))
     }
 
     async fn get_collection_info(&self, collection_name: String) -> Result<CollectionInfo> {
         let request = GetCollectionInfoRequest {
             collection_name: collection_name.clone(),
         };
-        let response = self.collection_info(request).await.map_err(|e| VectorDBError::QdrantError(e))?;
+        let response = self.collection_info(request).await.map_err(|e| SagittaError::QdrantError(e))?;
         match response.result {
             Some(info) => Ok(info),
             None => {
                 let err_msg = format!("Collection info not found for '{}'", collection_name);
-                Err(VectorDBError::RepositoryNotFound(err_msg))
+                Err(SagittaError::RepositoryNotFound(err_msg))
             }
         }
     }
 
     async fn count(&self, request: CountPoints) -> Result<CountResponse> {
-        self.count(request).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.count(request).await.map_err(|e| SagittaError::QdrantError(e))
     }
 
     async fn collection_exists(&self, collection_name: String) -> Result<bool> {
-        self.collection_exists(collection_name).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.collection_exists(collection_name).await.map_err(|e| SagittaError::QdrantError(e))
     }
 
     async fn delete_points_blocking(&self, collection_name: &str, points_selector: &PointsSelector) -> Result<()> {
@@ -94,16 +96,16 @@ impl QdrantClientTrait for Qdrant {
             points: Some(points_selector.clone()),
             ..Default::default()
         };
-        self.delete_points(request).await.map_err(|e| VectorDBError::QdrantError(e))?;
+        self.delete_points(request).await.map_err(|e| SagittaError::QdrantError(e))?;
         Ok(())
     }
 
     async fn scroll(&self, request: ScrollPoints) -> Result<ScrollResponse> {
-        self.scroll(request).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.scroll(request).await.map_err(|e| SagittaError::QdrantError(e))
     }
 
     async fn upsert_points(&self, request: UpsertPoints) -> Result<PointsOperationResponse> {
-        self.upsert_points(request).await.map_err(|e| VectorDBError::QdrantError(e))
+        self.upsert_points(request).await.map_err(|e| SagittaError::QdrantError(e))
     }
     
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool> {
@@ -138,19 +140,24 @@ impl QdrantClientTrait for Qdrant {
             ..Default::default()
         };
         
-        let response = self.create_collection(request).await.map_err(|e| VectorDBError::QdrantError(e))?;
+        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?;
+        Ok(response.result)
+    }
+    
+    async fn create_collection_detailed(&self, request: CreateCollection) -> Result<bool> {
+        let response = self.create_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?;
         Ok(response.result)
     }
     
     async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse> {
-        self.delete_points(request).await.map_err(VectorDBError::from)
+        self.delete_points(request).await.map_err(SagittaError::from)
     }
 
     async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query_points(request).await.map_err(VectorDBError::from)
+        self.query_points(request).await.map_err(SagittaError::from)
     }
 
     async fn query(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query(request).await.map_err(VectorDBError::from)
+        self.query(request).await.map_err(SagittaError::from)
     }
 } 

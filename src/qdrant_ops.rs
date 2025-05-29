@@ -1,6 +1,6 @@
 /// Contains operations specific to Qdrant interactions, like deleting points.
 use crate::{
-    error::{Result as CoreResult, VectorDBError},
+    error::{Result as CoreResult, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
 };
 use anyhow::{Context, Result};
@@ -45,7 +45,7 @@ where
     let delete_request = DeletePointsBuilder::new(collection_name)
         .points(PointsSelectorOneOf::Filter(select_all_filter));
 
-    client.delete_points(delete_request.into()).await.map_err(VectorDBError::from)
+    client.delete_points(delete_request.into()).await.map_err(SagittaError::from)
 }
 
 /// Deletes a Qdrant collection by its name.
@@ -76,9 +76,9 @@ where
             }
             Ok(())
         }
-        Err(core_err) => { // The trait method returns CoreResult (Result<T, VectorDBError>)
+        Err(core_err) => { // The trait method returns CoreResult (Result<T, SagittaError>)
             log::error!("Qdrant client error while deleting collection '{}': {:?}", collection_name, core_err);
-            Err(core_err) // Propagate the VectorDBError
+            Err(core_err) // Propagate the SagittaError
         }
     }
 }

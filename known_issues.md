@@ -1,10 +1,10 @@
-# Known Issues and Testing Gaps for vectordb-mcp
+# Known Issues and Testing Gaps for sagitta-mcp
 
-This document outlines known issues, limitations in the current testing strategy, and areas for future improvement related to `vectordb-mcp` testing and tenant handling.
+This document outlines known issues, limitations in the current testing strategy, and areas for future improvement related to `sagitta-mcp` testing and tenant handling.
 
 ## 1. `target_ref` Functionality Not Tested via MCP Tools
 
--   **Issue:** The `mcp_vectordb-mcp-stdio_repository_add` tool does not currently support a `target_ref` parameter.
+-   **Issue:** The `mcp_sagitta-mcp-stdio_repository_add` tool does not currently support a `target_ref` parameter.
 -   **Impact:** The server's logic for cloning a repository and checking out a specific commit/tag via `target_ref` during `repository/add` cannot be directly tested using the standard MCP tools available in the current automated environment.
 -   **Workaround/Future Testing:** To test this server feature, direct JSON-RPC calls must be used (e.g., via `run_terminal_cmd` with `echo`). Ensure `snake_case` parameters (`target_ref`, `tenant_id`) are used in the JSON payload. The toolset could be enhanced to support this parameter.
 
@@ -19,7 +19,7 @@ This document outlines known issues, limitations in the current testing strategy
 
 ## 3. JSON-RPC Parameter Case Sensitivity for `target_ref` and `tenant_id`
 
--   **Issue:** When using direct JSON-RPC calls (e.g., via `echo` piped to `vectordb-mcp stdio`), parameter keys in the JSON `params` object must be `snake_case` (e.g., `target_ref`, `tenant_id`) to align with the Rust struct field names in `RepositoryAddParams`. The current `serde` setup does not automatically handle `camelCase` for these specific structs/fields.
+-   **Issue:** When using direct JSON-RPC calls (e.g., via `echo` piped to `sagitta-mcp stdio`), parameter keys in the JSON `params` object must be `snake_case` (e.g., `target_ref`, `tenant_id`) to align with the Rust struct field names in `RepositoryAddParams`. The current `serde` setup does not automatically handle `camelCase` for these specific structs/fields.
 -   **Impact:** If `camelCase` (e.g., `targetRef`, `tenantId`) is used in the JSON `params` for direct calls, these parameters will not be deserialized correctly by the server, leading to them being ignored or treated as `None`.
 -   **Recommendation:**
     -   Ensure all direct JSON-RPC test examples or client implementations use `snake_case` for these parameters.
@@ -27,19 +27,19 @@ This document outlines known issues, limitations in the current testing strategy
 
 ## 4. Test Environment Potentially Overwrites User Configuration
 
--   **Issue:** Observations during e2e testing (especially when using `run_terminal_cmd` to execute `vectordb-mcp stdio` for single commands) suggest that these operations can modify the main user configuration file (e.g., `~/.config/vectordb/config.toml`). This was also noted in some Rust unit test setups if they save config without specifying a path.
+-   **Issue:** Observations during e2e testing (especially when using `run_terminal_cmd` to execute `sagitta-mcp stdio` for single commands) suggest that these operations can modify the main user configuration file (e.g., `~/.config/sagitta/config.toml`). This was also noted in some Rust unit test setups if they save config without specifying a path.
 -   **Impact:** This can lead to unexpected states persisting between test runs or inadvertently altering the user's development configuration. It caused issues where repositories seemed to "already exist" despite attempts to clean the config for a new test run.
 -   **Recommendation:**
     -   Investigate and ensure that test environments (both e2e tool-based tests and Rust unit tests) use temporary or test-specific configuration files.
     -   For Rust tests, utilize `tempfile::tempdir()` and ensure any calls to `save_config` are directed to a path within the temporary directory.
-    -   For e2e tests involving direct `vectordb-mcp` execution, explore mechanisms to point the binary to a test-specific config file if possible (e.g., via command-line arguments or environment variables if the server supports overriding the default config path).
+    -   For e2e tests involving direct `sagitta-mcp` execution, explore mechanisms to point the binary to a test-specific config file if possible (e.g., via command-line arguments or environment variables if the server supports overriding the default config path).
 
-## 5. `vectordb-cli` as a Cross-Tenant Admin Tool
+## 5. `sagitta-cli` as a Cross-Tenant Admin Tool
 
--   **Issue:** The `vectordb-cli` tool is currently designed to operate within the context of a single tenant, as defined by its local `config.toml` (or `--tenant-id` argument). It does not have dedicated commands or mechanisms to directly administer all tenants or manage tenant-specific resources (like repositories) across an entire VectorDB-MCP server in a comprehensive administrative capacity.
--   **Impact:** An administrator running `vectordb-cli` on the server machine cannot easily list all tenants, or list/add/remove repositories for a *specific, different* tenant directly through the CLI. Administrative actions on the MCP server (like tenant creation, cross-tenant API key management) are primarily intended to be done via the server's HTTP API using an admin-level API key (e.g., the bootstrap admin key).
+-   **Issue:** The `sagitta-cli` tool is currently designed to operate within the context of a single tenant, as defined by its local `config.toml` (or `--tenant-id` argument). It does not have dedicated commands or mechanisms to directly administer all tenants or manage tenant-specific resources (like repositories) across an entire Sagitta-MCP server in a comprehensive administrative capacity.
+-   **Impact:** An administrator running `sagitta-cli` on the server machine cannot easily list all tenants, or list/add/remove repositories for a *specific, different* tenant directly through the CLI. Administrative actions on the MCP server (like tenant creation, cross-tenant API key management) are primarily intended to be done via the server's HTTP API using an admin-level API key (e.g., the bootstrap admin key).
 -   **Future Enhancement Considerations:**
-    -   Introduce new `vectordb-cli admin <subcommand>` set of commands.
+    -   Introduce new `sagitta-cli admin <subcommand>` set of commands.
     -   These commands would authenticate to a specified MCP server's HTTP API using an admin API key.
     -   Provide functionality such as:
         -   `list-tenants`
@@ -48,7 +48,7 @@ This document outlines known issues, limitations in the current testing strategy
         -   `create-api-key --tenant-id <tenant_id> ...`
         -   `list-repos --tenant-id <tenant_id_or_all>` (requires corresponding MCP server API)
         -   `add-repo --tenant-id <tenant_id> --name <name> --url <url>` (requires corresponding MCP server API)
-    -   This would make `vectordb-cli` a more complete client for both user-scoped operations (via local config) and administrative operations against an MCP server instance. 
+    -   This would make `sagitta-cli` a more complete client for both user-scoped operations (via local config) and administrative operations against an MCP server instance. 
 
 ## 6. Query Quality Benchmark Script Issues
 
@@ -58,7 +58,7 @@ This document outlines known issues, limitations in the current testing strategy
 -   **Recommendation:**
     -   Verify the actual default branch for `https://github.com/microsoft/TypeScript-Node-Starter`.
     -   Update `query_benchmark/benchmark_config.yaml` to specify the correct `default_branch` for `tsnode-typescript` and `tsnode-javascript`.
-    -   Consider enhancing `vectordb-cli repo add` or the server's `repository/add` logic to automatically fall back to `master` if `main` is not found (or vice-versa), or to query the default branch from the remote if no branch is specified. 
+    -   Consider enhancing `sagitta-cli repo add` or the server's `repository/add` logic to automatically fall back to `master` if `main` is not found (or vice-versa), or to query the default branch from the remote if no branch is specified. 
 
 ### 6.1. Query Result Scores Appear Low
 
@@ -68,7 +68,7 @@ This document outlines known issues, limitations in the current testing strategy
     -   Is this score scaling expected behavior for the current embedding models and scoring algorithms?
     -   What does a score of 0.5, 0.7, or 0.9 truly represent in terms of match quality?
     -   Could there be a normalization issue, or is the scale inherently compressed?
-    -   This needs further investigation with the `vectordb-core` team to understand the scoring mechanism and expected score distributions.
+    -   This needs further investigation with the `sagitta-search` team to understand the scoring mechanism and expected score distributions.
 
 ### 6.2. Initial Query Relevancy Assessment (Example)
 
@@ -81,4 +81,4 @@ This document outlines known issues, limitations in the current testing strategy
 -   **Recommendation:** 
     -   Continue analysis across more queries and repositories in `benchmark_results.md` to identify patterns.
     -   Consider if query refinement in `benchmark_config.yaml` (e.g., adding more specific keywords or using different `type` filters) could improve results for certain types of questions.
-    -   If relevancy issues are widespread, it may point to areas for improvement in the core `vectordb-core` search algorithms or embedding models. 
+    -   If relevancy issues are widespread, it may point to areas for improvement in the core `sagitta-search` search algorithms or embedding models. 

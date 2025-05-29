@@ -1,11 +1,11 @@
 #![allow(clippy::arc_with_non_send_sync)] 
 
 use crate::qdrant_client_trait::QdrantClientTrait;
-use crate::error::{Result, VectorDBError};
+use crate::error::{Result, SagittaError};
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
     CollectionInfo, CountPoints, CountResponse, DeletePoints, HealthCheckReply, PointsOperationResponse, PointsSelector, QueryPoints, 
-    QueryResponse, /*ScoredPoint,*/ ScrollPoints, ScrollResponse, SearchPoints, SearchResponse, UpsertPoints, /*PointId*/
+    QueryResponse, /*ScoredPoint,*/ ScrollPoints, ScrollResponse, SearchPoints, SearchResponse, UpsertPoints, /*PointId*/ CreateCollection
 };
 use std::sync::{Arc, Mutex};
 
@@ -110,14 +110,14 @@ impl QdrantClientTrait for ManualMockQdrantClient {
         *self.query_points_called.lock().unwrap() = true;
         log::debug!("ManualMock: query_points called");
         self.expected_query_response.lock().unwrap().take()
-            .unwrap_or_else(|| Err(VectorDBError::Other("Mock Error: query_points called without expected response".into())))
+            .unwrap_or_else(|| Err(SagittaError::Other("Mock Error: query_points called without expected response".into())))
     }
 
     async fn query(&self, _request: QueryPoints) -> Result<QueryResponse> {
         *self.query_called.lock().unwrap() = true;
         log::debug!("ManualMock: query called");
         self.expected_query_response.lock().unwrap().take()
-            .unwrap_or_else(|| Err(VectorDBError::Other("Mock Error: query called without expected response".into())))
+            .unwrap_or_else(|| Err(SagittaError::Other("Mock Error: query called without expected response".into())))
     }
 
     async fn create_collection(&self, collection_name: &str, vector_dimension: u64) -> Result<bool> {
@@ -125,7 +125,28 @@ impl QdrantClientTrait for ManualMockQdrantClient {
         *self.create_collection_args.lock().unwrap() = Some((collection_name.to_string(), vector_dimension));
         log::debug!("ManualMock: create_collection called with name: {}, dim: {}", collection_name, vector_dimension);
         self.expected_create_collection_response.lock().unwrap().take()
-            .unwrap_or_else(|| Err(VectorDBError::Other("Mock Error: create_collection called without expected response".into())))
+            .unwrap_or_else(|| Err(SagittaError::Other("Mock Error: create_collection called without expected response".into())))
+    }
+
+    async fn create_collection_detailed(&self, request: CreateCollection) -> Result<bool> {
+        // For the mock, we'll just delegate to the simpler create_collection method
+        // Extract collection name and vector size from the request
+        let collection_name = &request.collection_name;
+        let vector_size = if let Some(vectors_config) = &request.vectors_config {
+            if let Some(config) = &vectors_config.config {
+                match config {
+                    qdrant_client::qdrant::vectors_config::Config::Params(params) => params.size,
+                    qdrant_client::qdrant::vectors_config::Config::ParamsMap(_) => 384, // Default fallback
+                }
+            } else {
+                384 // Default fallback
+            }
+        } else {
+            384 // Default fallback
+        };
+        
+        log::debug!("ManualMock: create_collection_detailed called, delegating to create_collection");
+        self.create_collection(collection_name, vector_size).await
     }
 
     async fn collection_exists(&self, collection_name: String) -> Result<bool> {
@@ -134,7 +155,7 @@ impl QdrantClientTrait for ManualMockQdrantClient {
         log::debug!("ManualMock: collection_exists called with name: {}", collection_name);
         let mut responses = self.expected_collection_exists_responses.lock().unwrap();
         if responses.is_empty() {
-            Err(VectorDBError::Other("Mock Error: collection_exists called without expected response(s)".into()))
+            Err(SagittaError::Other("Mock Error: collection_exists called without expected response(s)".into()))
         } else {
             responses.remove(0) // FIFO for multiple expected calls
         }

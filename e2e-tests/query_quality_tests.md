@@ -1,6 +1,6 @@
 # Query Quality & Relevance Tests (Revised)
 
-This document contains human-like search queries designed to assess the quality and relevance of search results for different programming languages within `vectordb-cli`. These queries are optimized for hybrid (dense + sparse vector) search capabilities and test a variety of element types with appropriate language specifications.
+This document contains human-like search queries designed to assess the quality and relevance of search results for different programming languages within `sagitta-cli`. These queries are optimized for hybrid (dense + sparse vector) search capabilities and test a variety of element types with appropriate language specifications.
 
 ## Purpose
 
@@ -8,7 +8,7 @@ After adding repositories and running `repo sync`, execute these queries to veri
 
 ## Prerequisites
 
-1. The `vectordb-cli` binary is compiled.
+1. The `sagitta-cli` binary is compiled.
 2. Qdrant is running.
 3. The following repositories have been added using `repo add --name <name> --url <url>`:
    * `ripgrep-mcp-test`: `https://github.com/BurntSushi/ripgrep` (Rust)

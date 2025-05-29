@@ -6,7 +6,7 @@ use std::{
     fmt::Debug,
     thread,
 };
-use crate::error::{Result, VectorDBError};
+use crate::error::{Result, SagittaError};
 use super::{onnx::OnnxEmbeddingModel, EmbeddingProvider, EmbeddingModelType};
 
 /// A pool of ONNX model sessions for efficient parallel processing
@@ -113,7 +113,7 @@ impl OnnxSessionPool {
                 Ok(session) => new_sessions.push(session),
                 Err(e) => {
                     log::error!("Failed to create new ONNX session during reconnect: {}", e);
-                    return Err(VectorDBError::EmbeddingError(format!(
+                    return Err(SagittaError::EmbeddingError(format!(
                         "Failed to reconnect ONNX sessions: {}", e
                     )));
                 }

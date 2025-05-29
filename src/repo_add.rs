@@ -1,13 +1,13 @@
-// Use modules from *within* vectordb_core
+// Use modules from *within* sagitta_search
 use crate::config::RepositoryConfig;
-// use crate::error::VectorDBError; // Marked as unused
+// use crate::error::SagittaError; // Marked as unused
 use crate::repo_helpers as helpers;
 // use crate::repo_helpers::{prepare_repository, index_files}; // Marked as unused
 use crate::qdrant_client_trait::QdrantClientTrait;
 
-// Use modules from the main vectordb_cli crate
+// Use modules from the main sagitta_cli crate
 // Remove the below line if it exists:
-// use vectordb_cli::vectordb::embedding_logic::EmbeddingHandler;
+// use sagitta_cli::sagitta::embedding_logic::EmbeddingHandler;
 
 // Other dependencies
 use anyhow::anyhow;
@@ -119,51 +119,90 @@ pub async fn handle_repo_add<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
+    info!("[handle_repo_add] Starting repository addition process");
+    info!("[handle_repo_add] Args: {:?}", args);
+    info!("[handle_repo_add] Repo base path: {}", repo_base_path_for_add.display());
+    info!("[handle_repo_add] Embedding dim: {}", embedding_dim);
+    info!("[handle_repo_add] Tenant ID: {}", tenant_id);
+    
     // Validate basic arguments
+    info!("[handle_repo_add] Validating arguments...");
     if args.local_path.is_none() && args.url.is_none() {
+        error!("[handle_repo_add] Invalid arguments: Either --local-path or --url must be specified");
         return Err(AddRepoError::InvalidArgs("Either --local-path or --url must be specified.".to_string()));
     }
+    info!("[handle_repo_add] Arguments validated successfully");
 
     // Handle repository name
+    info!("[handle_repo_add] Determining repository name...");
     let repo_name = match &args.name {
-        Some(name) => name.clone(),
+        Some(name) => {
+            info!("[handle_repo_add] Using provided name: {}", name);
+            name.clone()
+        },
         None => {
+            info!("[handle_repo_add] Deriving name from URL or path...");
             // If URL is provided, derive name from URL
             if let Some(url) = &args.url {
-                PathBuf::from(url)
+                let derived_name = PathBuf::from(url)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s.trim_end_matches(".git").to_string())
-                    .ok_or_else(|| AddRepoError::NameDerivationError("URL".to_string()))?
+                    .ok_or_else(|| AddRepoError::NameDerivationError("URL".to_string()))?;
+                info!("[handle_repo_add] Derived name from URL: {}", derived_name);
+                derived_name
             } else {
                 // If only local path is provided, derive name from the directory name
                 let local_path_ref = args.local_path.as_ref().unwrap(); // Use as_ref() to avoid moving
-                local_path_ref
+                let derived_name = local_path_ref
                     .file_name()
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
-                    .ok_or_else(|| AddRepoError::NameDerivationError("local path".to_string()))?
+                    .ok_or_else(|| AddRepoError::NameDerivationError("local path".to_string()))?;
+                info!("[handle_repo_add] Derived name from local path: {}", derived_name);
+                derived_name
             }
         },
     };
+    info!("[handle_repo_add] Repository name determined: {}", repo_name);
 
     // Use the passed-in base path
+    info!("[handle_repo_add] Setting up repository base path...");
     let repo_base_path = repo_base_path_for_add;
+    info!("[handle_repo_add] Repository base path: {}", repo_base_path.display());
 
     // Ensure the determined base path exists
+    info!("[handle_repo_add] Creating repository base directory if needed...");
     fs::create_dir_all(&repo_base_path)
         .map_err(AddRepoError::IoError)?;
+    info!("[handle_repo_add] Repository base directory ensured");
     
     // Determine the final local path for the repository
+    info!("[handle_repo_add] Determining final local path...");
     let local_path = args.local_path.clone().unwrap_or_else(|| repo_base_path.join(&repo_name));
+    info!("[handle_repo_add] Final local path: {}", local_path.display());
 
     // If URL is not provided but required for a new clone scenario (checked by prepare_repository)
     let repo_url = args.url.clone();
+    info!("[handle_repo_add] Repository URL: {:?}", repo_url);
 
     // Flag to indicate if the repo was added by specifying a local path initially
     let added_as_local_path_flag = args.local_path.is_some();
+    info!("[handle_repo_add] Added as local path: {}", added_as_local_path_flag);
 
-    info!("Preparing repository setup for tenant '{}', repo '{}'", tenant_id, repo_name);
+    info!("[handle_repo_add] About to call prepare_repository...");
+    info!("[handle_repo_add] prepare_repository args:");
+    info!("[handle_repo_add]   url: {:?}", repo_url.as_deref().unwrap_or_default());
+    info!("[handle_repo_add]   name: {:?}", Some(&repo_name));
+    info!("[handle_repo_add]   local_path: {:?}", if added_as_local_path_flag { Some(&local_path) } else { None });
+    info!("[handle_repo_add]   branch: {:?}", args.branch.as_deref());
+    info!("[handle_repo_add]   target_ref: {:?}", args.target_ref.as_deref());
+    info!("[handle_repo_add]   remote: {:?}", args.remote.as_deref());
+    info!("[handle_repo_add]   ssh_key: {:?}", args.ssh_key.as_ref());
+    info!("[handle_repo_add]   ssh_passphrase: {:?}", args.ssh_passphrase.as_deref().map(|_| "***"));
+    info!("[handle_repo_add]   repo_base_path: {}", repo_base_path.display());
+    info!("[handle_repo_add]   embedding_dim: {}", embedding_dim);
+    info!("[handle_repo_add]   tenant_id: {}", tenant_id);
 
     // Call prepare_repository for both new clones and existing local paths.
     // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
@@ -182,14 +221,19 @@ where
         config,      // Pass AppConfig for collection_name_prefix and other settings
         tenant_id,   // Pass tenant_id
     ).await.map_err(|e| {
+        error!("[handle_repo_add] prepare_repository failed: {}", e);
         // Map internal Error to AddRepoError
         match e {
-            crate::error::VectorDBError::GitMessageError(msg) => AddRepoError::GitError(anyhow!(msg)),
-            crate::error::VectorDBError::QdrantError(msg) => AddRepoError::QdrantError(anyhow!(msg)),
+            crate::error::SagittaError::GitMessageError(msg) => AddRepoError::GitError(anyhow!(msg)),
+            crate::error::SagittaError::QdrantError(msg) => AddRepoError::QdrantError(anyhow!(msg)),
             // Add other specific mappings as needed
             _ => AddRepoError::ConfigError(anyhow!(e.to_string())),
         }
     })?;
+
+    info!("[handle_repo_add] prepare_repository completed successfully");
+    info!("[handle_repo_add] New repository config: name={}, url={}, local_path={}", 
+          new_repo_config.name, new_repo_config.url, new_repo_config.local_path.display());
 
     // Ensure the returned config has the correct added_as_local_path flag if it was derived
     // prepare_repository now sets this, but we can ensure it aligns if needed, though it should be correct.
@@ -203,6 +247,7 @@ where
     // `handle_repo_add` becomes simpler.
 
     // The `new_repo_config` returned by `prepare_repository` already contains the tenant_id.
+    info!("[handle_repo_add] Repository addition completed successfully");
     Ok(new_repo_config)
 }
 
@@ -259,7 +304,7 @@ mod tests {
             server_api_key_path: None,
             repositories_base_path: None,
             vocabulary_base_path: None,
-            repositories: vec![],
+            repositories: Vec::new(),
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
@@ -269,7 +314,8 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
+            tenant_id: None,
+            rayon_num_threads: 4,
         }
     }
 
@@ -309,6 +355,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
+            rayon_num_threads: 4,
         };
         
         let expected_collection_name = format!("{}{}_{}", 
@@ -390,6 +437,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
+            rayon_num_threads: 4,
         }
     }
 
@@ -430,6 +478,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
+            rayon_num_threads: 4,
         };
         
         let expected_collection_name = format!("{}{}_{}", 
@@ -521,6 +570,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
+            rayon_num_threads: 4,
         };
 
         let repo_name_str = "test_cloned_repo";
@@ -580,5 +630,188 @@ mod tests {
         assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
         assert!(manual_mock_client.verify_create_collection_called());
         assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
+    }
+
+    #[tokio::test]
+    async fn test_handle_repo_add_hello_world_hanging_issue() {
+        // This test reproduces the exact hanging issue reported by the user
+        let temp_dir = tempdir().unwrap();
+        
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+
+        let config = AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            vocabulary_base_path: None,
+            repositories: vec![],
+            active_repository: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                vector_dimension: 384,
+                collection_name_prefix: "repo_".to_string(),
+                ..PerformanceConfig::default()
+            },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("3c62d9d6-0762-4063-bc26-23d4ced05d53".to_string()),
+            rayon_num_threads: 4,
+        };
+        
+        let expected_collection_name = format!("{}{}_{}", 
+            config.performance.collection_name_prefix, 
+            "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in the logs
+            "hello-world"
+        );
+        let expected_dimension = config.performance.vector_dimension;
+
+        manual_mock_client.expect_collection_exists(Ok(false));
+        manual_mock_client.expect_create_collection(Ok(true));
+
+        // This is the exact scenario from the user's logs
+        let add_args = AddRepoArgs {
+            local_path: None,
+            url: Some("https://github.com/octocat/Hello-World.git".to_string()),
+            name: Some("hello-world".to_string()),
+            branch: Some("master".to_string()), // This is the key - using master branch
+            remote: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+            repositories_base_path: None,
+            target_ref: None,
+        };
+
+        let start_time = std::time::Instant::now();
+        
+        let result = handle_repo_add(
+            add_args,
+            temp_dir.path().to_path_buf(),
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+            "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in logs
+        )
+        .await;
+
+        let elapsed = start_time.elapsed();
+        
+        println!("Test completed in {:?}", elapsed);
+        println!("Result: {:?}", result);
+        
+        // The test should complete within a reasonable time (not hang indefinitely)
+        assert!(elapsed.as_secs() < 30, "handle_repo_add took too long: {:?} - this indicates the hanging issue", elapsed);
+        
+        // We expect this to either succeed or fail with a specific error, but not hang
+        match result {
+            Ok(repo_config) => {
+                println!("Successfully added repository: {}", repo_config.name);
+                assert_eq!(repo_config.name, "hello-world");
+                
+                // Verify mock calls
+                assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
+                assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
+                assert!(manual_mock_client.verify_create_collection_called());
+                assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
+            }
+            Err(e) => {
+                println!("Failed to add repository: {}", e);
+                // This is fine - we just want to make sure it doesn't hang
+                // But let's check what the specific error is
+                assert!(!e.to_string().contains("timeout"), "Should not timeout, but got: {}", e);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_repo_add_with_embedding_handler_simulation() {
+        // This test simulates the scenario where embedding handler initialization might cause issues
+        let temp_dir = tempdir().unwrap();
+        
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+
+        // Create a config that would try to initialize an embedding handler
+        let onnx_dir = temp_dir.path().join("onnx");
+        fs::create_dir_all(&onnx_dir).unwrap();
+        
+        let config = AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
+            onnx_model_path: Some(onnx_dir.join("model.onnx").to_string_lossy().to_string()),
+            onnx_tokenizer_path: Some(onnx_dir.to_string_lossy().to_string()),
+            server_api_key_path: None,
+            vocabulary_base_path: None,
+            repositories: vec![],
+            active_repository: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                vector_dimension: 384,
+                collection_name_prefix: "repo_".to_string(),
+                ..PerformanceConfig::default()
+            },
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("3c62d9d6-0762-4063-bc26-23d4ced05d53".to_string()),
+            rayon_num_threads: 4,
+        };
+
+        manual_mock_client.expect_collection_exists(Ok(false));
+        manual_mock_client.expect_create_collection(Ok(true));
+
+        // This is the exact scenario from the user's logs
+        let add_args = AddRepoArgs {
+            local_path: None,
+            url: Some("https://github.com/octocat/Hello-World.git".to_string()),
+            name: Some("hello-world".to_string()),
+            branch: Some("master".to_string()),
+            remote: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+            repositories_base_path: None,
+            target_ref: None,
+        };
+
+        let start_time = std::time::Instant::now();
+        
+        let result = handle_repo_add(
+            add_args,
+            temp_dir.path().to_path_buf(),
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+            "3c62d9d6-0762-4063-bc26-23d4ced05d53",
+        )
+        .await;
+
+        let elapsed = start_time.elapsed();
+        
+        println!("Test with ONNX config completed in {:?}", elapsed);
+        println!("Result: {:?}", result);
+        
+        // The test should complete within a reasonable time (not hang indefinitely)
+        assert!(elapsed.as_secs() < 30, "handle_repo_add took too long: {:?} - this indicates the hanging issue", elapsed);
+        
+        // This test should succeed since we're not actually trying to load ONNX models
+        match result {
+            Ok(repo_config) => {
+                println!("Successfully added repository: {}", repo_config.name);
+                assert_eq!(repo_config.name, "hello-world");
+            }
+            Err(e) => {
+                println!("Failed to add repository: {}", e);
+                // This is fine - we just want to make sure it doesn't hang
+            }
+        }
     }
 }

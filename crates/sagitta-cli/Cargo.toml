@@ -1,0 +1,112 @@
+[package]
+name = "sagitta-cli"
+description = "A CLI tool for semantic code search."
+version = "2.1.1"
+edition = "2021"
+authors = ["Adam Mulvany <amulvany@gitlab.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://gitlab.com/amulvany/sagitta-cli"
+keywords = ["search", "semantic", "code", "vector", "onnx"]
+categories = ["command-line-utilities", "development-tools"]
+homepage = "https://gitlab.com/amulvany/sagitta-cli"
+documentation = "https://docs.rs/sagitta-cli"
+exclude = [
+    "onnx/",
+    "repo-collection/",
+    "test_data/",
+    "qdrant_storage/",
+    "scripts/",
+    "examples/",
+    "docs/",
+    "tests/",
+    ".env",
+    "crates/sagitta-client/",
+    "proto/rust/"
+]
+
+[lib]
+name = "sagitta_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sagitta-cli"
+path = "src/main.rs"
+
+[features]
+default = ["cli_feature", "onetime_rayon_feature", "onnx_feature"]
+cli_feature = [] # Renamed to avoid conflict with potential 'cli' dependency feature
+onetime_rayon_feature = ["dep:rayon"] # Renamed 
+onnx_feature = ["dep:ort"]          # Renamed
+cuda = ["ort/cuda"]
+
+[dependencies]
+git-manager = { path = "../git-manager" }
+sagitta_search = { path = "../../" }
+
+# CLI specific dependencies
+clap = { version = "4.5.7", features = ["derive", "env"] }
+ctrlc = { version = "3.4.6", features = ["termination"], optional = true }
+notify = "6.1.1"
+notify-debouncer-full = "0.3.1"
+termcolor = "1.4"
+
+# Common utilities that CLI might use directly
+anyhow = "1.0"
+tokio = { version = "1.37.0", features = ["full"] } # CLI might use a slightly different version than core for its own runtime
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [ "env-filter", "fmt" ] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.140"
+log = "0.4"
+
+# Optional dependencies gated by features
+rayon = { version = "1.10.0", optional = true }
+ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
+
+# Other dependencies from old root that might be specific to CLI logic not covered by core
+# These were present in the old root Cargo.toml. Review if they are truly needed by CLI directly
+# or if they will be provided transitively by sagitta_search, or should be part of core.
+indicatif = { version = "0.17.8", features = ["rayon"] }
+walkdir = "2.5.0"
+thiserror = "1.0.61"
+async-trait = "0.1.77"
+serde_yaml = "0.9"
+colored = "2.0"
+dirs = "5.0.1"
+tempfile = "3.5"
+regex = "1.10.3"
+rand = "0.8"
+fastrand = "2.0"
+num_cpus = "1.16.0"
+chrono = { version = "0.4", features = ["serde"] }
+lsp-types = "0.94"
+crossbeam-channel = "0.5.13"
+lru = "0.11.0"
+bincode = "1.3"
+qdrant-client = "1.13.0" # CLI might interact with qdrant directly too
+uuid = { version = "1.8", features = ["v4", "serde"] }
+env_logger = "0.11.3"
+toml = "0.8.20"
+futures = "0.3.31"
+git2 = "0.18.3"
+ndarray-stats = "0.6.0"
+url = "2.5"
+tonic = "0.12.3"
+glob = "0.3"
+
+[dev-dependencies]
+mockall = "0.12.1"
+tempfile = "3"
+anyhow = "1.0"
+test-log = "0.2"
+assert_cmd = "2.0"
+predicates = "3.1"
+qdrant-client = { version = "1.13.0", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+[build-dependencies]
+fs_extra = "1.3"
+dirs = "5.0.1" # Matching version from core for consistency if used 

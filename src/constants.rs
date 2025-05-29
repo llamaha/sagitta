@@ -1,4 +1,4 @@
-// Constants shared within vectordb_core, potentially moved from vectordb_cli
+// Constants shared within sagitta_search, potentially moved from sagitta_cli
 
 // Fields used in Qdrant payloads and filters
 /// The field name used for storing the relative file path in Qdrant payloads.
