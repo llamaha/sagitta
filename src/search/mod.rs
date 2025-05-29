@@ -1,4 +1,4 @@
-// crates/vectordb-core/src/search/mod.rs
+// crates/sagitta-search/src/search/mod.rs
 //! Core module for handling search operations (semantic, potentially others later).
 
 pub mod result;
@@ -14,7 +14,7 @@ use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::embedding::EmbeddingHandler;
 use crate::repo_helpers::get_collection_name;
-use crate::error::VectorDBError;
+use crate::error::SagittaError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_CHUNK_CONTENT};
 // --- End imports --- 
 
@@ -27,7 +27,7 @@ pub async fn search_semantic<C>(
     repo_name: &str,
     config: &Arc<AppConfig>, // Use Arc<AppConfig> for consistency
     client: Arc<C>,
-) -> Result<Vec<SearchResult>, VectorDBError>
+) -> Result<Vec<SearchResult>, SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
@@ -35,11 +35,11 @@ where
 
     // 1. Get Query Embedding
     let embedding_handler = EmbeddingHandler::new(&*config)
-        .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     let embeddings = embedding_handler.embed(&[query])
-        .map_err(|e| VectorDBError::EmbeddingError(e.to_string()))?;
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     let query_embedding = embeddings.into_iter().next()
-        .ok_or_else(|| VectorDBError::EmbeddingError("Embedding handler returned no embedding for query".to_string()))?;
+        .ok_or_else(|| SagittaError::EmbeddingError("Embedding handler returned no embedding for query".to_string()))?;
 
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
@@ -58,7 +58,7 @@ where
     let search_response = client
         .search_points(search_request) // Pass ownership
         .await
-        .map_err(VectorDBError::from)?;
+        .map_err(SagittaError::from)?;
     
     debug!("Received {} search results from Qdrant", search_response.result.len());
 

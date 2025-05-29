@@ -6,9 +6,11 @@ use qdrant_client::qdrant::{DeletePointsBuilder, Filter, Condition,
     PointId, PointsSelector, points_selector::PointsSelectorOneOf, PointsIdsList};
 use anyhow::{Context, Result};
 use crate::constants::{BATCH_SIZE, FIELD_BRANCH, FIELD_FILE_PATH};
-use crate::error::VectorDBError as Error;
+use crate::error::SagittaError as Error;
 use crate::QdrantClientTrait;
 use crate::config::AppConfig;
+use crate::sync_progress::{SyncProgressReporter, SyncStage, NoOpProgressReporter, SyncProgress};
+use std::sync::Arc;
 
 /// Generates the Qdrant collection name for a given repository name based on the config prefix.
 pub fn get_collection_name(tenant_id: &str, repo_name: &str, config: &AppConfig) -> String {
@@ -23,13 +25,27 @@ pub async fn delete_points_for_files<
     collection_name: &str,
     branch_name: &str,
     relative_paths: &[PathBuf],
+    progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
 ) -> Result<(), Error> {
+    let reporter = progress_reporter.unwrap_or_else(|| Arc::new(NoOpProgressReporter));
     if relative_paths.is_empty() {
         log::debug!("No files provided for deletion in branch '{}'.", branch_name);
         return Ok(());
     }
     log::info!("Deleting points for {} files in branch '{}' from collection '{}'...",
         relative_paths.len(), branch_name, collection_name);
+
+    // Report start of deletion stage
+    reporter.report(SyncProgress {
+        stage: SyncStage::DeleteFile {
+            current_file: None,
+            total_files: relative_paths.len(),
+            current_file_num: 0,
+            files_per_second: None,
+            message: Some(format!("Starting deletion scan for {} files.", relative_paths.len())),
+        }
+    }).await;
+
     let mut point_ids_to_delete: Vec<PointId> = Vec::new();
     let filter = Filter::must([
         Condition::matches(FIELD_BRANCH, branch_name.to_string()),
@@ -78,6 +94,10 @@ pub async fn delete_points_for_files<
         return Ok(());
     }
     log::debug!("Found {} points to delete for branch '{}'.", point_ids_to_delete.len(), branch_name);
+
+    let total_points_to_delete = point_ids_to_delete.len();
+    let mut deleted_points_count = 0;
+
     for chunk in point_ids_to_delete.chunks(BATCH_SIZE) {
          let _points_selector = PointsSelector {
              points_selector_one_of: Some(PointsSelectorOneOf::Points(
@@ -89,6 +109,17 @@ pub async fn delete_points_for_files<
          client.delete_points(delete_request.into()).await
              .with_context(|| format!("Failed to delete a batch of points from collection '{}'", collection_name))?;
         log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch_name);
+        deleted_points_count += chunk.len();
+        // Report progress after each batch deletion
+        reporter.report(SyncProgress {
+            stage: SyncStage::DeleteFile {
+                current_file: None,
+                total_files: relative_paths.len(),
+                current_file_num: relative_paths.len(),
+                files_per_second: None,
+                message: Some(format!("Deleted {}/{} points associated with scanned files.", deleted_points_count, total_points_to_delete)),
+            }
+        }).await;
     }
     log::info!("Successfully deleted {} points for {} files in branch '{}'.",
         point_ids_to_delete.len(), relative_paths.len(), branch_name);

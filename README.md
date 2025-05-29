@@ -1,16 +1,20 @@
-# `vectordb-core`
+# `sagitta-search`
 
-`vectordb-core` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `vectordb-cli`.
+`sagitta-search` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `sagitta-cli`.
 
 This repository also contains:
-- [`crates/vectordb-cli`](./crates/vectordb-cli/README.md): A command-line interface for `vectordb-core`.
-- [`crates/vectordb-mcp`](./crates/vectordb-mcp/README.md): A server component (MCP) for `vectordb-core`.
+- [`crates/sagitta-cli`](./crates/sagitta-cli/README.md): A command-line interface for `sagitta-search`.
+- [`crates/sagitta-mcp`](./crates/sagitta-mcp/README.md): A server component (MCP) for `sagitta-search`.
+- [`crates/git-manager`](./crates/git-manager/README.md): Centralized git operations with branch management and automatic resync capabilities.
+- [`crates/sagitta-code`](./crates/sagitta-code/README.md): AI agent with conversation management and repository integration.
+- [`crates/reasoning-engine`](./crates/reasoning-engine/README.md): Advanced reasoning and orchestration engine for AI workflows.
+- [`crates/repo-mapper`](./crates/repo-mapper/README.md): Repository structure analysis and mapping utilities.
 
 **Note:** This tool is under development and not ready for production use.
 
 ## Performance
 
-`vectordb-core` is designed for high-performance indexing and search operations, enabling tools like `vectordb-cli` to achieve significant speed. Through careful tuning of parallel processing, GPU utilization (via ONNX Runtime), and embedding model selection, we've focused on achieving substantial speed improvements while maintaining high-quality search results. The library aims to intelligently balance resource usage based on hardware capabilities, making it efficient even on systems with limited GPU memory when used appropriately by a frontend application.
+`sagitta-search` is designed for high-performance indexing and search operations, enabling tools like `sagitta-cli` to achieve significant speed. Through careful tuning of parallel processing, GPU utilization (via ONNX Runtime), and embedding model selection, we've focused on achieving substantial speed improvements while maintaining high-quality search results. The library aims to intelligently balance resource usage based on hardware capabilities, making it efficient even on systems with limited GPU memory when used appropriately by a frontend application.
 
 ## Prerequisites
 
@@ -20,7 +24,7 @@ This repository also contains:
     source "$HOME/.cargo/env"
     ```
 
-2.  **ONNX Runtime**: `vectordb-core` uses ONNX Runtime for its embedding models.
+2.  **ONNX Runtime**: `sagitta-search` uses ONNX Runtime for its embedding models.
 
     **Download:** Get the pre-built binaries for your OS/Architecture (**GPU version is required for practical use; CPU is only for development or debugging**) from the official **[ONNX Runtime v1.20.0 Release](https://github.com/microsoft/onnxruntime/releases/tag/v1.20.0)**. Find the appropriate archive for your system (e.g., `onnxruntime-linux-x64-gpu-1.20.0.tgz`) under the assets menu. **Do not use the CPU-only version for production or large codebases.**
     **Extract:** Decompress the downloaded archive to a suitable location (e.g., `~/onnxruntime/` or `/opt/onnxruntime/`).
@@ -49,21 +53,29 @@ This repository also contains:
 ### 1. Clone the Repository
 ```bash
 # Replace with the actual repository URL
-git clone https://gitlab.com/amulvany/vectordb-core.git
-cd vectordb-core 
+git clone https://gitlab.com/amulvany/sagitta-search.git
+cd sagitta-search 
 ```
 
 ### 2. Build the Tools
 
-The recommended way to build is to compile the entire workspace, which includes `vectordb-core`, `vectordb-cli`, and `vectordb-mcp`:
+The recommended way to build is to compile the entire workspace, which includes `sagitta-search`, `sagitta-cli`, and `sagitta-mcp`:
+
+**For GPU acceleration (recommended for production):**
 ```bash
-cargo build --release --workspace --features ort/cuda
+cargo build --release --workspace --features cuda
 ```
-The resulting binaries will be located in the `target/release/` directory (e.g., `target/release/vectordb-cli`, `target/release/vectordb-mcp`).
+
+**For CPU-only builds (development/testing):**
+```bash
+cargo build --release --workspace
+```
+
+The resulting binaries will be located in the `target/release/` directory (e.g., `target/release/sagitta-cli`, `target/release/sagitta-mcp`).
 
 ### 3. Set Up Embedding Models
 
-Tools using `vectordb-core` (like `vectordb-cli`) require ONNX-format embedding models and their tokenizers.
+Tools using `sagitta-search` (like `sagitta-cli`) require ONNX-format embedding models and their tokenizers.
 
 *   **Generate/Obtain Model Files**: The `scripts/` directory contains Python helper scripts to convert models from the Hugging Face Hub to the required ONNX format:
     *   To generate the default model (`all-MiniLM-L6-v2`), use `convert_all_minilm_model.py`. First, set up a Python environment (see section 6 below), then run:
@@ -73,15 +85,15 @@ Tools using `vectordb-core` (like `vectordb-cli`) require ONNX-format embedding 
         This script typically downloads the model and saves the ONNX model and tokenizer files into an `onnx/` directory (or similar, check the script output).
     *   To generate other models (like a code-specific one), use the corresponding script (e.g., `convert_st_code_model.py`). See section 6 for more details.
 
-*   **Configure Model Paths**: The paths to the ONNX model (`.onnx` file) and tokenizer (`tokenizer.json` directory) need to be specified. This is typically done via the central configuration file (see section 4), although tools like `vectordb-cli` may also allow overriding via environment variables or command-line arguments (refer to specific tool documentation).
+*   **Configure Model Paths**: The paths to the ONNX model (`.onnx` file) and tokenizer (`tokenizer.json` directory) need to be specified. This is typically done via the central configuration file (see section 4), although tools like `sagitta-cli` may also allow overriding via environment variables or command-line arguments (refer to specific tool documentation).
 
 ### 4. Configuration File
 
-Both `vectordb-cli` and `vectordb-mcp` load settings (like Qdrant URL, repository paths, model paths if not overridden by environment variables or arguments) from a central configuration file. This file is typically located at:
+Both `sagitta-cli` and `sagitta-mcp` load settings (like Qdrant URL, repository paths, model paths if not overridden by environment variables or arguments) from a central configuration file. This file is typically located at:
 
-`~/.config/vectordb/config.toml`
+`~/.config/sagitta/config.toml`
 
-You can initialize a default configuration using `vectordb-cli init` (see the `vectordb-cli` README).
+You can initialize a default configuration using `sagitta-cli init` (see the `sagitta-cli` README).
 
 **See [docs/configuration.md](./docs/configuration.md) for a full list and documentation of all configuration options.**
 
@@ -93,7 +105,7 @@ To avoid errors like:
 
     Error: ONNX model path or tokenizer path not specified. Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir) or ensure they are set in the configuration file.
 
-Add the following lines to your `~/.config/vectordb/config.toml` (adjust the paths as needed):
+Add the following lines to your `~/.config/sagitta/config.toml` (adjust the paths as needed):
 
 ```toml
 onnx_model_path = "/absolute/path/to/model.onnx"
@@ -109,20 +121,20 @@ You can also override these via CLI arguments:
 
 ### 5. Using GPU Acceleration (Optional but highly recommended)
 
-`vectordb-core` can leverage GPU acceleration if you have a compatible ONNX Runtime build installed and correctly configured.
+`sagitta-search` can leverage GPU acceleration if you have a compatible ONNX Runtime build installed and correctly configured.
 
 *   **Install GPU-enabled ONNX Runtime**: Follow the instructions in Prerequisites, ensuring you select a version with GPU support (currently, CUDA on Linux is the primary tested configuration) and install any necessary drivers (NVIDIA drivers, CUDA Toolkit, cuDNN).
 *   **Set Library Path**: Ensure `LD_LIBRARY_PATH` (or equivalent like `PATH` on Windows) points to the directory containing the GPU-enabled ONNX Runtime libraries.
-*   **(Optional) Build `vectordb-core` with GPU features**: The `ort` crate dependency in `Cargo.toml` has features (like `cuda`). If you encounter issues with the default `download-binaries` feature conflicting with your system install, you might consider modifying `Cargo.toml` to use a specific feature (e.g., `ort = { ..., default-features = false, features = ["cuda"] }`) and rebuilding the workspace (`cargo build --release --workspace --features ort/cuda`).
+*   **(Optional) Build `sagitta-search` with GPU features**: The `ort` crate dependency in `Cargo.toml` has features (like `cuda`). If you encounter issues with the default `download-binaries` feature conflicting with your system install, you might consider modifying `Cargo.toml` to use a specific feature (e.g., `ort = { ..., default-features = false, features = ["cuda"] }`) and rebuilding the workspace (`cargo build --release --workspace --features ort/cuda`).
 *   **Manage GPU Memory**: By default this tool is bottlenecked by your available GPU memory.  You might hit GPU Out-of-Memory errors depending on the number of parallel threads that are loading the model into GPU memory. Limit parallel threads using Rayon:
     ```bash
     # Adjust N based on your GPU memory
     export RAYON_NUM_THREADS=N 
-    vectordb-cli repo sync # Or other tool commands
+    sagitta-cli repo sync # Or other tool commands
 
 ### 6. Using Different Embedding Models
 
-`vectordb-core` supports using alternative sentence-transformer models compatible with ONNX.
+`sagitta-search` supports using alternative sentence-transformer models compatible with ONNX.
 
 *   **Available Model Conversion Scripts**: The `./scripts/` directory includes Python scripts (`convert_all_minilm_model.py`, `convert_st_code_model.py`) to generate ONNX models from different Sentence Transformer models available on the Hugging Face Hub.
 *   **Running Conversion Scripts**:
@@ -135,11 +147,11 @@ You can also override these via CLI arguments:
     2.  Run the desired conversion script (e.g., `python scripts/convert_st_code_model.py`). This typically creates a new directory (e.g., `st_code_onnx/`) with the model files.
     3.  Deactivate: `deactivate`.
 *   **Configure Model Paths**: Update the central configuration (see section 4) to point to the new model's `.onnx` file and tokenizer directory. Tools may also allow overrides via environment variables or arguments.
-*   **Index Compatibility**: Different models produce embeddings of different dimensions. Qdrant indexes are tied to a specific dimension. If the core library (used by tools like `vectordb-cli`) detects a model dimension mismatch for an existing index, it will likely need to clear and recreate the index.
+*   **Index Compatibility**: Different models produce embeddings of different dimensions. Qdrant indexes are tied to a specific dimension. If the core library (used by tools like `sagitta-cli`) detects a model dimension mismatch for an existing index, it will likely need to clear and recreate the index.
 
 ## Model Conversion Scripts
 
-The following scripts in the `./scripts` directory help you download and convert popular Hugging Face models to ONNX format for use with vectordb-core:
+The following scripts in the `./scripts` directory help you download and convert popular Hugging Face models to ONNX format for use with sagitta-search:
 
 | Script Name                   | Model Name / HF Repo                  | Embedding Dimension | Description                                      |
 |------------------------------ |---------------------------------------|--------------------|--------------------------------------------------|

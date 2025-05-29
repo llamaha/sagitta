@@ -11,13 +11,13 @@ use std::io::Write;
 use std::process::Stdio;
 use anyhow::Context as AnyhowContext;
 
-const WORKSPACE_ROOT: &str = "/home/adam/repos/vectordb-core"; // From user context
+const WORKSPACE_ROOT: &str = "/home/adam/repos/sagitta-search"; // From user context
 const TEST_TENANT_ID: &str = "test_tenant_001";
 const QDRANT_URL_TEST: &str = "http://localhost:6334";
 const VECTOR_DIMENSION: i32 = 384;
 
 fn get_cli_path() -> PathBuf {
-    PathBuf::from(WORKSPACE_ROOT).join("target/release/vectordb-cli")
+    PathBuf::from(WORKSPACE_ROOT).join("target/release/sagitta-cli")
 }
 
 // ONNX paths are now primarily for writing to config, not direct CLI args
@@ -44,8 +44,8 @@ impl TestEnv {
     fn new() -> Self {
         let temp_dir = tempdir().expect("Failed to create temp dir for test");
         
-        let config_dir = temp_dir.path().join(".config/vectordb");
-        fs::create_dir_all(&config_dir).expect("Failed to create .config/vectordb directory in temp_dir");
+        let config_dir = temp_dir.path().join(".config/sagitta");
+        fs::create_dir_all(&config_dir).expect("Failed to create .config/sagitta directory in temp_dir");
         let config_file_path = config_dir.join("config.toml");
         
         let mut config_file = File::create(&config_file_path).expect("Failed to create config.toml in temp_dir");
@@ -67,24 +67,22 @@ impl TestEnv {
     fn cli_cmd(&self) -> Result<Command, Box<dyn std::error::Error>> {
         let mut cmd = Command::new(get_cli_path());
         cmd.env("RUST_LOG", "info"); // Enable logging for CLI, useful for debugging
-        // Attempt to override default config/data paths.
-        // These are hypothetical. The CLI might use XDG_CONFIG_HOME/XDG_DATA_HOME,
-        // or have its own flags like --config-dir / --data-dir.
-        // Setting HOME is a broad approach if specific overrides aren't available.
-        cmd.env("HOME", self.temp_dir.path());
-        // If the CLI has specific flags for these, they should be used instead.
-        // For example:
-        // cmd.arg("--config-dir").arg(self.cli_config_dir.path());
-        // cmd.arg("--data-dir").arg(self.cli_data_dir.path());
 
+        // Explicitly set SAGITTA_TEST_CONFIG_PATH to the config file created in TestEnv::new()
+        let config_file_path = self.temp_dir.path().join(".config/sagitta/config.toml");
+        cmd.env("SAGITTA_TEST_CONFIG_PATH", config_file_path);
+
+        // Setting HOME might still be useful if other XDG paths are derived from it,
+        // or if the CLI writes other data based on HOME (e.g., default repo base path if not in config).
+        cmd.env("HOME", self.temp_dir.path());
         Ok(cmd)
     }
 
     // Helper to get the path to the CLI's repository base.
-    // This assumes a default structure like ~/.local/share/vectordb-cli/repositories
+    // This assumes a default structure like ~/.local/share/sagitta-cli/repositories
     // which would be inside our temp_dir if HOME is set correctly.
     fn get_cli_repo_base_path(&self) -> PathBuf {
-        self.temp_dir.path().join(".local/share/vectordb/repositories")
+        self.temp_dir.path().join(".local/share/sagitta/repositories")
     }
 }
 
@@ -95,8 +93,8 @@ mod phase_1_repo_commands {
     #[test]
     fn cli_help_and_version() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
-        env.cli_cmd()?.arg("--help").assert().success().stdout(contains("Usage: vectordb-cli"));
-        env.cli_cmd()?.arg("--version").assert().success().stdout(contains("vectordb-cli"));
+        env.cli_cmd()?.arg("--help").assert().success().stdout(contains("Usage: sagitta-cli"));
+        env.cli_cmd()?.arg("--version").assert().success().stdout(contains("sagitta-cli"));
         Ok(())
     }
 

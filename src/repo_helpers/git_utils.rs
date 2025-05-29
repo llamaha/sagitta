@@ -4,9 +4,8 @@ use std::path::PathBuf;
 use git2::{Repository, FetchOptions, Cred, RemoteCallbacks, CredentialType};
 use anyhow::Result;
 use crate::config::RepositoryConfig;
-use crate::error::VectorDBError as Error;
+use crate::error::SagittaError as Error;
 use crate::config::AppConfig;
-use crate::git_helpers::switch_branch_impl;
 
 /// Helper function to check if a file extension is explicitly supported by a parser
 pub fn is_supported_extension(extension: &str) -> bool {
@@ -133,28 +132,5 @@ pub fn collect_files_from_tree(
             _ => {}
         }
     }
-    Ok(())
-}
-
-/// Switches the active branch for a given repository in the configuration.
-/// This involves checking out the branch in the local Git repository and updating the
-/// `active_branch` field in the `RepositoryConfig`.
-pub fn switch_repository_branch(
-    config: &mut AppConfig,
-    repo_name: &str,
-    branch_name: &str,
-) -> Result<(), Error> {
-    let repo_config_index = config.repositories
-        .iter()
-        .position(|r| r.name == repo_name)
-        .ok_or_else(|| Error::RepositoryNotFound(repo_name.to_string()))?;
-
-    let repo_config = &mut config.repositories[repo_config_index];
-
-    // Call implementation function from within core
-    switch_branch_impl(repo_config, branch_name)?;
-
-    repo_config.active_branch = Some(branch_name.to_string());
-
     Ok(())
 } 

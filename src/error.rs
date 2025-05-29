@@ -7,12 +7,12 @@ use ort;
 // use serde::ser::Error as SerError;
 // use serde::de::Error as DeError;
 
-/// Result type for VectorDB operations
-pub type Result<T> = std::result::Result<T, VectorDBError>;
+/// Result type for Sagitta operations
+pub type Result<T> = std::result::Result<T, SagittaError>;
 
-/// Errors that can occur in the VectorDB system
+/// Errors that can occur in the Sagitta system
 #[derive(Error, Debug)]
-pub enum VectorDBError {
+pub enum SagittaError {
     #[error("File not found: {0}")]
     /// Error indicating that a specified file was not found at the given path.
     FileNotFound(String),
@@ -201,23 +201,23 @@ pub enum VectorDBError {
     ConfigError(String),
 }
 
-// Custom conversion from anyhow::Error to VectorDBError
-// Tries to downcast to preserve the original VectorDBError type if possible.
-impl From<anyhow::Error> for VectorDBError {
+// Custom conversion from anyhow::Error to SagittaError
+// Tries to downcast to preserve the original SagittaError type if possible.
+impl From<anyhow::Error> for SagittaError {
     fn from(err: anyhow::Error) -> Self {
-        // Attempt to downcast to the original VectorDBError
-        if let Some(specific_err) = err.downcast_ref::<VectorDBError>() {
+        // Attempt to downcast to the original SagittaError
+        if let Some(specific_err) = err.downcast_ref::<SagittaError>() {
             specific_err.clone() // Clone the original error if downcast succeeds
         } else {
             // Fallback: If downcast fails, wrap the error message in Other
             // This preserves the error context but loses the specific variant type.
-            VectorDBError::Other(format!("{:?}", err))
+            SagittaError::Other(format!("{:?}", err))
         }
     }
 }
 
-// Add Clone implementation for VectorDBError to support parallel processing
-impl Clone for VectorDBError {
+// Add Clone implementation for SagittaError to support parallel processing
+impl Clone for SagittaError {
     fn clone(&self) -> Self {
         match self {
             Self::FileNotFound(s) => Self::FileNotFound(s.clone()),
@@ -290,35 +290,35 @@ mod tests {
 
     #[test]
     fn test_display_file_not_found() {
-        let err = VectorDBError::FileNotFound("missing.txt".to_string());
+        let err = SagittaError::FileNotFound("missing.txt".to_string());
         assert_eq!(err.to_string(), "File not found: missing.txt");
     }
 
     #[test]
     fn test_display_file_read_error() {
         let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "cannot read");
-        let err = VectorDBError::FileReadError { path: PathBuf::from("secret.txt"), source: io_err };
+        let err = SagittaError::FileReadError { path: PathBuf::from("secret.txt"), source: io_err };
         assert_eq!(err.to_string(), "Failed to read file secret.txt: cannot read");
     }
 
     #[test]
     fn test_display_file_write_error() {
         let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "cannot write");
-        let err = VectorDBError::FileWriteError { path: PathBuf::from("output.log"), source: io_err };
+        let err = SagittaError::FileWriteError { path: PathBuf::from("output.log"), source: io_err };
         assert_eq!(err.to_string(), "Failed to write file output.log: cannot write");
     }
 
     #[test]
     fn test_display_directory_creation_error() {
         let io_err = io::Error::new(io::ErrorKind::AlreadyExists, "dir exists");
-        let err = VectorDBError::DirectoryCreationError{ path: PathBuf::from("my_dir"), source: io_err };
+        let err = SagittaError::DirectoryCreationError{ path: PathBuf::from("my_dir"), source: io_err };
         assert_eq!(err.to_string(), "Failed to create directory my_dir: dir exists");
     }
 
     #[test]
     fn test_display_metadata_error() {
         let io_err = io::Error::new(io::ErrorKind::NotFound, "no metadata");
-        let err = VectorDBError::MetadataError{ path: PathBuf::from("no_file"), source: io_err };
+        let err = SagittaError::MetadataError{ path: PathBuf::from("no_file"), source: io_err };
         assert_eq!(err.to_string(), "Failed to access file metadata for no_file: no metadata");
     }
 
@@ -337,7 +337,7 @@ mod tests {
         }
         // This should now correctly generate a serde_json::Error
         let serialization_err = serde_json::to_string(&Unserializable {}).unwrap_err();
-        let err = VectorDBError::SerializationError(serialization_err.to_string());
+        let err = SagittaError::SerializationError(serialization_err.to_string());
         // Check the Display output using contains, as the exact serde_json error might vary slightly
         assert!(err.to_string().contains("cannot serialize Unserializable"));
         // Also check the error type prefix is correct
@@ -346,68 +346,68 @@ mod tests {
 
     #[test]
     fn test_display_deserialization_error() {
-        let err = VectorDBError::DeserializationError("Failed to deserialize JSON data".to_string());
+        let err = SagittaError::DeserializationError("Failed to deserialize JSON data".to_string());
         assert_eq!(err.to_string(), "Error deserializing data: Failed to deserialize JSON data");
     }
 
     #[test]
     fn test_display_embedding_error() {
-        let err = VectorDBError::EmbeddingError("Embedding generation failed".to_string());
+        let err = SagittaError::EmbeddingError("Embedding generation failed".to_string());
         assert_eq!(err.to_string(), "Error generating embedding: Embedding generation failed");
     }
 
     #[test]
     fn test_display_database_error() {
-        let err = VectorDBError::DatabaseError("DB connection failed".to_string());
+        let err = SagittaError::DatabaseError("DB connection failed".to_string());
         assert_eq!(err.to_string(), "Database error: DB connection failed");
     }
 
     #[test]
     fn test_display_ast_traversal_error() {
-        let err = VectorDBError::ASTTraversalError("Could not traverse node".to_string());
+        let err = SagittaError::ASTTraversalError("Could not traverse node".to_string());
         assert_eq!(err.to_string(), "AST traversal error: Could not traverse node");
     }
 
     #[test]
     fn test_display_invalid_parameter() {
-        let err = VectorDBError::InvalidParameter("Negative count provided".to_string());
+        let err = SagittaError::InvalidParameter("Negative count provided".to_string());
         assert_eq!(err.to_string(), "Invalid parameter: Negative count provided");
     }
 
     #[test]
     fn test_display_invalid_path() {
-        let err = VectorDBError::InvalidPath("Path contains invalid chars".to_string());
+        let err = SagittaError::InvalidPath("Path contains invalid chars".to_string());
         assert_eq!(err.to_string(), "Invalid path: Path contains invalid chars");
     }
 
     #[test]
     fn test_display_cache_error() {
-        let err = VectorDBError::CacheError("Cache miss or invalidation".to_string());
+        let err = SagittaError::CacheError("Cache miss or invalidation".to_string());
         assert_eq!(err.to_string(), "Cache error: Cache miss or invalidation");
     }
 
     #[test]
     fn test_display_parser_error() {
-        let err = VectorDBError::ParserError("Syntax error in code".to_string());
+        let err = SagittaError::ParserError("Syntax error in code".to_string());
         assert_eq!(err.to_string(), "Parser error: Syntax error in code");
     }
 
     #[test]
     fn test_display_unsupported_language() {
-        let err = VectorDBError::UnsupportedLanguage("Language 'Brainfuck' not supported".to_string());
+        let err = SagittaError::UnsupportedLanguage("Language 'Brainfuck' not supported".to_string());
         assert_eq!(err.to_string(), "Unsupported language: Language 'Brainfuck' not supported");
     }
 
     #[test]
     fn test_display_hnsw_error() {
         // Often wraps other errors, e.g., ONNX errors might end up here via From<anyhow::Error>
-        let err = VectorDBError::HNSWError("HNSW search failed internally".to_string());
+        let err = SagittaError::HNSWError("HNSW search failed internally".to_string());
         assert_eq!(err.to_string(), "HNSW index error: HNSW search failed internally");
     }
 
     #[test]
     fn test_display_dimension_mismatch() {
-        let err = VectorDBError::DimensionMismatch { expected: 768, found: 384 };
+        let err = SagittaError::DimensionMismatch { expected: 768, found: 384 };
         assert_eq!(err.to_string(), "HNSW index dimension (768) does not match query/data dimension (384)");
     }
 
@@ -415,97 +415,97 @@ mod tests {
     fn test_display_io_error() {
         let io_err = io::Error::new(io::ErrorKind::TimedOut, "connection timed out");
         // Uses From<io::Error>
-        let err = VectorDBError::from(io_err); // Or VectorDBError::IOError(io_err)
+        let err = SagittaError::from(io_err); // Or SagittaError::IOError(io_err)
         assert_eq!(err.to_string(), "IO error: connection timed out");
     }
 
     #[test]
     fn test_display_code_analysis_error() {
-        let err = VectorDBError::CodeAnalysisError("Failed to analyze symbols".to_string());
+        let err = SagittaError::CodeAnalysisError("Failed to analyze symbols".to_string());
         assert_eq!(err.to_string(), "Code analysis error: Failed to analyze symbols");
     }
 
     #[test]
     fn test_display_general_error() {
-        let err = VectorDBError::GeneralError("An unexpected issue occurred".to_string());
+        let err = SagittaError::GeneralError("An unexpected issue occurred".to_string());
         assert_eq!(err.to_string(), "General error: An unexpected issue occurred");
     }
 
     #[test]
     fn test_display_directory_not_found() {
-        let err = VectorDBError::DirectoryNotFound("/non/existent/path".to_string());
+        let err = SagittaError::DirectoryNotFound("/non/existent/path".to_string());
         assert_eq!(err.to_string(), "Directory not found: /non/existent/path");
     }
 
     #[test]
     fn test_display_repository_error() {
-        let err = VectorDBError::RepositoryError("Git operation failed".to_string());
+        let err = SagittaError::RepositoryError("Git operation failed".to_string());
         assert_eq!(err.to_string(), "Repository error: Git operation failed");
     }
 
     #[test]
     fn test_display_repository_not_found() {
-        let err = VectorDBError::RepositoryNotFound("Repo at path not found".to_string());
+        let err = SagittaError::RepositoryNotFound("Repo at path not found".to_string());
         assert_eq!(err.to_string(), "Repository not found: Repo at path not found");
     }
 
     #[test]
     fn test_display_search_error() {
-        let err = VectorDBError::SearchError("Search query was invalid".to_string());
+        let err = SagittaError::SearchError("Search query was invalid".to_string());
         assert_eq!(err.to_string(), "Search error: Search query was invalid");
     }
 
     #[test]
     fn test_display_other_error() {
-        let err = VectorDBError::Other("Some other specific error".to_string());
+        let err = SagittaError::Other("Some other specific error".to_string());
         assert_eq!(err.to_string(), "Other error: Some other specific error");
     }
 
     #[test]
     fn test_display_configuration_error() {
-        let err = VectorDBError::ConfigurationError("Missing API key".to_string());
+        let err = SagittaError::ConfigurationError("Missing API key".to_string());
         assert_eq!(err.to_string(), "Configuration error: Missing API key");
     }
 
     #[test]
     fn test_display_indexing_error() {
-        let err = VectorDBError::IndexingError("Failed to add document to index".to_string());
+        let err = SagittaError::IndexingError("Failed to add document to index".to_string());
         assert_eq!(err.to_string(), "Indexing error: Failed to add document to index");
     }
 
     #[test]
     fn test_display_directory_not_indexed() {
-        let err = VectorDBError::DirectoryNotIndexed("src/utils".to_string());
+        let err = SagittaError::DirectoryNotIndexed("src/utils".to_string());
         assert_eq!(err.to_string(), "Directory 'src/utils' is not present in the index");
     }
 
     #[test]
     fn test_display_index_not_found() {
-        let err = VectorDBError::IndexNotFound;
+        let err = SagittaError::IndexNotFound;
         assert_eq!(err.to_string(), "Search index not found or not built");
     }
 
     #[test]
     fn test_display_operation_cancelled() {
-        let err = VectorDBError::OperationCancelled;
+        let err = SagittaError::OperationCancelled;
         assert_eq!(err.to_string(), "Operation cancelled by user");
     }
 
     #[test]
     fn test_display_mutex_lock_error() {
-        let err = VectorDBError::MutexLockError("Failed to acquire lock".to_string());
+        let err = SagittaError::MutexLockError("Failed to acquire lock".to_string());
         assert_eq!(err.to_string(), "Mutex lock error: Failed to acquire lock");
     }
 
     // Example test for Clone - testing one variant is usually enough
     #[test]
     fn test_error_cloning() {
-        let original = VectorDBError::FileNotFound("clone_test.txt".to_string());
+        let original = SagittaError::FileNotFound("clone_test.txt".to_string());
         let cloned = original.clone();
         assert_eq!(original.to_string(), cloned.to_string());
         // Ensure it's a deep clone if necessary (though for String it doesn't matter much)
-        if let VectorDBError::FileNotFound(s1) = original {
-            if let VectorDBError::FileNotFound(s2) = cloned {
+        if let SagittaError::FileNotFound(s1) = original {
+            if let SagittaError::FileNotFound(s2) = cloned {
                 assert_eq!(s1, s2);
                 assert_ne!(s1.as_ptr(), s2.as_ptr()); // Check they aren't the same string instance in memory
             } else {
@@ -519,17 +519,17 @@ mod tests {
     // Example test for From<anyhow::Error>
     #[test]
     fn test_from_anyhow_error() {
-        let original_err = VectorDBError::HNSWError("Test HNSW error".to_string());
+        let original_err = SagittaError::HNSWError("Test HNSW error".to_string());
         let anyhow_err = anyhow::Error::new(original_err.clone()); // Clone the original error
-        let vectordb_err: VectorDBError = anyhow_err.into();
+        let sagitta_err: SagittaError = anyhow_err.into();
         // Check if the downcasted error is the correct variant
         assert!(
-            matches!(vectordb_err, VectorDBError::HNSWError(_)),
+            matches!(sagitta_err, SagittaError::HNSWError(_)),
             "Expected HNSWError, got {:?}", // Add debug print on failure
-            vectordb_err
+            sagitta_err
         );
         // Optionally, check if the content is preserved
-        if let VectorDBError::HNSWError(msg) = vectordb_err {
+        if let SagittaError::HNSWError(msg) = sagitta_err {
             assert_eq!(msg, "Test HNSW error");
         }
     }
@@ -546,19 +546,19 @@ mod tests {
 
     #[test]
     fn test_from_anyhow_error_other() {
-        let original_err = VectorDBError::HNSWError("Test HNSW error".to_string());
+        let original_err = SagittaError::HNSWError("Test HNSW error".to_string());
         let anyhow_err = anyhow::Error::new(original_err.clone());
-        let vectordb_err: VectorDBError = anyhow_err.into();
+        let sagitta_err: SagittaError = anyhow_err.into();
         
         // Assert that the downcasted error is the correct variant
         assert!(
-            matches!(vectordb_err, VectorDBError::HNSWError(_)), 
+            matches!(sagitta_err, SagittaError::HNSWError(_)), 
             "Expected HNSWError, got {:?}", 
-            vectordb_err
+            sagitta_err
         );
         
         // Additionally, check if the content matches
-        if let VectorDBError::HNSWError(msg) = vectordb_err {
+        if let SagittaError::HNSWError(msg) = sagitta_err {
             assert_eq!(msg, "Test HNSW error");
         } else {
             // This branch shouldn't be reached if the matches! assertion passed,

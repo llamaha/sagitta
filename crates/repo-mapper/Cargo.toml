@@ -1,0 +1,21 @@
+[package]
+name = "repo-mapper"
+version = "0.1.0"
+edition = "2021"
+description = "Repository mapping functionality for generating code structure maps"
+license = "MIT"
+
+[dependencies]
+regex = "1.10.2"
+walkdir = "2.4.0"
+rayon = "1.8"
+ignore = "0.4"
+grep-matcher = "0.1.6"
+grep-regex = "0.1.12"
+grep-searcher = "0.1.11"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.8" 

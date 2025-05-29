@@ -1,6 +1,6 @@
-# vectordb-core Configuration Reference
+# sagitta-search Configuration Reference
 
-This document describes all configuration options available in `config.toml` for `vectordb-core`, `vectordb-cli`, and `vectordb-mcp`.
+This document describes all configuration options available in `config.toml` for `sagitta-search`, `sagitta-cli`, and `sagitta-mcp`.
 
 ---
 
@@ -8,8 +8,8 @@ This document describes all configuration options available in `config.toml` for
 
 The main configuration file is typically located at:
 
-- **Linux/macOS:** `~/.config/vectordb/config.toml`
-- **Windows:** `%APPDATA%\vectordb\config.toml`
+- **Linux/macOS:** `~/.config/sagitta/config.toml`
+- **Windows:** `%APPDATA%\sagitta\config.toml`
 
 ---
 
@@ -24,12 +24,12 @@ repositories_base_path = "/absolute/path/to/repos"
 vocabulary_base_path = "/absolute/path/to/vocab"
 # tenant_id = "your-tenant-uuid"  # Optional: see below
 
-# TLS/HTTPS settings (for vectordb-mcp)
+# TLS/HTTPS settings (for sagitta-mcp)
 tls_enable = false
 tls_cert_path = null
 tls_key_path = null
 
-# CORS settings (for vectordb-mcp)
+# CORS settings (for sagitta-mcp)
 cors_allowed_origins = null
 cors_allow_credentials = true
 ```
@@ -197,7 +197,7 @@ Monitor system resources (GPU VRAM, GPU utilization, CPU utilization, network I/
 
 ## Updating Configuration
 
-- Edit `config.toml` directly, or use `vectordb-cli` commands where available.
+- Edit `config.toml` directly, or use `sagitta-cli` commands where available.
 - After editing, restart any running servers or re-run CLI commands to pick up changes.
 
 ---
@@ -213,10 +213,10 @@ Monitor system resources (GPU VRAM, GPU utilization, CPU utilization, network I/
 - **Type:** `String` (optional)
 - **Purpose:** If set, this value is used as the default tenant ID for all CLI and server operations. It enables multi-tenancy and is required for most repository operations.
 - **How to set:**
-  - Run `vectordb-cli init` to generate a new UUID and write it to your config.
+  - Run `sagitta-cli init` to generate a new UUID and write it to your config.
   - Or, manually add a line like `tenant_id = "your-uuid-here"` to your `config.toml`.
 - **Multi-user mode:**
-  - If you want to use vectordb-core in a multi-tenant environment, each user or automation should have a unique `tenant_id`.
+  - If you want to use sagitta-search in a multi-tenant environment, each user or automation should have a unique `tenant_id`.
   - If you want to run in single-user mode, just use the generated `tenant_id`.
 
 **Note:** If neither `--tenant-id` nor `tenant_id` in config is set, most CLI commands will error out. See the [README](../README.md) for more details and usage examples. 

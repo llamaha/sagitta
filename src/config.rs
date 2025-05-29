@@ -7,15 +7,15 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf};
 use anyhow::anyhow;
-use crate::error::VectorDBError;
+use crate::error::SagittaError;
 use crate::constants::COLLECTION_NAME_PREFIX;
 
-const APP_NAME: &str = "vectordb";
+const APP_NAME: &str = "sagitta";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const REPO_DIR_NAME: &str = "repositories";
 const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 /// Represents configuration for a single managed repository
 pub struct RepositoryConfig {
     /// Unique name identifying the repository.
@@ -214,6 +214,9 @@ pub struct AppConfig {
     /// Optional tenant ID for this configuration (used as default for CLI/server operations)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
+    /// Number of threads for Rayon parallel processing (for controlling GPU memory usage)
+    #[serde(default = "default_rayon_num_threads")]
+    pub rayon_num_threads: usize,
 }
 
 /// Configuration settings related to indexing.
@@ -241,6 +244,7 @@ impl Default for AppConfig {
             cors_allowed_origins: None, // Default to None (no CORS headers or restrictive default by tower-http)
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
+            rayon_num_threads: default_rayon_num_threads(),
         }
     }
 }
@@ -249,19 +253,19 @@ impl Default for AppConfig {
 pub fn get_config_path() -> Result<PathBuf> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow!("Could not find config directory"))?
-        .join("vectordb");
+        .join("sagitta");
     Ok(config_dir.join(CONFIG_FILE_NAME))
 }
 
 /// Returns the default base path for vocabulary files based on OS conventions.
-/// Uses $XDG_DATA_HOME/vectordb-cli/vocabularies or equivalent.
+/// Uses $XDG_DATA_HOME/sagitta-cli/vocabularies or equivalent.
 fn get_default_vocabulary_base_path() -> Result<PathBuf> {
     let base_dirs = dirs::data_dir()
-        .ok_or_else(|| VectorDBError::ConfigurationError("Could not determine user data directory".to_string()))?;
+        .ok_or_else(|| SagittaError::ConfigurationError("Could not determine user data directory".to_string()))?;
     let app_data_dir = base_dirs.join(APP_NAME).join("vocabularies");
     // Create the directory if it doesn't exist
     fs::create_dir_all(&app_data_dir).map_err(|e| {
-        VectorDBError::DirectoryCreationError {
+        SagittaError::DirectoryCreationError {
             path: app_data_dir.clone(),
             source: e,
         }
@@ -279,7 +283,7 @@ pub fn get_vocabulary_path(config: &AppConfig, collection_name: &str) -> Result<
     // Ensure base directory exists if explicitly configured
     if config.vocabulary_base_path.is_some() {
          fs::create_dir_all(&base_path).map_err(|e| {
-            VectorDBError::DirectoryCreationError {
+            SagittaError::DirectoryCreationError {
                 path: base_path.clone(),
                 source: e,
             }
@@ -302,7 +306,7 @@ pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
             let path = PathBuf::from(base_path);
              // Ensure base directory exists if explicitly configured
             fs::create_dir_all(&path).map_err(|e| {
-                VectorDBError::DirectoryCreationError {
+                SagittaError::DirectoryCreationError {
                     path: path.clone(),
                     source: e,
                 }
@@ -312,10 +316,10 @@ pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
     }
     // Default path calculation (as before)
     let base_dirs = dirs::data_dir()
-        .ok_or_else(|| VectorDBError::ConfigurationError("Could not determine user data directory".to_string()))?;
+        .ok_or_else(|| SagittaError::ConfigurationError("Could not determine user data directory".to_string()))?;
     let app_data_dir = base_dirs.join(APP_NAME).join("repositories");
     fs::create_dir_all(&app_data_dir).map_err(|e| {
-        VectorDBError::DirectoryCreationError {
+        SagittaError::DirectoryCreationError {
             path: app_data_dir.clone(),
             source: e,
         }
@@ -326,7 +330,7 @@ pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
 /// Gets the configuration path by checking ENV, override, or default XDG.
 pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     // Check for test environment variable first
-    if let Ok(test_path_str) = std::env::var("VECTORDB_TEST_CONFIG_PATH") {
+    if let Ok(test_path_str) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
         log::debug!("Using test config path from ENV: {}", test_path_str);
         return Ok(PathBuf::from(test_path_str));
     }
@@ -401,8 +405,14 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         .ok_or_else(|| anyhow::anyhow!("Invalid config file path provided or determined"))?;
 
     // Ensure parent dir exists
-    fs::create_dir_all(app_config_dir)
-        .with_context(|| format!("Failed to create config directory: {}", app_config_dir.display()))?;
+    match fs::create_dir_all(app_config_dir) {
+        Ok(_) => log::debug!("Ensured config directory exists: {}", app_config_dir.display()),
+        Err(e) => {
+            log::error!("Failed to create config directory {}: {}", app_config_dir.display(), e);
+            // Explicitly panic here to make sure this isn't silently failing
+            panic!("fs::create_dir_all failed for {}: {}", app_config_dir.display(), e);
+        }
+    }
 
     // Serialize the main config structure first
     let mut config_content = toml::to_string_pretty(config)
@@ -413,7 +423,7 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
     if config.onnx_model_path.is_none() {
         onnx_comments.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
         onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
-        onnx_comments.push_str("\n# Example: /path/to/vectordb-cli/onnx/all-minilm-l6-v2.onnx");
+        onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/all-minilm-l6-v2.onnx");
     }
     if config.onnx_tokenizer_path.is_none() {
         if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
@@ -421,7 +431,7 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         }
         onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
         onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
-        onnx_comments.push_str("\n# Example: /path/to/vectordb-cli/onnx/");
+        onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/");
     }
 
     // Prepend ONNX comments if any, ensuring they are at the top level
@@ -456,6 +466,10 @@ pub fn get_managed_repos_from_config(config: &AppConfig) -> ManagedRepositories 
 
 fn default_cors_allow_credentials() -> bool {
     true // Common default for development, might be stricter in production
+}
+
+fn default_rayon_num_threads() -> usize {
+    4 // Default to 4 threads
 }
 
 #[cfg(test)]
@@ -544,6 +558,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
+            rayon_num_threads: default_rayon_num_threads(),
         };
 
         // Save and load
@@ -604,6 +619,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
+            rayon_num_threads: default_rayon_num_threads(),
         };
         
         // Should use the custom path from config
@@ -616,7 +632,7 @@ mod tests {
         let default_repo_path_result = get_repo_base_path(None);
         assert!(default_repo_path_result.is_ok());
         let default_repo_path = default_repo_path_result.unwrap();
-        assert!(default_repo_path.to_string_lossy().contains("vectordb/repositories"));
+        assert!(default_repo_path.to_string_lossy().contains("sagitta/repositories"));
         assert!(default_repo_path.exists()); // Verify it created the default dir
         
         // Create a repo config with a local path based on the temp base_path
@@ -677,5 +693,293 @@ mod tests {
         assert!(custom_path.starts_with(&custom_dir));
         assert!(custom_path.ends_with("test_vocab.json"));
         Ok(())
+    }
+
+    #[test]
+    fn test_load_config_malformed_toml() {
+        let temp_dir = tempdir().unwrap();
+        let (config_path, _data_path) = setup_test_env(temp_dir.path());
+
+        // Create a malformed TOML file
+        let malformed_toml_content = r#"
+            qdrant_url = "http://localhost:6334"
+            # Missing closing quote for onnx_model_path
+            onnx_model_path = "/path/to/your/model.onnx
+        "#;
+        fs::write(&config_path, malformed_toml_content).unwrap();
+
+        // Attempt to load the malformed config
+        let result = load_config(Some(&config_path));
+
+        // Assert that loading failed
+        assert!(result.is_err(), "Expected load_config to fail for malformed TOML");
+        
+        // Optionally, check the error message or type if needed
+        // e.g., assert!(result.unwrap_err().to_string().contains("parse"));
+    }
+
+    #[test]
+    fn test_load_config_unreadable_file() {
+        let temp_dir = tempdir().unwrap();
+        let (config_path, _data_path) = setup_test_env(temp_dir.path());
+
+        // Instead of trying to make a file unreadable (which doesn't work reliably on Unix),
+        // test with a directory path instead of a file path.
+        // Attempting to read a directory as a file should fail reliably across platforms.
+        let directory_path = config_path.parent().unwrap(); // Use the directory instead of the file
+
+        let result = load_config(Some(&directory_path.to_path_buf()));
+
+        assert!(result.is_err(), "Expected load_config to fail when given a directory path instead of a file path. Actual: {:?}", result);
+    }
+
+    #[test]
+    fn test_load_config_with_env_override() {
+        let temp_dir = tempdir().unwrap();
+        let (config_path_ignored, _data_path) = setup_test_env(temp_dir.path()); // This path won't be used
+
+        // Create a separate config file that the env var will point to
+        let env_config_dir = temp_dir.path().join("env_config_dir");
+        std::fs::create_dir_all(&env_config_dir).unwrap();
+        let env_config_path = env_config_dir.join("env_config.toml");
+
+        let mut env_config = AppConfig::default();
+        env_config.qdrant_url = "http://env-override-qdrant:6334".to_string();
+        save_config_to_path(&env_config, &env_config_path).unwrap();
+
+        // Set the environment variable
+        std::env::set_var("SAGITTA_TEST_CONFIG_PATH", env_config_path.to_str().unwrap());
+
+        // Load config - it should use the path from the env var
+        // Pass `None` as override_path to ensure env var is the primary source here
+        let loaded_config = load_config(None).unwrap();
+
+        // Clean up the environment variable
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+
+        // Assert that the loaded config is the one from the env var path
+        assert_eq!(loaded_config.qdrant_url, "http://env-override-qdrant:6334");
+        assert_ne!(loaded_config.qdrant_url, AppConfig::default().qdrant_url);
+    }
+
+    #[test]
+    fn test_save_config_creates_dir() {
+        let temp_dir = tempdir().unwrap();
+        let new_config_dir = temp_dir.path().join("new_config_dir");
+        let config_path = new_config_dir.join(CONFIG_FILE_NAME);
+
+        // Ensure the directory does not exist initially
+        assert!(!new_config_dir.exists());
+
+        // Temporarily clear the env var to ensure this test uses the override_path
+        let original_env_var = std::env::var("SAGITTA_TEST_CONFIG_PATH").ok();
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+
+        let config = AppConfig::default();
+        let save_result = save_config(&config, Some(&config_path));
+
+        // Restore env var if it was originally set
+        if let Some(val) = original_env_var {
+            std::env::set_var("SAGITTA_TEST_CONFIG_PATH", val);
+        }
+        
+        save_result.unwrap(); // Check result after restoring env var
+
+        // Assert that the directory and file were created
+        assert!(new_config_dir.exists(), "Config directory should have been created.");
+        assert!(config_path.exists(), "Config file should have been created.");
+
+        // Also check if the content is as expected
+        let loaded_config = load_config_from_path(&config_path).unwrap();
+        assert_eq!(config, loaded_config);
+    }
+
+    #[test]
+    fn test_load_config_creates_default_if_not_exists() {
+        let temp_dir = tempdir().unwrap();
+        let new_config_dir = temp_dir.path().join("another_new_config_dir");
+        let config_path = new_config_dir.join(CONFIG_FILE_NAME);
+
+        // Ensure the directory and file do not exist initially
+        assert!(!new_config_dir.exists());
+        assert!(!config_path.exists());
+
+        // Temporarily clear the env var to ensure this test uses the override_path
+        let original_env_var = std::env::var("SAGITTA_TEST_CONFIG_PATH").ok();
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+
+        // Load config, expecting it to create a default one
+        let load_result = load_config(Some(&config_path));
+
+        // Restore env var if it was originally set
+        if let Some(val) = original_env_var {
+            std::env::set_var("SAGITTA_TEST_CONFIG_PATH", val);
+        }
+
+        let loaded_config = load_result.unwrap();
+        let default_config = AppConfig::default();
+
+        // Assert that the directory and file were created
+        assert!(new_config_dir.exists(), "Config directory should have been created by load_config.");
+        assert!(config_path.exists(), "Config file should have been created by load_config.");
+
+        // Assert that the loaded config is the default config
+        assert_eq!(loaded_config, default_config, "Loaded config should be the default config.");
+
+        // Verify the content of the created file
+        let file_content = fs::read_to_string(&config_path).unwrap();
+        let parsed_config_from_file: AppConfig = toml::from_str(&file_content).unwrap();
+        assert_eq!(parsed_config_from_file, default_config, "The content of the created config file should be the default config.");
+    }
+
+    #[test]
+    fn test_get_vocabulary_path_creates_custom_base_dir() -> Result<()> {
+        let temp_dir = tempdir().unwrap();
+        let custom_vocab_base_str = temp_dir.path().join("custom_vocab_storage");
+        
+        assert!(!custom_vocab_base_str.exists(), "Custom vocab base directory should not exist yet.");
+
+        let mut config = AppConfig::default();
+        config.vocabulary_base_path = Some(custom_vocab_base_str.to_string_lossy().into_owned());
+
+        let collection_name = "repo_sample_collection";
+        let vocab_path = get_vocabulary_path(&config, collection_name)?;
+
+        assert!(custom_vocab_base_str.exists(), "Custom vocab base directory should have been created.");
+        assert!(vocab_path.starts_with(&custom_vocab_base_str),
+                "Vocabulary path should be inside the custom base directory.");
+        assert!(vocab_path.ends_with("sample_collection_vocab.json"),
+                "Vocabulary filename is incorrect.");
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_repo_base_path_creates_custom_dir() -> Result<()> {
+        let temp_dir = tempdir().unwrap();
+        let custom_repo_base_dir = temp_dir.path().join("custom_repo_storage");
+
+        assert!(!custom_repo_base_dir.exists(), "Custom repo base directory should not exist yet.");
+
+        let config = AppConfig {
+            repositories_base_path: Some(custom_repo_base_dir.to_string_lossy().into_owned()),
+            ..AppConfig::default()
+        };
+
+        let repo_base_path = get_repo_base_path(Some(&config))?;
+
+        assert!(custom_repo_base_dir.exists(), "Custom repo base directory should have been created.");
+        assert_eq!(repo_base_path, custom_repo_base_dir, "Returned path should be the custom one.");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_repo_base_path_creates_default_dir_no_config() -> Result<()> {
+        // To test the true default path, we need to ensure our test environment
+        // doesn't interfere with dirs::data_dir(). This is tricky to isolate perfectly
+        // without deeper mocking of the dirs crate or running in a very controlled environment.
+        // For now, we rely on dirs::data_dir() behaving consistently and that our test
+        // execution has permissions to create directories in the default location.
+        // We will check for a subdirectory that should be created.
+
+        // We need a way to predict the default path to check for its creation.
+        // Let's simulate the logic within get_repo_base_path for default path generation.
+        let expected_default_data_dir = dirs::data_dir()
+            .ok_or_else(|| anyhow!("Could not determine user data directory for test setup"))?;
+        let expected_default_app_data_dir = expected_default_data_dir.join(APP_NAME).join(REPO_DIR_NAME);
+
+        // It's possible this directory already exists from previous tests or application runs.
+        // If it exists, we can't definitively prove *this* call created it unless we delete it first,
+        // which is risky. So, we'll just ensure it exists after the call.
+        // For a clean test, ideally this path would be unique per test run or cleaned up.
+        // tempfile::tempdir() is not suitable here as we want to test the actual default path logic.
+
+        let repo_base_path = get_repo_base_path(None)?;
+
+        assert!(expected_default_app_data_dir.exists(), 
+                "Default repo base directory ({}) should exist after calling get_repo_base_path(None).",
+                expected_default_app_data_dir.display());
+        assert_eq!(repo_base_path, expected_default_app_data_dir,
+                 "Returned path should be the default XDG data directory path.");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_managed_repos_from_config() {
+        let temp_dir = tempdir().unwrap();
+        let (_config_path, data_path) = setup_test_env(temp_dir.path());
+
+        let repo1_path = data_path.join("repo1_managed");
+        let repo1 = RepositoryConfig {
+            name: "repo1_managed".to_string(),
+            url: "url1_managed".to_string(),
+            local_path: repo1_path.clone(),
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            active_branch: Some("main".to_string()),
+            ..Default::default() // Use default for other fields
+        };
+
+        let repo2_path = data_path.join("repo2_managed");
+        let repo2 = RepositoryConfig {
+            name: "repo2_managed".to_string(),
+            url: "url2_managed".to_string(),
+            local_path: repo2_path.clone(),
+            default_branch: "dev".to_string(),
+            tracked_branches: vec!["dev".to_string()],
+            active_branch: Some("dev".to_string()),
+            ..Default::default()
+        };
+
+        let original_config = AppConfig {
+            repositories: vec![repo1.clone(), repo2.clone()],
+            active_repository: Some("repo1_managed".to_string()),
+            ..AppConfig::default()
+        };
+
+        let managed_repos = get_managed_repos_from_config(&original_config);
+
+        assert_eq!(managed_repos.repositories.len(), 2);
+        assert_eq!(managed_repos.repositories[0].name, "repo1_managed");
+        assert_eq!(managed_repos.repositories[1].name, "repo2_managed");
+        assert_eq!(managed_repos.active_repository, Some("repo1_managed".to_string()));
+
+        // Ensure it's a clone (modify original and check managed_repos isn't affected - though not strictly necessary for this simple getter)
+        // let mut mut_original_config = original_config.clone();
+        // mut_original_config.active_repository = Some("changed".to_string());
+        // assert_eq!(managed_repos.active_repository, Some("repo1_managed".to_string()));
+    }
+
+    #[test]
+    fn test_indexing_config_default() {
+        let default_indexing = IndexingConfig::default();
+        assert_eq!(default_indexing.max_concurrent_upserts, default_max_concurrent_upserts());
+        // Add more assertions here if IndexingConfig gets more fields with defaults
+    }
+
+    #[test]
+    fn test_performance_config_default() {
+        let default_perf = PerformanceConfig::default();
+        assert_eq!(default_perf.batch_size, default_batch_size());
+        assert_eq!(default_perf.internal_embed_batch_size, default_internal_embed_batch_size());
+        assert_eq!(default_perf.collection_name_prefix, default_collection_name_prefix());
+        assert_eq!(default_perf.max_file_size_bytes, default_max_file_size_bytes());
+        assert_eq!(default_perf.vector_dimension, default_vector_dimension());
+        // Add more assertions here if PerformanceConfig gets more fields with defaults
+    }
+
+    #[test]
+    fn test_oauth_config_default() {
+        let default_oauth = OAuthConfig::default();
+        assert!(default_oauth.client_id.is_empty());
+        assert!(default_oauth.client_secret.is_empty());
+        assert!(default_oauth.auth_url.is_empty());
+        assert!(default_oauth.token_url.is_empty());
+        assert!(default_oauth.user_info_url.is_empty());
+        assert!(default_oauth.redirect_uri.is_empty());
+        assert_eq!(default_oauth.introspection_url, None);
+        assert_eq!(default_oauth.scopes, vec!["openid".to_string(), "profile".to_string(), "email".to_string()]);
     }
 } 

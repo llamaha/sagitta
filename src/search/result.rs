@@ -1,4 +1,4 @@
-// crates/vectordb-core/src/search/result.rs
+// crates/sagitta-search/src/search/result.rs
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

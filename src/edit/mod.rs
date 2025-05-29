@@ -1,4 +1,4 @@
-// crates/vectordb-core/src/edit/mod.rs
+// crates/sagitta-search/src/edit/mod.rs
 //! Core module for handling code editing operations.
 
 use std::fs;

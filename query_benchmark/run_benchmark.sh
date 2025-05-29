@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Benchmark script for vectordb-cli
+# Benchmark script for sagitta-cli
 # Dependencies: yq (for YAML parsing), jq (for JSON parsing)
 # On Debian/Ubuntu: sudo apt-get install yq jq
 # On macOS: brew install yq jq
@@ -58,17 +58,17 @@ fi
 echo "Checking if CLI_PATH '$CLI_PATH' is executable or in PATH..."
 # Check if CLI_PATH is executable or in PATH
 if ! command -v "$CLI_PATH" &> /dev/null && [ ! -x "$CLI_PATH" ]; then
-    echo "Error: vectordb-cli not found at '$CLI_PATH' or not in PATH, or not executable. Please check benchmark_config.yaml."
+    echo "Error: sagitta-cli not found at '$CLI_PATH' or not in PATH, or not executable. Please check benchmark_config.yaml."
     exit 1
 fi
 echo "CLI_PATH is valid and accessible."
 
 echo "Initializing or clearing report file: $REPORT_FILE"
 # Initialize or clear the report file
-echo "# Vectordb Query Benchmark Results" > "$REPORT_FILE"
+echo "# Sagitta Query Benchmark Results" > "$REPORT_FILE"
 echo "Generated on $(date)" >> "$REPORT_FILE"
 echo "" >> "$REPORT_FILE"
-echo "Instructions: For each query, review the N results provided by vectordb-cli." >> "$REPORT_FILE"
+echo "Instructions: For each query, review the N results provided by sagitta-cli." >> "$REPORT_FILE"
 echo "Rate the relevance of each *individual* result on a scale of 1 (not relevant) to 10 (highly relevant)." >> "$REPORT_FILE"
 echo "The goal is to assess the quality of search results to identify areas for improvement." >> "$REPORT_FILE"
 echo "" >> "$REPORT_FILE"

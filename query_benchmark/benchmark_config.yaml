@@ -1,5 +1,5 @@
 global_settings:
-  cli_path: "vectordb-cli" # Assumes it's in PATH or specify full path
+  cli_path: "sagitta-cli" # Assumes it's in PATH or specify full path
   results_limit: 3
 
 repositories:

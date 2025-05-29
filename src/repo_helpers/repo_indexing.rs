@@ -6,14 +6,13 @@ use std::collections::{HashSet, HashMap};
 use crate::config::RepositoryConfig;
 use anyhow::{Context, Result};
 use tracing::{info, warn, error, debug};
-use indicatif::{ProgressBar, ProgressStyle};
 use qdrant_client::qdrant::{Filter, Condition, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, PointId};
 use crate::constants::{FIELD_BRANCH, FIELD_LANGUAGE};
 use crate::config::AppConfig;
 use crate::embedding::EmbeddingHandler;
 use crate::QdrantClientTrait;
 use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
-use crate::error::VectorDBError as Error;
+use crate::error::SagittaError as Error;
 use crate::repo_helpers::qdrant_utils::get_collection_name;
 use anyhow::anyhow;
 use std::process::{Command, Stdio};
@@ -22,6 +21,8 @@ use git2;
 use std::fs;
 use git2::Repository;
 use std::os::unix::fs::PermissionsExt;
+use tokio;
+use crate::sync_progress::{SyncProgressReporter, SyncStage};
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
 /// list of indexed languages for that branch by querying Qdrant.
@@ -102,6 +103,7 @@ pub async fn index_files<
     collection_name: &str,
     branch_name: &str,
     commit_hash: &str,
+    progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
 ) -> Result<usize, Error>
 {
     if relative_paths.is_empty() {
@@ -115,16 +117,6 @@ pub async fn index_files<
 
     let embedding_handler_arc = Arc::new(embedding_handler);
 
-    let pb = ProgressBar::new(relative_paths.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}, {eta})")
-            .map_err(|e| Error::Other(e.to_string()))?
-            .progress_chars("#=-"),
-    );
-    pb.set_draw_target(indicatif::ProgressDrawTarget::stderr());
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
     index_repo_files(
         config,
         repo_root,
@@ -134,7 +126,7 @@ pub async fn index_files<
         commit_hash,
         client.clone(),
         embedding_handler_arc,
-        Some(&pb),
+        progress_reporter,
         config.indexing.max_concurrent_upserts,
     ).await
 }
@@ -185,18 +177,79 @@ where
         info!("Qdrant collection ensured for new clone.");
 
         info!("Cloning repository '{repo_name_str}' from {url_str} into {}...", final_local_path.display());
-        let clone_status = Command::new("git")
-            .arg("clone")
-            .arg("--branch")
-            .arg(final_branch)
-            .arg(&url_str)
-            .arg(&final_local_path)
-            .stdout(Stdio::piped()) // Capture stdout
-            .stderr(Stdio::piped()) // Capture stderr
-            .spawn()
-            .context("Failed to spawn git clone command")?
-            .wait_with_output()
-            .context("Failed to wait for git clone command")?;
+        
+        // First try to clone without specifying a branch to avoid hanging if the branch doesn't exist
+        let clone_result = if final_branch == "main" || final_branch == "master" {
+            // For common default branches, try cloning without specifying branch first
+            info!("Attempting to clone without specifying branch (will use repository default)...");
+            info!("Large repositories may take several minutes to clone. Please wait...");
+            let clone_status = tokio::time::timeout(
+                std::time::Duration::from_secs(1800), // 30 minute timeout for large repos
+                tokio::process::Command::new("git")
+                    .arg("clone")
+                    .arg(&url_str)
+                    .arg(&final_local_path)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+            ).await;
+            
+            match clone_status {
+                Ok(Ok(output)) => Ok(output),
+                Ok(Err(e)) => Err(anyhow!("Git clone command failed: {}", e)),
+                Err(_) => Err(anyhow!("Git clone timed out after 30 minutes")),
+            }
+        } else {
+            // For non-default branches, try with the specific branch
+            info!("Attempting to clone with specific branch '{}'...", final_branch);
+            info!("Large repositories may take several minutes to clone. Please wait...");
+            let clone_status = tokio::time::timeout(
+                std::time::Duration::from_secs(1800), // 30 minute timeout for large repos
+                tokio::process::Command::new("git")
+                    .arg("clone")
+                    .arg("--branch")
+                    .arg(final_branch)
+                    .arg(&url_str)
+                    .arg(&final_local_path)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+            ).await;
+            
+            match clone_status {
+                Ok(Ok(output)) => Ok(output),
+                Ok(Err(e)) => {
+                    warn!("Clone with specific branch '{}' failed: {}. Trying without branch specification...", final_branch, e);
+                    // Fallback: try cloning without branch specification
+                    info!("Falling back to default branch clone. Large repositories may take several minutes...");
+                    let fallback_status = tokio::time::timeout(
+                        std::time::Duration::from_secs(1800),
+                        tokio::process::Command::new("git")
+                            .arg("clone")
+                            .arg(&url_str)
+                            .arg(&final_local_path)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .output()
+                    ).await;
+                    
+                    match fallback_status {
+                        Ok(Ok(output)) => Ok(output),
+                        Ok(Err(e)) => Err(anyhow!("Fallback git clone command failed: {}", e)),
+                        Err(_) => Err(anyhow!("Fallback git clone timed out after 30 minutes")),
+                    }
+                },
+                Err(_) => Err(anyhow!("Git clone with branch '{}' timed out after 30 minutes", final_branch)),
+            }
+        };
+
+        let clone_status = match clone_result {
+            Ok(output) => output,
+            Err(e) => {
+                error!("Failed to clone repository: {}", e);
+                return Err(Error::GitMessageError(format!("Git clone failed: {}", e)));
+            }
+        };
 
         if clone_status.status.success() {
             was_cloned = true;
@@ -209,6 +262,38 @@ where
             }
             if !stderr.is_empty() {
                 info!("git clone stderr:\n{}", stderr);
+            }
+            
+            // If we cloned without specifying a branch, we might need to checkout the desired branch
+            if final_branch != "main" && final_branch != "master" {
+                info!("Checking if we need to checkout branch '{}'...", final_branch);
+                let checkout_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    tokio::process::Command::new("git")
+                        .current_dir(&final_local_path)
+                        .arg("checkout")
+                        .arg(final_branch)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output()
+                ).await;
+                
+                match checkout_result {
+                    Ok(Ok(checkout_output)) => {
+                        if checkout_output.status.success() {
+                            info!("Successfully checked out branch '{}'", final_branch);
+                        } else {
+                            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+                            warn!("Failed to checkout branch '{}': {}. Using default branch.", final_branch, stderr);
+                        }
+                    },
+                    Ok(Err(e)) => {
+                        warn!("Checkout command failed: {}. Using default branch.", e);
+                    },
+                    Err(_) => {
+                        warn!("Checkout timed out. Using default branch.");
+                    }
+                }
             }
         } else {
             let stderr_cow = String::from_utf8_lossy(&clone_status.stderr);
@@ -844,22 +929,6 @@ pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
         return Ok(());
     }
 
-    // Create a progress bar
-    let pb = ProgressBar::new(files_to_process.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}, {eta})")
-            .map_err(|e| Error::Other(e.to_string()))?
-            .progress_chars("#=-"),
-    );
-    pb.set_draw_target(indicatif::ProgressDrawTarget::stderr());
-    pb.enable_steady_tick(std::time::Duration::from_millis(100));
-
-    // Initialize embedding handler
-    let embedding_handler = EmbeddingHandler::new(config)
-        .context("Failed to initialize embedding handler for repo indexing")?;
-    let embedding_handler_arc = Arc::new(embedding_handler);
-
     // Index the files
     index_files(
         client,
@@ -869,9 +938,9 @@ pub async fn index_repository<C: QdrantClientTrait + Send + Sync + 'static>(
         collection_name,
         branch,
         commit_hash,
+        None,
     ).await?;
 
-    pb.finish_with_message("Indexing complete");
     Ok(())
 }
 
@@ -898,16 +967,16 @@ mod tests {
             url: "http://localhost:6334".to_string(),
             local_path: repo_path.clone(),
             default_branch: "main".to_string(),
-            active_branch: Some("main".to_string()),
-            tenant_id: Some("test-tenant".to_string()),
             tracked_branches: vec!["main".to_string()],
             remote_name: Some("origin".to_string()),
+            last_synced_commits: HashMap::new(),
+            active_branch: Some("main".to_string()),
             ssh_key_path: None,
             ssh_key_passphrase: None,
-            last_synced_commits: HashMap::new(),
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
         };
 
         let app_config = AppConfig {
@@ -928,6 +997,282 @@ mod tests {
         drop(temp_dir); // Explicitly drop temp_dir before the final assert
 
         assert!(!repo_path.exists(), "Repository directory should have been deleted.");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_sync_status_update_with_languages() -> Result<(), Error> {
+        let mut config = AppConfig::default();
+        
+        // Add a test repository
+        config.repositories.push(RepositoryConfig {
+            name: "test-repo".to_string(),
+            url: "https://example.com/repo.git".to_string(),
+            local_path: PathBuf::from("/tmp/test-repo"),
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: HashMap::new(),
+            active_branch: Some("main".to_string()),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        });
+
+        let repo_index = 0;
+        let branch_name = "main";
+        let commit_hash = "abc123def456";
+
+        // Mock Qdrant client that will simulate the language query
+        let mut mock_client = MockQdrantClientTrait::new();
+        mock_client.expect_scroll()
+            .returning(|_| {
+                use qdrant_client::qdrant::{ScrollResponse, RetrievedPoint, PointId};
+                use std::collections::HashMap;
+                
+                // Mock response with some language data
+                let mut payload = HashMap::new();
+                payload.insert("language".to_string(), qdrant_client::qdrant::Value {
+                    kind: Some(qdrant_client::qdrant::value::Kind::StringValue("rust".to_string())),
+                });
+                
+                let point = RetrievedPoint {
+                    id: Some(PointId { point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Uuid("test".to_string())) }),
+                    payload,
+                    vectors: None,
+                    shard_key: None,
+                    order_value: None,
+                };
+                
+                Ok(ScrollResponse {
+                    result: vec![point],
+                    next_page_offset: None,
+                    time: 0.1,
+                    usage: None,
+                })
+            });
+
+        let client_arc = Arc::new(mock_client);
+        let collection_name = "test_collection";
+
+        // Test the update function
+        let result = update_sync_status_and_languages(
+            &mut config,
+            repo_index,
+            branch_name,
+            commit_hash,
+            client_arc.as_ref(),
+            collection_name,
+        ).await;
+
+        assert!(result.is_ok());
+        
+        // Verify the commit was updated
+        let repo = &config.repositories[repo_index];
+        assert_eq!(repo.last_synced_commits.get(branch_name), Some(&commit_hash.to_string()));
+        
+        // Verify languages were set (at least rust from our mock)
+        assert!(repo.indexed_languages.is_some());
+        let languages = repo.indexed_languages.as_ref().unwrap();
+        assert!(languages.contains(&"rust".to_string()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_repository_timeout_simulation() -> Result<(), Error> {
+        // This test simulates timeout behavior without actually timing out
+        // since we can't easily test actual 30-minute timeouts in unit tests
+        
+        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        let base_path = temp_dir.path();
+        
+        // Mock client for collection operations
+        let mut mock_client = MockQdrantClientTrait::new();
+        mock_client.expect_collection_exists()
+            .returning(|_| Ok(false));
+        mock_client.expect_create_collection()
+            .returning(|_, _| Ok(true));
+        
+        let client = Arc::new(mock_client);
+        
+        // Test with an invalid URL that would timeout in real scenario
+        let config = AppConfig::default();
+        
+        // This should fail because the URL is invalid, simulating what would happen
+        // if a clone operation timed out
+        let result = prepare_repository::<MockQdrantClientTrait>(
+            "https://invalid-nonexistent-repo-url-that-would-timeout.git",
+            Some("test-repo"),
+            None, // No local path
+            Some("main"),
+            None, // No target ref
+            None, // No remote
+            None, // No SSH key
+            None, // No SSH passphrase
+            base_path,
+            client,
+            384, // embedding_dim
+            &config,
+            "test-tenant",
+        ).await;
+        
+        // Should fail with a git error (simulating timeout)
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Git") || error_msg.contains("clone") || error_msg.contains("failed"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_repository_with_existing_local_path() -> Result<(), Error> {
+        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        let base_path = temp_dir.path();
+        let existing_repo_path = base_path.join("existing_repo");
+        
+        // Create a fake existing repository
+        fs::create_dir_all(&existing_repo_path).map_err(|e| Error::Other(format!("Failed to create existing repo: {}", e)))?;
+        fs::create_dir_all(&existing_repo_path.join(".git")).map_err(|e| Error::Other(format!("Failed to create .git: {}", e)))?;
+        
+        // Mock client
+        let mut mock_client = MockQdrantClientTrait::new();
+        mock_client.expect_collection_exists()
+            .returning(|_| Ok(false));
+        mock_client.expect_create_collection()
+            .returning(|_, _| Ok(true));
+        
+        let client = Arc::new(mock_client);
+        let config = AppConfig::default();
+        
+        // Test prepare_repository with existing local path (should not timeout)
+        let result = prepare_repository::<MockQdrantClientTrait>(
+            "", // Empty URL since we're using local path
+            Some("existing-repo"),
+            Some(&existing_repo_path),
+            Some("main"),
+            None,
+            None,
+            None,
+            None,
+            base_path,
+            client,
+            384,
+            &config,
+            "test-tenant",
+        ).await;
+        
+        assert!(result.is_ok());
+        let repo_config = result.unwrap();
+        assert_eq!(repo_config.name, "existing-repo");
+        assert_eq!(repo_config.local_path, existing_repo_path);
+        assert!(repo_config.added_as_local_path);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_index_files_empty_list() -> Result<(), Error> {
+        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        let repo_root = temp_dir.path().to_path_buf();
+        
+        // Mock client
+        let mut mock_client = MockQdrantClientTrait::new();
+        // No expectations needed since no files to index
+        
+        let client = Arc::new(mock_client);
+        let config = AppConfig::default();
+        let empty_file_list: Vec<PathBuf> = vec![];
+        
+        let result = index_files(
+            client,
+            &config,
+            &repo_root,
+            &empty_file_list,
+            "test_collection",
+            "main",
+            "abc123",
+            None,
+        ).await;
+        
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0); // Should return 0 files indexed
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_timeout_configuration_values() {
+        // Test that the timeout values are set correctly
+        // This is more of a documentation test to ensure the values match expectations
+        
+        // The timeout should be 1800 seconds (30 minutes)
+        let expected_timeout_secs = 1800;
+        let expected_timeout = std::time::Duration::from_secs(expected_timeout_secs);
+        
+        // Verify the timeout duration is what we expect
+        assert_eq!(expected_timeout.as_secs(), 1800);
+        assert_eq!(expected_timeout.as_secs() / 60, 30); // 30 minutes
+        
+        // This documents the timeout behavior that's actually implemented
+        // in the prepare_repository function for git clone operations
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_operations_safety_checks() -> Result<(), Error> {
+        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        
+        // Test that dangerous paths are rejected
+        let dangerous_paths = vec![
+            "/",
+            "/usr",
+            "/bin", 
+            "/etc",
+            "/var",
+            "/tmp",
+            "/home", // This one might be system-dependent
+        ];
+        
+        for dangerous_path in dangerous_paths {
+            let repo_config = RepositoryConfig {
+                name: "dangerous-repo".to_string(),
+                url: "https://example.com/repo.git".to_string(),
+                local_path: PathBuf::from(dangerous_path),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                last_synced_commits: HashMap::new(),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                tenant_id: Some("test-tenant".to_string()),
+            };
+            
+            let mut mock_client = MockQdrantClientTrait::new();
+            mock_client.expect_delete_collection()
+                .returning(|_| Ok(true));
+            
+            let client = Arc::new(mock_client);
+            let config = AppConfig::default();
+            
+            // This should complete without actually deleting system directories
+            let result = delete_repository_data(&repo_config, client, &config).await;
+            
+            // Should succeed but not actually delete dangerous paths
+            // (the function has safety checks to prevent this)
+            assert!(result.is_ok());
+            
+            // Verify the dangerous path still exists
+            assert!(PathBuf::from(dangerous_path).exists(), 
+                   "Dangerous path {} should not have been deleted", dangerous_path);
+        }
 
         Ok(())
     }

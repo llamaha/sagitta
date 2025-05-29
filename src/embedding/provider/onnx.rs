@@ -2,25 +2,25 @@
 use super::EmbeddingProvider;
 use crate::embedding::EmbeddingModelType;
 // Use error types from within this crate
-use crate::error::{Result as VectorDBResult, VectorDBError};
+use crate::error::{Result as SagittaResult, SagittaError};
 
-// Keep external dependencies (ensure they are in vectordb_core's Cargo.toml)
+// Keep external dependencies (ensure they are in sagitta_search's Cargo.toml)
 use anyhow::{anyhow, Error, Result};
 use log::{debug, warn};
 use ndarray::{Array};
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::{Value};
-use ort::execution_providers::{CUDAExecutionProvider};
+use ort::execution_providers::{CUDAExecutionProvider, CPUExecutionProvider};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokenizers::Tokenizer;
 
 // Remove imports for types defined elsewhere or unused
-// use crate::vectordb::embedding::EmbeddingModel;
+// use crate::sagitta::embedding::EmbeddingModel;
 // use async_trait::async_trait; // Not used here
 // use std::path::{Path, PathBuf}; // PathBuf not used here
-// use crate::vectordb::embedding::EmbeddingResult; // Not used here
+// use crate::sagitta::embedding::EmbeddingResult; // Not used here
 // use crate::syntax::SyntaxElement; // Not used here
 
 /// ONNX-based embedding model with memory management
@@ -82,7 +82,7 @@ impl EmbeddingProvider for ThreadSafeOnnxProvider {
         self.0.lock().expect("Failed to lock OnnxEmbeddingModel mutex").model_type()
     }
 
-    fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> SagittaResult<Vec<Vec<f32>>> {
         self.0.lock().expect("Failed to lock OnnxEmbeddingModel mutex").embed_batch(texts)
     }
 }
@@ -140,14 +140,29 @@ impl OnnxEmbeddingModel {
         })
     }
 
-    /// Creates a new ONNX session with CUDA provider
+    /// Creates a new ONNX session with appropriate execution provider based on build features
     fn create_session(model_path: &Path) -> Result<Session> {
         // Initialize Environment using ort::init()
-        let cuda_provider = CUDAExecutionProvider::default();
-        let _ = ort::init()
-            .with_name("vectordb-onnx")
-            .with_execution_providers([cuda_provider.build()]) // Configure EPs here
-            .commit();
+        #[cfg(feature = "cuda")]
+        {
+            debug!("Building ONNX session with CUDA execution provider (with CPU fallback)");
+            let cuda_provider = CUDAExecutionProvider::default();
+            let cpu_provider = CPUExecutionProvider::default();
+            let _ = ort::init()
+                .with_name("sagitta-onnx")
+                .with_execution_providers([cuda_provider.build(), cpu_provider.build()]) // CUDA first, CPU fallback
+                .commit();
+        }
+        
+        #[cfg(not(feature = "cuda"))]
+        {
+            debug!("Building ONNX session with CPU execution provider only");
+            let cpu_provider = CPUExecutionProvider::default();
+            let _ = ort::init()
+                .with_name("sagitta-onnx")
+                .with_execution_providers([cpu_provider.build()]) // CPU only
+                .commit();
+        }
 
         // Build session using Session::builder()
         Ok(Session::builder()? 
@@ -243,7 +258,7 @@ impl EmbeddingProvider for Arc<Mutex<OnnxEmbeddingModel>> {
         self.lock().expect("Failed to lock OnnxEmbeddingModel mutex").model_type()
     }
 
-    fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> SagittaResult<Vec<Vec<f32>>> {
         self.lock().expect("Failed to lock OnnxEmbeddingModel mutex").embed_batch(texts)
     }
 }
@@ -257,7 +272,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         EmbeddingModelType::Onnx
     }
 
-    fn embed_batch(&self, texts: &[&str]) -> VectorDBResult<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> SagittaResult<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -267,7 +282,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         unsafe {
             let this = self as *const _ as *mut OnnxEmbeddingModel;
             (*this).ensure_fresh_session()
-                .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to ensure fresh session: {}", e)))?;
+                .map_err(|e| SagittaError::EmbeddingError(format!("Failed to ensure fresh session: {}", e)))?;
         }
 
         use std::time::Instant;
@@ -280,7 +295,7 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         let token_start = Instant::now();
         for text in texts {
             let (mut input_ids, mut attention_mask) = self.prepare_inputs(text)
-                .map_err(|e| VectorDBError::EmbeddingError(format!("Input prep failed: {}", e)))?;
+                .map_err(|e| SagittaError::EmbeddingError(format!("Input prep failed: {}", e)))?;
             all_input_ids.append(&mut input_ids);
             all_attention_masks.append(&mut attention_mask);
         }
@@ -289,28 +304,28 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
 
         let input_ids_array =
             Array::from_shape_vec((batch_size, self.max_seq_length), all_input_ids)
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Input ID batch shape error: {}", e)))?;
+            .map_err(|e| SagittaError::EmbeddingError(format!("Input ID batch shape error: {}", e)))?;
         let attention_mask_array =
             Array::from_shape_vec((batch_size, self.max_seq_length), all_attention_masks)
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Attention mask batch shape error: {}", e)))?;
+            .map_err(|e| SagittaError::EmbeddingError(format!("Attention mask batch shape error: {}", e)))?;
         
         // Convert ndarray to ort Value
         let input_ids_shape = input_ids_array.shape().to_vec();
         let input_ids_vec = input_ids_array.into_raw_vec_and_offset().0;
         let input_ids_value = Value::from_array((input_ids_shape, input_ids_vec))
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create input ID tensor value: {}", e)))?;
+            .map_err(|e| SagittaError::EmbeddingError(format!("Failed to create input ID tensor value: {}", e)))?;
         
         let attention_mask_shape = attention_mask_array.shape().to_vec();
         let attention_mask_vec = attention_mask_array.into_raw_vec_and_offset().0;
         let attention_mask_value = Value::from_array((attention_mask_shape, attention_mask_vec))
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create attention mask tensor value: {}", e)))?;
+            .map_err(|e| SagittaError::EmbeddingError(format!("Failed to create attention mask tensor value: {}", e)))?;
 
         let onnx_start = Instant::now();
         let outputs = self.session.run(ort::inputs![
             "input_ids" => input_ids_value,
             "attention_mask" => attention_mask_value,
-        ].map_err(|e| VectorDBError::EmbeddingError(format!("Failed to create ONNX inputs: {}", e)))?)
-            .map_err(|e| VectorDBError::EmbeddingError(format!("ONNX session batch run failed: {}", e)))?;
+        ].map_err(|e| SagittaError::EmbeddingError(format!("Failed to create ONNX inputs: {}", e)))?)
+            .map_err(|e| SagittaError::EmbeddingError(format!("ONNX session batch run failed: {}", e)))?;
         let onnx_elapsed = onnx_start.elapsed();
         log::info!("[PROFILE] ONNX inference for {} items: {:?}", batch_size, onnx_elapsed);
 
@@ -318,13 +333,13 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
         let output_value = outputs.get("sentence_embedding")
             .or_else(|| outputs.get("pooler_output"))
             .or_else(|| outputs.get("last_hidden_state"))
-            .ok_or_else(|| VectorDBError::EmbeddingError(
+            .ok_or_else(|| SagittaError::EmbeddingError(
                 "Model did not return 'sentence_embedding', 'pooler_output', or 'last_hidden_state' in batch".to_string()
             ))?;
         
         // Extract raw tensor data
         let (shape, data) = output_value.try_extract_raw_tensor::<f32>()
-            .map_err(|e| VectorDBError::EmbeddingError(format!("Failed to extract raw tensor data: {}", e)))?;
+            .map_err(|e| SagittaError::EmbeddingError(format!("Failed to extract raw tensor data: {}", e)))?;
 
         let expected_dim = self.dimension;
         // Handle different possible output shapes:
@@ -348,12 +363,12 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
              // The current design expects pooled embeddings from the ONNX model.
              // We could implement pooling here, but it's better handled by the model export script.
              warn!("Received token embeddings (shape: {:?}) instead of pooled sentence embeddings. The ONNX model might not include the pooling step.", shape);
-             Err(VectorDBError::EmbeddingError(
+             Err(SagittaError::EmbeddingError(
                  "Received token embeddings instead of expected sentence embeddings. Ensure the ONNX model includes pooling.".to_string()
              ))
         } else {
              // Unexpected shape
-             Err(VectorDBError::EmbeddingError(format!(
+             Err(SagittaError::EmbeddingError(format!(
                  "Unexpected batch output shape: got {:?}, expected compatible with [{}, {}] or [{}, sequence_length, {}]",
                  shape, batch_size, expected_dim, batch_size, expected_dim
              )))

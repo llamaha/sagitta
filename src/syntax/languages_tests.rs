@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    // Adjust import path to reflect the new location within vectordb-core
+    // Adjust import path to reflect the new location within sagitta-search
     use super::super::languages::SUPPORTED_LANGUAGES;
 
     #[test]

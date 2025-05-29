@@ -1,10 +1,10 @@
 # MCP Server End-to-End Test Plan
 
-This document outlines the manual end-to-end test plan for the `vectordb-mcp` server, interacting via its JSON-RPC interface over standard input/output.
+This document outlines the manual end-to-end test plan for the `sagitta-mcp` server, interacting via its JSON-RPC interface over standard input/output.
 
 ## Prerequisites
 
-1.  Build the `vectordb-mcp` binary: `cargo build --all --release --features ort,cuda`
+1.  Build the `sagitta-mcp` binary: `cargo build --all --release --features ort,cuda`
     *   **Note:** If using `--features ort,cuda`, you might need to set the `LD_LIBRARY_PATH` environment variable if the server fails to start due to missing shared libraries (e.g., `libonnxruntime.so`). Example: `export LD_LIBRARY_PATH=./target/release/lib:$LD_LIBRARY_PATH` before running the server.
 2.  Have a Qdrant instance running and accessible at the URL specified in the config (default: `http://localhost:6334`).
 3.  Ensure the `repositories/` directory (or the configured base path) exists and is writable.
@@ -17,7 +17,7 @@ To run each test case, pipe the JSON request directly into the server process us
 
 Example:
 ```bash
-echo '{"jsonrpc": "2.0", "method": "repository/sync", "params": {"name": "test-sinatra"}, "id": 1}' | LD_LIBRARY_PATH=/home/adam/repos/vectordb-cli/target/release/lib RUST_LOG=debug /home/adam/repos/vectordb-cli/target/release/vectordb-mcp
+echo '{"jsonrpc": "2.0", "method": "repository/sync", "params": {"name": "test-sinatra"}, "id": 1}' | LD_LIBRARY_PATH=/home/adam/repos/sagitta-cli/target/release/lib RUST_LOG=debug /home/adam/repos/sagitta-cli/target/release/sagitta-mcp
 ```
 
 Replace `<JSON_REQUEST>` with the specific request JSON for each step below. The server's response (and logs) will be printed to your terminal.

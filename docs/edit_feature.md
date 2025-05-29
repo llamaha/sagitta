@@ -1,6 +1,6 @@
-# Code Editing with vectordb-cli
+# Code Editing with sagitta-cli
 
-The vectordb-cli tool provides powerful code editing capabilities that leverage its semantic understanding of code. You can perform targeted edits with validation to ensure changes are applied correctly and safely.
+The sagitta-cli tool provides powerful code editing capabilities that leverage its semantic understanding of code. You can perform targeted edits with validation to ensure changes are applied correctly and safely.
 
 ## Core Editing Concepts
 
@@ -11,7 +11,7 @@ The edit feature supports two key targeting mechanisms:
 Use element-based targeting when you want to replace an entire logical code unit like a class, function, or method:
 
 ```bash
-vectordb-cli edit apply --file path/to/file.py --element "class:MyClass" --content-file new_class.py
+sagitta-cli edit apply --file path/to/file.py --element "class:MyClass" --content-file new_class.py
 ```
 
 This approach uses semantic understanding to identify the boundaries of the specified code element and replaces the entire element with new content.
@@ -25,7 +25,7 @@ Use line-based targeting for more precise edits when you want to:
 - Make targeted changes to specific sections
 
 ```bash
-vectordb-cli edit apply --file path/to/file.py --line-start 15 --line-end 20 --content "def new_method(self):\n    return True"
+sagitta-cli edit apply --file path/to/file.py --line-start 15 --line-end 20 --content "def new_method(self):\n    return True"
 ```
 
 Line-based targeting requires careful consideration of the indentation patterns in the target file to ensure consistent formatting.
@@ -36,10 +36,10 @@ For reliability and safety, the edit feature supports a validation-first workflo
 
 ```bash
 # First validate the edit
-vectordb-cli edit validate --file path/to/file.py --element "function:process_data" --content-file new_function.py
+sagitta-cli edit validate --file path/to/file.py --element "function:process_data" --content-file new_function.py
 
 # Then apply if validation succeeds
-vectordb-cli edit apply --file path/to/file.py --element "function:process_data" --content-file new_function.py
+sagitta-cli edit apply --file path/to/file.py --element "function:process_data" --content-file new_function.py
 ```
 
 Validation checks ensure:
@@ -77,7 +77,7 @@ For the most reliable editing workflows:
 ### Validate Command
 
 ```
-vectordb-cli edit validate [OPTIONS] --file <FILE>
+sagitta-cli edit validate [OPTIONS] --file <FILE>
 
 Options:
   --file <FILE>             Path to the file to validate against
@@ -94,7 +94,7 @@ Options:
 ### Apply Command
 
 ```
-vectordb-cli edit apply [OPTIONS] --file <FILE>
+sagitta-cli edit apply [OPTIONS] --file <FILE>
 
 Options:
   --file <FILE>             Path to the file to edit

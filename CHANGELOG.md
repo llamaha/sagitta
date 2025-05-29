@@ -1,4 +1,4 @@
-# vectordb-cli Release Notes
+# sagitta-cli Release Notes
 
 ## [1.6.0] - 2025-04-19
 
@@ -202,7 +202,7 @@ This release focuses on improving search quality and adding language-specific co
 
 ## v0.1.0 - Initial Release (2025-03-31)
 
-First release of vectordb-cli with basic functionality.
+First release of sagitta-cli with basic functionality.
 
 ### Changes
 

@@ -1,5 +1,5 @@
 use crate::EmbeddingModelType; // Use re-export from core for type
-use crate::error::{Result, VectorDBError};
+use crate::error::{Result, SagittaError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -51,9 +51,9 @@ impl EmbeddingCache {
 
         if Path::new(&cache_path).exists() {
             let contents = fs::read_to_string(&cache_path)
-                .map_err(|e| VectorDBError::CacheError(e.to_string()))?;
+                .map_err(|e| SagittaError::CacheError(e.to_string()))?;
             let mut cache: Self = serde_json::from_str(&contents)
-                .map_err(|e| VectorDBError::CacheError(e.to_string()))?;
+                .map_err(|e| SagittaError::CacheError(e.to_string()))?;
             cache.cache_path = cache_path;
             cache.ttl = ttl;
             // Default model type on load, user should set it via db
@@ -90,7 +90,7 @@ impl EmbeddingCache {
     /// This operation is atomic (uses a temporary file).
     pub fn save(&self) -> Result<()> {
         if let Some(parent) = Path::new(&self.cache_path).parent() {
-            std::fs::create_dir_all(parent).map_err(|e| VectorDBError::DirectoryCreationError {
+            std::fs::create_dir_all(parent).map_err(|e| SagittaError::DirectoryCreationError {
                 path: parent.to_path_buf(),
                 source: e,
             })?;
@@ -106,15 +106,15 @@ impl EmbeddingCache {
         // Write to temporary file first
         let contents =
             serde_json::to_string_pretty(&cache_file)
-                .map_err(|e| VectorDBError::SerializationError(e.to_string()))?;
-        std::fs::write(&temp_path, contents).map_err(|e| VectorDBError::FileWriteError {
+                .map_err(|e| SagittaError::SerializationError(e.to_string()))?;
+        std::fs::write(&temp_path, contents).map_err(|e| SagittaError::FileWriteError {
             path: Path::new(&temp_path).to_path_buf(),
             source: e,
         })?;
 
         // Atomically rename the temporary file to the actual file
         std::fs::rename(&temp_path, &self.cache_path).map_err(|e| {
-            VectorDBError::FileWriteError {
+            SagittaError::FileWriteError {
                 path: Path::new(&self.cache_path).to_path_buf(),
                 source: e,
             }
@@ -126,12 +126,12 @@ impl EmbeddingCache {
     /// Calculates a hash based on the file's modification time and size.
     /// This is used to detect if a file has changed since it was last cached.
     pub fn get_file_hash(path: &Path) -> Result<u64> {
-        let metadata = std::fs::metadata(path).map_err(|e| VectorDBError::MetadataError {
+        let metadata = std::fs::metadata(path).map_err(|e| SagittaError::MetadataError {
             path: path.to_path_buf(),
             source: e,
         })?;
 
-        let modified_time = metadata.modified().map_err(|e| VectorDBError::MetadataError {
+        let modified_time = metadata.modified().map_err(|e| SagittaError::MetadataError {
             path: path.to_path_buf(),
             source: e,
         })?;
@@ -220,7 +220,7 @@ impl EmbeddingCache {
     }
 
     /// Removes an entry from the cache if it exists.
-    #[allow(dead_code)] // Suppress warning, used by VectorDB::remove
+    #[allow(dead_code)] // Suppress warning, used by Sagitta::remove
     pub fn remove(&mut self, key: &str) -> Result<Option<CacheEntry>> {
         let removed = self.entries.remove(key);
         if removed.is_some() {

@@ -1,4 +1,4 @@
-// crates/vectordb-core/src/sync.rs
+// crates/sagitta-search/src/sync.rs
 
 use crate::config::{AppConfig, RepositoryConfig};
 use crate::constants::FIELD_LANGUAGE;
@@ -24,6 +24,13 @@ use std::{
 use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
 use log::{info, warn, debug, trace};
+
+// Import git-manager traits for integration
+use git_manager::{VectorSyncTrait, VectorSyncResult};
+use async_trait::async_trait;
+use crate::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter, NoOpProgressReporter}; // Added
+use std::sync::Mutex; // Added for Mock
+use qdrant_client::qdrant::Distance;
 
 /// Contains the results of a repository synchronization operation.
 #[derive(Debug, Clone)]
@@ -75,10 +82,14 @@ pub async fn sync_repository<C>(
     repo_config: &RepositoryConfig, // Use immutable ref
     options: SyncOptions,
     app_config: &AppConfig, // Pass AppConfig for embedding/language config
+    reporter: Option<Arc<dyn SyncProgressReporter>>,
 ) -> Result<SyncResult>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
+    let reporter = reporter.unwrap_or_else(|| Arc::new(NoOpProgressReporter));
+    reporter.report(SyncProgress { stage: SyncStage::Idle }).await;
+
     info!("Synchronizing repository: {}", repo_config.name);
     
     // --- Gather necessary info upfront ---
@@ -111,7 +122,7 @@ where
     );
     
     // --- Step 1: Git Operations (blocking) ---
-    let git_result = task::spawn_blocking(move || -> Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool)> {
+    let git_result = task::spawn_blocking(move || -> Result<(String, Vec<PathBuf>, Vec<PathBuf>, bool, Option<String>)> {
         debug!("Inside blocking task for Git operations.");
         let repo = Repository::open(&repo_path_clone)
             .with_context(|| format!("Failed to open repository at {}", repo_path_clone.display()))?;
@@ -163,12 +174,55 @@ where
                 };
                 eprintln!(); // Newline to stderr after fetch progress
 
-                // Find the remote-tracking branch reference
+                // Find the remote-tracking branch reference with fallback logic
                 let ref_name = format!("refs/remotes/{}/{}", remote_name_clone, branch_name);
-                branch_commit = repo.find_reference(&ref_name)
-                    .with_context(|| format!("Could not find remote-tracking reference '{}'. Was fetch successful?", ref_name))?
-                    .peel_to_commit()
-                    .with_context(|| format!("Could not peel reference '{}' to commit.", ref_name))?;
+                
+                // Try to find the specified branch first
+                let branch_result = repo.find_reference(&ref_name);
+                
+                branch_commit = match branch_result {
+                    Ok(reference) => {
+                        // Successfully found the specified branch
+                        reference.peel_to_commit()
+                            .with_context(|| format!("Could not peel reference '{}' to commit.", ref_name))?
+                    },
+                    Err(_) => {
+                        // Branch not found, try fallback logic
+                        warn!("Could not find remote-tracking reference '{}'. Attempting fallback to default branches.", ref_name);
+                        
+                        // Try common default branch names
+                        let fallback_branches = if branch_name == "main" {
+                            vec!["master"]
+                        } else if branch_name == "master" {
+                            vec!["main"]
+                        } else {
+                            vec!["main", "master"]
+                        };
+                        
+                        let mut found_branch = None;
+                        for fallback_branch in fallback_branches {
+                            let fallback_ref_name = format!("refs/remotes/{}/{}", remote_name_clone, fallback_branch);
+                            if let Ok(reference) = repo.find_reference(&fallback_ref_name) {
+                                info!("Found fallback branch '{}' instead of '{}'", fallback_branch, branch_name);
+                                found_branch = Some(reference);
+                                break;
+                            }
+                        }
+                        
+                        match found_branch {
+                            Some(reference) => {
+                                reference.peel_to_commit()
+                                    .with_context(|| format!("Could not peel fallback reference to commit."))?
+                            },
+                            None => {
+                                return Err(anyhow!(
+                                    "Could not find remote-tracking reference '{}' or any fallback branches (main, master). Was fetch successful?", 
+                                    ref_name
+                                ).into());
+                            }
+                        }
+                    }
+                };
                 commit_oid_str = branch_commit.id().to_string();
             } else {
                 debug!("Repository treated as local-only.");
@@ -187,6 +241,7 @@ where
         let mut sync_type = SyncType::None;
         let mut files_to_index = Vec::new();
         let mut files_to_delete = Vec::new();
+        let mut diff_message = None;
 
         let last_synced_oid_str = last_synced_commit_map_clone.get(current_branch_name);
 
@@ -209,6 +264,8 @@ where
 
                 let mut diff_opts = DiffOptions::new();
                 let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut diff_opts))?;
+
+                diff_message = Some(format!("Calculated diff from {} to {}", last_commit_str, commit_oid_str));
 
                 diff.foreach(
                     &mut |delta, _progress| {
@@ -238,17 +295,45 @@ where
             let tree = branch_commit.tree()?;
             // Use the helper function from repo_helpers
             repo_helpers::collect_files_from_tree(&repo, &tree, &mut files_to_index, &PathBuf::new())?;
+
             info!("Full sync: {} files found in tree.", files_to_index.len());
             files_to_delete.clear(); // Ensure no deletions on full sync
         }
         
-        Ok((commit_oid_str, files_to_index, files_to_delete, sync_type != SyncType::None))
+        Ok((commit_oid_str, files_to_index, files_to_delete, sync_type != SyncType::None, diff_message))
 
     }).await.context("Git operation task failed")??; // Handle JoinError and inner Result
     
-    let (commit_oid_str, mut files_to_index, files_to_delete, sync_needed) = git_result;
+    let (commit_oid_str, mut files_to_index, files_to_delete, sync_needed, diff_message) = git_result;
+    
+    // Report progress for diff calculation if it happened
+    if let Some(message) = diff_message {
+        reporter.report(SyncProgress { 
+            stage: SyncStage::DiffCalculation { message }
+        }).await;
+    }
+    
+    // Report progress for file collection if it was a full sync
+    if !files_to_index.is_empty() && !sync_needed {
+        // This means it was already synced, no progress to report
+    } else if !files_to_index.is_empty() {
+        reporter.report(SyncProgress { 
+            stage: SyncStage::CollectFiles {
+                total_files: files_to_index.len(),
+                message: "Collected files for sync".to_string(),
+            }
+        }).await;
+    }
     
     if !sync_needed {
+        // Send completion progress update for already synced repositories
+        reporter.report(SyncProgress { 
+            stage: SyncStage::Completed { 
+                message: format!("Repository '{}' branch/ref '{}' already synced to commit {}", 
+                    repo_name, target_ref.unwrap_or(active_branch), commit_oid_str)
+            }
+        }).await;
+        
         return Ok(SyncResult {
             success: true,
             message: format!("Repository '{}' branch/ref '{}' already synced to commit {}", 
@@ -289,6 +374,12 @@ where
         .context("Failed to initialize embedding handler for sync")?;
     let embedding_dim = embedding_handler.dimension()
         .context("Failed to get embedding dimension for sync")?;
+    
+    reporter.report(SyncProgress { // Added
+        stage: SyncStage::VerifyingCollection {
+            message: format!("Ensuring collection '{}' exists with dimension {}", collection_name, embedding_dim)
+        }
+    }).await;
     repo_helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim as u64).await?;
     
     // Handle Deletions
@@ -299,6 +390,7 @@ where
             &collection_name, 
             current_sync_branch_or_ref,
             &files_to_delete, 
+            Some(reporter.clone()),
         ).await.context("Failed to delete points for removed files")?; 
         info!("Finished removing data for deleted files.");
     }
@@ -315,6 +407,7 @@ where
             &collection_name,
             current_sync_branch_or_ref,
             &commit_oid_str,
+            Some(reporter.clone()),
         ).await.context("Failed to index new/modified files")?;
         info!("Finished indexing added/modified files.");
     } else {
@@ -326,6 +419,11 @@ where
     // --- Query Indexed Languages --- 
     // (This logic remains largely the same, using the QdrantClientTrait)
     info!("Querying for current set of indexed languages...");
+    reporter.report(SyncProgress { // Added
+        stage: SyncStage::QueryLanguages { 
+            message: "Querying Qdrant for currently indexed languages".to_string()
+        }
+    }).await;
     let mut indexed_languages_set = HashSet::new();
     let scroll_filter = repo_helpers::create_branch_filter(current_sync_branch_or_ref);
     let mut scroll_offset: Option<qdrant_client::qdrant::PointId> = None;
@@ -365,13 +463,206 @@ where
     indexed_languages.sort();
     info!("Indexed languages after sync: {:?}", indexed_languages);
     
+    let success_message = format!("Successfully synced repository '{}' branch/ref '{}' to commit {}", 
+            repo_name, current_sync_branch_or_ref, commit_oid_str);
+    reporter.report(SyncProgress { // Added
+        stage: SyncStage::Completed { message: success_message.clone() }
+    }).await;
+
     Ok(SyncResult {
         success: true,
-        message: format!("Successfully synced repository '{}' branch/ref '{}' to commit {}", 
-            repo_name, current_sync_branch_or_ref, commit_oid_str),
+        message: success_message,
         indexed_languages,
         last_synced_commit: Some(commit_oid_str),
         files_indexed: files_to_index_count,
         files_deleted: files_to_delete_count,
     })
+}
+
+/// Sagitta implementation of the VectorSyncTrait
+/// This bridges git-manager with sagitta_search sync functionality
+pub struct SagittaSync<C>
+where 
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    client: Arc<C>,
+    repo_config: RepositoryConfig,
+    app_config: AppConfig,
+}
+
+impl<C> SagittaSync<C>
+where 
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    /// Create a new SagittaSync instance
+    pub fn new(client: Arc<C>, repo_config: RepositoryConfig, app_config: AppConfig) -> Self {
+        Self {
+            client,
+            repo_config,
+            app_config,
+        }
+    }
+}
+
+#[async_trait]
+impl<C> VectorSyncTrait for SagittaSync<C> 
+where 
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    async fn sync_files(
+        &self,
+        repo_path: &std::path::Path,
+        files_to_add: &[std::path::PathBuf],
+        files_to_update: &[std::path::PathBuf], 
+        files_to_delete: &[std::path::PathBuf],
+        is_full_sync: bool,
+    ) -> std::result::Result<VectorSyncResult, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        // Create sync options based on the parameters
+        let options = SyncOptions {
+            force: is_full_sync,
+            extensions: None,
+        };
+
+        // Call the real sync_repository function
+        match sync_repository(
+            self.client.clone(),
+            &self.repo_config,
+            options,
+            &self.app_config,
+            None,
+        ).await {
+            Ok(sync_result) => {
+                Ok(VectorSyncResult {
+                    success: sync_result.success,
+                    files_indexed: sync_result.files_indexed,
+                    files_deleted: sync_result.files_deleted,
+                    message: sync_result.message,
+                })
+            }
+            Err(e) => {
+                // Map the error to the trait object type
+                Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync + 'static>)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig};
+    use std::collections::HashMap;
+    use std::path::{PathBuf, Path};
+    use tempfile::TempDir;
+    use git2::Repository;
+    use std::fs;
+    use crate::qdrant_client_trait::MockQdrantClientTrait;
+    use std::sync::Arc;
+    use tokio::runtime::Runtime;
+    use crate::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter}; // Added
+    use std::sync::Mutex; // Added for Mock
+    use qdrant_client::qdrant::Distance;
+
+    /// Create a test repository config
+    fn create_test_repo_config(temp_dir: &TempDir, name: &str, branch: &str) -> RepositoryConfig {
+        let repo_path = temp_dir.path().join(name);
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        RepositoryConfig {
+            name: name.to_string(),
+            url: format!("https://github.com/test/{}.git", name),
+            local_path: repo_path,
+            default_branch: branch.to_string(),
+            tracked_branches: vec![branch.to_string()],
+            active_branch: Some(branch.to_string()),
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: HashMap::new(),
+            indexed_languages: None,
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        }
+    }
+
+    /// Create a test app config
+    fn create_test_app_config() -> AppConfig {
+        AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            repositories_base_path: None,
+            vocabulary_base_path: None,
+            tenant_id: Some("test-tenant".to_string()),
+            indexing: IndexingConfig {
+                max_concurrent_upserts: 4,
+            },
+            performance: PerformanceConfig {
+                batch_size: 100,
+                internal_embed_batch_size: 32,
+                collection_name_prefix: "sagitta".to_string(),
+                max_file_size_bytes: 1048576,
+                vector_dimension: 384,
+            },
+            rayon_num_threads: 4,
+            repositories: Vec::new(),
+            active_repository: None,
+            server_api_key_path: None,
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+        }
+    }
+
+    #[test]
+    fn test_sync_options_default() {
+        let options = SyncOptions::default();
+        assert!(!options.force);
+        assert!(options.extensions.is_none());
+    }
+
+    #[test]
+    fn test_sync_result_creation() {
+        let result = SyncResult {
+            success: true,
+            message: "Test sync completed".to_string(),
+            indexed_languages: vec!["rust".to_string(), "python".to_string()],
+            last_synced_commit: Some("abc123".to_string()),
+            files_indexed: 10,
+            files_deleted: 2,
+        };
+        
+        assert!(result.success);
+        assert_eq!(result.message, "Test sync completed");
+        assert_eq!(result.indexed_languages.len(), 2);
+        assert_eq!(result.last_synced_commit, Some("abc123".to_string()));
+        assert_eq!(result.files_indexed, 10);
+        assert_eq!(result.files_deleted, 2);
+    }
+
+    #[test]
+    fn test_sync_type_enum() {
+        assert_eq!(SyncType::None, SyncType::None);
+        assert_ne!(SyncType::None, SyncType::Full);
+        assert_ne!(SyncType::Incremental, SyncType::Full);
+    }
+
+    #[tokio::test]
+    async fn test_sync_repository_with_missing_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_config = create_test_repo_config(&temp_dir, "test-repo", "main");
+        let app_config = create_test_app_config();
+        let options = SyncOptions::default();
+        
+        let mock_client = Arc::new(MockQdrantClientTrait::new());
+        
+        // This should fail because the repository doesn't exist
+        let result = sync_repository(mock_client, &repo_config, options, &app_config, None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to open repository"));
+    }
 } 

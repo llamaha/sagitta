@@ -1,6 +1,6 @@
 use crate::{
     embedding::EmbeddingHandler,
-    error::{Result, VectorDBError},
+    error::{Result, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
 };
 use qdrant_client::qdrant::{
@@ -57,7 +57,7 @@ where
         Ok(vm) => vm,
         Err(e) => {
             log::error!("Failed to load vocabulary from {}: {}. Cannot perform hybrid search.", vocab_path.display(), e);
-            return Err(VectorDBError::Other(format!("Vocabulary not found for collection '{}'", collection_name)));
+            return Err(SagittaError::Other(format!("Vocabulary not found for collection '{}'", collection_name)));
         }
     };
     if vocabulary_manager.is_empty() {
@@ -71,7 +71,7 @@ where
         .into_iter()
         .next()
         .ok_or_else(|| {
-            VectorDBError::EmbeddingError("Failed to generate dense embedding for the query ".to_string())
+            SagittaError::EmbeddingError("Failed to generate dense embedding for the query ".to_string())
         })?;
     log::trace!("Core: Generated dense query embedding.");
 
