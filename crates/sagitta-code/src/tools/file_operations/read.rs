@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use sagitta_search::AppConfig as SagittaAppConfig;
 
 /// Parameters for reading a file
@@ -77,10 +77,10 @@ impl Tool for ReadFileTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: ReadFileParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse read_file parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse read_file parameters: {}", e)))?;
         
         log::info!("[ReadFileTool] Reading file '{}' from repository '{}' (lines: {:?}-{:?})", 
                   params.file_path, params.repository_name, params.start_line, params.end_line);
@@ -112,7 +112,7 @@ impl Tool for ReadFileTool {
                 let detailed_error = format!("Failed to read file '{}' from repository '{}': {}", 
                                            params.file_path, params.repository_name, e);
                 log::error!("[ReadFileTool] {}", detailed_error);
-                Err(FredAgentError::ToolError(detailed_error))
+                Err(SagittaCodeError::ToolError(detailed_error))
             }
         }
     }

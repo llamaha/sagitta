@@ -10,7 +10,7 @@ use crate::agent::message::types::ToolCall;
 use crate::agent::state::manager::StateManager;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{ToolResult, ToolParameters};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Event emitted by the tool executor
 #[derive(Debug, Clone)]
@@ -89,7 +89,7 @@ impl ToolExecutor {
         &self,
         tool_name: &str,
         parameters: Value,
-    ) -> Result<ToolResult, FredAgentError> {
+    ) -> Result<ToolResult, SagittaCodeError> {
         // Generate a unique ID for this tool call
         let tool_call_id = Uuid::new_v4().to_string();
         
@@ -105,7 +105,7 @@ impl ToolExecutor {
         tool_call_id: &str,
         tool_name: &str,
         parameters: Value,
-    ) -> Result<ToolResult, FredAgentError> {
+    ) -> Result<ToolResult, SagittaCodeError> {
         debug!(
             "ToolExecutor (executor.rs): Executing tool: '{}' with call ID: '{}'. Parameters: {:?}",
             tool_name,
@@ -120,7 +120,7 @@ impl ToolExecutor {
             tool_call_id: tool_call_id.to_string(),
             tool_name: tool_name.to_string(),
             parameters: parameters.clone(),
-        }).await.map_err(|e| FredAgentError::Unknown(format!("Failed to send tool started event: {}", e)))?;
+        }).await.map_err(|e| SagittaCodeError::Unknown(format!("Failed to send tool started event: {}", e)))?;
         
         debug!("ToolExecutor: Looking up tool '{}' in registry.", tool_name);
         match self.registry.get(tool_name).await {
@@ -144,7 +144,7 @@ impl ToolExecutor {
                             tool_call_id: tool_call_id.to_string(),
                             tool_name: tool_name.to_string(),
                             result: result.clone(),
-                        }).await.map_err(|e| FredAgentError::Unknown(format!("ToolExecutor: Failed to send tool completed event: {}", e)))?;
+                        }).await.map_err(|e| SagittaCodeError::Unknown(format!("ToolExecutor: Failed to send tool completed event: {}", e)))?;
                         debug!("DEBUG: ToolExecutor successfully sent completion event for tool: {}", tool_name);
                         
                         Ok(result)
@@ -163,9 +163,9 @@ impl ToolExecutor {
                             tool_call_id: tool_call_id.to_string(),
                             tool_name: tool_name.to_string(),
                             error: error_message.clone(),
-                        }).await.map_err(|e| FredAgentError::Unknown(format!("ToolExecutor: Failed to send tool failed event: {}", e)))?;
+                        }).await.map_err(|e| SagittaCodeError::Unknown(format!("ToolExecutor: Failed to send tool failed event: {}", e)))?;
                         
-                        Err(FredAgentError::ToolError(error_message))
+                        Err(SagittaCodeError::ToolError(error_message))
                     }
                 };
                 exec_result
@@ -177,16 +177,16 @@ impl ToolExecutor {
                     tool_call_id: tool_call_id.to_string(),
                     tool_name: tool_name.to_string(),
                     error: format!("Tool '{}' not found in registry.", tool_name),
-                }).await.map_err(|e| FredAgentError::Unknown(format!("ToolExecutor: Failed to send tool not found event: {}", e)))?;
+                }).await.map_err(|e| SagittaCodeError::Unknown(format!("ToolExecutor: Failed to send tool not found event: {}", e)))?;
                 
                 // Return an error to the caller (Agent)
-                Err(FredAgentError::ToolNotFound(tool_name.to_string()))
+                Err(SagittaCodeError::ToolNotFound(tool_name.to_string()))
             }
         }
     }
     
     /// Execute a tool call
-    pub async fn execute_tool_call(&self, tool_call: &ToolCall) -> Result<ToolResult, FredAgentError> {
+    pub async fn execute_tool_call(&self, tool_call: &ToolCall) -> Result<ToolResult, SagittaCodeError> {
         self.execute_tool_with_id(
             &tool_call.id,
             &tool_call.name,

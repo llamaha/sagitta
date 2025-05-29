@@ -68,21 +68,21 @@ This method is the heart of the engine:
 ### 7. Error Handling (`src/error.rs`)
 - **`ReasoningError`**: A detailed enum defining various errors that can occur within the engine, using `thiserror` for easy error propagation and display.
 
-## Integration with an Agent (e.g., Fred Agent)
+## Integration with an Agent (e.g., Sagitta Code)
 
 The `reasoning-engine` is designed to be a library. A concrete AI agent application (like `sagitta-code`) uses it by:
-1.  **Providing Implementations for Traits**: The agent implements `LlmClient` (e.g., `ReasoningLlmClientAdapter` wrapping a `GeminiClient`), `ToolExecutor` (e.g., `AgentToolExecutor` using its `ToolRegistry`), `StreamHandler`, `EventEmitter`, and critically, the `IntentAnalyzer` (e.g., `FredIntentAnalyzer` using `sagitta-search`'s embedding models).
+1.  **Providing Implementations for Traits**: The agent implements `LlmClient` (e.g., `ReasoningLlmClientAdapter` wrapping a `GeminiClient`), `ToolExecutor` (e.g., `AgentToolExecutor` using its `ToolRegistry`), `StreamHandler`, `EventEmitter`, and critically, the `IntentAnalyzer` (e.g., `SagittaCodeIntentAnalyzer` using `sagitta-search`'s embedding models).
 2.  **Configuration**: The agent loads a `ReasoningConfig` and initializes the `ReasoningEngine` with it, along with the trait implementations.
 3.  **Driving the Engine**: When the agent receives a user message, it prepares the full conversation history (as `Vec<LlmMessage>`) and calls `ReasoningEngine::process()`.
 4.  **Handling Output**: The agent processes events from the `EventEmitter` and stream chunks from the `StreamHandler` to update its UI or interact with the user.
 
 ## How Semantic Intent Analysis Works (High-Level)
 
-1.  The `ReasoningEngine` is initialized with an `IntentAnalyzer` implementation (e.g., `FredIntentAnalyzer` from `sagitta-code`).
-2.  `FredIntentAnalyzer` (during its own initialization) loads an embedding model (e.g., an ONNX model via `sagitta_search`'s `ThreadSafeOnnxProvider`).
+1.  The `ReasoningEngine` is initialized with an `IntentAnalyzer` implementation (e.g., `SagittaCodeIntentAnalyzer` from `sagitta-code`).
+2.  `SagittaCodeIntentAnalyzer` (during its own initialization) loads an embedding model (e.g., an ONNX model via `sagitta_search`'s `ThreadSafeOnnxProvider`).
 3.  It also pre-embeds a set of "prototype phrases" corresponding to different `DetectedIntent` enums (e.g., "The task is complete" -> `ProvidesFinalAnswer`).
-4.  During `ReasoningEngine::process`, if the LLM returns text but no explicit tool calls, this text is passed to `FredIntentAnalyzer::analyze_intent()`.
-5.  `FredIntentAnalyzer` embeds the LLM's text using the ONNX model.
+4.  During `ReasoningEngine::process`, if the LLM returns text but no explicit tool calls, this text is passed to `SagittaCodeIntentAnalyzer::analyze_intent()`.
+5.  `SagittaCodeIntentAnalyzer` embeds the LLM's text using the ONNX model.
 6.  It then calculates the semantic similarity (e.g., cosine similarity) between the LLM text embedding and all pre-computed prototype embeddings.
 7.  The `DetectedIntent` of the prototype with the highest similarity (above a certain threshold) is returned to the `ReasoningEngine`.
 8.  The `ReasoningEngine` uses this `DetectedIntent` to make a more informed decision (e.g., nudge for action if `ProvidesPlanWithoutExplicitAction`, terminate if `ProvidesFinalAnswer` or `AsksClarifyingQuestion`).

@@ -14,7 +14,7 @@ use reasoning_engine::ReasoningError; // Import ReasoningError directly
 
 use std::collections::HashMap; // For more complex prototype storage if needed
 
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 // Basic cosine similarity function (can be moved to a shared utility module)
 fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
@@ -33,14 +33,14 @@ fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
 }
 
 #[derive(Debug)] // Added Debug derive
-pub struct FredIntentAnalyzer {
+pub struct SagittaCodeIntentAnalyzer {
     embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
     intent_prototypes: Vec<(DetectedIntent, Vec<f32>)>, // Store pre-embedded prototypes
     rt_handle: Handle,
 }
 
-impl FredIntentAnalyzer {
-    /// Creates a new `FredIntentAnalyzer`.
+impl SagittaCodeIntentAnalyzer {
+    /// Creates a new `SagittaCodeIntentAnalyzer`.
     pub fn new(embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>) -> Self {
         let prototypes_phrases = vec![
             // More specific final answer patterns
@@ -75,7 +75,7 @@ impl FredIntentAnalyzer {
         ];
 
         let mut intent_prototypes = Vec::new();
-        debug!("FredIntentAnalyzer: Embedding intent prototypes...");
+        debug!("SagittaCodeIntentAnalyzer: Embedding intent prototypes...");
         for (intent, phrase) in prototypes_phrases {
             // Use a block to ensure the lock is released after embedding
             let embedding_result = {
@@ -88,17 +88,17 @@ impl FredIntentAnalyzer {
                     debug!("Successfully embedded prototype for {:?}: '{}'", intent, phrase);
                 }
                 Ok(_) => {
-                    warn!("FredIntentAnalyzer: Failed to embed prototype (empty result) for {:?}: '{}'", intent, phrase);
+                    warn!("SagittaCodeIntentAnalyzer: Failed to embed prototype (empty result) for {:?}: '{}'", intent, phrase);
                 }
                 Err(e) => {
-                    warn!("FredIntentAnalyzer: Embedding failed for prototype '{}' ({:?}): {:?}", phrase, intent, e);
+                    warn!("SagittaCodeIntentAnalyzer: Embedding failed for prototype '{}' ({:?}): {:?}", phrase, intent, e);
                 }
             }
         }
         if intent_prototypes.is_empty() {
-            warn!("FredIntentAnalyzer: No intent prototypes were successfully embedded. Intent analysis will be impaired.");
+            warn!("SagittaCodeIntentAnalyzer: No intent prototypes were successfully embedded. Intent analysis will be impaired.");
         }
-        debug!("FredIntentAnalyzer: Embedded {} intent prototypes successfully.", intent_prototypes.len());
+        debug!("SagittaCodeIntentAnalyzer: Embedded {} intent prototypes successfully.", intent_prototypes.len());
 
         Self {
             embedding_provider,
@@ -109,18 +109,18 @@ impl FredIntentAnalyzer {
 }
 
 #[async_trait]
-impl IntentAnalyzer for FredIntentAnalyzer {
+impl IntentAnalyzer for SagittaCodeIntentAnalyzer {
     async fn analyze_intent(
         &self,
         text: &str,
         conversation_context: Option<&[LlmMessage]>, // Context can be used for more advanced rules later
     ) -> Result<DetectedIntent, ReasoningError> {
         if text.trim().is_empty() {
-            debug!("FredIntentAnalyzer: Received empty text, returning Ambiguous intent.");
+            debug!("SagittaCodeIntentAnalyzer: Received empty text, returning Ambiguous intent.");
             return Ok(DetectedIntent::Ambiguous);
         }
 
-        debug!("FredIntentAnalyzer: Analyzing intent for text: \"{}\"", text);
+        debug!("SagittaCodeIntentAnalyzer: Analyzing intent for text: \"{}\"", text);
 
         // CRITICAL: Check for intermediate summaries that should NOT be treated as final answers
         let is_intermediate_summary = text.contains("I've finished those tasks") ||
@@ -154,7 +154,7 @@ impl IntentAnalyzer for FredIntentAnalyzer {
                                     text.contains("I'll help you with that");
 
         if is_intermediate_summary {
-            debug!("FredIntentAnalyzer: Detected intermediate summary, returning RequestsMoreInput to continue processing.");
+            debug!("SagittaCodeIntentAnalyzer: Detected intermediate summary, returning RequestsMoreInput to continue processing.");
             return Ok(DetectedIntent::RequestsMoreInput);
         }
 
@@ -194,40 +194,40 @@ impl IntentAnalyzer for FredIntentAnalyzer {
 
         // Prioritize continuation over weak completion
         if has_continuation_indicators {
-            debug!("FredIntentAnalyzer: Detected continuation indicators, returning RequestsMoreInput.");
+            debug!("SagittaCodeIntentAnalyzer: Detected continuation indicators, returning RequestsMoreInput.");
             return Ok(DetectedIntent::RequestsMoreInput);
         }
 
         if has_plan_indicators && !has_strong_completion_indicators {
-            debug!("FredIntentAnalyzer: Detected plan without strong completion, returning ProvidesPlanWithoutExplicitAction.");
+            debug!("SagittaCodeIntentAnalyzer: Detected plan without strong completion, returning ProvidesPlanWithoutExplicitAction.");
             return Ok(DetectedIntent::ProvidesPlanWithoutExplicitAction);
         }
 
         // Only treat as final answer if we have strong completion indicators and no continuation indicators
         if has_strong_completion_indicators && !has_continuation_indicators {
-            debug!("FredIntentAnalyzer: Detected strong completion indicators without continuation, returning ProvidesFinalAnswer.");
+            debug!("SagittaCodeIntentAnalyzer: Detected strong completion indicators without continuation, returning ProvidesFinalAnswer.");
             return Ok(DetectedIntent::ProvidesFinalAnswer);
         }
 
         // If we have weak completion indicators but also continuation indicators, prefer continuation
         if has_weak_completion_indicators && has_continuation_indicators {
-            debug!("FredIntentAnalyzer: Detected weak completion with continuation indicators, returning RequestsMoreInput.");
+            debug!("SagittaCodeIntentAnalyzer: Detected weak completion with continuation indicators, returning RequestsMoreInput.");
             return Ok(DetectedIntent::RequestsMoreInput);
         }
 
         if self.intent_prototypes.is_empty() {
-            warn!("FredIntentAnalyzer: No intent prototypes available for comparison. Returning RequestsMoreInput to be safe.");
+            warn!("SagittaCodeIntentAnalyzer: No intent prototypes available for comparison. Returning RequestsMoreInput to be safe.");
             return Ok(DetectedIntent::RequestsMoreInput); // Changed from Ambiguous to be less conservative
         }
 
         let text_embedding = match self.embedding_provider.embed_batch(&[text]) {
             Ok(mut embeddings) if !embeddings.is_empty() => embeddings.remove(0),
             Ok(_) => {
-                warn!("FredIntentAnalyzer: Could not get embedding for text (empty result): \"{}\"", text);
+                warn!("SagittaCodeIntentAnalyzer: Could not get embedding for text (empty result): \"{}\"", text);
                 return Ok(DetectedIntent::RequestsMoreInput); // Changed from Ambiguous to be less conservative
             }
             Err(e) => {
-                warn!("FredIntentAnalyzer: Embedding failed for text \"{}\": {:?}", text, e);
+                warn!("SagittaCodeIntentAnalyzer: Embedding failed for text \"{}\": {:?}", text, e);
                 return Err(ReasoningError::intent_analysis(format!("Embedding failed for intent analysis: {}", e)));
             }
         };
@@ -238,7 +238,7 @@ impl IntentAnalyzer for FredIntentAnalyzer {
         for (intent, prototype_embedding) in &self.intent_prototypes {
             let similarity = cosine_similarity(&text_embedding, prototype_embedding);
             // trace! used for potentially very verbose logging
-            trace!("FredIntentAnalyzer: Similarity of '{}' with {:?}: {:.4}", text, intent, similarity);
+            trace!("SagittaCodeIntentAnalyzer: Similarity of '{}' with {:?}: {:.4}", text, intent, similarity);
             if similarity > highest_similarity {
                 highest_similarity = similarity;
                 best_match = intent.clone();
@@ -254,7 +254,7 @@ impl IntentAnalyzer for FredIntentAnalyzer {
         
         if highest_similarity < similarity_threshold {
             debug!(
-                "FredIntentAnalyzer: Highest similarity {:.4} for '{}' is below threshold {}. Returning RequestsMoreInput to continue.",
+                "SagittaCodeIntentAnalyzer: Highest similarity {:.4} for '{}' is below threshold {}. Returning RequestsMoreInput to continue.",
                 highest_similarity,
                 text,
                 similarity_threshold
@@ -264,11 +264,11 @@ impl IntentAnalyzer for FredIntentAnalyzer {
 
         // Additional safety check: if we detected a final answer but there are continuation indicators, override it
         if best_match == DetectedIntent::ProvidesFinalAnswer && (is_intermediate_summary || has_continuation_indicators) {
-            debug!("FredIntentAnalyzer: Overriding ProvidesFinalAnswer due to intermediate summary or continuation indicators.");
+            debug!("SagittaCodeIntentAnalyzer: Overriding ProvidesFinalAnswer due to intermediate summary or continuation indicators.");
             return Ok(DetectedIntent::RequestsMoreInput);
         }
 
-        debug!("FredIntentAnalyzer: Best match intent for '{}': {:?} with similarity {:.4}", text, best_match, highest_similarity);
+        debug!("SagittaCodeIntentAnalyzer: Best match intent for '{}': {:?} with similarity {:.4}", text, best_match, highest_similarity);
         Ok(best_match)
     }
 } 

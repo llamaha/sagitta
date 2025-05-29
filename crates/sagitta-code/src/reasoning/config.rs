@@ -3,9 +3,9 @@ use reasoning_engine::{
 };
 use std::time::Duration;
 
-use crate::config::types::FredAgentConfig;
+use crate::config::types::SagittaCodeConfig;
 
-pub fn create_reasoning_config(agent_config: &FredAgentConfig) -> ReasoningConfig {
+pub fn create_reasoning_config(agent_config: &SagittaCodeConfig) -> ReasoningConfig {
     ReasoningConfig {
         max_iterations: agent_config.gemini.max_reasoning_steps, // Corrected path
         confidence_threshold: 0.7, // Using the default value from reasoning_engine's ReasoningConfig

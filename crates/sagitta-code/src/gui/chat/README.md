@@ -121,7 +121,7 @@ Different types of message authors with color coding:
 ```rust
 pub enum MessageAuthor {
     User,    // Blue - You
-    Agent,   // Green - Fred
+    Agent,   // Green - Sagitta Code
     System,  // Red - System
     Tool,    // Yellow - Tool
 }

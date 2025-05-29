@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use repo_mapper::{generate_repo_map, RepoMapOptions};
 use sagitta_search::config::AppConfig;
 
@@ -46,16 +46,16 @@ impl RepositoryMapTool {
     }
     
     /// Generate a repository map using the repo-mapper crate
-    async fn generate_map(&self, params: &RepositoryMapParams) -> Result<serde_json::Value, FredAgentError> {
+    async fn generate_map(&self, params: &RepositoryMapParams) -> Result<serde_json::Value, SagittaCodeError> {
         let repo_manager = self.repo_manager.lock().await;
         
         // Check if repository exists and get its path
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo = repositories.iter()
             .find(|r| r.name == params.name)
-            .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.name)))?;
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.name)))?;
 
         let repo_path = &repo.local_path;
 
@@ -81,7 +81,7 @@ impl RepositoryMapTool {
 
         // Generate the repository map
         let result = generate_repo_map(repo_path, options)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to generate repository map: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to generate repository map: {}", e)))?;
 
         // Convert to JSON response
         Ok(serde_json::json!({
@@ -153,7 +153,7 @@ impl Tool for RepositoryMapTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         match serde_json::from_value::<RepositoryMapParams>(parameters) {
             Ok(params) => {
                 match self.generate_map(&params).await {

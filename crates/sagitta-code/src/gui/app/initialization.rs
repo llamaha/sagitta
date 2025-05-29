@@ -1,9 +1,9 @@
-// Application initialization for the Fred Agent
+// Application initialization for the Sagitta Code
 
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use super::FredAgentApp;
+use super::SagittaCodeApp;
 use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
@@ -27,7 +27,7 @@ use crate::tools::web_search::WebSearchTool;
 use crate::tools::analyze_input::AnalyzeInputTool;
 use crate::tools::analyze_input::TOOLS_COLLECTION_NAME; // Import the const
 use crate::tools::code_edit::edit::EditTool; // Corrected import for EditTool
-use crate::config::FredAgentConfig;
+use crate::config::SagittaCodeConfig;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::shell_execution::ShellExecutionTool;
 use crate::tools::test_execution::TestExecutionTool;
@@ -59,25 +59,25 @@ use qdrant_client::qdrant::{
 use qdrant_client::Payload as QdrantPayload; // Corrected Payload import
 
 /// Initialize the application
-pub async fn initialize(app: &mut FredAgentApp) -> Result<()> {
-    log::info!("FredAgentApp: Initializing...");
+pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
+    log::info!("SagittaCodeApp: Initializing...");
 
     // Load sagitta-search config
     let core_config = match get_sagitta_code_core_config_path() {
         Ok(core_config_path) => {
             match sagitta_search::config::load_config(Some(&core_config_path)) {
                 Ok(config) => {
-                    log::info!("FredAgentApp: Loaded sagitta-search config from {:?}", core_config_path);
+                    log::info!("SagittaCodeApp: Loaded sagitta-search config from {:?}", core_config_path);
                     config
                 }
                 Err(e) => {
-                    log::warn!("FredAgentApp: Could not load sagitta-search config from {:?}: {}. Using defaults.", core_config_path, e);
+                    log::warn!("SagittaCodeApp: Could not load sagitta-search config from {:?}: {}. Using defaults.", core_config_path, e);
                     sagitta_search::config::AppConfig::default()
                 }
             }
         },
         Err(e) => {
-            log::error!("FredAgentApp: Failed to get dedicated core config path: {}. Using default AppConfig.", e);
+            log::error!("SagittaCodeApp: Failed to get dedicated core config path: {}. Using default AppConfig.", e);
             sagitta_search::config::AppConfig::default()
         }
     };
@@ -109,7 +109,7 @@ pub async fn initialize(app: &mut FredAgentApp) -> Result<()> {
     };
 
     app.repo_panel.refresh_repositories(); // Initial refresh
-    log::info!("FredAgentApp: RepoPanel initialized and refreshed.");
+    log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
 
     // Load theme from config
     match app.config.ui.theme.as_str() {
@@ -318,7 +318,7 @@ pub async fn initialize(app: &mut FredAgentApp) -> Result<()> {
             // Add a welcome message
             let welcome_message = StreamingMessage::from_text(
                 MessageAuthor::Agent,
-                "Hello! I'm Fred, your AI assistant for code repositories. How can I help you today?".to_string(),
+                "Hello! I'm Sagitta Code, your AI assistant for code repositories. How can I help you today?".to_string(),
             );
             app.chat_manager.add_complete_message(welcome_message);
         },

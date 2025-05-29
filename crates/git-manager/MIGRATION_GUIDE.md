@@ -828,7 +828,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SwitchBranchParams {
@@ -877,9 +877,9 @@ impl Tool for SwitchBranchTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         let params: SwitchBranchParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Invalid parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Invalid parameters: {}", e)))?;
         
         let mut repo_manager = self.repo_manager.lock().await;
         
@@ -893,7 +893,7 @@ impl Tool for SwitchBranchTool {
                 })))
             },
             Err(e) => {
-                Err(FredAgentError::ToolError(format!(
+                Err(SagittaCodeError::ToolError(format!(
                     "Failed to switch branch in repository '{}': {}", 
                     params.repository_name, e
                 )))
@@ -999,7 +999,7 @@ async fn test_mcp_migration_compatibility() {
 }
 
 #[tokio::test]
-async fn test_fred_agent_migration_compatibility() {
+async fn test_sagitta_code_migration_compatibility() {
     // Test that git-manager provides same functionality as old sagitta-code
     // ... similar test structure
 }
@@ -1073,7 +1073,7 @@ fn backup_configuration() -> Result<PathBuf> {
 - [ ] Update tool definitions
 - [ ] Test MCP protocol compatibility
 
-### Fred-Agent Migration
+### Sagitta-Code Migration
 - [ ] Add git-manager dependency
 - [ ] Update RepositoryManager
 - [ ] Update sync operations

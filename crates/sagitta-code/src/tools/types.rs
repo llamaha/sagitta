@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// A tool definition that describes a tool's interface
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -121,9 +121,9 @@ impl ToolResult {
     }
     
     /// Create a successful tool result from a serializable value
-    pub fn success_from<T: Serialize>(value: &T) -> Result<Self, FredAgentError> {
+    pub fn success_from<T: Serialize>(value: &T) -> Result<Self, SagittaCodeError> {
         Ok(Self::Success(serde_json::to_value(value).map_err(|e| {
-            FredAgentError::ToolError(format!("Failed to serialize tool result: {}", e))
+            SagittaCodeError::ToolError(format!("Failed to serialize tool result: {}", e))
         })?))
     }
     
@@ -178,7 +178,7 @@ pub trait Tool: Send + Sync + std::fmt::Debug {
     fn definition(&self) -> ToolDefinition;
     
     /// Execute the tool with the given parameters
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError>;
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError>;
 }
 
 /// A boxed tool that can be used by the registry

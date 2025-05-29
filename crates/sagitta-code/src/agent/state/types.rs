@@ -1,6 +1,6 @@
 // State data structures will go here
 
-// ... file removed, all types now imported from fred-engine ...
+// ... file removed, all types now imported from sagitta-code-engine ...
 
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc}; // Import Utc

@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use sagitta_code::{
     agent::Agent,
-    config::{FredAgentConfig, load_config},
+    config::{SagittaCodeConfig, load_config},
     utils::init_logger,
-    // If gui items are needed here from lib, add them e.g. gui::FredAgentApp
+    // If gui items are needed here from lib, add them e.g. gui::SagittaCodeApp
 };
 
 // When compiled with the "gui" feature, this will import and use the GUI modules
@@ -25,14 +25,14 @@ mod gui_app {
     // Ensure gui items are correctly pathed if lib.rs also declares pub mod gui;
     // If sagitta_code::gui is the canonical path from lib.rs, these direct uses are fine.
     use sagitta_code::gui::repository::manager::RepositoryManager;
-    use sagitta_code::gui::app::FredAgentApp; // Already using sagitta_code::gui path
+    use sagitta_code::gui::app::SagittaCodeApp; // Already using sagitta_code::gui path
     use sagitta_code::gui::fonts;
-    use sagitta_code::config::FredAgentConfig;
+    use sagitta_code::config::SagittaCodeConfig;
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
     
     struct GuiApp {
-        app: FredAgentApp, // This now correctly refers to sagitta_code::gui::app::FredAgentApp
+        app: SagittaCodeApp, // This now correctly refers to sagitta_code::gui::app::SagittaCodeApp
         update_sender: tokio::sync::mpsc::Sender<()>,
         update_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     }
@@ -53,11 +53,11 @@ mod gui_app {
         }
     }
     
-    pub async fn run(fred_config: FredAgentConfig) -> Result<()> {
-        log::info!("Starting Fred Agent GUI");
+    pub async fn run(sagitta_code_config: SagittaCodeConfig) -> Result<()> {
+        log::info!("Starting Sagitta Code GUI");
         
         // Load sagitta-search AppConfig
-        let sagitta_config_path_val = fred_config.sagitta_config_path(); 
+        let sagitta_config_path_val = sagitta_code_config.sagitta_config_path(); 
         let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
             Ok(config) => config,
             Err(e) => {
@@ -78,20 +78,20 @@ mod gui_app {
         
         let repo_manager_clone = Arc::clone(&repo_manager);
         
-        // Create the FredAgentApp first to be able to initialize it properly
-        let mut app_instance = sagitta_code::gui::app::FredAgentApp::new(
+        // Create the SagittaCodeApp first to be able to initialize it properly
+        let mut app_instance = sagitta_code::gui::app::SagittaCodeApp::new(
             repo_manager_clone.clone(), 
-            fred_config, // Pass owned FredAgentConfig
+            sagitta_code_config, // Pass owned SagittaCodeConfig
             sagitta_app_config // Pass owned AppConfig
         );
         
         // Initialize the app asynchronously before launching eframe
         if let Err(e) = app_instance.initialize().await {
-            log::error!("Failed to initialize FredAgentApp: {}", e);
+            log::error!("Failed to initialize SagittaCodeApp: {}", e);
             // Consider showing an error message to the user
         }
         
-        // Now create the actual GUI app with the pre-initialized FredAgentApp
+        // Now create the actual GUI app with the pre-initialized SagittaCodeApp
         let app_creator = move |cc: &CreationContext| -> Result<Box<dyn eframe::App>, Box<dyn std::error::Error + Send + Sync>> {
             let (update_sender, update_receiver) = tokio::sync::mpsc::channel(10);
             
@@ -129,7 +129,7 @@ mod gui_app {
         };
         
         eframe::run_native(
-            "Fred Agent",
+            "Sagitta Code",
             options,
             Box::new(app_creator)
         ).map_err(|e| anyhow::anyhow!("eframe error: {}", e))?;
@@ -164,14 +164,14 @@ mod cli_app {
     use sagitta_code::llm::client::LlmClient; // Corrected path
     use sagitta_code::llm::gemini::client::GeminiClient; // Corrected path
 
-    pub async fn run(config: FredAgentConfig) -> Result<()> {
-        log::info!("Starting Fred Agent CLI");
+    pub async fn run(config: SagittaCodeConfig) -> Result<()> {
+        log::info!("Starting Sagitta Code CLI");
         
         // Load sagitta-search AppConfig (assuming core_config.toml is handled by this)
-        // The FredAgentConfig might need a field for the path to sagitta_search's config,
+        // The SagittaCodeConfig might need a field for the path to sagitta_search's config,
         // or a shared config loading mechanism.
-        // For now, try to load it using a default path or a path from FredAgentConfig if available.
-        let sagitta_config_path_val = config.sagitta_config_path(); // PathBuf from FredAgentConfig
+        // For now, try to load it using a default path or a path from SagittaCodeConfig if available.
+        let sagitta_config_path_val = config.sagitta_config_path(); // PathBuf from SagittaCodeConfig
         let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
             Ok(cfg) => cfg,
             Err(e) => {
@@ -402,7 +402,7 @@ mod cli_app {
         });
         
         // Main CLI loop
-        println!("Fred Agent CLI");
+        println!("Sagitta Code CLI");
         println!("Type 'exit' or 'quit' to exit");
         println!("Type 'mode auto' for fully autonomous mode");
         println!("Type 'mode confirm' for tools with confirmation");
@@ -476,7 +476,7 @@ async fn main() -> Result<()> {
         Err(e) => {
             eprintln!("Warning: Failed to load config: {}", e);
             eprintln!("Using default configuration");
-            FredAgentConfig::default()
+            SagittaCodeConfig::default()
         }
     };
     

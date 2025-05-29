@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 use anyhow::Result; // Ensure anyhow::Result is used
 
-/// Gets the path to Fred Agent's dedicated core configuration file (e.g., for sagitta-search settings).
+/// Gets the path to Sagitta Code's dedicated core configuration file (e.g., for sagitta-search settings).
 /// This will be something like ~/.config/sagitta-code/core_config.toml
 pub fn get_sagitta_code_core_config_path() -> Result<PathBuf> {
     if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta_code") { // Use empty vendor for typical ~/.config behavior
@@ -12,11 +12,11 @@ pub fn get_sagitta_code_core_config_path() -> Result<PathBuf> {
         }
         Ok(config_dir.join("core_config.toml"))
     } else {
-        Err(anyhow::anyhow!("Unable to determine Fred Agent config directory"))
+        Err(anyhow::anyhow!("Unable to determine Sagitta Code config directory"))
     }
 }
 
-/// Gets the path to Fred Agent's main application configuration file.
+/// Gets the path to Sagitta Code's main application configuration file.
 /// This will be something like ~/.config/sagitta-code/sagitta_code_config.json
 pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
     if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta_code") {
@@ -26,7 +26,7 @@ pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
         }
         Ok(config_dir.join("sagitta_code_config.json"))
     } else {
-        Err(anyhow::anyhow!("Unable to determine Fred Agent config directory"))
+        Err(anyhow::anyhow!("Unable to determine Sagitta Code config directory"))
     }
 }
 
@@ -34,7 +34,7 @@ pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
 mod tests {
     use super::*;
     use std::env;
-    use crate::utils::errors::FredAgentError;
+    use crate::utils::errors::SagittaCodeError;
 
     #[test]
     fn test_get_sagitta_code_app_config_path() {
@@ -223,7 +223,7 @@ mod tests {
 
     #[test] 
     fn test_config_separation() {
-        // Ensure Fred Agent configs are separate from main sagitta configs
+        // Ensure Sagitta Code configs are separate from main sagitta configs
         if let (Ok(app_path), Ok(core_path)) = (
             get_sagitta_code_app_config_path(),
             get_sagitta_code_core_config_path()

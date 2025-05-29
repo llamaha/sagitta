@@ -11,7 +11,7 @@ use sagitta_search::config::{AppConfig, load_config, save_config, get_config_pat
 use uuid::Uuid;
 use log::{info, warn, error};
 
-use crate::config::{FredAgentConfig, load_merged_config, save_config as save_fred_config};
+use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
 use crate::config::types::GeminiConfig;
 use crate::config::paths::{get_sagitta_code_core_config_path, get_sagitta_code_app_config_path};
 
@@ -20,8 +20,8 @@ use crate::config::paths::{get_sagitta_code_core_config_path, get_sagitta_code_a
 pub struct SettingsPanel {
     // Sagitta config
     sagitta_config: Arc<Mutex<AppConfig>>,
-    // Fred Agent config
-    fred_config: Arc<Mutex<FredAgentConfig>>,
+    // Sagitta Code config
+    sagitta_code_config: Arc<Mutex<SagittaCodeConfig>>,
     is_open: bool,
     status_message: Option<(String, Color32)>,
     
@@ -39,7 +39,7 @@ pub struct SettingsPanel {
     performance_max_file_size_bytes: u32,
     rayon_num_threads: u32,
     
-    // Fred Agent config fields
+    // Sagitta Code config fields
     pub gemini_api_key: String,
     pub gemini_model: String,
     pub gemini_max_reasoning_steps: u32,
@@ -47,10 +47,10 @@ pub struct SettingsPanel {
 
 impl SettingsPanel {
     /// Create a new settings panel
-    pub fn new(initial_fred_config: FredAgentConfig, initial_app_config: AppConfig) -> Self {
+    pub fn new(initial_sagitta_code_config: SagittaCodeConfig, initial_app_config: AppConfig) -> Self {
         Self {
             sagitta_config: Arc::new(Mutex::new(initial_app_config.clone())),
-            fred_config: Arc::new(Mutex::new(initial_fred_config.clone())),
+            sagitta_code_config: Arc::new(Mutex::new(initial_sagitta_code_config.clone())),
             is_open: false,
             status_message: None,
             
@@ -68,10 +68,10 @@ impl SettingsPanel {
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             rayon_num_threads: initial_app_config.rayon_num_threads as u32,
             
-            // Fred Agent config fields from initial_fred_config
-            gemini_api_key: initial_fred_config.gemini.api_key.clone().unwrap_or_default(),
-            gemini_model: initial_fred_config.gemini.model.clone(),
-            gemini_max_reasoning_steps: initial_fred_config.gemini.max_reasoning_steps,
+            // Sagitta Code config fields from initial_sagitta_code_config
+            gemini_api_key: initial_sagitta_code_config.gemini.api_key.clone().unwrap_or_default(),
+            gemini_model: initial_sagitta_code_config.gemini.model.clone(),
+            gemini_max_reasoning_steps: initial_sagitta_code_config.gemini.max_reasoning_steps,
         }
     }
     
@@ -90,9 +90,9 @@ impl SettingsPanel {
         self.sagitta_config.lock().await.clone()
     }
     
-    /// Get the current fred agent config
-    pub async fn get_fred_config(&self) -> FredAgentConfig {
-        self.fred_config.lock().await.clone()
+    /// Get the current sagitta code config
+    pub async fn get_sagitta_code_config(&self) -> SagittaCodeConfig {
+        self.sagitta_code_config.lock().await.clone()
     }
     
     /// Render the settings panel
@@ -327,17 +327,17 @@ impl SettingsPanel {
         self.status_message = None;
         let mut changes_made = false;
 
-        // Save FredAgentConfig
-        let updated_fred_config = self.create_updated_fred_config();
-        match save_fred_config(&updated_fred_config) {
+        // Save SagittaCodeConfig
+        let updated_sagitta_code_config = self.create_updated_sagitta_code_config();
+        match save_sagitta_code_config(&updated_sagitta_code_config) {
             Ok(_) => {
-                self.status_message = Some(("Fred Agent settings saved.".to_string(), theme.success_color()));
-                log::info!("SettingsPanel: Fred Agent config saved");
+                self.status_message = Some(("Sagitta Code settings saved.".to_string(), theme.success_color()));
+                log::info!("SettingsPanel: Sagitta Code config saved");
                 changes_made = true;
             }
             Err(e) => {
-                self.status_message = Some((format!("Error saving Fred Agent settings: {}", e), theme.error_color()));
-                log::error!("SettingsPanel: Error saving Fred Agent config: {}", e);
+                self.status_message = Some((format!("Error saving Sagitta Code settings: {}", e), theme.error_color()));
+                log::error!("SettingsPanel: Error saving Sagitta Code config: {}", e);
             }
         }
         
@@ -398,16 +398,16 @@ impl SettingsPanel {
         config
     }
     
-    /// Create an updated FredAgentConfig from the current UI state
-    fn create_updated_fred_config(&self) -> FredAgentConfig {
-        let mut fred_config = FredAgentConfig::default();
+    /// Create an updated SagittaCodeConfig from the current UI state
+    fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
+        let mut sagitta_code_config = SagittaCodeConfig::default();
         
         // Update Gemini settings
-        fred_config.gemini.api_key = if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) };
-        fred_config.gemini.model = self.gemini_model.clone();
-        fred_config.gemini.max_reasoning_steps = self.gemini_max_reasoning_steps;
+        sagitta_code_config.gemini.api_key = if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) };
+        sagitta_code_config.gemini.model = self.gemini_model.clone();
+        sagitta_code_config.gemini.max_reasoning_steps = self.gemini_max_reasoning_steps;
         
-        fred_config
+        sagitta_code_config
     }
 }
 
@@ -417,9 +417,9 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{FredAgentConfig, GeminiConfig, UiConfig, LoggingConfig, ConversationConfig};
+    use crate::config::types::{SagittaCodeConfig, GeminiConfig, UiConfig, LoggingConfig, ConversationConfig};
     // Import specific loader functions for more direct testing of file operations
-    use crate::config::loader::{load_config_from_path as load_fred_config_from_path, save_config_to_path as save_fred_config_to_path};
+    use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 
     fn create_test_sagitta_config() -> AppConfig {
         AppConfig {
@@ -452,8 +452,8 @@ mod tests {
         }
     }
 
-    fn create_test_fred_config() -> FredAgentConfig {
-        FredAgentConfig {
+    fn create_test_sagitta_code_config() -> SagittaCodeConfig {
+        SagittaCodeConfig {
             gemini: GeminiConfig {
                 api_key: Some("test-api-key".to_string()),
                 model: "test-model".to_string(),
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_settings_panel_creation() {
-        let panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+        let panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Check values from create_test_sagitta_config()
         assert_eq!(panel.qdrant_url, "http://test:6334"); // Corrected expected value
@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(panel.performance_max_file_size_bytes, 2097152);
         assert_eq!(panel.rayon_num_threads, 8);
 
-        // Check values from create_test_fred_config()
+        // Check values from create_test_sagitta_code_config()
         assert_eq!(panel.gemini_api_key, "test-api-key");
         assert_eq!(panel.gemini_model, "test-model");
         assert_eq!(panel.gemini_max_reasoning_steps, 75);
@@ -500,7 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_settings_panel_config_population() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         assert_eq!(panel.qdrant_url, "http://test:6334");
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
@@ -517,8 +517,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_settings_panel_fred_config_population() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+    async fn test_settings_panel_sagitta_code_config_population() {
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         assert_eq!(panel.gemini_api_key, "test-api-key");
         assert_eq!(panel.gemini_model, "test-model");
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_settings_panel_toggle() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         assert!(!panel.is_open());
         
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_create_updated_sagitta_config() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set some test values
         panel.qdrant_url = "http://custom:6334".to_string();
@@ -573,15 +573,15 @@ mod tests {
     }
 
     #[test]
-    fn test_create_updated_fred_config() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+    fn test_create_updated_sagitta_code_config() {
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set some test values
         panel.gemini_api_key = "updated-api-key".to_string();
         panel.gemini_model = "updated-model".to_string();
         panel.gemini_max_reasoning_steps = 100;
         
-        let config = panel.create_updated_fred_config();
+        let config = panel.create_updated_sagitta_code_config();
         
         assert_eq!(config.gemini.api_key, Some("updated-api-key".to_string()));
         assert_eq!(config.gemini.model, "updated-model");
@@ -589,14 +589,14 @@ mod tests {
     }
 
     #[test]
-    fn test_create_updated_fred_config_empty_api_key() {
-        let mut panel = SettingsPanel::new(create_test_fred_config(), create_test_sagitta_config());
+    fn test_create_updated_sagitta_code_config_empty_api_key() {
+        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set empty API key
         panel.gemini_api_key = "".to_string();
         panel.gemini_model = "test-model".to_string();
         
-        let config = panel.create_updated_fred_config();
+        let config = panel.create_updated_sagitta_code_config();
         
         assert_eq!(config.gemini.api_key, None);
         assert_eq!(config.gemini.model, "test-model");
@@ -605,9 +605,9 @@ mod tests {
     #[test]
     fn test_settings_panel_default_values_match_config_defaults() {
         let default_app_config = AppConfig::default();
-        let default_fred_config = FredAgentConfig::default();
+        let default_sagitta_code_config = SagittaCodeConfig::default();
         
-        let panel = SettingsPanel::new(default_fred_config.clone(), default_app_config.clone());
+        let panel = SettingsPanel::new(default_sagitta_code_config.clone(), default_app_config.clone());
 
         // Check AppConfig derived fields
         assert_eq!(panel.qdrant_url, default_app_config.qdrant_url);
@@ -623,17 +623,17 @@ mod tests {
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
         assert_eq!(panel.rayon_num_threads as usize, default_app_config.rayon_num_threads);
 
-        // Check FredAgentConfig derived fields
-        assert_eq!(panel.gemini_api_key, default_fred_config.gemini.api_key.unwrap_or_default());
-        assert_eq!(panel.gemini_model, default_fred_config.gemini.model);
-        assert_eq!(panel.gemini_max_reasoning_steps, default_fred_config.gemini.max_reasoning_steps);
+        // Check SagittaCodeConfig derived fields
+        assert_eq!(panel.gemini_api_key, default_sagitta_code_config.gemini.api_key.unwrap_or_default());
+        assert_eq!(panel.gemini_model, default_sagitta_code_config.gemini.model);
+        assert_eq!(panel.gemini_max_reasoning_steps, default_sagitta_code_config.gemini.max_reasoning_steps);
     }
 
     #[test]
     fn test_settings_panel_config_sync_roundtrip() {
         let temp_dir = TempDir::new().unwrap();
         let core_config_temp_path = temp_dir.path().join("core_config.toml");
-        let fred_config_temp_path = temp_dir.path().join("sagitta_code_config.json");
+        let sagitta_code_config_temp_path = temp_dir.path().join("sagitta_code_config.json");
 
         // 1. Initial Configs (Set A)
         let initial_app_config = AppConfig {
@@ -644,7 +644,7 @@ mod tests {
             rayon_num_threads: 2,
             ..Default::default()
         };
-        let initial_fred_config = FredAgentConfig {
+        let initial_sagitta_code_config = SagittaCodeConfig {
             gemini: GeminiConfig {
                 api_key: Some("initial-api-key".to_string()),
                 model: "initial-gemini-model".to_string(),
@@ -659,29 +659,29 @@ mod tests {
         };
 
         // 2. Create Panel & Verify Initial State (Simulates File to GUI)
-        let mut panel = SettingsPanel::new(initial_fred_config.clone(), initial_app_config.clone());
+        let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_app_config.clone());
 
         assert_eq!(panel.qdrant_url, initial_app_config.qdrant_url);
         assert_eq!(panel.onnx_model_path, initial_app_config.onnx_model_path);
         assert_eq!(panel.tenant_id, initial_app_config.tenant_id);
         assert_eq!(panel.rayon_num_threads as usize, initial_app_config.rayon_num_threads);
 
-        assert_eq!(panel.gemini_api_key, initial_fred_config.gemini.api_key.unwrap_or_default());
-        assert_eq!(panel.gemini_model, initial_fred_config.gemini.model);
-        assert_eq!(panel.gemini_max_reasoning_steps, initial_fred_config.gemini.max_reasoning_steps);
+        assert_eq!(panel.gemini_api_key, initial_sagitta_code_config.gemini.api_key.unwrap_or_default());
+        assert_eq!(panel.gemini_model, initial_sagitta_code_config.gemini.model);
+        assert_eq!(panel.gemini_max_reasoning_steps, initial_sagitta_code_config.gemini.max_reasoning_steps);
         // Test theme string parsing
-        match initial_fred_config.ui.theme.as_str() {
+        match initial_sagitta_code_config.ui.theme.as_str() {
             "dark" => {
                 // Theme parsing works correctly for dark theme
-                assert_eq!(initial_fred_config.ui.theme, "dark");
+                assert_eq!(initial_sagitta_code_config.ui.theme, "dark");
             },
             "light" => {
                 // Theme parsing works correctly for light theme  
-                assert_eq!(initial_fred_config.ui.theme, "light");
+                assert_eq!(initial_sagitta_code_config.ui.theme, "light");
             },
             _ => {
                 // Default theme handling
-                assert_eq!(initial_fred_config.ui.theme, "dark");
+                assert_eq!(initial_sagitta_code_config.ui.theme, "dark");
             }
         }
 
@@ -696,12 +696,12 @@ mod tests {
 
         // 4. Generate Configs from Modified Panel State
         let updated_sagitta_config = panel.create_updated_sagitta_config();
-        let updated_fred_config = panel.create_updated_fred_config();
+        let updated_sagitta_code_config = panel.create_updated_sagitta_code_config();
         
         // 5. Verify Updated Configs Match Modified Panel State
-        assert_eq!(updated_fred_config.gemini.api_key, Some("updated-api-key".to_string()));
-        assert_eq!(updated_fred_config.gemini.model, "updated-gemini-model".to_string());
-        assert_eq!(updated_fred_config.gemini.max_reasoning_steps, 90);
+        assert_eq!(updated_sagitta_code_config.gemini.api_key, Some("updated-api-key".to_string()));
+        assert_eq!(updated_sagitta_code_config.gemini.model, "updated-gemini-model".to_string());
+        assert_eq!(updated_sagitta_code_config.gemini.max_reasoning_steps, 90);
         
         // Verify sagitta config updates
         assert_eq!(updated_sagitta_config.qdrant_url, "http://updated-qdrant:6334");
@@ -710,11 +710,11 @@ mod tests {
 
         // 6. Save Generated Configs to Temp Files
         sagitta_search::config::save_config(&updated_sagitta_config, Some(&core_config_temp_path)).unwrap();
-        save_fred_config_to_path(&updated_fred_config, &fred_config_temp_path).unwrap();
+        save_sagitta_code_config_to_path(&updated_sagitta_code_config, &sagitta_code_config_temp_path).unwrap();
 
         // 7. Load Configs Back from Temp Files
         let loaded_app_config_from_file = sagitta_search::config::load_config(Some(&core_config_temp_path)).unwrap();
-        let loaded_fred_config_from_file = load_fred_config_from_path(&fred_config_temp_path).unwrap();
+        let loaded_sagitta_code_config_from_file = load_sagitta_code_config_from_path(&sagitta_code_config_temp_path).unwrap();
 
         // 8. Verify Loaded Configs Match Modified Panel State (as represented by generated configs)
         assert_eq!(loaded_app_config_from_file.qdrant_url, updated_sagitta_config.qdrant_url);
@@ -723,11 +723,11 @@ mod tests {
         assert_eq!(loaded_app_config_from_file.rayon_num_threads, updated_sagitta_config.rayon_num_threads);
         // Add more AppConfig fields if necessary
 
-        assert_eq!(loaded_fred_config_from_file.gemini.api_key, updated_fred_config.gemini.api_key);
-        assert_eq!(loaded_fred_config_from_file.gemini.model, updated_fred_config.gemini.model);
-        assert_eq!(loaded_fred_config_from_file.gemini.max_reasoning_steps, updated_fred_config.gemini.max_reasoning_steps);
-        assert_eq!(loaded_fred_config_from_file.ui.theme, updated_fred_config.ui.theme);
-        // Add more FredAgentConfig fields if necessary
+        assert_eq!(loaded_sagitta_code_config_from_file.gemini.api_key, updated_sagitta_code_config.gemini.api_key);
+        assert_eq!(loaded_sagitta_code_config_from_file.gemini.model, updated_sagitta_code_config.gemini.model);
+        assert_eq!(loaded_sagitta_code_config_from_file.gemini.max_reasoning_steps, updated_sagitta_code_config.gemini.max_reasoning_steps);
+        assert_eq!(loaded_sagitta_code_config_from_file.ui.theme, updated_sagitta_code_config.ui.theme);
+        // Add more SagittaCodeConfig fields if necessary
     }
 }
 

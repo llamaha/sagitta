@@ -1,4 +1,4 @@
-// Application state management for the Fred Agent
+// Application state management for the Sagitta Code
 
 use crate::agent::state::types::{AgentMode, AgentState, ConversationStatus};
 use crate::agent::message::types::{ToolCall, AgentMessage};

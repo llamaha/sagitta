@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
 
-use super::types::{FredAgentConfig, GeminiConfig};
+use super::types::{SagittaCodeConfig, GeminiConfig};
 use crate::config::paths::{get_sagitta_code_app_config_path, get_sagitta_code_core_config_path};
 
 const CONFIG_FILENAME: &str = "sagitta_code_config.json";
@@ -19,26 +19,26 @@ pub fn get_config_path() -> Result<PathBuf> {
 }
 
 /// Load configuration from the default location
-pub fn load_config() -> Result<FredAgentConfig> {
+pub fn load_config() -> Result<SagittaCodeConfig> {
     let config_path = get_sagitta_code_app_config_path()?;
     
     load_config_from_path(&config_path)
 }
 
 /// Load configuration from a specific path
-pub fn load_config_from_path<P: AsRef<Path>>(path: P) -> Result<FredAgentConfig> {
+pub fn load_config_from_path<P: AsRef<Path>>(path: P) -> Result<SagittaCodeConfig> {
     let path = path.as_ref();
     
     if !path.exists() {
         // Return default config if file doesn't exist
-        return Ok(FredAgentConfig::default());
+        return Ok(SagittaCodeConfig::default());
     }
     
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
     
     // Determine format based on file extension
-    let config: FredAgentConfig = if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+    let config: SagittaCodeConfig = if path.extension().and_then(|s| s.to_str()) == Some("toml") {
         toml::from_str(&content)
             .with_context(|| format!("Failed to parse TOML config file: {}", path.display()))?
     } else {
@@ -50,7 +50,7 @@ pub fn load_config_from_path<P: AsRef<Path>>(path: P) -> Result<FredAgentConfig>
 }
 
 /// Load core configuration (TOML format) and merge with app config
-pub fn load_merged_config() -> Result<FredAgentConfig> {
+pub fn load_merged_config() -> Result<SagittaCodeConfig> {
     let mut config = load_config().unwrap_or_default();
     
     // Try to load core config (TOML) and merge it
@@ -74,27 +74,27 @@ pub fn load_merged_config() -> Result<FredAgentConfig> {
 }
 
 /// Load core configuration from TOML file
-pub fn load_core_config_from_path<P: AsRef<Path>>(path: P) -> Result<FredAgentConfig> {
+pub fn load_core_config_from_path<P: AsRef<Path>>(path: P) -> Result<SagittaCodeConfig> {
     let path = path.as_ref();
     
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read core config file: {}", path.display()))?;
     
-    let config: FredAgentConfig = toml::from_str(&content)
+    let config: SagittaCodeConfig = toml::from_str(&content)
         .with_context(|| format!("Failed to parse TOML core config file: {}", path.display()))?;
     
     Ok(config)
 }
 
 /// Save configuration to the default location
-pub fn save_config(config: &FredAgentConfig) -> Result<()> {
+pub fn save_config(config: &SagittaCodeConfig) -> Result<()> {
     let config_path = get_sagitta_code_app_config_path()?;
     
     save_config_to_path(config, &config_path)
 }
 
 /// Save configuration to a specific path
-pub fn save_config_to_path<P: AsRef<Path>>(config: &FredAgentConfig, path: P) -> Result<()> {
+pub fn save_config_to_path<P: AsRef<Path>>(config: &SagittaCodeConfig, path: P) -> Result<()> {
     let path = path.as_ref();
     
     // Ensure the parent directory exists
@@ -119,7 +119,7 @@ pub fn save_config_to_path<P: AsRef<Path>>(config: &FredAgentConfig, path: P) ->
 }
 
 /// Save core configuration to TOML file
-pub fn save_core_config(config: &FredAgentConfig) -> Result<()> {
+pub fn save_core_config(config: &SagittaCodeConfig) -> Result<()> {
     let core_config_path = get_sagitta_code_core_config_path()?;
     
     // Ensure the parent directory exists
@@ -138,7 +138,7 @@ pub fn save_core_config(config: &FredAgentConfig) -> Result<()> {
 }
 
 /// Initialize the configuration directory and create a default config if it doesn't exist
-pub fn initialize_config() -> Result<FredAgentConfig> {
+pub fn initialize_config() -> Result<SagittaCodeConfig> {
     let config_path = get_sagitta_code_app_config_path()?;
     
     // Create the config directory if it doesn't exist
@@ -152,7 +152,7 @@ pub fn initialize_config() -> Result<FredAgentConfig> {
     // Load or create default config (this will now merge core config if it exists)
     let config = load_merged_config().unwrap_or_else(|_| {
         log::info!("Creating default configuration");
-        FredAgentConfig::default()
+        SagittaCodeConfig::default()
     });
     
     // Save the config to ensure the file exists
@@ -162,7 +162,7 @@ pub fn initialize_config() -> Result<FredAgentConfig> {
 }
 
 /// Validate that a configuration is valid
-pub fn validate_config(config: &FredAgentConfig) -> Result<()> {
+pub fn validate_config(config: &SagittaCodeConfig) -> Result<()> {
     // Validate Gemini configuration
     if config.gemini.model.is_empty() {
         return Err(anyhow::anyhow!("Gemini model cannot be empty"));
@@ -179,8 +179,8 @@ pub fn validate_config(config: &FredAgentConfig) -> Result<()> {
 }
 
 /// Merge two configurations, with the second one taking precedence
-pub fn merge_configs(base: FredAgentConfig, override_config: FredAgentConfig) -> FredAgentConfig {
-    FredAgentConfig {
+pub fn merge_configs(base: SagittaCodeConfig, override_config: SagittaCodeConfig) -> SagittaCodeConfig {
+    SagittaCodeConfig {
         gemini: GeminiConfig {
             api_key: override_config.gemini.api_key.or(base.gemini.api_key),
             model: if override_config.gemini.model.is_empty() {
@@ -212,8 +212,8 @@ mod tests {
     use tempfile::{TempDir, NamedTempFile};
     use std::fs;
 
-    fn create_test_config() -> FredAgentConfig {
-        let mut config = FredAgentConfig::default();
+    fn create_test_config() -> SagittaCodeConfig {
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some("test-api-key".to_string());
         config.gemini.model = "gemini-2.5-pro-preview-05-06".to_string();
         config
@@ -328,7 +328,7 @@ mod tests {
     #[test]
     fn test_save_config_serialization() {
         let temp_file = NamedTempFile::new().unwrap();
-        let mut test_config = FredAgentConfig::default();
+        let mut test_config = SagittaCodeConfig::default();
         test_config.gemini.api_key = Some("serialization-test-key".to_string());
         test_config.gemini.model = "gemini-1.5-pro-latest".to_string();
         
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_validate_config_empty_model() {
-        let mut invalid_config = FredAgentConfig::default();
+        let mut invalid_config = SagittaCodeConfig::default();
         invalid_config.gemini.api_key = Some("test-key".to_string());
         invalid_config.gemini.model = "".to_string();
         
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_validate_config_empty_api_key() {
-        let mut invalid_config = FredAgentConfig::default();
+        let mut invalid_config = SagittaCodeConfig::default();
         invalid_config.gemini.api_key = Some("".to_string());
         invalid_config.gemini.model = "gemini-1.5-pro-latest".to_string();
         
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_validate_config_none_api_key() {
-        let mut valid_config = FredAgentConfig::default();
+        let mut valid_config = SagittaCodeConfig::default();
         valid_config.gemini.api_key = None;
         valid_config.gemini.model = "gemini-1.5-pro-latest".to_string();
         
@@ -412,11 +412,11 @@ mod tests {
 
     #[test]
     fn test_merge_configs_override_api_key() {
-        let mut base = FredAgentConfig::default();
+        let mut base = SagittaCodeConfig::default();
         base.gemini.api_key = Some("base-key".to_string());
         base.gemini.model = "base-model".to_string();
         
-        let mut override_config = FredAgentConfig::default();
+        let mut override_config = SagittaCodeConfig::default();
         override_config.gemini.api_key = Some("override-key".to_string());
         override_config.gemini.model = "".to_string(); // Empty, should use base
         
@@ -428,11 +428,11 @@ mod tests {
 
     #[test]
     fn test_merge_configs_override_model() {
-        let mut base = FredAgentConfig::default();
+        let mut base = SagittaCodeConfig::default();
         base.gemini.api_key = Some("base-key".to_string());
         base.gemini.model = "base-model".to_string();
         
-        let mut override_config = FredAgentConfig::default();
+        let mut override_config = SagittaCodeConfig::default();
         override_config.gemini.api_key = None; // Should use base
         override_config.gemini.model = "override-model".to_string();
         
@@ -444,11 +444,11 @@ mod tests {
 
     #[test]
     fn test_merge_configs_both_none() {
-        let mut base = FredAgentConfig::default();
+        let mut base = SagittaCodeConfig::default();
         base.gemini.api_key = None;
         base.gemini.model = "base-model".to_string();
         
-        let mut override_config = FredAgentConfig::default();
+        let mut override_config = SagittaCodeConfig::default();
         override_config.gemini.api_key = None;
         override_config.gemini.model = "".to_string();
         
@@ -460,11 +460,11 @@ mod tests {
 
     #[test]
     fn test_merge_configs_complete_override() {
-        let mut base = FredAgentConfig::default();
+        let mut base = SagittaCodeConfig::default();
         base.gemini.api_key = Some("base-key".to_string());
         base.gemini.model = "base-model".to_string();
         
-        let mut override_config = FredAgentConfig::default();
+        let mut override_config = SagittaCodeConfig::default();
         override_config.gemini.api_key = Some("override-key".to_string());
         override_config.gemini.model = "override-model".to_string();
         
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn test_config_with_special_characters() {
         let temp_file = NamedTempFile::new().unwrap();
-        let mut config_with_special_chars = FredAgentConfig::default();
+        let mut config_with_special_chars = SagittaCodeConfig::default();
         config_with_special_chars.gemini.api_key = Some("key-with-special-chars!@#$%^&*()".to_string());
         config_with_special_chars.gemini.model = "model-with-dashes-and_underscores".to_string();
         
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn test_config_with_unicode() {
         let temp_file = NamedTempFile::new().unwrap();
-        let mut config_with_unicode = FredAgentConfig::default();
+        let mut config_with_unicode = SagittaCodeConfig::default();
         config_with_unicode.gemini.api_key = Some("🔑-unicode-key-🚀".to_string());
         config_with_unicode.gemini.model = "model-with-émojis-🤖".to_string();
         

@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Parameters for adding a repository
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,7 +38,7 @@ impl AddRepositoryTool {
     }
     
     /// Add a repository
-    async fn add_repository(&self, params: &AddRepositoryParams) -> Result<String, FredAgentError> {
+    async fn add_repository(&self, params: &AddRepositoryParams) -> Result<String, SagittaCodeError> {
         let mut repo_manager = self.repo_manager.lock().await;
         
         if let Some(local_path) = &params.local_path {
@@ -51,7 +51,7 @@ impl AddRepositoryTool {
                         // Treat "already exists" as success since the repository is available
                         Ok(format!("Repository '{}' already exists and is available for use", params.name))
                     } else {
-                        Err(FredAgentError::ToolError(format!("Failed to add local repository: {}", e)))
+                        Err(SagittaCodeError::ToolError(format!("Failed to add local repository: {}", e)))
                     }
                 }
             }
@@ -73,12 +73,12 @@ impl AddRepositoryTool {
                         // Treat "already exists" as success since the repository is available
                         Ok(format!("Repository '{}' already exists and is available for use", params.name))
                     } else {
-                        Err(FredAgentError::ToolError(format!("Failed to add repository: {}", e)))
+                        Err(SagittaCodeError::ToolError(format!("Failed to add repository: {}", e)))
                     }
                 }
             }
         } else {
-            Err(FredAgentError::ToolError("Either URL or local_path must be provided".to_string()))
+            Err(SagittaCodeError::ToolError("Either URL or local_path must be provided".to_string()))
         }
     }
 }
@@ -121,7 +121,7 @@ impl Tool for AddRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         match serde_json::from_value::<AddRepositoryParams>(parameters) {
             Ok(params) => {
                 match self.add_repository(&params).await {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::tools::types::{BoxedTool, ToolDefinition, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use crate::gui::repository::manager::RepositoryManager;
 use sagitta_search::config::AppConfig;
 use std::sync::Mutex as SyncMutex;
@@ -27,14 +27,14 @@ impl ToolRegistry {
     }
     
     /// Register a tool with the registry
-    pub async fn register(&self, tool: BoxedTool) -> Result<(), FredAgentError> {
+    pub async fn register(&self, tool: BoxedTool) -> Result<(), SagittaCodeError> {
         let def = tool.definition();
         let name = def.name.clone();
         
         let mut tools = self.tools.write().await;
         
         if tools.contains_key(&name) {
-            return Err(FredAgentError::ToolError(format!(
+            return Err(SagittaCodeError::ToolError(format!(
                 "Tool with name '{}' is already registered", name
             )));
         }
@@ -44,11 +44,11 @@ impl ToolRegistry {
     }
     
     /// Unregister a tool from the registry
-    pub async fn unregister(&self, name: &str) -> Result<(), FredAgentError> {
+    pub async fn unregister(&self, name: &str) -> Result<(), SagittaCodeError> {
         let mut tools = self.tools.write().await;
         
         if !tools.contains_key(name) {
-            return Err(FredAgentError::ToolError(format!(
+            return Err(SagittaCodeError::ToolError(format!(
                 "Tool with name '{}' is not registered", name
             )));
         }

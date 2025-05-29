@@ -24,13 +24,13 @@ use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
 use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
-use crate::config::types::FredAgentConfig;
-use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as FredStreamChunk, MessagePart as FredMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
+use crate::config::types::SagittaCodeConfig;
+use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
 use crate::llm::gemini::client::GeminiClient;
-use crate::tools::executor::{ToolExecutor as FredToolExecutorInternal, ToolExecutionEvent};
+use crate::tools::executor::{ToolExecutor as SagittaCodeToolExecutorInternal, ToolExecutionEvent};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{ToolResult, ToolDefinition as ToolDefinitionType};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use crate::tools::code_search::tool::CodeSearchTool;
 use crate::reasoning::{
     AgentToolExecutor,
@@ -38,7 +38,7 @@ use crate::reasoning::{
     AgentStatePersistence,
     AgentMetricsCollector,
     config::create_reasoning_config,
-    FredIntentAnalyzer,
+    SagittaCodeIntentAnalyzer,
 };
 use crate::reasoning::llm_adapter::ReasoningLlmClientAdapter;
 use reasoning_engine::ReasoningEngine;
@@ -74,7 +74,7 @@ use crate::agent::conversation::persistence::ConversationPersistence;
 use crate::agent::conversation::search::ConversationSearchEngine;
 
 /// The system prompt instructing the agent how to respond
-const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Fred AI, powered by Gemini and sagitta-search.
+const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by Gemini and sagitta-search.
 You help developers understand and work with code repositories efficiently.
 You have access to tools that can search and retrieve code, view file contents, and more.
 When asked about code, use your tools to look up accurate and specific information.
@@ -198,13 +198,13 @@ pub struct Agent {
     state_manager: Arc<StateManager>,
     
     /// The tool executor (from sagitta-code's own tools module)
-    tool_executor: FredToolExecutorInternal,
+    tool_executor: SagittaCodeToolExecutorInternal,
     
     /// Sender for agent events
     event_sender: broadcast::Sender<AgentEvent>,
     
     /// The configuration
-    config: FredAgentConfig,
+    config: SagittaCodeConfig,
     state: Arc<tokio::sync::Mutex<AgentState>>, // General agent state, distinct from reasoning engine state
     
     /// Pending tool calls waiting for human approval
@@ -214,7 +214,7 @@ pub struct Agent {
     loop_break_requested: Arc<tokio::sync::Mutex<bool>>, // New engine might have its own or use this
     
     /// NEW: The new reasoning engine, wrapped in Arc<Mutex<>> for shared mutable access
-    new_reasoning_engine: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, FredIntentAnalyzer>>>,
+    new_reasoning_engine: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>>>,
 
     /// Event handler for agent events
     event_handler: EventHandler,
@@ -229,13 +229,13 @@ pub struct Agent {
 impl Agent {
     /// Create a new agent with the provided configuration
     pub async fn new(
-        config: FredAgentConfig,
+        config: SagittaCodeConfig,
         tool_registry: Arc<ToolRegistry>,
         embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
         persistence: Box<dyn ConversationPersistence>,
         search_engine: Box<dyn ConversationSearchEngine>,
         llm_client: Arc<dyn LlmClient>,
-    ) -> Result<Self, FredAgentError> {
+    ) -> Result<Self, SagittaCodeError> {
         info!("Creating new agent...");
         info!("Using provided LLM client.");
         
@@ -246,11 +246,11 @@ impl Agent {
         debug!("Initializing StateManager.");
         let state_manager_instance = StateManager::new(); // Not Arc wrapped here
 
-        let (tool_executor_internal, tool_event_receiver_from_executor) = FredToolExecutorInternal::new(
+        let (tool_executor_internal, tool_event_receiver_from_executor) = SagittaCodeToolExecutorInternal::new(
             tool_registry.clone(), 
-            Arc::new(state_manager_instance.clone()) // FredToolExecutorInternal might expect Arc
+            Arc::new(state_manager_instance.clone()) // SagittaCodeToolExecutorInternal might expect Arc
         );
-        debug!("Fred-agent internal ToolExecutor created.");
+        debug!("Sagitta-code internal ToolExecutor created.");
 
         // Construct the dynamic system prompt
         let tool_definitions_for_prompt = tool_registry.get_definitions().await;
@@ -295,7 +295,7 @@ impl Agent {
             persistence, // Use passed-in persistence
             search_engine, // Use passed-in search_engine
         ).await
-        .map_err(|e| FredAgentError::Unknown(format!("Failed to create conversation manager: {}", e)))?
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation manager: {}", e)))?
         .with_auto_save(config.conversation.auto_save);
         debug!("Conversation manager created.");
         
@@ -306,14 +306,14 @@ impl Agent {
             None, // TODO: Detect workspace ID from project context
             system_prompt.clone(),
         ).await
-        .map_err(|e| FredAgentError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
+        .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
         debug!("Conversation-aware history manager created.");
 
         // Create shared loop break flag
         let loop_break_requested_initial = Arc::new(tokio::sync::Mutex::new(false));
 
         // 0. Create Intent Analyzer (using the provided embedding_provider)
-        let intent_analyzer_impl = Arc::new(FredIntentAnalyzer::new(embedding_provider.clone()));
+        let intent_analyzer_impl = Arc::new(SagittaCodeIntentAnalyzer::new(embedding_provider.clone()));
 
         // 1. Create the llm_client adapter FIRST
         let llm_adapter_for_re = Arc::new(ReasoningLlmClientAdapter::new(llm_client.clone(), tool_registry.clone()));
@@ -324,13 +324,13 @@ impl Agent {
 
         // 3. Attempt to create the ReasoningEngine
         let reasoning_engine_instance_result =
-            ReasoningEngine::<ReasoningLlmClientAdapter, FredIntentAnalyzer>::new(
+            ReasoningEngine::<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>::new(
                 reasoning_config_data.clone(), 
                 llm_adapter_for_re.clone(), 
                 intent_analyzer_impl.clone()
             ).await;
 
-        let new_reasoning_engine_arc: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, FredIntentAnalyzer>>> = match reasoning_engine_instance_result {
+        let new_reasoning_engine_arc: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>>> = match reasoning_engine_instance_result {
             Ok(engine) => {
                 info!("New ReasoningEngine instance created successfully.");
                 Arc::new(tokio::sync::Mutex::new(engine))
@@ -339,7 +339,7 @@ impl Agent {
                 error!("Failed to create ReasoningEngine: {}. Using a fallback.", e);
                  let fallback_llm_adapter = Arc::new(ReasoningLlmClientAdapter::new(llm_client.clone(), tool_registry.clone()));
                  Arc::new(tokio::sync::Mutex::new(
-                     ReasoningEngine::<ReasoningLlmClientAdapter, FredIntentAnalyzer>::new(
+                     ReasoningEngine::<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>::new(
                         reasoning_config_data, 
                         fallback_llm_adapter, 
                         intent_analyzer_impl
@@ -371,7 +371,7 @@ impl Agent {
         debug!("State event listener started for Agent state.");
 
         agent_self.event_handler.start_tool_event_listener(tool_event_receiver_from_executor, agent_self.history.clone());
-        debug!("Tool event listener started for FredToolExecutorInternal events.");
+        debug!("Tool event listener started for SagittaCodeToolExecutorInternal events.");
 
         info!("Agent created successfully.");
         Ok(agent_self)
@@ -402,14 +402,14 @@ impl Agent {
     /// Process a user message with streaming
     /// This now calls the more general `process_message_stream_with_thinking_fixed`
     pub async fn process_message_stream(&self, message: impl Into<String>) 
-        -> Result<Pin<Box<dyn Stream<Item = Result<FredStreamChunk, FredAgentError>> + Send + '_>>, FredAgentError> 
+        -> Result<Pin<Box<dyn Stream<Item = Result<SagittaCodeStreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         self.process_message_stream_with_thinking_fixed(message, None).await
     }
     
     /// Process a user message with streaming and thinking mode enabled - MAIN ENTRY POINT
     pub async fn process_message_stream_with_thinking_fixed(&self, message: impl Into<String>, _thinking_config: Option<ThinkingConfig>) 
-        -> Result<Pin<Box<dyn Stream<Item = Result<FredStreamChunk, FredAgentError>> + Send + '_>>, FredAgentError> 
+        -> Result<Pin<Box<dyn Stream<Item = Result<SagittaCodeStreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
         info!("Processing user message (stream with thinking - FIXED): '{}'", message_text);
@@ -432,13 +432,13 @@ impl Agent {
         }
         debug!("Converted agent history to {} LlmMessages for ReasoningEngine.", reasoning_llm_history.len());
 
-        let (tx, rx) = mpsc::unbounded_channel::<Result<FredStreamChunk, FredAgentError>>();
+        let (tx, rx) = mpsc::unbounded_channel::<Result<SagittaCodeStreamChunk, SagittaCodeError>>();
 
         let tool_executor_adapter = Arc::new(AgentToolExecutor::new(self.tool_registry.clone()));
         let event_emitter_adapter = Arc::new(AgentEventEmitter::new(self.event_sender.clone()));
         let stream_handler_adapter = Arc::new(AgentStreamHandler::new(tx.clone(), self.event_sender.clone(), current_conversation_id));
         
-        let engine_arc_clone: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, FredIntentAnalyzer>>> = Arc::clone(&self.new_reasoning_engine);
+        let engine_arc_clone: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>>> = Arc::clone(&self.new_reasoning_engine);
         let event_sender_clone = self.event_sender.clone();
         let reasoning_state_cache_clone = Arc::clone(&self.reasoning_state_cache);
 
@@ -447,8 +447,8 @@ impl Agent {
             
             if reasoning_llm_history.is_empty() {
                 error!("Cannot call ReasoningEngine::process with an empty message history.");
-                // Use a more generic error or add InvalidInput to FredAgentError
-                if tx.send(Err(FredAgentError::Unknown("Cannot process with empty history.".to_string()))).is_err() {
+                // Use a more generic error or add InvalidInput to SagittaCodeError
+                if tx.send(Err(SagittaCodeError::Unknown("Cannot process with empty history.".to_string()))).is_err() {
                     warn!("Reasoning process cannot start (empty history), but output stream receiver is already gone.");
                 }
                 let _ = event_sender_clone.send(AgentEvent::Error("Reasoning process cannot start with empty history.".to_string()));
@@ -485,7 +485,7 @@ impl Agent {
                 }
                 Err(e) => {
                     error!("ReasoningEngine::process_with_context returned Err: {}", e);
-                    if tx.send(Err(FredAgentError::ReasoningError(e.to_string()))).is_err() {
+                    if tx.send(Err(SagittaCodeError::ReasoningError(e.to_string()))).is_err() {
                         warn!("Reasoning process failed (Err returned), but output stream receiver is already gone.");
                     }
                     let _ = event_sender_clone.send(AgentEvent::Error(format!("Reasoning process failed: {}", e)));
@@ -510,7 +510,7 @@ impl Agent {
     }
     
     /// Execute a tool by name with parameters (with recovery)
-    pub async fn execute_tool(&self, tool_name: &str, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    pub async fn execute_tool(&self, tool_name: &str, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         self.tool_executor.execute_tool(tool_name, parameters).await
     }
     
@@ -525,7 +525,7 @@ impl Agent {
     }
     
     /// Set the agent mode
-    pub async fn set_mode(&self, mode: AgentMode) -> Result<(), FredAgentError> {
+    pub async fn set_mode(&self, mode: AgentMode) -> Result<(), SagittaCodeError> {
         self.state_manager.set_agent_mode(mode).await
     }
     
@@ -535,7 +535,7 @@ impl Agent {
     }
     
     /// Clear the conversation history (except system prompts)
-    pub async fn clear_history(&self) -> Result<(), FredAgentError> {
+    pub async fn clear_history(&self) -> Result<(), SagittaCodeError> {
         self.history.clear().await;
         Ok(())
     }
@@ -562,7 +562,7 @@ impl Agent {
     }
     
     /// Register a tool with the agent
-    pub async fn register_tool(&self, tool: Arc<dyn crate::tools::types::Tool>) -> Result<(), FredAgentError> {
+    pub async fn register_tool(&self, tool: Arc<dyn crate::tools::types::Tool>) -> Result<(), SagittaCodeError> {
         self.tool_registry.register(tool).await
     }
     
@@ -572,29 +572,29 @@ impl Agent {
     }
     
     /// Get the current conversation
-    pub async fn get_current_conversation(&self) -> Result<Option<crate::agent::conversation::types::Conversation>, FredAgentError> {
+    pub async fn get_current_conversation(&self) -> Result<Option<crate::agent::conversation::types::Conversation>, SagittaCodeError> {
         self.history.get_current_conversation().await
     }
     
     /// Switch to a different conversation
-    pub async fn switch_conversation(&self, conversation_id: uuid::Uuid) -> Result<(), FredAgentError> {
+    pub async fn switch_conversation(&self, conversation_id: uuid::Uuid) -> Result<(), SagittaCodeError> {
         self.history.switch_conversation(conversation_id).await
     }
     
     /// Create a new conversation
-    pub async fn create_new_conversation(&self, title: String) -> Result<uuid::Uuid, FredAgentError> {
+    pub async fn create_new_conversation(&self, title: String) -> Result<uuid::Uuid, SagittaCodeError> {
         let manager = self.get_conversation_manager();
         let mut manager_guard = manager.lock().await;
         manager_guard.create_conversation(title, None).await
-            .map_err(|e| FredAgentError::Unknown(format!("Failed to create conversation: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))
     }
     
     /// List all conversations
-    pub async fn list_conversations(&self) -> Result<Vec<crate::agent::conversation::types::ConversationSummary>, FredAgentError> {
+    pub async fn list_conversations(&self) -> Result<Vec<crate::agent::conversation::types::ConversationSummary>, SagittaCodeError> {
         let manager = self.get_conversation_manager();
         let manager_guard = manager.lock().await;
         manager_guard.list_conversations(None).await
-            .map_err(|e| FredAgentError::Unknown(format!("Failed to list conversations: {}", e)))
+            .map_err(|e| SagittaCodeError::Unknown(format!("Failed to list conversations: {}", e)))
     }
 
     // Added getter for StateManager's state Arc
@@ -609,14 +609,14 @@ mod tests;
 
 // Adapter for reasoning_engine::StreamHandler
 struct AgentStreamHandler {
-    raw_chunk_sender: mpsc::UnboundedSender<Result<FredStreamChunk, FredAgentError>>,
+    raw_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>,
     agent_event_sender: broadcast::Sender<AgentEvent>,
     conversation_id: Option<Uuid>, // Added conversation_id
 }
 
 impl AgentStreamHandler {
     fn new(
-        raw_chunk_sender: mpsc::UnboundedSender<Result<FredStreamChunk, FredAgentError>>,
+        raw_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>,
         agent_event_sender: broadcast::Sender<AgentEvent>,
         conversation_id: Option<Uuid>, // Added conversation_id
     ) -> Self {
@@ -631,21 +631,21 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
         log::debug!("AgentStreamHandler: Processing chunk with type='{}', data_len={}, is_final={}", 
                    chunk.chunk_type, chunk.data.len(), chunk.is_final);
 
-        let fred_chunk_part_result: Result<Option<FredMessagePart>, FredAgentError> = match chunk.chunk_type.as_str() {
+        let sagitta_code_chunk_part_result: Result<Option<SagittaCodeMessagePart>, SagittaCodeError> = match chunk.chunk_type.as_str() {
             "text" | "llm_text" | "llm_output" => {
                 match String::from_utf8(chunk.data.clone()) {
                     Ok(text_content) => {
                         log::debug!("AgentStreamHandler: Text chunk content: '{}'", text_content);
                         // CRITICAL FIX: Always create a text part for non-empty text content
                         if !text_content.trim().is_empty() {
-                            Ok(Some(FredMessagePart::Text { text: text_content }))
+                            Ok(Some(SagittaCodeMessagePart::Text { text: text_content }))
                         } else {
                             Ok(None) // Skip empty text chunks
                         }
                     }
                     Err(e) => {
                         log::error!("AgentStreamHandler: Failed to parse text chunk as UTF-8: {}", e);
-                        Err(FredAgentError::ParseError(format!("Stream chunk data is not valid UTF-8 for text: {}", e)))
+                        Err(SagittaCodeError::ParseError(format!("Stream chunk data is not valid UTF-8 for text: {}", e)))
                     }
                 }
             }
@@ -654,7 +654,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 match serde_json::from_slice::<reasoning_engine::traits::ToolCall>(&chunk.data) {
                     Ok(tc_data) => {
                         log::debug!("AgentStreamHandler: ToolCall data parsed successfully");
-                        Ok(Some(FredMessagePart::ToolCall {
+                        Ok(Some(SagittaCodeMessagePart::ToolCall {
                             tool_call_id: Uuid::new_v4().to_string(),
                             name: tc_data.name,
                             parameters: tc_data.args,
@@ -662,16 +662,16 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                     }
                     Err(e) => {
                         log::error!("AgentStreamHandler: Failed to parse tool_call data: {}", e);
-                        Err(FredAgentError::ParseError(format!("Failed to parse tool_call data: {}", e)))
+                        Err(SagittaCodeError::ParseError(format!("Failed to parse tool_call data: {}", e)))
                     }
                 }
             }
             "thought" => { // Assuming thoughts might also come as simple text with this chunk_type
                  String::from_utf8(chunk.data)
-                    .map_err(|e| FredAgentError::ParseError(format!("Stream chunk data is not valid UTF-8 for thought: {}", e)))
+                    .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid UTF-8 for thought: {}", e)))
                     .map(|text_content| {
                         if !text_content.trim().is_empty() {
-                            Some(FredMessagePart::Thought { text: text_content })
+                            Some(SagittaCodeMessagePart::Thought { text: text_content })
                         } else {
                             None
                         }
@@ -684,7 +684,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 if let Ok(text_content) = String::from_utf8(chunk.data.clone()) {
                     if !text_content.trim().is_empty() {
                         log::debug!("AgentStreamHandler: Treating unknown chunk_type '{}' as text: '{}'", chunk.chunk_type, text_content);
-                        Ok(Some(FredMessagePart::Text { text: text_content }))
+                        Ok(Some(SagittaCodeMessagePart::Text { text: text_content }))
                     } else {
                         Ok(None)
                     }
@@ -695,17 +695,17 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
             }
         };
 
-        match fred_chunk_part_result {
-            Ok(Some(fred_part)) => {
-                let fred_stream_chunk = FredStreamChunk {
-                    part: fred_part.clone(),
+        match sagitta_code_chunk_part_result {
+            Ok(Some(sagitta_code_part)) => {
+                let sagitta_code_stream_chunk = SagittaCodeStreamChunk {
+                    part: sagitta_code_part.clone(),
                     is_final: chunk.is_final,
                     finish_reason: chunk.metadata.get("finish_reason").cloned(), // metadata value is String
                     token_usage: None, // This handler receives the struct StreamChunk, not the enum with TokenUsage
                 };
                 
                 // CRITICAL FIX: Always send to raw chunk sender for stream consumption
-                if let Err(_) = self.raw_chunk_sender.send(Ok(fred_stream_chunk)) {
+                if let Err(_) = self.raw_chunk_sender.send(Ok(sagitta_code_stream_chunk)) {
                     log::warn!("AgentStreamHandler: Raw chunk receiver dropped.");
                     return Err(ReasoningError::streaming("raw_sender_dropped".to_string(), "Failed to send to raw_chunk_sender".to_string()));
                 } else {
@@ -713,8 +713,8 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 }
                 
                 // ALSO emit AgentEvent::LlmChunk for GUI consumption
-                match &fred_part {
-                    FredMessagePart::Text { text } => {
+                match &sagitta_code_part {
+                    SagittaCodeMessagePart::Text { text } => {
                         log::debug!("AgentStreamHandler: Emitting LlmChunk event for text: '{}'", text);
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: text.clone(),
@@ -723,7 +723,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk: {}", e);
                         }
                     }
-                    FredMessagePart::Thought { text } => {
+                    SagittaCodeMessagePart::Thought { text } => {
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: format!("THINKING: {}", text),
                             is_final: chunk.is_final,
@@ -731,7 +731,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for thought: {}", e);
                         }
                     }
-                    FredMessagePart::ToolCall { name, parameters, .. } => {
+                    SagittaCodeMessagePart::ToolCall { name, parameters, .. } => {
                         // Emit a descriptive text chunk for tool calls
                         let tool_description = format!("\n\n[TOOL] Executing tool (core.rs): **{}**\n", name);
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
@@ -800,11 +800,11 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
     }
 
     async fn handle_stream_error(&self, _stream_id: Uuid, error: ReasoningError) -> Result<(), ReasoningError> {
-        let fred_error = FredAgentError::ReasoningError(error.to_string());
-        if self.raw_chunk_sender.send(Err(fred_error.clone())).is_err() {
+        let sagitta_code_error = SagittaCodeError::ReasoningError(error.to_string());
+        if self.raw_chunk_sender.send(Err(sagitta_code_error.clone())).is_err() {
             warn!("AgentStreamHandler: Raw chunk receiver dropped for stream error.");
         }
-        if let Err(e) = self.agent_event_sender.send(AgentEvent::Error(fred_error.to_string())) {
+        if let Err(e) = self.agent_event_sender.send(AgentEvent::Error(sagitta_code_error.to_string())) {
             warn!("AgentStreamHandler: Failed to send AgentEvent::Error: {}", e);
         }
         Err(error) 

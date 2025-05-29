@@ -1,11 +1,11 @@
-# Fred Agent
+# Sagitta Code
 
-**Fred Agent** is an advanced AI coding assistant built on top of [sagitta-search](../../README.md) that provides intelligent code interaction, repository management, and conversation handling capabilities. It combines the power of Google's Gemini LLM with semantic code search to deliver a superior development experience.
+**Sagitta Code** is an advanced AI coding assistant built on top of [sagitta-search](../../README.md) that provides intelligent code interaction, repository management, and conversation handling capabilities. It combines the power of Google's Gemini LLM with semantic code search to deliver a superior development experience.
 
 ## 🚀 Features
 
 ### 🧠 Advanced Conversation Management
-Fred Agent features a **revolutionary conversation management system** that surpasses traditional linear chat interfaces:
+Sagitta Code features a **revolutionary conversation management system** that surpasses traditional linear chat interfaces:
 
 - **🌳 Context-Aware Branching**: Explore alternative solutions with intelligent conversation branches
 - **📍 Smart Checkpoints**: Save and restore conversation states with full context snapshots
@@ -180,13 +180,13 @@ sagitta-code/
 
 ### Configuration
 
-Fred Agent uses a layered configuration system:
+Sagitta Code uses a layered configuration system:
 
 1. **Core Configuration** (`~/.config/sagitta/config.toml`):
    - See [configuration.md](../../docs/configuration.md) for sagitta-search settings
    - Includes Qdrant URL, ONNX model paths, performance tuning
 
-2. **Fred Agent Configuration** (`~/.config/sagitta-code/config.toml`):
+2. **Sagitta Code Configuration** (`~/.config/sagitta-code/config.toml`):
    ```toml
    [gemini]
    api_key = "your-gemini-api-key"
@@ -332,7 +332,7 @@ impl Tool for CustomTool {
         }
     }
     
-    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
         // Implementation
         Ok(ToolResult::Success(serde_json::json!({"result": "success"})))
     }
@@ -358,7 +358,7 @@ Access comprehensive analytics through the GUI or programmatically:
 ## 🤝 Integration
 
 ### With sagitta-search
-Fred Agent is built on sagitta-search and inherits all its capabilities:
+Sagitta Code is built on sagitta-search and inherits all its capabilities:
 - Semantic code search
 - Repository indexing
 - Vector embeddings
@@ -395,7 +395,7 @@ Fred Agent is built on sagitta-search and inherits all its capabilities:
 ### Logging
 Enable detailed logging:
 ```bash
-RUST_LOG=fred_agent=debug ./sagitta-code
+RUST_LOG=sagitta_code=debug ./sagitta-code
 ```
 
 Access logs through the GUI logging panel (Ctrl+L) or check the console output.
@@ -421,4 +421,4 @@ This project is licensed under the MIT License - see the [LICENSE-MIT](../../LIC
 
 ---
 
-**Fred Agent** represents the next generation of AI-powered development tools, combining semantic understanding, intelligent conversation management, and comprehensive code analysis in a single, powerful application. 
+**Sagitta Code** represents the next generation of AI-powered development tools, combining semantic understanding, intelligent conversation management, and comprehensive code analysis in a single, powerful application. 

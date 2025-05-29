@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use async_trait::async_trait;
 
 use crate::gui::repository::manager::RepositoryManager;
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use crate::tools::types::{Tool, ToolCategory, ToolDefinition, ToolResult};
 
 /// Search parameters for the code search tool
@@ -83,11 +83,11 @@ impl Tool for CodeSearchTool {
         }
     }
     
-    async fn execute(&self, params: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, params: Value) -> Result<ToolResult, SagittaCodeError> {
         log::debug!("CodeSearchTool: Executing with params: {:?}", params);
         
         let search_params: SearchParams = serde_json::from_value(params)
-            .map_err(|e| FredAgentError::ToolError(format!("Invalid search parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Invalid search parameters: {}", e)))?;
         
         log::debug!("CodeSearchTool: Searching repository '{}' for query '{}'", 
                    search_params.repository_name, search_params.query);
@@ -124,7 +124,7 @@ impl Tool for CodeSearchTool {
             Err(e) => {
                 let error_msg = format!("Search failed: {}", e);
                 log::error!("CodeSearchTool: {}", error_msg);
-                Err(FredAgentError::ToolError(error_msg))
+                Err(SagittaCodeError::ToolError(error_msg))
             }
         }
     }

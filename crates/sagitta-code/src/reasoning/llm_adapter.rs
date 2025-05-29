@@ -5,15 +5,15 @@ use std::pin::Pin;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 // Types from sagitta_code::llm::client
 use crate::llm::client::{
-    LlmClient as FredLlmClient,
-    Message as FredMessage,
-    MessagePart as FredMessagePart,
-    StreamChunk as FredStreamChunk,
-    Role as FredRole
+    LlmClient as SagittaCodeLlmClient,
+    Message as SagittaCodeMessage,
+    MessagePart as SagittaCodeMessagePart,
+    StreamChunk as SagittaCodeStreamChunk,
+    Role as SagittaCodeRole
 };
 
 // Types and traits from reasoning_engine::traits
@@ -31,16 +31,16 @@ use reasoning_engine::ReasoningError;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::ToolDefinition as AgentToolDefinition; 
 
-/// Adapter to make Fred-Agent's LlmClient usable by ReasoningEngine
+/// Adapter to make Sagitta-Code's LlmClient usable by ReasoningEngine
 #[derive(Clone)] // Clone is needed if ReasoningEngine will store Arc<Self>
 pub struct ReasoningLlmClientAdapter {
-    fred_llm_client: Arc<dyn FredLlmClient>,
+    sagitta_code_llm_client: Arc<dyn SagittaCodeLlmClient>,
     tool_registry: Arc<ToolRegistry>, // Added tool_registry
 }
 
 impl ReasoningLlmClientAdapter {
-    pub fn new(fred_llm_client: Arc<dyn FredLlmClient>, tool_registry: Arc<ToolRegistry>) -> Self {
-        Self { fred_llm_client, tool_registry }
+    pub fn new(sagitta_code_llm_client: Arc<dyn SagittaCodeLlmClient>, tool_registry: Arc<ToolRegistry>) -> Self {
+        Self { sagitta_code_llm_client, tool_registry }
     }
 }
 
@@ -51,18 +51,18 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
         messages: Vec<ReasoningMessage>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ReasoningStreamChunk, ReasoningError>> + Send>>, ReasoningError> {
         
-        let fred_messages: Vec<FredMessage> = messages.into_iter().map(|msg| {
+        let sagitta_code_messages: Vec<SagittaCodeMessage> = messages.into_iter().map(|msg| {
             let role = match msg.role.as_str() {
-                "user" => FredRole::User,
-                "assistant" => FredRole::Assistant,
-                "tool" => FredRole::User,
-                _ => FredRole::User,
+                "user" => SagittaCodeRole::User,
+                "assistant" => SagittaCodeRole::Assistant,
+                "tool" => SagittaCodeRole::User,
+                _ => SagittaCodeRole::User,
             };
             let parts = msg.parts.into_iter().filter_map(|part| {
                 match part {
-                    ReasoningMessagePart::Text(text) => Some(FredMessagePart::Text { text }),
+                    ReasoningMessagePart::Text(text) => Some(SagittaCodeMessagePart::Text { text }),
                     ReasoningMessagePart::ToolCall(tool_call_data) => {
-                        Some(FredMessagePart::ToolCall {
+                        Some(SagittaCodeMessagePart::ToolCall {
                             tool_call_id: Uuid::new_v4().to_string(),
                             name: tool_call_data.name,
                             parameters: tool_call_data.args,
@@ -70,7 +70,7 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
                     }
                 }
             }).collect();
-            FredMessage {
+            SagittaCodeMessage {
                 id: Uuid::new_v4(),
                 role, 
                 parts, 
@@ -80,7 +80,7 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
 
         // Fetch and convert tool definitions
         let agent_tools: Vec<AgentToolDefinition> = self.tool_registry.get_definitions().await;
-        let fred_tools: Vec<crate::llm::client::ToolDefinition> = agent_tools.into_iter().map(|agent_tool_def| {
+        let sagitta_code_tools: Vec<crate::llm::client::ToolDefinition> = agent_tools.into_iter().map(|agent_tool_def| {
             crate::llm::client::ToolDefinition {
                 name: agent_tool_def.name,
                 description: agent_tool_def.description,
@@ -89,11 +89,11 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
             }
         }).collect();
 
-        match self.fred_llm_client.generate_stream(&fred_messages, &fred_tools).await {
-            Ok(fred_stream) => {
-                let reasoning_stream = fred_stream.map_ok(|fred_chunk: FredStreamChunk| {
-                    // If FredStreamChunk has token_usage, map it directly
-                    if let Some(usage) = fred_chunk.token_usage {
+        match self.sagitta_code_llm_client.generate_stream(&sagitta_code_messages, &sagitta_code_tools).await {
+            Ok(sagitta_code_stream) => {
+                let reasoning_stream = sagitta_code_stream.map_ok(|sagitta_code_chunk: SagittaCodeStreamChunk| {
+                    // If SagittaCodeStreamChunk has token_usage, map it directly
+                    if let Some(usage) = sagitta_code_chunk.token_usage {
                         // Convert sagitta_code::llm::client::TokenUsage to reasoning_engine::traits::TokenUsage
                         let reasoning_usage = ReasoningTokenUsage {
                             prompt_tokens: usage.prompt_tokens,
@@ -106,47 +106,47 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
                         return ReasoningStreamChunk::TokenUsage(reasoning_usage);
                     }
 
-                    // Otherwise, convert FredStreamChunk to ReasoningStreamChunk based on part
-                    match fred_chunk.part {
-                        FredMessagePart::Text { text } => {
+                    // Otherwise, convert SagittaCodeStreamChunk to ReasoningStreamChunk based on part
+                    match sagitta_code_chunk.part {
+                        SagittaCodeMessagePart::Text { text } => {
                             ReasoningStreamChunk::Text { // Use enum variant
                                 content: text,
-                                is_final: fred_chunk.is_final,
+                                is_final: sagitta_code_chunk.is_final,
                             }
                         }
-                        FredMessagePart::Thought { text } => { // Added handling for Thought
+                        SagittaCodeMessagePart::Thought { text } => { // Added handling for Thought
                              ReasoningStreamChunk::Text { // Use enum variant
                                 content: format!("THINKING:{}", text), // Prefix content
-                                is_final: fred_chunk.is_final,
+                                is_final: sagitta_code_chunk.is_final,
                             }
                         }
-                        FredMessagePart::ToolCall { name, parameters, tool_call_id: _ } => { // Correctly destructure, ignore tool_call_id for now
+                        SagittaCodeMessagePart::ToolCall { name, parameters, tool_call_id: _ } => { // Correctly destructure, ignore tool_call_id for now
                             ReasoningStreamChunk::ToolCall {
                                 tool_call: ReasoningToolCall { name, args: parameters }, // Map parameters to args
-                                is_final: fred_chunk.is_final, // Assuming a tool call can be final
+                                is_final: sagitta_code_chunk.is_final, // Assuming a tool call can be final
                             }
                         }
-                        FredMessagePart::ToolResult { name: _, result: _, tool_call_id: _ } => {
+                        SagittaCodeMessagePart::ToolResult { name: _, result: _, tool_call_id: _ } => {
                             ReasoningStreamChunk::Text {
                                 content: "[Received ToolResult from LLM stream - unhandled]".to_string(),
-                                is_final: fred_chunk.is_final,
+                                is_final: sagitta_code_chunk.is_final,
                             }
                         }
-                        // Other FredMessagePart types (like ToolResult) would need mapping if they appear here.
+                        // Other SagittaCodeMessagePart types (like ToolResult) would need mapping if they appear here.
                         _ => {
                              // Default for unhandled/empty parts.
                              // Consider if this should be an error or an empty text chunk.
                              // For robustness, an empty text chunk might be safer if the stream can send unexpected empty parts.
                             ReasoningStreamChunk::Text {
                                 content: String::new(),
-                                is_final: fred_chunk.is_final,
+                                is_final: sagitta_code_chunk.is_final,
                             }
                         }
                     }
-                }).map_err(|e: FredAgentError| ReasoningError::llm(e.to_string()));
+                }).map_err(|e: SagittaCodeError| ReasoningError::llm(e.to_string()));
                 Ok(Box::pin(reasoning_stream))
             }
-            Err(e) => Err(ReasoningError::llm(format!("FredLlmClient failed to generate stream: {}", e))),
+            Err(e) => Err(ReasoningError::llm(format!("SagittaCodeLlmClient failed to generate stream: {}", e))),
         }
     }
 } 

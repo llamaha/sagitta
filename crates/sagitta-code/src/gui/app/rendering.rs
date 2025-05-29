@@ -1,8 +1,8 @@
-// UI rendering for the Fred Agent application
+// UI rendering for the Sagitta Code application
 
 use egui::{Context, Key, TopBottomPanel, Frame, Vec2};
 use crate::gui::app::AppEvent;
-use super::FredAgentApp;
+use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
 use super::super::theme::{AppTheme, apply_theme};
@@ -11,13 +11,13 @@ use crate::agent::state::types::AgentState;
 use crate::utils::logging::LOG_COLLECTOR;
 use futures_util::StreamExt;
 use super::panels::ActivePanel;
-use crate::config::FredAgentConfig;
+use crate::config::SagittaCodeConfig;
 use crate::gui::repository::manager::RepositoryManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Main rendering function for the application
-pub fn render(app: &mut FredAgentApp, ctx: &Context) {
+pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Apply theme to the entire application
     apply_theme(ctx, app.state.current_theme);
 
@@ -64,7 +64,7 @@ pub fn render(app: &mut FredAgentApp, ctx: &Context) {
 }
 
 /// Handle keyboard shortcuts
-fn handle_keyboard_shortcuts(app: &mut FredAgentApp, ctx: &Context) {
+fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.ctrl) {
         // Ctrl+R: Toggle repository panel
         app.panels.toggle_panel(ActivePanel::Repository);
@@ -109,7 +109,7 @@ fn handle_keyboard_shortcuts(app: &mut FredAgentApp, ctx: &Context) {
 }
 
 /// Handle loop control actions
-fn handle_loop_control(app: &mut FredAgentApp) {
+fn handle_loop_control(app: &mut SagittaCodeApp) {
     if app.state.loop_break_requested {
         log::info!("Loop break requested by user");
         app.state.loop_break_requested = false;
@@ -144,7 +144,7 @@ fn handle_loop_control(app: &mut FredAgentApp) {
 }
 
 /// Handle chat input submission
-fn handle_chat_input_submission(app: &mut FredAgentApp) {
+fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
     if app.state.chat_on_submit {
         if !app.state.chat_input_buffer.trim().is_empty() {
             let user_message = app.state.chat_input_buffer.trim().to_string();
@@ -164,7 +164,7 @@ fn handle_chat_input_submission(app: &mut FredAgentApp) {
             
             // CRITICAL FIX: Prevent duplicate submissions
             if app.state.is_waiting_for_response && !breaking_loop {
-                log::warn!("FredAgentApp: Ignoring duplicate submission while already waiting for response");
+                log::warn!("SagittaCodeApp: Ignoring duplicate submission while already waiting for response");
                 app.state.chat_on_submit = false;
                 return;
             }
@@ -173,14 +173,14 @@ fn handle_chat_input_submission(app: &mut FredAgentApp) {
             app.chat_manager.add_user_message(user_message.clone());
 
             // CRITICAL FIX: Force clear current_response_id when user submits new message
-            // This ensures Fred ALWAYS creates a new message for each response
+            // This ensures Sagitta Code ALWAYS creates a new message for each response
             if let Some(old_response_id) = app.state.current_response_id.take() {
-                log::warn!("FredAgentApp: Forcing clear of stale response_id {} for new user message", old_response_id);
+                log::warn!("SagittaCodeApp: Forcing clear of stale response_id {} for new user message", old_response_id);
                 // Finish any incomplete streaming response
                 app.chat_manager.finish_streaming(&old_response_id);
             }
             app.state.current_response_id = None;
-            log::info!("FredAgentApp: Cleared current_response_id for new user message: '{}'", user_message);
+            log::info!("SagittaCodeApp: Cleared current_response_id for new user message: '{}'", user_message);
 
             // Process the message with the agent using STREAMING
             if let Some(agent) = &app.agent {
@@ -309,7 +309,7 @@ fn handle_chat_input_submission(app: &mut FredAgentApp) {
 }
 
 /// Render all panels
-fn render_panels(app: &mut FredAgentApp, ctx: &Context) {
+fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
     // Render based on active panel
     match app.panels.active_panel {
         ActivePanel::Repository => {
@@ -652,7 +652,7 @@ fn render_panels(app: &mut FredAgentApp, ctx: &Context) {
 }
 
 /// Render hotkeys modal
-fn render_hotkeys_modal(app: &mut FredAgentApp, ctx: &Context) {
+fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
     // This would be implemented based on the original hotkeys modal logic
     // For now, just a placeholder
     if app.state.show_hotkeys_modal {
@@ -687,7 +687,7 @@ fn theme_to_background_color(theme: AppTheme) -> egui::Color32 {
 }
 
 /// Render main UI
-fn render_main_ui(app: &mut FredAgentApp, ctx: &Context) {
+fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
     render_panels(app, ctx);
 
     // Update logging panel logs from the global collector
@@ -768,7 +768,7 @@ fn render_main_ui(app: &mut FredAgentApp, ctx: &Context) {
 }
 
 /// Render tool info modal
-fn render_tool_info_modal(app: &mut FredAgentApp, ctx: &Context, tool_name: &str, tool_args: &str) {
+fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &str, tool_args: &str) {
     // Check if this is a tool result (indicated by " Result" suffix)
     if tool_name.ends_with(" Result") {
         // This is a tool result - show it directly
@@ -794,13 +794,13 @@ mod tests {
     use egui::Key;
 
     /// Create a test app instance for testing
-    fn create_test_app() -> FredAgentApp {
-        let fred_config = FredAgentConfig::default();
+    fn create_test_app() -> SagittaCodeApp {
+        let sagitta_code_config = SagittaCodeConfig::default();
         let app_core_config = sagitta_search::config::AppConfig::default(); // Create AppConfig
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new_for_test(
             Arc::new(Mutex::new(app_core_config.clone())) // Use cloned AppConfig for repo_manager
         )));
-        FredAgentApp::new(repo_manager, fred_config, app_core_config) // Pass both configs
+        SagittaCodeApp::new(repo_manager, sagitta_code_config, app_core_config) // Pass both configs
     }
 
     /// Mock egui context for testing keyboard input

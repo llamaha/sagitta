@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use sagitta_search::AppConfig as SagittaAppConfig;
 
 /// Parameters for viewing a file in a repository
@@ -75,10 +75,10 @@ impl Tool for ViewFileInRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: ViewFileParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse view_file parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse view_file parameters: {}", e)))?;
         
         log::info!("[ViewFileInRepositoryTool] Viewing file '{}' from repository '{}' (lines: {:?}-{:?})", 
                   params.file_path, params.repository_name, params.start_line, params.end_line);
@@ -115,7 +115,7 @@ impl Tool for ViewFileInRepositoryTool {
                 let detailed_error = format!("Failed to view file '{}' from repository '{}': {}", 
                                            params.file_path, params.repository_name, e);
                 log::error!("[ViewFileInRepositoryTool] {}", detailed_error);
-                Err(FredAgentError::ToolError(detailed_error))
+                Err(SagittaCodeError::ToolError(detailed_error))
             }
         }
     }

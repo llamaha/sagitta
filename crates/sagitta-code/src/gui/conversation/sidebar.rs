@@ -13,8 +13,8 @@ use crate::agent::state::types::ConversationStatus;
 use crate::gui::theme::AppTheme;
 
 // --- Minimal Placeholder definitions --- 
-#[derive(Debug, Clone, Default)] pub struct FredAgentAppState { pub current_conversation_id: Option<Uuid>, pub editing_conversation_id: Option<Uuid>, pub sidebar_action: Option<SidebarAction>, pub conversation_list: Vec<ConversationSummary>, pub show_clustered_conversations: bool, pub current_agent_mode: AgentMode, pub target_conversation_id: Option<Uuid>}
-impl FredAgentAppState { pub fn switch_to_conversation(&mut self, _id: Uuid) {} }
+#[derive(Debug, Clone, Default)] pub struct SagittaCodeAppState { pub current_conversation_id: Option<Uuid>, pub editing_conversation_id: Option<Uuid>, pub sidebar_action: Option<SidebarAction>, pub conversation_list: Vec<ConversationSummary>, pub show_clustered_conversations: bool, pub current_agent_mode: AgentMode, pub target_conversation_id: Option<Uuid>}
+impl SagittaCodeAppState { pub fn switch_to_conversation(&mut self, _id: Uuid) {} }
 #[derive(Debug, Clone)] pub enum SidebarAction { RequestDeleteConversation(Uuid), RenameConversation(Uuid, String) }
 #[derive(Debug, Clone, Default)] pub struct DisplayIndicator { pub display: String, pub color: Option<Color32>}
 #[derive(Debug, Clone, Default)] pub struct ConversationDisplayDetails { pub title: String, pub time_display: String, pub indicators: Vec<DisplayIndicator>}
@@ -886,7 +886,7 @@ impl ConversationSidebar {
         self.config = config;
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, app_state: &mut FredAgentAppState, theme: &AppTheme) {
+    pub fn show(&mut self, ctx: &egui::Context, app_state: &mut SagittaCodeAppState, theme: &AppTheme) {
         egui::SidePanel::left("conversation_sidebar")
             .resizable(true)
             .default_width(250.0)
@@ -928,8 +928,8 @@ impl ConversationSidebar {
     }
 
     // Stubs for missing methods
-    fn render_header(&mut self, _ui: &mut Ui, _app_state: &mut FredAgentAppState, _theme: &AppTheme) { /* Placeholder */ }
-    fn render_search_bar(&mut self, _ui: &mut Ui, _app_state: &mut FredAgentAppState) { /* Placeholder */ }
+    fn render_header(&mut self, _ui: &mut Ui, _app_state: &mut SagittaCodeAppState, _theme: &AppTheme) { /* Placeholder */ }
+    fn render_search_bar(&mut self, _ui: &mut Ui, _app_state: &mut SagittaCodeAppState) { /* Placeholder */ }
     fn group_conversations(&self, conv_list: &[ConversationSummary]) -> HashMap<String, Vec<DisplayConversationItem>> {
         let mut map = HashMap::new();
         let items = conv_list.iter().map(|summary| DisplayConversationItem {
@@ -940,13 +940,13 @@ impl ConversationSidebar {
         map.insert("All".to_string(), items);
         map
     }
-    fn handle_sidebar_actions(&mut self, _app_state: &mut FredAgentAppState, _ctx: &egui::Context) { /* Placeholder */ }
+    fn handle_sidebar_actions(&mut self, _app_state: &mut SagittaCodeAppState, _ctx: &egui::Context) { /* Placeholder */ }
 }
 
 fn render_conversation_list_item(
     ui: &mut Ui,
     conv_item: &DisplayConversationItem,
-    app_state: &mut FredAgentAppState,
+    app_state: &mut SagittaCodeAppState,
     _theme: &AppTheme, // theme might not be needed
     is_current: bool,
     is_editing: bool,
@@ -1007,7 +1007,7 @@ fn render_conversation_list_item(
 fn render_cluster_item(
     ui: &mut Ui,
     cluster: &ConversationCluster,
-    app_state: &mut FredAgentAppState, 
+    app_state: &mut SagittaCodeAppState, 
     _theme: &AppTheme,
 ) {
     ui.push_id(format!("cluster_{}", cluster.id), |ui| {

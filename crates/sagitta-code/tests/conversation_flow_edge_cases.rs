@@ -8,10 +8,10 @@ use serde_json::Value;
 
 use sagitta_code::{
     agent::Agent,
-    config::FredAgentConfig,
+    config::SagittaCodeConfig,
     tools::registry::ToolRegistry,
     llm::client::{LlmClient, Message, ToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
-    utils::errors::FredAgentError,
+    utils::errors::SagittaCodeError,
 };
 use sagitta_search::embedding::provider::{EmbeddingProvider, onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider}};
 use futures_util::StreamExt;
@@ -35,7 +35,7 @@ use anyhow::Result;
 // Add the missing import for reasoning engine LlmClient trait
 use reasoning_engine::traits::LlmClient as ReasoningLlmClient;
 use sagitta_code::reasoning::llm_adapter::ReasoningLlmClientAdapter; // Added for ReasoningEngine direct test
-use sagitta_code::reasoning::FredIntentAnalyzer; // Added for ReasoningEngine direct test
+use sagitta_code::reasoning::SagittaCodeIntentAnalyzer; // Added for ReasoningEngine direct test
 use sagitta_code::reasoning::config::create_reasoning_config; // Added for ReasoningEngine direct test
 use reasoning_engine::ReasoningEngine; // Added for ReasoningEngine direct test
 use reasoning_engine::ReasoningEvent; // Added for ReasoningEngine direct test
@@ -139,7 +139,7 @@ impl MockLlmClient {
         }
     }
 
-    async fn get_next_response(&self) -> Result<MockResponse, FredAgentError> {
+    async fn get_next_response(&self) -> Result<MockResponse, SagittaCodeError> {
         let mut index_guard = self.current_index.lock().await;
         let responses_guard = self.responses.lock().await;
         
@@ -147,7 +147,7 @@ impl MockLlmClient {
             // It's better to return a specific error or a default response than panicking here.
             // For testing, an error indicating no more responses is good.
             eprintln!("MockLlmClient: No more mock responses available! Current index: {}, Total responses: {}", *index_guard, responses_guard.len());
-            return Err(FredAgentError::LlmError("MockLlmClient: No more mock responses available.".to_string()));
+            return Err(SagittaCodeError::LlmError("MockLlmClient: No more mock responses available.".to_string()));
         }
         
         let response = responses_guard[*index_guard].clone();
@@ -162,13 +162,13 @@ impl LlmClient for MockLlmClient {
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.calls.lock().await.push((messages.to_vec(), tools.to_vec()));
 
         let mock_response = self.get_next_response().await?;
         
         if mock_response.should_error {
-            return Err(FredAgentError::LlmError(
+            return Err(SagittaCodeError::LlmError(
                 mock_response.error_message.unwrap_or_else(|| "Mock LLM error triggered".to_string())
             ));
         }
@@ -203,7 +203,7 @@ impl LlmClient for MockLlmClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         _thinking_config: &ThinkingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
@@ -212,7 +212,7 @@ impl LlmClient for MockLlmClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         _grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
@@ -222,7 +222,7 @@ impl LlmClient for MockLlmClient {
         tools: &[ToolDefinition],
         _thinking_config: &ThinkingConfig,
         _grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
@@ -230,11 +230,11 @@ impl LlmClient for MockLlmClient {
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         // This call will be recorded by self.calls in generate()
         let llm_response = self.generate(messages, tools).await?;
         
-        let mut stream_chunks: Vec<Result<StreamChunk, FredAgentError>> = Vec::new();
+        let mut stream_chunks: Vec<Result<StreamChunk, SagittaCodeError>> = Vec::new();
 
         for part in llm_response.message.parts {
             stream_chunks.push(Ok(StreamChunk {
@@ -261,7 +261,7 @@ impl LlmClient for MockLlmClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         _thinking_config: &ThinkingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 
@@ -270,7 +270,7 @@ impl LlmClient for MockLlmClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         _grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 
@@ -280,7 +280,7 @@ impl LlmClient for MockLlmClient {
         tools: &[ToolDefinition],
         _thinking_config: &ThinkingConfig,
         _grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 }
@@ -297,7 +297,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
         }
         Err(e) => {
             println!("Failed to load real sagitta_code config, using default: {}. (LLM will be mocked)", e);
-            FredAgentConfig::default()
+            SagittaCodeConfig::default()
         }
     };
 
@@ -322,7 +322,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockWebSearchTool {
         fn definition(&self) -> AgentToolDefinition { /* ... as before ... */ AgentToolDefinition {name: "web_search".to_string(),description: "Search the web for information".to_string(),parameters: serde_json::json!({"type": "object","properties": {"query": {"type": "string", "description": "The search query"}},"required": ["query"]}),is_required: false,category: ToolCategory::WebSearch,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("MockWebSearchTool executed with params: {:?}", parameters);
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "search completed", "results": ["mock result1", "mock result2"]})))
         }
@@ -334,7 +334,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockEditFileTool {
         fn definition(&self) -> AgentToolDefinition { /* ... as before ... */ AgentToolDefinition {name: "edit_file".to_string(),description: "Edit or create a file with specified content".to_string(),parameters: serde_json::json!({"type": "object","properties": {"target_file": {"type": "string", "description": "Path to the file"},"code_edit": {"type": "string", "description": "Content to write"},"instructions": {"type": "string", "description": "Instructions for the edit"}},"required": ["target_file", "code_edit", "instructions"]}),is_required: false,category: ToolCategory::FileOperations,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("MockEditFileTool executed with params: {:?}", parameters);
             if parameters.get("target_file").and_then(|f| f.as_str()).unwrap_or("").contains("fail") {
                 return Ok(sagitta_code::tools::types::ToolResult::Error { error: "File edit failed: Permission denied".to_string() });
@@ -349,7 +349,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockCodebaseSearchTool {
         fn definition(&self) -> AgentToolDefinition { /* ... as before ... */ AgentToolDefinition {name: "codebase_search".to_string(),description: "Search for code patterns in the codebase".to_string(),parameters: serde_json::json!({"type": "object","properties": {"query": {"type": "string", "description": "The search query"},"target_directories": {"type": "array", "items": {"type": "string"}, "description": "Directories to search"}},"required": ["query"]}),is_required: false,category: ToolCategory::CodeSearch,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("MockCodebaseSearchTool executed with params: {:?}", parameters);
             let query = parameters.get("query").and_then(|q| q.as_str()).unwrap_or("");
             if query.contains("non_existent") {
@@ -368,7 +368,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockShellExecutionTool {
         fn definition(&self) -> AgentToolDefinition { /* ... as before ... */ AgentToolDefinition {name: "shell_execution".to_string(),description: "Execute shell commands".to_string(),parameters: serde_json::json!({"type": "object","properties": {"command": {"type": "string", "description": "The shell command to execute"},"working_directory": {"type": "string", "description": "Working directory for the command"}},"required": ["command"]}),is_required: false,category: ToolCategory::ShellExecution,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("MockShellExecutionTool executed with params: {:?}", parameters);
             let command = parameters.get("command").and_then(|c| c.as_str()).unwrap_or("");
             if command.contains("fail") {
@@ -384,7 +384,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockRepositoryTool {
         fn definition(&self) -> AgentToolDefinition { /* ... as before ... */ AgentToolDefinition {name: "add_repository".to_string(),description: "Add a new repository to the system".to_string(),parameters: serde_json::json!({"type": "object","properties": {"name": {"type": "string", "description": "Name of the repository"},"url": {"type": "string", "description": "URL of the repository"},"local_path": {"type": "string", "description": "Local path for the repository"}},"required": ["name"]}),is_required: false,category: ToolCategory::Repository,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("MockRepositoryTool executed with params: {:?}", parameters);
             let name = parameters.get("name").and_then(|n| n.as_str()).unwrap_or("");
             if name.contains("invalid") {
@@ -400,7 +400,7 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
     #[async_trait]
     impl sagitta_code::tools::types::Tool for MockAnalyzeInputTool {
         fn definition(&self) -> AgentToolDefinition { /* ... */ AgentToolDefinition {name: "analyze_input".to_string(),description: "Mock tool to analyze input for testing purposes.".to_string(),parameters: serde_json::json!({"type": "object","properties": {"input": {"type": "string", "description": "The input text to analyze"},"context": {"type": "string", "description": "Optional conversation context (can be empty string if not provided)"}},"required": ["input"]}),is_required: false,category: ToolCategory::Other,metadata: HashMap::new(),} }
-        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: Value) -> Result<sagitta_code::tools::types::ToolResult, SagittaCodeError> {
             println!("[MockAnalyzeInputTool] executed with params: {:?}", parameters);
             let input_text = parameters.get("input").and_then(|v| v.as_str()).unwrap_or("unknown input");
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({
@@ -1333,7 +1333,7 @@ async fn test_reasoning_engine_direct() {
         .try_init();
     println!("🔍 Test: test_reasoning_engine_direct (with MockLLM)");
 
-    let sagitta_code_config = FredAgentConfig::default(); 
+    let sagitta_code_config = SagittaCodeConfig::default(); 
     let reasoning_config_data = create_reasoning_config(&sagitta_code_config);
     let mock_llm_responses = vec![
         MockResponse {
@@ -1342,17 +1342,17 @@ async fn test_reasoning_engine_direct() {
             should_error: false, error_message: None,
         }
     ];
-    let mock_fred_llm_client = Arc::new(MockLlmClient::new(mock_llm_responses));
+    let mock_sagitta_code_llm_client = Arc::new(MockLlmClient::new(mock_llm_responses));
     let tool_registry = Arc::new(ToolRegistry::new());
     
     // 3. ReasoningLlmClientAdapter (adapts MockLlmClient to reasoning_engine::traits::LlmClient)
     //    The concrete type LC is ReasoningLlmClientAdapter.
     let llm_adapter_for_re: Arc<ReasoningLlmClientAdapter> = 
-        Arc::new(ReasoningLlmClientAdapter::new(mock_fred_llm_client.clone(), tool_registry.clone()));
+        Arc::new(ReasoningLlmClientAdapter::new(mock_sagitta_code_llm_client.clone(), tool_registry.clone()));
 
     // 4. Intent Analyzer (using mock embedding provider, as in setup_test_agent)
     let mock_embedding_provider = Arc::new(ThreadSafeMockProvider::new(384)); 
-    let intent_analyzer = Arc::new(FredIntentAnalyzer::new(mock_embedding_provider));
+    let intent_analyzer = Arc::new(SagittaCodeIntentAnalyzer::new(mock_embedding_provider));
     
     let mut reasoning_engine = ReasoningEngine::new(
         reasoning_config_data,
@@ -1427,7 +1427,7 @@ async fn test_reasoning_engine_direct() {
     assert!(collected_text.contains("Hello from direct Reasoning Engine test"), 
         "Did not get expected output from mocked RE LLM. Got: {}", collected_text);
     
-    assert_eq!(mock_fred_llm_client.calls.lock().await.len(), 1, "MockLlmClient for ReasoningEngine should have been called once.");
+    assert_eq!(mock_sagitta_code_llm_client.calls.lock().await.len(), 1, "MockLlmClient for ReasoningEngine should have been called once.");
 }
 
 #[tokio::test]
@@ -1437,17 +1437,17 @@ async fn test_llm_adapter_direct() {
         .try_init();
     println!("🔍 Test: test_llm_adapter_direct (with MockLLM)");
 
-    let mock_fred_responses = vec![
+    let mock_sagitta_code_responses = vec![
         MockResponse { 
             text: "Adapter direct test response. Part 1.".to_string(), 
             tool_calls: vec![], 
             should_error: false, error_message: None 
         },
     ];
-    let mock_fred_llm_client = Arc::new(MockLlmClient::new(mock_fred_responses));
+    let mock_sagitta_code_llm_client = Arc::new(MockLlmClient::new(mock_sagitta_code_responses));
     let tool_registry = Arc::new(ToolRegistry::new());
     let adapter: Arc<dyn reasoning_engine::traits::LlmClient> = 
-        Arc::new(ReasoningLlmClientAdapter::new(mock_fred_llm_client.clone(), tool_registry));
+        Arc::new(ReasoningLlmClientAdapter::new(mock_sagitta_code_llm_client.clone(), tool_registry));
 
     let messages_for_adapter = vec![
         reasoning_engine::traits::LlmMessage {
@@ -1492,8 +1492,8 @@ async fn test_llm_adapter_direct() {
     assert!(full_text_from_adapter.contains("Adapter direct test response. Part 1."), 
         "Did not get expected text from adapter. Got: '{}'", full_text_from_adapter);
     
-    assert_eq!(mock_fred_llm_client.calls.lock().await.len(), 1, 
-        "Underlying mock_fred_llm_client (MockLlmClient) should have been called once by the adapter's generate_stream call.");
+    assert_eq!(mock_sagitta_code_llm_client.calls.lock().await.len(), 1, 
+        "Underlying mock_sagitta_code_llm_client (MockLlmClient) should have been called once by the adapter's generate_stream call.");
 }
 
 #[tokio::test]

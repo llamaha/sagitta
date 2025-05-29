@@ -6,7 +6,7 @@ use chrono;
 
 use crate::agent::state::manager::StateManager;
 use crate::agent::events::AgentEvent;
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Recovery configuration for the agent
 #[derive(Debug, Clone)]
@@ -111,7 +111,7 @@ impl RecoveryManager {
     }
     
     /// Check if the agent should attempt recovery
-    pub fn should_attempt_recovery(&self, error: &FredAgentError) -> bool {
+    pub fn should_attempt_recovery(&self, error: &SagittaCodeError) -> bool {
         let recovery_state = self.state.lock().unwrap();
         
         if !self.config.enable_auto_recovery {
@@ -125,8 +125,8 @@ impl RecoveryManager {
         
         // Check if this is a recoverable error
         match error {
-            FredAgentError::NetworkError(_) => true,
-            FredAgentError::LlmError(msg) => {
+            SagittaCodeError::NetworkError(_) => true,
+            SagittaCodeError::LlmError(msg) => {
                 let msg_lower = msg.to_lowercase();
                 msg_lower.contains("timeout") || 
                 msg_lower.contains("connection") || 
@@ -135,7 +135,7 @@ impl RecoveryManager {
                 msg_lower.contains("rate_limit") ||
                 msg_lower.contains("too many requests")
             },
-            FredAgentError::ToolError(msg) => {
+            SagittaCodeError::ToolError(msg) => {
                 let msg_lower = msg.to_lowercase();
                 msg_lower.contains("network") || 
                 msg_lower.contains("timeout") ||
@@ -146,7 +146,7 @@ impl RecoveryManager {
     }
     
     /// Attempt recovery from an error
-    pub async fn attempt_recovery(&self, error: &FredAgentError, context: &str) -> Result<(), FredAgentError> {
+    pub async fn attempt_recovery(&self, error: &SagittaCodeError, context: &str) -> Result<(), SagittaCodeError> {
         let retry_count = {
             let mut recovery_state = self.state.lock().unwrap();
             

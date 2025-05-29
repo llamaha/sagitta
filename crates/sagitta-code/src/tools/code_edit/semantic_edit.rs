@@ -12,7 +12,7 @@ use tempfile::NamedTempFile;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Parameters for semantic code editing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,36 +54,36 @@ impl SemanticEditTool {
     }
     
     /// Perform a semantic edit using sagitta-cli
-    async fn perform_semantic_edit(&self, params: &SemanticEditParams) -> Result<String, FredAgentError> {
+    async fn perform_semantic_edit(&self, params: &SemanticEditParams) -> Result<String, SagittaCodeError> {
         // Get repository information
         let repo_manager = self.repo_manager.lock().await;
         
         // Find repository by name
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo_config = repositories.iter()
             .find(|r| r.name == params.repository_name)
-            .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
         
         // Construct the full file path
         let full_path = PathBuf::from(&repo_config.local_path).join(&params.file_path);
         
         if !full_path.exists() {
-            return Err(FredAgentError::ToolError(format!("File '{}' not found", full_path.display())));
+            return Err(SagittaCodeError::ToolError(format!("File '{}' not found", full_path.display())));
         }
         
         // Create a temporary file for the content
         let mut temp_file = NamedTempFile::new()
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to create temporary file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to create temporary file: {}", e)))?;
         
         // Write the content to the temporary file
         temp_file.write_all(params.content.as_bytes())
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to write to temporary file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to write to temporary file: {}", e)))?;
         
         // Get the path of the temporary file
         let temp_file_path = temp_file.path().to_str()
-            .ok_or_else(|| FredAgentError::ToolError("Failed to get temporary file path".to_string()))?;
+            .ok_or_else(|| SagittaCodeError::ToolError("Failed to get temporary file path".to_string()))?;
         
         // First validate the edit
         let validation_output = Command::new("sagitta-cli")
@@ -93,12 +93,12 @@ impl SemanticEditTool {
             .arg("--element").arg(&params.element)
             .arg("--content-file").arg(temp_file_path)
             .output()
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
         
         // Check if validation was successful
         if !validation_output.status.success() {
             let error_message = String::from_utf8_lossy(&validation_output.stderr).to_string();
-            return Err(FredAgentError::ToolError(format!("Validation failed: {}", error_message)));
+            return Err(SagittaCodeError::ToolError(format!("Validation failed: {}", error_message)));
         }
         
         // Then apply the edit
@@ -118,12 +118,12 @@ impl SemanticEditTool {
         }
         
         let apply_output = apply_command.output()
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
         
         // Check if apply was successful
         if !apply_output.status.success() {
             let error_message = String::from_utf8_lossy(&apply_output.stderr).to_string();
-            return Err(FredAgentError::ToolError(format!("Apply failed: {}", error_message)));
+            return Err(SagittaCodeError::ToolError(format!("Apply failed: {}", error_message)));
         }
         
         // Return success message
@@ -175,10 +175,10 @@ impl Tool for SemanticEditTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: SemanticEditParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse semantic edit parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse semantic edit parameters: {}", e)))?;
         
         // Perform the semantic edit
         match self.perform_semantic_edit(&params).await {

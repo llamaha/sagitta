@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::agent::conversation::types::{Conversation, ConversationSummary, ProjectType};
 use crate::agent::state::types::ConversationStatus;
-use crate::config::types::FredAgentConfig;
+use crate::config::types::SagittaCodeConfig;
 use crate::tools::types::ToolCategory;
 
 /// Conversation analytics manager for tracking metrics and patterns

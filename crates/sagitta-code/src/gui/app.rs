@@ -16,7 +16,7 @@ use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
 use super::chat::StreamingChatManager;
 use super::theme::AppTheme;
-use crate::config::FredAgentConfig;
+use crate::config::SagittaCodeConfig;
 use sagitta_search::config::AppConfig;
 use crate::agent::events::AgentEvent;
 
@@ -55,14 +55,14 @@ impl StringExt for str {
 }
 
 /// Main application UI
-pub struct FredAgentApp {
+pub struct SagittaCodeApp {
     // Core components
     pub agent: Option<Arc<Agent>>,
     pub repo_panel: RepoPanel,
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     conversation_sidebar: ConversationSidebar,
-    config: Arc<FredAgentConfig>,
+    config: Arc<SagittaCodeConfig>,
     app_core_config: Arc<AppConfig>,
     
     // State management - make public for direct access
@@ -82,18 +82,18 @@ pub struct FredAgentApp {
     tool_formatter: ToolResultFormatter,
 }
 
-impl FredAgentApp {
-    /// Create a new Fred Agent App
+impl SagittaCodeApp {
+    /// Create a new Sagitta Code App
     pub fn new(
         repo_manager: Arc<Mutex<RepositoryManager>>,
-        fred_config: FredAgentConfig,
+        sagitta_code_config: SagittaCodeConfig,
         app_core_config: AppConfig
     ) -> Self {
-        let fred_config_arc = Arc::new(fred_config.clone());
+        let sagitta_code_config_arc = Arc::new(sagitta_code_config.clone());
         let app_core_config_arc = Arc::new(app_core_config.clone());
 
         // Create settings panel and initialize it with the current configs
-        let settings_panel = SettingsPanel::new(fred_config.clone(), app_core_config.clone());
+        let settings_panel = SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone());
 
         // Create conversation event channel
         let (conversation_sender, conversation_receiver) = mpsc::unbounded_channel();
@@ -102,7 +102,7 @@ impl FredAgentApp {
 
         // Create initial state and set theme from config
         let mut initial_state = AppState::new();
-        match fred_config.ui.theme.as_str() {
+        match sagitta_code_config.ui.theme.as_str() {
             "light" => initial_state.current_theme = AppTheme::Light,
             "dark" | _ => initial_state.current_theme = AppTheme::Dark, // Default to Dark
         }
@@ -113,7 +113,7 @@ impl FredAgentApp {
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),
-            config: fred_config_arc,
+            config: sagitta_code_config_arc,
             app_core_config: app_core_config_arc,
             
             // Initialize state management with theme from config
@@ -211,7 +211,7 @@ impl FredAgentApp {
 }
 
 // Implement Deref and DerefMut to allow direct access to state fields
-impl Deref for FredAgentApp {
+impl Deref for SagittaCodeApp {
     type Target = AppState;
     
     fn deref(&self) -> &Self::Target {
@@ -219,7 +219,7 @@ impl Deref for FredAgentApp {
     }
 }
 
-impl DerefMut for FredAgentApp {
+impl DerefMut for SagittaCodeApp {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.state
     }

@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Tool for listing repositories
 #[derive(Debug)]
@@ -42,7 +42,7 @@ impl Tool for ListRepositoriesTool {
         }
     }
     
-    async fn execute(&self, _parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, _parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Get the repository manager
         let repo_manager = self.repo_manager.lock().await;
         
@@ -69,7 +69,7 @@ impl Tool for ListRepositoriesTool {
                 })))
             },
             Err(e) => {
-                Err(FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))
+                Err(SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))
             }
         }
     }

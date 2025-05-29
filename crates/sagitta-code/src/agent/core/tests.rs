@@ -2,13 +2,13 @@
 mod tests {
     use super::*;
     use crate::agent::core::Agent;
-    use crate::utils::errors::FredAgentError;
+    use crate::utils::errors::SagittaCodeError;
     use mockall::predicate::*;
     use mockall::mock;
     use crate::tools::types::{ToolCategory, ToolResult};
     use std::collections::HashMap;
     use crate::llm::client::MessagePart;
-    use crate::config::types::FredAgentConfig;
+    use crate::config::types::SagittaCodeConfig;
     use crate::tools::types::ToolDefinition as ToolDefinitionType;
     use serde_json::Value as JsonValue;
     use futures_util::stream;
@@ -55,7 +55,7 @@ mod tests {
             }
         }
         
-        async fn execute(&self, _parameters: JsonValue) -> Result<ToolResult, FredAgentError> {
+        async fn execute(&self, _parameters: JsonValue) -> Result<ToolResult, SagittaCodeError> {
             Ok(self.result.clone())
         }
     }
@@ -178,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn test_autonomous_reasoning_and_streaming_recovery() {
         // Create a test configuration
-        let config = FredAgentConfig::default();
+        let config = SagittaCodeConfig::default();
         
         // Create tool registry with mock tools
         let tool_registry = Arc::new(ToolRegistry::new());
@@ -330,7 +330,7 @@ mod tests {
         };
         
         // Create a real configuration with the API key
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some(api_key);
         config.gemini.model = "gemini-2.0-flash-exp".to_string(); // Use the latest model
         
@@ -708,7 +708,7 @@ mod tests {
             }
         }
         
-        async fn execute(&self, parameters: JsonValue) -> Result<ToolResult, FredAgentError> {
+        async fn execute(&self, parameters: JsonValue) -> Result<ToolResult, SagittaCodeError> {
             // Track execution order
             {
                 let mut order = self.execution_order.lock().unwrap();
@@ -727,12 +727,12 @@ mod tests {
     #[tokio::test]
     async fn test_empty_response_detection_and_recovery() {
         // Test that the agent can detect and recover from empty responses
-        use crate::config::types::FredAgentConfig;
+        use crate::config::types::SagittaCodeConfig;
         use crate::tools::registry::ToolRegistry;
         use std::sync::Arc;
         
         // Create a minimal config for testing
-        let _config = FredAgentConfig::default();
+        let _config = SagittaCodeConfig::default();
         let _tool_registry = Arc::new(ToolRegistry::new());
         
         // This test verifies the empty response detection logic exists

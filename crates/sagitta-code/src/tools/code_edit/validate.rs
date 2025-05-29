@@ -12,7 +12,7 @@ use tempfile::NamedTempFile;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Parameters for validating code edits
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,36 +52,36 @@ impl ValidateTool {
     }
     
     /// Validate a code edit
-    async fn validate_edit(&self, params: &ValidateParams) -> Result<String, FredAgentError> {
+    async fn validate_edit(&self, params: &ValidateParams) -> Result<String, SagittaCodeError> {
         // Get repository information
         let repo_manager = self.repo_manager.lock().await;
         
         // Find repository by name
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo_config = repositories.iter()
             .find(|r| r.name == params.repository_name)
-            .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
         
         // Construct the full file path
         let full_path = PathBuf::from(&repo_config.local_path).join(&params.file_path);
         
         if !full_path.exists() {
-            return Err(FredAgentError::ToolError(format!("File '{}' not found", full_path.display())));
+            return Err(SagittaCodeError::ToolError(format!("File '{}' not found", full_path.display())));
         }
         
         // Create a temporary file for the content
         let mut temp_file = NamedTempFile::new()
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to create temporary file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to create temporary file: {}", e)))?;
         
         // Write the content to the temporary file
         temp_file.write_all(params.content.as_bytes())
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to write to temporary file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to write to temporary file: {}", e)))?;
         
         // Get the path of the temporary file
         let temp_file_path = temp_file.path().to_str()
-            .ok_or_else(|| FredAgentError::ToolError("Failed to get temporary file path".to_string()))?;
+            .ok_or_else(|| SagittaCodeError::ToolError("Failed to get temporary file path".to_string()))?;
         
         // Build the sagitta-cli command for validation
         let mut validate_command = Command::new("sagitta-cli");
@@ -97,12 +97,12 @@ impl ValidateTool {
             validate_command.arg("--line-start").arg(line_start.to_string())
                 .arg("--line-end").arg(line_end.to_string());
         } else {
-            return Err(FredAgentError::ToolError("Either element or both line_start and line_end must be provided".to_string()));
+            return Err(SagittaCodeError::ToolError("Either element or both line_start and line_end must be provided".to_string()));
         }
         
         // Execute the command
         let validation_output = validate_command.output()
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to execute sagitta-cli: {}", e)))?;
         
         // Check validation result
         let output_text = String::from_utf8_lossy(&validation_output.stdout).to_string();
@@ -111,7 +111,7 @@ impl ValidateTool {
         if validation_output.status.success() {
             Ok(format!("Validation successful: {}", output_text))
         } else {
-            Err(FredAgentError::ToolError(format!("Validation failed: {}", error_text)))
+            Err(SagittaCodeError::ToolError(format!("Validation failed: {}", error_text)))
         }
     }
 }
@@ -158,10 +158,10 @@ impl Tool for ValidateTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: ValidateParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse validate parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse validate parameters: {}", e)))?;
         
         // Validate the edit
         match self.validate_edit(&params).await {

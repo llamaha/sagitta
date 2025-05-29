@@ -1,4 +1,4 @@
-// Panel management for the Fred Agent application
+// Panel management for the Sagitta Code application
 
 use std::sync::Arc;
 use egui::{Context, ScrollArea, Window, RichText, Color32};
@@ -78,11 +78,11 @@ impl PreviewPanel {
     }
 }
 
-/// Logging panel for displaying Fred Agent logs
+/// Logging panel for displaying Sagitta Code logs
 pub struct LoggingPanel {
     pub visible: bool,
     pub logs: Vec<(std::time::SystemTime, String)>, // (timestamp, log line)
-    pub filter_fred_only: bool,
+    pub filter_sagitta_code_only: bool,
 }
 
 impl LoggingPanel {
@@ -90,7 +90,7 @@ impl LoggingPanel {
         Self {
             visible: false,
             logs: Vec::new(),
-            filter_fred_only: true,
+            filter_sagitta_code_only: true,
         }
     }
 
@@ -125,7 +125,7 @@ impl LoggingPanel {
             .default_width(500.0)
             .frame(egui::Frame::none().fill(theme.panel_background()))
             .show(ctx, |ui| {
-                ui.heading("Fred Logs");
+                ui.heading("Sagitta Code Logs");
                 ui.horizontal(|ui| {
                     if ui.button("Copy 10s").clicked() {
                         let logs = self.get_recent_logs(10);

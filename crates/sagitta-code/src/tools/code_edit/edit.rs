@@ -9,7 +9,7 @@ use std::fs;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Parameters for line-based code editing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,42 +50,42 @@ impl EditTool {
     }
     
     /// Perform a line-based edit
-    async fn perform_edit(&self, params: &EditParams) -> Result<String, FredAgentError> {
+    async fn perform_edit(&self, params: &EditParams) -> Result<String, SagittaCodeError> {
         // Get repository information
         let repo_manager = self.repo_manager.lock().await;
         
         // Find repository by name
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo_config = repositories.iter()
             .find(|r| r.name == params.repository_name)
-            .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
         
         // Construct the full file path
         let full_path = PathBuf::from(&repo_config.local_path).join(&params.file_path);
         
         if !full_path.exists() {
-            return Err(FredAgentError::ToolError(format!("File '{}' not found", full_path.display())));
+            return Err(SagittaCodeError::ToolError(format!("File '{}' not found", full_path.display())));
         }
         
         // Read the file
         let file_content = fs::read_to_string(&full_path)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to read file: {}", e)))?;
         
         // Split into lines
         let lines: Vec<&str> = file_content.lines().collect();
         
         // Validate line numbers
         if params.line_start < 1 || params.line_start > lines.len() {
-            return Err(FredAgentError::ToolError(format!(
+            return Err(SagittaCodeError::ToolError(format!(
                 "Invalid start line number: {}. File has {} lines",
                 params.line_start, lines.len()
             )));
         }
         
         if params.line_end < params.line_start || params.line_end > lines.len() {
-            return Err(FredAgentError::ToolError(format!(
+            return Err(SagittaCodeError::ToolError(format!(
                 "Invalid end line number: {}. File has {} lines, and start line is {}",
                 params.line_end, lines.len(), params.line_start
             )));
@@ -118,7 +118,7 @@ impl EditTool {
         
         // Write the file
         fs::write(&full_path, &new_content)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to write file: {}", e)))?;
         
         // TODO: Format the code if requested
         
@@ -169,10 +169,10 @@ impl Tool for EditTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: EditParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse edit parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse edit parameters: {}", e)))?;
         
         // Perform the edit
         match self.perform_edit(&params).await {

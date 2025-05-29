@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use crate::llm::client::{LlmClient, Message, MessagePart, Role, GroundingConfig};
 use crate::llm::client::ToolDefinition as LlmToolDefinition;
 
@@ -35,7 +35,7 @@ impl WebSearchTool {
     }
     
     /// Perform a web search and return structured, actionable results
-    async fn perform_search(&self, query: &str) -> Result<serde_json::Value, FredAgentError> {
+    async fn perform_search(&self, query: &str) -> Result<serde_json::Value, SagittaCodeError> {
         // Analyze the query to determine what type of information is being requested
         let search_prompt = self.create_targeted_prompt(query);
         
@@ -55,7 +55,7 @@ impl WebSearchTool {
         let response = self.llm_client
             .generate_with_grounding(&[search_message], &[], &grounding_config)
             .await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to perform web search: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to perform web search: {}", e)))?;
         
         // Extract response and grounding info
         let response_text = response.message.parts.iter()
@@ -467,10 +467,10 @@ The tool provides both human-readable results and structured data that can be us
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: WebSearchParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse web search parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse web search parameters: {}", e)))?;
         
         // Perform the search
         let result = self.perform_search(&params.search_term).await?;
@@ -495,14 +495,14 @@ mod tests {
         
         #[async_trait]
         impl LlmClient for TestLlmClient {
-            async fn generate(&self, messages: &[Message], tools: &[LlmToolDefinition]) -> Result<LlmResponse, FredAgentError>;
-            async fn generate_with_thinking(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig) -> Result<LlmResponse, FredAgentError>;
-            async fn generate_with_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], grounding_config: &GroundingConfig) -> Result<LlmResponse, FredAgentError>;
-            async fn generate_with_thinking_and_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<LlmResponse, FredAgentError>;
-            async fn generate_stream(&self, messages: &[Message], tools: &[LlmToolDefinition]) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
-            async fn generate_stream_with_thinking(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
-            async fn generate_stream_with_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
-            async fn generate_stream_with_thinking_and_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
+            async fn generate(&self, messages: &[Message], tools: &[LlmToolDefinition]) -> Result<LlmResponse, SagittaCodeError>;
+            async fn generate_with_thinking(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig) -> Result<LlmResponse, SagittaCodeError>;
+            async fn generate_with_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], grounding_config: &GroundingConfig) -> Result<LlmResponse, SagittaCodeError>;
+            async fn generate_with_thinking_and_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<LlmResponse, SagittaCodeError>;
+            async fn generate_stream(&self, messages: &[Message], tools: &[LlmToolDefinition]) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
+            async fn generate_stream_with_thinking(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
+            async fn generate_stream_with_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
+            async fn generate_stream_with_thinking_and_grounding(&self, messages: &[Message], tools: &[LlmToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
         }
     }
 
@@ -621,7 +621,7 @@ mod tests {
         mock_client
             .expect_generate_with_grounding()
             .times(1)
-            .returning(|_, _, _| Err(FredAgentError::LlmError("API error".to_string())));
+            .returning(|_, _, _| Err(SagittaCodeError::LlmError("API error".to_string())));
         
         let tool = WebSearchTool::new(Arc::new(mock_client));
         

@@ -132,7 +132,7 @@ pub fn chat_input_ui(
             };
             ui.small(RichText::new(help_text).color(hint_color).weak());
             
-            // Add Message Fred and help button on the same line (right side)
+            // Add Message Sagitta Code and help button on the same line (right side)
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Simple help button with tooltip
                 let help_label = RichText::new("?")
@@ -147,7 +147,7 @@ pub fn chat_input_ui(
                 }
                 
                 ui.add_space(8.0);
-                ui.small(RichText::new("Message Fred").color(hint_color));
+                ui.small(RichText::new("Message Sagitta Code").color(hint_color));
             });
         });
         
@@ -157,7 +157,7 @@ pub fn chat_input_ui(
         ui.horizontal(|ui| {
             if is_in_loop {
                 ui.add_space(4.0);
-                ui.small(RichText::new("🔄 Fred is in reasoning loop...").color(warning_color));
+                ui.small(RichText::new("🔄 Sagitta Code is in reasoning loop...").color(warning_color));
                 ui.spinner();
                 
                 // Loop control buttons
@@ -178,7 +178,7 @@ pub fn chat_input_ui(
                 }
             } else if is_waiting {
                 ui.add_space(4.0);
-                ui.small(RichText::new("Fred is thinking...").color(hint_color));
+                ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
                 ui.spinner();
             }
             

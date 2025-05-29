@@ -1,9 +1,9 @@
 use crate::agent::message::types::ToolCategory;
 use crate::agent::tool::ToolRegistry;
 use crate::agent::types::AgentMessage;
-use crate::config::FredAgentConfig;
+use crate::config::SagittaCodeConfig;
 use crate::gemini::client::GeminiClient;
-use crate::gui::app::FredApp;
+use crate::gui::app::SagittaCodeApp;
 use crate::gui::chat::ChatMessage;
 use crate::gui::chat::MessageAuthor;
 use crate::gui::tools::ValidateTool;
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-impl FredApp {
+impl SagittaCodeApp {
     async fn initialize_agent(&mut self, ctx: &Context) -> anyhow::Result<()> {
         let repo_manager = Arc::new(RepoManager::new(self.config.as_ref().clone()));
         let tool_registry = Arc::new(ToolRegistry::new());

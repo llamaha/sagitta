@@ -1,4 +1,4 @@
-# Fred Agent Conversation Management Implementation Plan
+# Sagitta Code Conversation Management Implementation Plan
 
 ## Overview
 This plan outlines the implementation of an advanced conversation management system that surpasses traditional linear chat interfaces with intelligent branching, semantic clustering, project-contextual workspaces, and advanced persistence.

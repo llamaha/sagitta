@@ -10,9 +10,9 @@ lazy_static! {
 }
 
 /// Custom logger that collects logs for the logging panel
-pub struct FredLogCollector;
+pub struct SagittaCodeLogCollector;
 
-impl log::Log for FredLogCollector {
+impl log::Log for SagittaCodeLogCollector {
     fn enabled(&self, metadata: &Metadata) -> bool {
         metadata.target().contains("sagitta_code")
     }
@@ -32,7 +32,7 @@ impl log::Log for FredLogCollector {
     fn flush(&self) {}
 }
 
-static FRED_LOG_COLLECTOR: FredLogCollector = FredLogCollector;
+static SAGITTA_CODE_LOG_COLLECTOR: SagittaCodeLogCollector = SagittaCodeLogCollector;
 
 /// Initialize the logger with a reasonable default configuration
 pub fn init_logger() {
@@ -119,8 +119,8 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn test_fred_log_collector_enabled() {
-        let collector = FredLogCollector;
+    fn test_sagitta_code_log_collector_enabled() {
+        let collector = SagittaCodeLogCollector;
         
         // Test with sagitta_code target
         let metadata = Metadata::builder()
@@ -132,8 +132,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fred_log_collector_disabled() {
-        let collector = FredLogCollector;
+    fn test_sagitta_code_log_collector_disabled() {
+        let collector = SagittaCodeLogCollector;
         
         // Test with non-sagitta_code target
         let metadata = Metadata::builder()
@@ -145,8 +145,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fred_log_collector_partial_match() {
-        let collector = FredLogCollector;
+    fn test_sagitta_code_log_collector_partial_match() {
+        let collector = SagittaCodeLogCollector;
         
         // Test with target that contains sagitta_code
         let metadata = Metadata::builder()
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_storage() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_different_levels() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_size_limit() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_flush() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // flush() should not panic and should be a no-op
         collector.flush();
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_timestamp() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_message_format() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_concurrent_access() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_with_empty_message() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn test_log_collector_with_special_characters() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     #[ignore] // Ignoring due to potential environment/unicode handling issues in test runner
     fn test_log_collector_with_unicode() {
-        let collector = FredLogCollector;
+        let collector = SagittaCodeLogCollector;
         
         // Clear any existing logs
         if let Ok(mut logs) = LOG_COLLECTOR.lock() {

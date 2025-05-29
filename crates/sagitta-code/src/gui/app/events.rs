@@ -1,4 +1,4 @@
-// Event handling for the Fred Agent application
+// Event handling for the Sagitta Code application
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -11,7 +11,7 @@ use crate::agent::events::AgentEvent;
 use crate::llm::client::Role;
 use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall, MessageType};
 use super::panels::{SystemEventType};
-use super::FredAgentApp;
+use super::SagittaCodeApp;
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ pub enum ConversationEvent {
 }
 
 /// Process agent events
-pub fn process_agent_events(app: &mut FredAgentApp) {
+pub fn process_agent_events(app: &mut SagittaCodeApp) {
     if let Some(ref mut receiver) = app.agent_event_receiver {
         // Collect events first to avoid borrowing issues
         let mut events = Vec::new();
@@ -50,14 +50,14 @@ pub fn process_agent_events(app: &mut FredAgentApp) {
                         let chat_message = make_chat_message_from_agent_message(&message);
                         let streaming_message: StreamingMessage = chat_message.into();
                         app.chat_manager.add_complete_message(streaming_message);
-                        log::info!("FredAgentApp: Added complete LlmMessage as new message");
+                        log::info!("SagittaCodeApp: Added complete LlmMessage as new message");
                     } else {
-                        log::warn!("FredAgentApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?})", app.state.current_response_id);
+                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?})", app.state.current_response_id);
                     }
                     app.state.is_waiting_for_response = false;
                 },
                 AgentEvent::LlmChunk { content, is_final } => {
-                    log::info!("FredAgentApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", content.chars().take(70).collect::<String>(), is_final);
+                    log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", content.chars().take(70).collect::<String>(), is_final);
                     handle_llm_chunk(app, content, is_final, None);
                 },
                 AgentEvent::ToolCall { tool_call } => {
@@ -74,7 +74,7 @@ pub fn process_agent_events(app: &mut FredAgentApp) {
                     );
                 },
                 AgentEvent::StateChanged(state) => {
-                    log::debug!("FredAgentApp: Agent state changed to: {:?}", state);
+                    log::debug!("SagittaCodeApp: Agent state changed to: {:?}", state);
                     handle_state_change(app, state);
                 },
                 AgentEvent::ToolCallApproved { tool_call_id } => {
@@ -94,14 +94,14 @@ pub fn process_agent_events(app: &mut FredAgentApp) {
                     app.panels.events_panel.add_event(SystemEventType::Error, message_text);
                 },
                 AgentEvent::ConversationStatusChanged(status) => {
-                    log::info!("FredAgentApp: Received ConversationStatusChanged event: {:?}", status);
+                    log::info!("SagittaCodeApp: Received ConversationStatusChanged event: {:?}", status);
                     // Potentially refresh UI elements that depend on conversation status here
                 },
                 AgentEvent::Error(err_msg) => {
                     // Display error in a more prominent way, e.g., a toast or modal
                     // For now, add to events panel
                     app.panels.events_panel.add_event(SystemEventType::Error, err_msg.clone());
-                    log::error!("FredAgentApp received error event: {}", err_msg);
+                    log::error!("SagittaCodeApp received error event: {}", err_msg);
                     // Potentially update state to indicate error
                     app.state.is_waiting_for_response = false; // Stop waiting indicator on error
                     app.state.thinking_message = None;
@@ -119,7 +119,7 @@ pub fn process_agent_events(app: &mut FredAgentApp) {
                                  session_id, success, duration_ms, steps, tools)
                     );
                     // Signal that response processing is complete if it was a reasoning session
-                    // This assumes reasoning completion means Fred can take new input.
+                    // This assumes reasoning completion means Sagitta Code can take new input.
                     app.state.is_waiting_for_response = false;
                     app.state.thinking_message = None;
                 },
@@ -189,10 +189,10 @@ pub fn process_agent_events(app: &mut FredAgentApp) {
 }
 
 /// Process application-specific UI events
-pub fn process_app_events(app: &mut FredAgentApp) {
+pub fn process_app_events(app: &mut SagittaCodeApp) {
     // Collect events first to avoid borrowing issues
     let mut events = Vec::new();
-    if let Some(ref mut receiver) = app.app_event_receiver { // Assume app_event_receiver will be added to FredAgentApp
+    if let Some(ref mut receiver) = app.app_event_receiver { // Assume app_event_receiver will be added to SagittaCodeApp
         while let Ok(event) = receiver.try_recv() {
             events.push(event);
         }
@@ -202,7 +202,7 @@ pub fn process_app_events(app: &mut FredAgentApp) {
     for event in events {
         match event {
             AppEvent::ResponseProcessingComplete => {
-                log::info!("FredAgentApp: Received ResponseProcessingComplete event. Resetting is_waiting_for_response.");
+                log::info!("SagittaCodeApp: Received ResponseProcessingComplete event. Resetting is_waiting_for_response.");
                 app.state.is_waiting_for_response = false;
                 // Potentially clear other related state if needed, e.g., thinking indicators
                 app.state.is_thinking = false;
@@ -212,7 +212,7 @@ pub fn process_app_events(app: &mut FredAgentApp) {
                 // This might already be handled by AgentEvent::LlmChunk is_final=true,
                 // but adding it here ensures consistency if the event is sent separately.
                 if app.state.current_response_id.is_some() {
-                    log::warn!("FredAgentApp: ResponseProcessingComplete event received, but current_response_id was still set. Clearing it now.");
+                    log::warn!("SagittaCodeApp: ResponseProcessingComplete event received, but current_response_id was still set. Clearing it now.");
                     // If there's an active response ID, try to finalize it in chat_manager
                     // This is a safeguard; ideally, it's finalized when the stream ends.
                     app.chat_manager.finish_streaming(app.state.current_response_id.as_ref().unwrap());
@@ -239,13 +239,13 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 }
 
 /// Handle LLM chunk events
-pub fn handle_llm_chunk(app: &mut FredAgentApp, content: String, is_final: bool, message_type: Option<MessageType>) {
+pub fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, message_type: Option<MessageType>) {
     // CRITICAL FIX: Always start a new response for each new conversation turn
     // Don't reuse existing response IDs from previous messages
     if app.state.current_response_id.is_none() {
         let response_id = app.chat_manager.start_agent_response();
         app.state.current_response_id = Some(response_id);
-        log::info!("FredAgentApp: Started NEW agent response with ID: {}", app.state.current_response_id.as_ref().unwrap());
+        log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", app.state.current_response_id.as_ref().unwrap());
     }
     
     // Check if this is thinking content
@@ -264,7 +264,7 @@ pub fn handle_llm_chunk(app: &mut FredAgentApp, content: String, is_final: bool,
                 format!("Thinking: {}", thinking_text.chars().take(100).collect::<String>())
             );
             
-            log::info!("FredAgentApp: Added thinking content to conversation stream: {} chars", thinking_text.len());
+            log::info!("SagittaCodeApp: Added thinking content to conversation stream: {} chars", thinking_text.len());
             
             // Clear the old modal thinking indicator since we're now using inline thinking
             app.state.thinking_message = None;
@@ -312,13 +312,13 @@ pub fn handle_llm_chunk(app: &mut FredAgentApp, content: String, is_final: bool,
             app.chat_manager.finish_streaming(response_id);
             app.state.current_response_id = None;
             app.state.is_waiting_for_response = false;
-            log::info!("FredAgentApp: Finished streaming response, cleared current_response_id for NEXT response");
+            log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
         }
     }
 }
 
 /// Handle tool call events
-pub fn handle_tool_call(app: &mut FredAgentApp, tool_call: ToolCall) {
+pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
     // Add to events panel for system tracking
     app.panels.events_panel.add_event(
         SystemEventType::ToolExecution,
@@ -349,7 +349,7 @@ pub fn handle_tool_call(app: &mut FredAgentApp, tool_call: ToolCall) {
 }
 
 /// Handle tool call result events
-pub fn handle_tool_call_result(app: &mut FredAgentApp, tool_call_id: String, tool_name: String, result: crate::tools::types::ToolResult) {
+pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, tool_name: String, result: crate::tools::types::ToolResult) {
     // Add to events panel
     let event_message = match &result {
         crate::tools::types::ToolResult::Success(_) => {
@@ -399,7 +399,7 @@ pub fn handle_tool_call_result(app: &mut FredAgentApp, tool_call_id: String, too
 }
 
 /// Handle agent state changes
-pub fn handle_state_change(app: &mut FredAgentApp, state: AgentState) {
+pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
     // Add state changes to events panel
     let (state_message, event_type) = match &state {
         AgentState::Idle => {
@@ -479,7 +479,7 @@ pub fn handle_state_change(app: &mut FredAgentApp, state: AgentState) {
 }
 
 /// Process conversation events from async tasks
-pub fn process_conversation_events(app: &mut FredAgentApp) {
+pub fn process_conversation_events(app: &mut SagittaCodeApp) {
     // Collect events first to avoid borrowing issues
     let mut events = Vec::new();
     if let Some(ref mut receiver) = app.conversation_event_receiver {
@@ -512,7 +512,7 @@ pub fn process_conversation_events(app: &mut FredAgentApp) {
 }
 
 /// Refresh conversation data asynchronously
-pub fn refresh_conversation_data(app: &mut FredAgentApp) {
+pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
     if let Some(agent) = &app.agent {
         // Check if we should refresh (every 10 seconds max to reduce flickering)
         let should_refresh = app.state.last_conversation_refresh
@@ -548,14 +548,14 @@ pub fn refresh_conversation_data(app: &mut FredAgentApp) {
 }
 
 /// Force refresh conversation data immediately
-pub fn force_refresh_conversation_data(app: &mut FredAgentApp) {
+pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
     app.state.last_conversation_refresh = None;
     app.state.conversation_data_loading = false;
     refresh_conversation_data(app);
 }
 
 /// Switch to a conversation and update the chat view
-pub fn switch_to_conversation(app: &mut FredAgentApp, conversation_id: uuid::Uuid) {
+pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
     if let Some(agent) = &app.agent {
         let agent_clone = agent.clone();
         let sender = app.conversation_event_sender.clone();
@@ -615,7 +615,7 @@ pub fn switch_to_conversation(app: &mut FredAgentApp, conversation_id: uuid::Uui
     }
 }
 
-impl FredAgentApp {
+impl SagittaCodeApp {
     pub fn handle_agent_event(&mut self, event: AgentEvent, ctx: &egui::Context) {
         match event {
             AgentEvent::LlmChunk { content, is_final } => {
@@ -694,7 +694,7 @@ impl FredAgentApp {
         if self.state.current_response_id.is_none() {
             let response_id = self.chat_manager.start_agent_response();
             self.state.current_response_id = Some(response_id);
-            log::info!("FredAgentApp: Started NEW agent response with ID: {}", self.state.current_response_id.as_ref().unwrap());
+            log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", self.state.current_response_id.as_ref().unwrap());
         }
         
         // Check if this is thinking content
@@ -730,7 +730,7 @@ impl FredAgentApp {
                 self.chat_manager.finish_streaming(response_id);
                 self.state.current_response_id = None;
                 self.state.is_waiting_for_response = false;
-                log::info!("FredAgentApp: Finished streaming response, cleared current_response_id for NEXT response");
+                log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
             }
         }
     }

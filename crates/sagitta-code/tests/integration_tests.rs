@@ -1,5 +1,5 @@
-use sagitta_code::config::{FredAgentConfig, load_merged_config, load_config_from_path};
-use sagitta_code::gui::app::FredAgentApp;
+use sagitta_code::config::{SagittaCodeConfig, load_merged_config, load_config_from_path};
+use sagitta_code::gui::app::SagittaCodeApp;
 use sagitta_code::gui::repository::manager::RepositoryManager;
 use sagitta_code::gui::chat::StreamingChatManager;
 use std::sync::Arc;
@@ -21,14 +21,14 @@ use sagitta_code::llm::gemini::client::GeminiClient;
 use std::path::Path;
 use uuid::Uuid;
 
-/// Test that demonstrates Fred overwriting messages instead of creating new ones
+/// Test that demonstrates Sagitta Code overwriting messages instead of creating new ones
 #[tokio::test]
-async fn test_fred_message_overwriting_issue() {
+async fn test_sagitta_code_message_overwriting_issue() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("sagitta_code_config.json");
     
     // Create a test config
-    let test_config = FredAgentConfig::default();
+    let test_config = SagittaCodeConfig::default();
     let config_json = serde_json::to_string_pretty(&test_config).unwrap();
     fs::write(&config_path, config_json).await.unwrap();
     
@@ -37,7 +37,7 @@ async fn test_fred_message_overwriting_issue() {
     let repo_manager = Arc::new(Mutex::new(
         RepositoryManager::new(Arc::new(Mutex::new(app_core_config.clone())))
     ));
-    let mut app = FredAgentApp::new(repo_manager, test_config.clone(), app_core_config);
+    let mut app = SagittaCodeApp::new(repo_manager, test_config.clone(), app_core_config);
     
     // Simulate the exact behavior that causes message overwriting
     let chat_manager = Arc::new(StreamingChatManager::new());
@@ -46,38 +46,38 @@ async fn test_fred_message_overwriting_issue() {
     let user_msg_1 = "What is Rust?";
     chat_manager.add_user_message(user_msg_1.to_string());
     
-    // Fred starts responding to first message
-    let fred_response_1_id = chat_manager.start_agent_response();
-    chat_manager.append_content(&fred_response_1_id, "Rust is a systems programming language".to_string());
-    chat_manager.finish_streaming(&fred_response_1_id);
+    // Sagitta Code starts responding to first message
+    let sagitta_code_response_1_id = chat_manager.start_agent_response();
+    chat_manager.append_content(&sagitta_code_response_1_id, "Rust is a systems programming language".to_string());
+    chat_manager.finish_streaming(&sagitta_code_response_1_id);
     
     // User sends second message
     let user_msg_2 = "Can you give me an example?";
     chat_manager.add_user_message(user_msg_2.to_string());
     
-    // Fred starts responding to second message - THIS SHOULD CREATE A NEW MESSAGE
-    let fred_response_2_id = chat_manager.start_agent_response();
-    chat_manager.append_content(&fred_response_2_id, "Here's a simple example:".to_string());
-    chat_manager.finish_streaming(&fred_response_2_id);
+    // Sagitta Code starts responding to second message - THIS SHOULD CREATE A NEW MESSAGE
+    let sagitta_code_response_2_id = chat_manager.start_agent_response();
+    chat_manager.append_content(&sagitta_code_response_2_id, "Here's a simple example:".to_string());
+    chat_manager.finish_streaming(&sagitta_code_response_2_id);
     
     // Get all messages
     let messages = chat_manager.get_all_messages();
     
-    // CRITICAL TEST: Fred should have created 2 separate messages with different IDs and timestamps
-    let fred_messages: Vec<_> = messages.iter()
+    // CRITICAL TEST: Sagitta Code should have created 2 separate messages with different IDs and timestamps
+    let sagitta_code_messages: Vec<_> = messages.iter()
         .filter(|m| m.author == sagitta_code::gui::chat::view::MessageAuthor::Agent)
         .collect();
     
-    assert_eq!(fred_messages.len(), 2, "Fred should create 2 separate messages, not overwrite the first one");
-    assert_ne!(fred_messages[0].id, fred_messages[1].id, "Fred's messages should have different IDs");
-    assert!(fred_messages[1].timestamp > fred_messages[0].timestamp, "Second message should have later timestamp");
+    assert_eq!(sagitta_code_messages.len(), 2, "Sagitta Code should create 2 separate messages, not overwrite the first one");
+    assert_ne!(sagitta_code_messages[0].id, sagitta_code_messages[1].id, "Sagitta Code's messages should have different IDs");
+    assert!(sagitta_code_messages[1].timestamp > sagitta_code_messages[0].timestamp, "Second message should have later timestamp");
     
     // Content should be different
-    assert_eq!(fred_messages[0].content, "Rust is a systems programming language");
-    assert_eq!(fred_messages[1].content, "Here's a simple example:");
+    assert_eq!(sagitta_code_messages[0].content, "Rust is a systems programming language");
+    assert_eq!(sagitta_code_messages[1].content, "Here's a simple example:");
     
-    // Total messages should be 4: user1, fred1, user2, fred2
-    assert_eq!(messages.len(), 4, "Should have 4 total messages: user1, fred1, user2, fred2");
+    // Total messages should be 4: user1, sagitta_code1, user2, sagitta_code2
+    assert_eq!(messages.len(), 4, "Should have 4 total messages: user1, sagitta_code1, user2, sagitta_code2");
 }
 
 /// Test that demonstrates settings not loading from config files
@@ -116,7 +116,7 @@ async fn test_settings_not_loading_from_config() {
     let repo_manager = Arc::new(Mutex::new(
         RepositoryManager::new(Arc::new(Mutex::new(app_core_config_for_loaded.clone())))
     ));
-    let mut app = FredAgentApp::new(repo_manager, loaded_config.clone(), app_core_config_for_loaded);
+    let mut app = SagittaCodeApp::new(repo_manager, loaded_config.clone(), app_core_config_for_loaded);
     
     // CRITICAL TEST: App should be created with the loaded config values
     assert_eq!(app.settings_panel.gemini_api_key, "test-api-key-123");
@@ -131,13 +131,13 @@ async fn test_settings_not_loading_from_config() {
 #[tokio::test]
 async fn test_app_streaming_message_behavior() {
     let temp_dir = TempDir::new().unwrap();
-    let test_config = FredAgentConfig::default();
+    let test_config = SagittaCodeConfig::default();
     
     let app_core_config_stream_test = sagitta_search::config::AppConfig::default();
     let repo_manager = Arc::new(Mutex::new(
         RepositoryManager::new(Arc::new(Mutex::new(app_core_config_stream_test.clone())))
     ));
-    let mut app = FredAgentApp::new(repo_manager, test_config.clone(), app_core_config_stream_test);
+    let mut app = SagittaCodeApp::new(repo_manager, test_config.clone(), app_core_config_stream_test);
     let ctx = egui::Context::default();
     
     // Simulate the exact sequence that causes message overwriting
@@ -152,7 +152,7 @@ async fn test_app_streaming_message_behavior() {
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
-    // Simulate Fred starting to respond to first message
+    // Simulate Sagitta Code starting to respond to first message
     let response_id_1 = app.chat_manager.start_agent_response();
     app.current_response_id = Some(response_id_1.clone());
     
@@ -174,7 +174,7 @@ async fn test_app_streaming_message_behavior() {
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
-    // CRITICAL: Fred should start a NEW response, not reuse the old one
+    // CRITICAL: Sagitta Code should start a NEW response, not reuse the old one
     let response_id_2 = app.chat_manager.start_agent_response();
     app.current_response_id = Some(response_id_2.clone());
     
@@ -190,7 +190,7 @@ async fn test_app_streaming_message_behavior() {
     let messages = app.chat_manager.get_all_messages();
     
     // CRITICAL TEST: Should have 4 separate messages
-    assert_eq!(messages.len(), 4, "Should have 4 messages: user1, fred1, user2, fred2");
+    assert_eq!(messages.len(), 4, "Should have 4 messages: user1, sagitta_code1, user2, sagitta_code2");
     
     // Check message sequence
     assert_eq!(messages[0].author, sagitta_code::gui::chat::view::MessageAuthor::User);
@@ -205,8 +205,8 @@ async fn test_app_streaming_message_behavior() {
     assert_eq!(messages[3].author, sagitta_code::gui::chat::view::MessageAuthor::Agent);
     assert_eq!(messages[3].content, "Here's a simple Rust example:\n\nfn main() { println!(\"Hello!\"); }");
     
-    // CRITICAL: Fred's messages should have different IDs
-    assert_ne!(messages[1].id, messages[3].id, "Fred's responses should have different IDs");
+    // CRITICAL: Sagitta Code's messages should have different IDs
+    assert_ne!(messages[1].id, messages[3].id, "Sagitta Code's responses should have different IDs");
     
     // CRITICAL: Timestamps should be in order
     assert!(messages[1].timestamp <= messages[2].timestamp);
@@ -241,23 +241,23 @@ async fn test_config_loading_direct() {
 
 /// Test that reproduces the EXACT message overwriting issue described by the user
 #[tokio::test]
-async fn test_fred_message_overwriting_exact_scenario() {
+async fn test_sagitta_code_message_overwriting_exact_scenario() {
     let temp_dir = TempDir::new().unwrap();
-    let test_config = FredAgentConfig::default();
+    let test_config = SagittaCodeConfig::default();
     
     let app_core_config_overwrite_test = sagitta_search::config::AppConfig::default();
     let repo_manager = Arc::new(Mutex::new(
         RepositoryManager::new(Arc::new(Mutex::new(app_core_config_overwrite_test.clone())))
     ));
-    let mut app = FredAgentApp::new(repo_manager, test_config.clone(), app_core_config_overwrite_test);
+    let mut app = SagittaCodeApp::new(repo_manager, test_config.clone(), app_core_config_overwrite_test);
     let ctx = egui::Context::default();
     
-    // SCENARIO: User asks first question, Fred responds, then user asks second question
+    // SCENARIO: User asks first question, Sagitta Code responds, then user asks second question
     
     // 1. User asks first question
     app.chat_manager.add_user_message("What is Rust?".to_string());
     
-    // 2. Fred starts streaming first response
+    // 2. Sagitta Code starts streaming first response
     app.current_response_id = None; // Ensure clean state
     app.handle_llm_chunk("Rust is a systems".to_string(), false, &ctx);
     let first_response_id = app.current_response_id.clone();
@@ -270,7 +270,7 @@ async fn test_fred_message_overwriting_exact_scenario() {
     // 3. User asks second question
     app.chat_manager.add_user_message("Can you give me an example?".to_string());
     
-    // 4. Fred starts streaming second response - THIS SHOULD CREATE A NEW MESSAGE
+    // 4. Sagitta Code starts streaming second response - THIS SHOULD CREATE A NEW MESSAGE
     app.handle_llm_chunk("Here's a simple".to_string(), false, &ctx);
     let second_response_id = app.current_response_id.clone();
     app.handle_llm_chunk(" Rust example:".to_string(), false, &ctx);
@@ -281,39 +281,39 @@ async fn test_fred_message_overwriting_exact_scenario() {
     
     let messages = app.chat_manager.get_all_messages();
     
-    // Should have exactly 4 messages: user1, fred1, user2, fred2
-    assert_eq!(messages.len(), 4, "Should have 4 messages: user1, fred1, user2, fred2");
+    // Should have exactly 4 messages: user1, sagitta_code1, user2, sagitta_code2
+    assert_eq!(messages.len(), 4, "Should have 4 messages: user1, sagitta_code1, user2, sagitta_code2");
     
-    // Check that Fred's responses are separate messages with different content
-    let fred_messages: Vec<_> = messages.iter()
+    // Check that Sagitta Code's responses are separate messages with different content
+    let sagitta_code_messages: Vec<_> = messages.iter()
         .filter(|m| m.author == sagitta_code::gui::chat::view::MessageAuthor::Agent)
         .collect();
     
-    assert_eq!(fred_messages.len(), 2, "Should have exactly 2 Fred messages");
-    assert_ne!(fred_messages[0].id, fred_messages[1].id, "Fred's messages should have different IDs");
-    assert_ne!(fred_messages[0].content, fred_messages[1].content, "Fred's messages should have different content");
+    assert_eq!(sagitta_code_messages.len(), 2, "Should have exactly 2 Sagitta Code messages");
+    assert_ne!(sagitta_code_messages[0].id, sagitta_code_messages[1].id, "Sagitta Code's messages should have different IDs");
+    assert_ne!(sagitta_code_messages[0].content, sagitta_code_messages[1].content, "Sagitta Code's messages should have different content");
     
     // Verify the actual content
-    assert_eq!(fred_messages[0].content, "Rust is a systems programming language that focuses on safety.");
-    assert_eq!(fred_messages[1].content, "Here's a simple Rust example:\n\nfn main() { println!(\"Hello!\"); }");
+    assert_eq!(sagitta_code_messages[0].content, "Rust is a systems programming language that focuses on safety.");
+    assert_eq!(sagitta_code_messages[1].content, "Here's a simple Rust example:\n\nfn main() { println!(\"Hello!\"); }");
     
     // Verify timestamps are in order
-    assert!(fred_messages[1].timestamp > fred_messages[0].timestamp, "Second message should have later timestamp");
+    assert!(sagitta_code_messages[1].timestamp > sagitta_code_messages[0].timestamp, "Second message should have later timestamp");
     
-    println!("✅ FIXED: Fred creates separate messages instead of overwriting!");
+    println!("✅ FIXED: Sagitta Code creates separate messages instead of overwriting!");
 }
 
 /// Test that reproduces the EXACT conversation chain scenario from the user
 #[tokio::test]
 async fn test_exact_user_conversation_scenario() {
     let temp_dir = TempDir::new().unwrap();
-    let test_config = FredAgentConfig::default();
+    let test_config = SagittaCodeConfig::default();
     
     let app_core_config_scenario_test = sagitta_search::config::AppConfig::default();
     let repo_manager = Arc::new(Mutex::new(
         RepositoryManager::new(Arc::new(Mutex::new(app_core_config_scenario_test.clone())))
     ));
-    let mut app = FredAgentApp::new(repo_manager, test_config.clone(), app_core_config_scenario_test);
+    let mut app = SagittaCodeApp::new(repo_manager, test_config.clone(), app_core_config_scenario_test);
     let ctx = egui::Context::default();
     
     // EXACT SCENARIO FROM USER'S CONVERSATION CHAIN:
@@ -338,7 +338,7 @@ async fn test_exact_user_conversation_scenario() {
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
-    // 3. Fred starts thinking and responding to "hello"
+    // 3. Sagitta Code starts thinking and responding to "hello"
     // Simulate state change to Thinking (this should create NEW response ID)
     app.handle_agent_state_change(sagitta_code::agent::state::types::AgentState::Thinking { message: "Test thinking".to_string() }, &ctx);
     
@@ -350,7 +350,7 @@ async fn test_exact_user_conversation_scenario() {
     assert!(first_response_id.is_some(), "Should have created response ID for first message after first chunk");
     
     // Simulate the long response about being a code assistant
-    app.handle_llm_chunk("Hello! I'm Fred AI, a code assistant".to_string(), false, &ctx);
+    app.handle_llm_chunk("Hello! I'm Sagitta Code AI, a code assistant".to_string(), false, &ctx);
     app.handle_llm_chunk(" powered by Gemini and sagitta-search.".to_string(), false, &ctx);
     app.handle_llm_chunk(" I can help you understand and work with code repositories.".to_string(), true, &ctx);
     
@@ -373,7 +373,7 @@ async fn test_exact_user_conversation_scenario() {
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
-    // 5. Fred starts thinking and responding to "tell me a joke"
+    // 5. Sagitta Code starts thinking and responding to "tell me a joke"
     // Simulate state change to Thinking (this should create DIFFERENT response ID)
     app.handle_agent_state_change(sagitta_code::agent::state::types::AgentState::Thinking { message: "Test thinking again".to_string() }, &ctx);
     
@@ -393,37 +393,37 @@ async fn test_exact_user_conversation_scenario() {
     let messages = app.chat_manager.get_all_messages();
     
     // CRITICAL ASSERTIONS: Should have initial_count + 4 messages total
-    // initial messages + User: "hello" + Fred: response + User: "tell me a joke" + Fred: joke
+    // initial messages + User: "hello" + Sagitta Code: response + User: "tell me a joke" + Sagitta Code: joke
     let expected_count = initial_count + 4;
-    assert_eq!(messages.len(), expected_count, "Should have {} messages: initial + user1 + fred1 + user2 + fred2", expected_count);
+    assert_eq!(messages.len(), expected_count, "Should have {} messages: initial + user1 + sagitta_code1 + user2 + sagitta_code2", expected_count);
     
-    // Find the user and Fred messages (skip any initial messages)
-    let user_and_fred_messages: Vec<_> = messages.iter().skip(initial_count).collect();
-    assert_eq!(user_and_fred_messages.len(), 4, "Should have 4 new messages after initial");
+    // Find the user and Sagitta Code messages (skip any initial messages)
+    let user_and_sagitta_code_messages: Vec<_> = messages.iter().skip(initial_count).collect();
+    assert_eq!(user_and_sagitta_code_messages.len(), 4, "Should have 4 new messages after initial");
     
     // Check message sequence and content
-    assert_eq!(user_and_fred_messages[0].author, sagitta_code::gui::chat::view::MessageAuthor::User);
-    assert_eq!(user_and_fred_messages[0].content, "hello");
+    assert_eq!(user_and_sagitta_code_messages[0].author, sagitta_code::gui::chat::view::MessageAuthor::User);
+    assert_eq!(user_and_sagitta_code_messages[0].content, "hello");
     
-    assert_eq!(user_and_fred_messages[1].author, sagitta_code::gui::chat::view::MessageAuthor::Agent);
-    assert!(user_and_fred_messages[1].content.contains("code assistant"));
+    assert_eq!(user_and_sagitta_code_messages[1].author, sagitta_code::gui::chat::view::MessageAuthor::Agent);
+    assert!(user_and_sagitta_code_messages[1].content.contains("code assistant"));
     
-    assert_eq!(user_and_fred_messages[2].author, sagitta_code::gui::chat::view::MessageAuthor::User);
-    assert_eq!(user_and_fred_messages[2].content, "tell me a joke");
+    assert_eq!(user_and_sagitta_code_messages[2].author, sagitta_code::gui::chat::view::MessageAuthor::User);
+    assert_eq!(user_and_sagitta_code_messages[2].content, "tell me a joke");
     
-    assert_eq!(user_and_fred_messages[3].author, sagitta_code::gui::chat::view::MessageAuthor::Agent);
-    assert!(user_and_fred_messages[3].content.contains("developer go broke"));
-    assert!(user_and_fred_messages[3].content.contains("cache"));
+    assert_eq!(user_and_sagitta_code_messages[3].author, sagitta_code::gui::chat::view::MessageAuthor::Agent);
+    assert!(user_and_sagitta_code_messages[3].content.contains("developer go broke"));
+    assert!(user_and_sagitta_code_messages[3].content.contains("cache"));
     
-    // CRITICAL: Fred's messages should have different IDs and timestamps
-    assert_ne!(user_and_fred_messages[1].id, user_and_fred_messages[3].id, "Fred's two responses should have different IDs");
+    // CRITICAL: Sagitta Code's messages should have different IDs and timestamps
+    assert_ne!(user_and_sagitta_code_messages[1].id, user_and_sagitta_code_messages[3].id, "Sagitta Code's two responses should have different IDs");
     
     // Timestamps should be in order
-    assert!(user_and_fred_messages[1].timestamp >= user_and_fred_messages[0].timestamp);
-    assert!(user_and_fred_messages[2].timestamp >= user_and_fred_messages[1].timestamp);
-    assert!(user_and_fred_messages[3].timestamp >= user_and_fred_messages[2].timestamp);
+    assert!(user_and_sagitta_code_messages[1].timestamp >= user_and_sagitta_code_messages[0].timestamp);
+    assert!(user_and_sagitta_code_messages[2].timestamp >= user_and_sagitta_code_messages[1].timestamp);
+    assert!(user_and_sagitta_code_messages[3].timestamp >= user_and_sagitta_code_messages[2].timestamp);
     
-    println!("✅ FIXED: Exact user scenario - Fred creates separate messages with different timestamps!");
+    println!("✅ FIXED: Exact user scenario - Sagitta Code creates separate messages with different timestamps!");
 }
 
 /// Test that verifies the Gemini streaming parser handles empty parts arrays

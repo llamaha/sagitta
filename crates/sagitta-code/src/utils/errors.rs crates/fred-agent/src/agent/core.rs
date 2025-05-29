@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone)]
-pub enum FredAgentError {
+pub enum SagittaCodeError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
     
@@ -25,16 +25,16 @@ pub enum FredAgentError {
 }
 
 /// Implement From for broadcast::error::SendError
-impl<T> From<tokio::sync::broadcast::error::SendError<T>> for FredAgentError {
+impl<T> From<tokio::sync::broadcast::error::SendError<T>> for SagittaCodeError {
     fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
-        FredAgentError::EventError(format!("Failed to send event: {}", err))
+        SagittaCodeError::EventError(format!("Failed to send event: {}", err))
     }
 }
 
-// Add manual From<std::io::Error> for FredAgentError
-impl From<std::io::Error> for FredAgentError {
+// Add manual From<std::io::Error> for SagittaCodeError
+impl From<std::io::Error> for SagittaCodeError {
     fn from(err: std::io::Error) -> Self {
-        FredAgentError::IoError(err.to_string())
+        SagittaCodeError::IoError(err.to_string())
     }
 }
 

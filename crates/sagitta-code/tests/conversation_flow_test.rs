@@ -2,10 +2,10 @@ use std::sync::Arc;
 use tokio;
 use sagitta_code::{
     agent::Agent,
-    config::FredAgentConfig,
+    config::SagittaCodeConfig,
     tools::registry::ToolRegistry,
     llm::client::{LlmClient, Message, ToolDefinition as LlmToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
-    utils::errors::FredAgentError,
+    utils::errors::SagittaCodeError,
 };
 use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
 use futures_util::StreamExt;
@@ -40,7 +40,7 @@ impl MockLlmClient {
         }
     }
 
-    async fn get_next_response(&self) -> Result<MockResponse, FredAgentError> {
+    async fn get_next_response(&self) -> Result<MockResponse, SagittaCodeError> {
         let mut index_guard = self.current_index.lock().await;
         let responses_guard = self.responses.lock().await;
         
@@ -66,12 +66,12 @@ impl LlmClient for MockLlmClient {
         &self,
         messages: &[Message],
         tools: &[LlmToolDefinition],
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.calls.lock().await.push((messages.to_vec(), tools.to_vec()));
         let mock_response = self.get_next_response().await?;
         
         if mock_response.should_error {
-            return Err(FredAgentError::LlmError(
+            return Err(SagittaCodeError::LlmError(
                 mock_response.error_message.unwrap_or_else(|| "Mock LLM error triggered".to_string())
             ));
         }
@@ -99,27 +99,27 @@ impl LlmClient for MockLlmClient {
 
     async fn generate_with_thinking(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _thinking_config: &ThinkingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
     async fn generate_with_grounding(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
     async fn generate_with_thinking_and_grounding(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _thinking_config: &ThinkingConfig, _grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         self.generate(messages, tools).await
     }
 
     async fn generate_stream(
         &self, messages: &[Message], tools: &[LlmToolDefinition],
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let llm_response = self.generate(messages, tools).await?;
-        let mut stream_chunks: Vec<Result<StreamChunk, FredAgentError>> = Vec::new();
+        let mut stream_chunks: Vec<Result<StreamChunk, SagittaCodeError>> = Vec::new();
         for part in llm_response.message.parts {
             stream_chunks.push(Ok(StreamChunk {
                 part: part.clone(), is_final: false, finish_reason: None, token_usage: None,
@@ -133,19 +133,19 @@ impl LlmClient for MockLlmClient {
 
      async fn generate_stream_with_thinking(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _thinking_config: &ThinkingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 
     async fn generate_stream_with_grounding(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 
     async fn generate_stream_with_thinking_and_grounding(
         &self, messages: &[Message], tools: &[LlmToolDefinition], _thinking_config: &ThinkingConfig, _grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
 }
@@ -156,7 +156,7 @@ async fn test_conversation_flow_context_continuity() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let config = FredAgentConfig::default();
+    let config = SagittaCodeConfig::default();
     
     let model_path = Path::new("./models/all-MiniLM-L6-v2.onnx");
     let tokenizer_path = Path::new("./models/tokenizer.json");
@@ -288,7 +288,7 @@ async fn test_reasoning_session_continuity() {
         .filter_level(log::LevelFilter::Debug)
         .try_init();
 
-    let config = FredAgentConfig::default();
+    let config = SagittaCodeConfig::default();
     
     let model_path = Path::new("./models/all-MiniLM-L6-v2.onnx");
     let tokenizer_path = Path::new("./models/tokenizer.json");

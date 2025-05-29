@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio;
 use sagitta_code::tools::types::{Tool, ToolResult, ToolDefinition, ToolCategory};
-use sagitta_code::utils::errors::FredAgentError;
+use sagitta_code::utils::errors::SagittaCodeError;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -37,7 +37,7 @@ impl Tool for MockAddRepositoryTool {
         }
     }
     
-    async fn execute(&self, _parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, _parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         if self.should_return_already_exists {
             // Simulate the "already exists" case - this should be treated as success
             Ok(ToolResult::Success(serde_json::json!({

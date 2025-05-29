@@ -483,32 +483,32 @@ mod tests {
     fn test_sagitta_code_streaming_behavior_integration() {
         let manager = StreamingChatManager::new();
         
-        // Simulate a conversation where Fred should create separate messages
+        // Simulate a conversation where Sagitta Code should create separate messages
         
         // User asks first question
         let user_id_1 = manager.add_user_message("What is Rust?".to_string());
         
-        // Fred starts responding (first response)
-        let fred_id_1 = manager.start_agent_response();
-        manager.set_thinking(&fred_id_1, "Let me think about Rust programming language...".to_string());
-        manager.append_content(&fred_id_1, "Rust is a systems programming language".to_string());
-        manager.append_content(&fred_id_1, " that focuses on safety and performance.".to_string());
-        manager.finish_streaming(&fred_id_1);
+        // Sagitta Code starts responding (first response)
+        let sagitta_code_id_1 = manager.start_agent_response();
+        manager.set_thinking(&sagitta_code_id_1, "Let me think about Rust programming language...".to_string());
+        manager.append_content(&sagitta_code_id_1, "Rust is a systems programming language".to_string());
+        manager.append_content(&sagitta_code_id_1, " that focuses on safety and performance.".to_string());
+        manager.finish_streaming(&sagitta_code_id_1);
         
         // User asks follow-up question
         let user_id_2 = manager.add_user_message("Can you give me an example?".to_string());
         
-        // Fred starts NEW response (should be separate message with new timestamp)
-        let fred_id_2 = manager.start_agent_response();
-        manager.append_content(&fred_id_2, "Here's a simple Rust example:\n\n".to_string());
-        manager.append_content(&fred_id_2, "```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```".to_string());
-        manager.finish_streaming(&fred_id_2);
+        // Sagitta Code starts NEW response (should be separate message with new timestamp)
+        let sagitta_code_id_2 = manager.start_agent_response();
+        manager.append_content(&sagitta_code_id_2, "Here's a simple Rust example:\n\n".to_string());
+        manager.append_content(&sagitta_code_id_2, "```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```".to_string());
+        manager.finish_streaming(&sagitta_code_id_2);
         
         // Get all messages
         let messages = manager.get_all_messages();
         
         // Verify we have 4 separate messages
-        assert_eq!(messages.len(), 4, "Should have 4 separate messages: user1, fred1, user2, fred2");
+        assert_eq!(messages.len(), 4, "Should have 4 separate messages: user1, sagitta_code1, user2, sagitta_code2");
         
         // Verify message order and content
         assert_eq!(messages[0].author, MessageAuthor::User);
@@ -527,16 +527,16 @@ mod tests {
         assert!(messages[3].content.contains("fn main()"));
         assert!(messages[3].is_complete());
         
-        // Verify Fred's responses have different IDs (not overwriting same message)
-        assert_ne!(messages[1].id, messages[3].id, "Fred's responses should have different IDs");
+        // Verify Sagitta Code's responses have different IDs (not overwriting same message)
+        assert_ne!(messages[1].id, messages[3].id, "Sagitta Code's responses should have different IDs");
         
         // Verify timestamps are in order (later messages have later timestamps)
         assert!(messages[1].timestamp <= messages[2].timestamp);
         assert!(messages[2].timestamp <= messages[3].timestamp);
         
-        // Verify Fred's second response has a later timestamp than the first
+        // Verify Sagitta Code's second response has a later timestamp than the first
         assert!(messages[3].timestamp > messages[1].timestamp, 
-                "Fred's second response should have a later timestamp than the first");
+                "Sagitta Code's second response should have a later timestamp than the first");
     }
 }
 

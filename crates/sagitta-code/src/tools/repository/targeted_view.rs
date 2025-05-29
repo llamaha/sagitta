@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use repo_mapper::{generate_repo_map, RepoMapOptions, MethodInfo};
 
 /// Parameters for targeted view of repository elements
@@ -105,7 +105,7 @@ impl TargetedViewTool {
     /// 1. Do semantic search to find promising files
     /// 2. Get repository map for those files to extract metadata
     /// 3. Use metadata to perform highly targeted semantic search
-    async fn perform_targeted_analysis(&self, params: &TargetedViewParams) -> Result<TargetedAnalysisResult, FredAgentError> {
+    async fn perform_targeted_analysis(&self, params: &TargetedViewParams) -> Result<TargetedAnalysisResult, SagittaCodeError> {
         let repo_manager = self.repo_manager.lock().await;
 
         // Step 1: Initial semantic search to find promising files
@@ -118,7 +118,7 @@ impl TargetedViewTool {
             params.element_type.as_deref(),
             params.language.as_deref(),
             None, // branch
-        ).await.map_err(|e| FredAgentError::ToolError(format!("Semantic search failed: {}", e)))?;
+        ).await.map_err(|e| SagittaCodeError::ToolError(format!("Semantic search failed: {}", e)))?;
 
         log::info!("Step 1 result: Found {} semantic search results", semantic_results.result.len());
 
@@ -154,11 +154,11 @@ impl TargetedViewTool {
             
             // Fallback: Use repository map to find all files, then filter by query terms
             let repositories = repo_manager.list_repositories().await
-                .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+                .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
             
             let repo = repositories.iter()
                 .find(|r| r.name == params.repository_name)
-                .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+                .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
 
             // Generate a broad repository map to find relevant files
             let fallback_map_options = RepoMapOptions {
@@ -179,7 +179,7 @@ impl TargetedViewTool {
             };
 
             let fallback_repo_map = generate_repo_map(&repo.local_path, fallback_map_options)
-                .map_err(|e| FredAgentError::ToolError(format!("Failed to generate fallback repository map: {}", e)))?;
+                .map_err(|e| SagittaCodeError::ToolError(format!("Failed to generate fallback repository map: {}", e)))?;
 
             // Filter files based on query terms (simple text matching)
             let query_terms: Vec<&str> = params.query.split_whitespace().collect();
@@ -249,11 +249,11 @@ impl TargetedViewTool {
         log::info!("Step 2: Generating repository map for promising files");
         
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo = repositories.iter()
             .find(|r| r.name == params.repository_name)
-            .ok_or_else(|| FredAgentError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
 
         // Generate map for specific files
         let map_options = RepoMapOptions {
@@ -267,7 +267,7 @@ impl TargetedViewTool {
         };
 
         let repo_map_result = generate_repo_map(&repo.local_path, map_options)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to generate repository map: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to generate repository map: {}", e)))?;
 
         // Filter map results to only include promising files
         let mut filtered_methods_by_file = HashMap::new();
@@ -506,7 +506,7 @@ impl Tool for TargetedViewTool {
         }
     }
 
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         match serde_json::from_value::<TargetedViewParams>(parameters) {
             Ok(params) => {
                 match self.perform_targeted_analysis(&params).await {

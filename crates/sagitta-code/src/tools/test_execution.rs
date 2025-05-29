@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::tools::shell_execution::{ShellExecutionTool, ShellExecutionParams, ShellExecutionResult, LanguageContainers};
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Test framework configurations for different languages
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,9 +255,9 @@ impl TestExecutionTool {
         &self,
         language: &str,
         working_dir: &PathBuf,
-    ) -> Result<Vec<PathBuf>, FredAgentError> {
+    ) -> Result<Vec<PathBuf>, SagittaCodeError> {
         let config = self.test_configs.get_config(language)
-            .ok_or_else(|| FredAgentError::ToolError(
+            .ok_or_else(|| SagittaCodeError::ToolError(
                 format!("Unsupported language for testing: {}", language)
             ))?;
         
@@ -300,9 +300,9 @@ impl TestExecutionTool {
         language: &str,
         working_dir: &PathBuf,
         env_vars: &HashMap<String, String>,
-    ) -> Result<Vec<String>, FredAgentError> {
+    ) -> Result<Vec<String>, SagittaCodeError> {
         let config = self.test_configs.get_config(language)
-            .ok_or_else(|| FredAgentError::ToolError(
+            .ok_or_else(|| SagittaCodeError::ToolError(
                 format!("Unsupported language for testing: {}", language)
             ))?;
         
@@ -331,9 +331,9 @@ impl TestExecutionTool {
     async fn execute_tests(
         &self,
         params: &TestExecutionParams,
-    ) -> Result<TestExecutionResult, FredAgentError> {
+    ) -> Result<TestExecutionResult, SagittaCodeError> {
         let config = self.test_configs.get_config(&params.language)
-            .ok_or_else(|| FredAgentError::ToolError(
+            .ok_or_else(|| SagittaCodeError::ToolError(
                 format!("Unsupported language for testing: {}", params.language)
             ))?;
         
@@ -390,7 +390,7 @@ impl TestExecutionTool {
                 tests_passed: exec_result.exit_code == 0,
             })
         } else {
-            Err(FredAgentError::ToolError(
+            Err(SagittaCodeError::ToolError(
                 "Failed to execute test command".to_string()
             ))
         }
@@ -459,10 +459,10 @@ impl Tool for TestExecutionTool {
         }
     }
     
-    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: TestExecutionParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(
+            .map_err(|e| SagittaCodeError::ToolError(
                 format!("Invalid parameters: {}", e)
             ))?;
         
@@ -583,7 +583,7 @@ mod tests {
         let result = tool.execute(invalid_params).await;
         assert!(result.is_err());
         
-        if let Err(FredAgentError::ToolError(msg)) = result {
+        if let Err(SagittaCodeError::ToolError(msg)) = result {
             assert!(msg.contains("Invalid parameters"));
         } else {
             panic!("Expected ToolError");
@@ -602,7 +602,7 @@ mod tests {
         let result = tool.execute(params).await;
         assert!(result.is_err());
         
-        if let Err(FredAgentError::ToolError(msg)) = result {
+        if let Err(SagittaCodeError::ToolError(msg)) = result {
             assert!(msg.contains("Unsupported language"));
         } else {
             panic!("Expected ToolError");

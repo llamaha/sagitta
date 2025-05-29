@@ -7,7 +7,7 @@ use tokio::process::Command;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Configuration for shell execution containers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,7 +200,7 @@ impl ShellExecutionTool {
     }
     
     /// Check if Docker is available
-    pub async fn check_docker_available(&self) -> Result<bool, FredAgentError> {
+    pub async fn check_docker_available(&self) -> Result<bool, SagittaCodeError> {
         let output = Command::new("docker")
             .arg("--version")
             .output()
@@ -217,7 +217,7 @@ impl ShellExecutionTool {
         &self,
         params: &ShellExecutionParams,
         config: &ContainerConfig,
-    ) -> Result<ShellExecutionResult, FredAgentError> {
+    ) -> Result<ShellExecutionResult, SagittaCodeError> {
         let start_time = std::time::Instant::now();
         
         // Prepare Docker command
@@ -285,7 +285,7 @@ impl ShellExecutionTool {
         
         // Execute the command
         let mut child = docker_cmd.spawn()
-            .map_err(|e| FredAgentError::ToolError(
+            .map_err(|e| SagittaCodeError::ToolError(
                 format!("Failed to spawn Docker command: {}", e)
             ))?;
         
@@ -313,7 +313,7 @@ impl ShellExecutionTool {
                 })
             }
             Ok(Err(e)) => {
-                Err(FredAgentError::ToolError(
+                Err(SagittaCodeError::ToolError(
                     format!("Command execution failed: {}", e)
                 ))
             }
@@ -378,17 +378,17 @@ impl Tool for ShellExecutionTool {
         }
     }
     
-    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
         // Check if Docker is available
         if !self.check_docker_available().await? {
-            return Err(FredAgentError::ToolError(
+            return Err(SagittaCodeError::ToolError(
                 "Docker is not available. Please install Docker to use shell execution.".to_string()
             ));
         }
         
         // Parse parameters
         let params: ShellExecutionParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(
+            .map_err(|e| SagittaCodeError::ToolError(
                 format!("Invalid parameters: {}", e)
             ))?;
         
@@ -510,7 +510,7 @@ mod tests {
         let result = tool.execute(invalid_params).await;
         assert!(result.is_err());
         
-        if let Err(FredAgentError::ToolError(msg)) = result {
+        if let Err(SagittaCodeError::ToolError(msg)) = result {
             assert!(msg.contains("Invalid parameters"));
         } else {
             panic!("Expected ToolError");

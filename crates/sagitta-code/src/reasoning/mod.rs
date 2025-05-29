@@ -19,7 +19,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use crate::{agent::events::AgentEvent, tools::{registry::ToolRegistry, types::Tool}, llm::client::{MessagePart, StreamChunk as FredStreamChunk}, utils::errors::FredAgentError};
+use crate::{agent::events::AgentEvent, tools::{registry::ToolRegistry, types::Tool}, llm::client::{MessagePart, StreamChunk as SagittaCodeStreamChunk}, utils::errors::SagittaCodeError};
 
 pub struct AgentToolExecutor {
     tool_registry: Arc<ToolRegistry>,
@@ -69,15 +69,15 @@ impl ToolExecutor for AgentToolExecutor {
     }
 
     async fn get_available_tools(&self) -> ReasoningEngineResult<Vec<reasoning_engine::traits::ToolDefinition>> {
-        let fred_tools: Vec<crate::tools::types::ToolDefinition> = self.tool_registry.get_definitions().await;
+        let sagitta_code_tools: Vec<crate::tools::types::ToolDefinition> = self.tool_registry.get_definitions().await;
         let mut reasoning_tools = Vec::new();
-        for fred_tool in fred_tools {
+        for sagitta_code_tool in sagitta_code_tools {
             reasoning_tools.push(reasoning_engine::traits::ToolDefinition {
-                name: fred_tool.name,
-                description: fred_tool.description,
-                parameters: fred_tool.parameters, 
-                is_required: fred_tool.is_required,
-                category: Some(fred_tool.category.to_string()), 
+                name: sagitta_code_tool.name,
+                description: sagitta_code_tool.description,
+                parameters: sagitta_code_tool.parameters, 
+                is_required: sagitta_code_tool.is_required,
+                category: Some(sagitta_code_tool.category.to_string()), 
                 estimated_duration_ms: None, 
             });
         }
@@ -201,11 +201,11 @@ impl EventEmitter for AgentEventEmitter {
 }
 
 pub struct AgentStreamHandler {
-    output_chunk_sender: mpsc::UnboundedSender<Result<FredStreamChunk, FredAgentError>>,
+    output_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>,
 }
 
 impl AgentStreamHandler {
-    pub fn new(output_chunk_sender: mpsc::UnboundedSender<Result<FredStreamChunk, FredAgentError>>) -> Self {
+    pub fn new(output_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>) -> Self {
         Self { output_chunk_sender }
     }
 }
@@ -213,12 +213,12 @@ impl AgentStreamHandler {
 #[async_trait]
 impl StreamHandler for AgentStreamHandler {
     async fn handle_chunk(&self, chunk: StreamChunk) -> ReasoningEngineResult<()> {
-        let fred_chunk_conversion_result: Result<Option<FredStreamChunk>, FredAgentError> = {
+        let sagitta_code_chunk_conversion_result: Result<Option<SagittaCodeStreamChunk>, SagittaCodeError> = {
             match chunk.chunk_type.as_str() {
                 "llm_text" | "text" | "llm_output" => {
                     String::from_utf8(chunk.data)
-                        .map_err(|e| FredAgentError::ParseError(format!("Stream chunk data is not valid UTF-8 for text: {}", e)))
-                        .map(|text_content| Some(FredStreamChunk {
+                        .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid UTF-8 for text: {}", e)))
+                        .map(|text_content| Some(SagittaCodeStreamChunk {
                             part: MessagePart::Text { text: text_content },
                             is_final: chunk.is_final,
                             finish_reason: if chunk.is_final { chunk.metadata.get("finish_reason").cloned() } else { None },
@@ -228,27 +228,27 @@ impl StreamHandler for AgentStreamHandler {
                 "summary" => {
                     // Handle summary chunks with proper metadata
                     String::from_utf8(chunk.data)
-                        .map_err(|e| FredAgentError::ParseError(format!("Stream chunk data is not valid UTF-8 for summary: {}", e)))
+                        .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid UTF-8 for summary: {}", e)))
                         .map(|text_content| {
                             // Create a text chunk with summary metadata
-                            let mut fred_chunk = FredStreamChunk {
+                            let mut sagitta_code_chunk = SagittaCodeStreamChunk {
                                 part: MessagePart::Text { text: text_content },
                                 is_final: chunk.is_final,
                                 finish_reason: if chunk.is_final { chunk.metadata.get("finish_reason").cloned() } else { None },
                                 token_usage: None,
                             };
                             // The metadata will be handled by the agent event system
-                            Some(fred_chunk)
+                            Some(sagitta_code_chunk)
                         })
                 }
                 "tool_call" => {
                     serde_json::from_slice(&chunk.data)
-                        .map_err(|e| FredAgentError::ParseError(format!("Stream chunk data is not valid JSON for tool_call: {}", e)))
+                        .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid JSON for tool_call: {}", e)))
                         .map(|tool_call_data: serde_json::Value| {
                             let call_id = tool_call_data.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
                             let name = tool_call_data.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
                             let parameters = tool_call_data.get("parameters").cloned().unwrap_or(serde_json::Value::Null);
-                            Some(FredStreamChunk {
+                            Some(SagittaCodeStreamChunk {
                                 part: MessagePart::ToolCall { tool_call_id: call_id, name, parameters },
                                 is_final: chunk.is_final,
                                 finish_reason: None,
@@ -258,12 +258,12 @@ impl StreamHandler for AgentStreamHandler {
                 }
                 "tool_result" => {
                     serde_json::from_slice(&chunk.data)
-                        .map_err(|e| FredAgentError::ParseError(format!("Stream chunk data is not valid JSON for tool_result: {}", e)))
+                        .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid JSON for tool_result: {}", e)))
                         .map(|tool_result_data: serde_json::Value| {
                             let call_id = tool_result_data.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
                             let name = tool_result_data.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
                             let result_val = tool_result_data.get("result").cloned().unwrap_or(serde_json::Value::Null);
-                            Some(FredStreamChunk {
+                            Some(SagittaCodeStreamChunk {
                                 part: MessagePart::ToolResult { tool_call_id: call_id, name, result: result_val },
                                 is_final: chunk.is_final,
                                 finish_reason: None,
@@ -275,16 +275,16 @@ impl StreamHandler for AgentStreamHandler {
             }
         };
 
-        match fred_chunk_conversion_result {
-            Ok(Some(fred_chunk)) => {
-                if self.output_chunk_sender.send(Ok(fred_chunk)).is_err() {
-                    return Err(ReasoningError::streaming("output_channel_closed".to_string(), "Error sending FredStreamChunk".to_string()));
+        match sagitta_code_chunk_conversion_result {
+            Ok(Some(sagitta_code_chunk)) => {
+                if self.output_chunk_sender.send(Ok(sagitta_code_chunk)).is_err() {
+                    return Err(ReasoningError::streaming("output_channel_closed".to_string(), "Error sending SagittaCodeStreamChunk".to_string()));
                 }
             }
             Ok(None) => {}
             Err(sagitta_code_error) => {
                 if self.output_chunk_sender.send(Err(sagitta_code_error)).is_err() {
-                    return Err(ReasoningError::streaming("output_channel_closed_sending_error".to_string(), "Error sending FredAgentError".to_string()));
+                    return Err(ReasoningError::streaming("output_channel_closed_sending_error".to_string(), "Error sending SagittaCodeError".to_string()));
                 }
             }
         }
@@ -292,7 +292,7 @@ impl StreamHandler for AgentStreamHandler {
     }
 
     async fn handle_stream_complete(&self, _stream_id: Uuid) -> ReasoningEngineResult<()> {
-        let final_chunk = FredStreamChunk {
+        let final_chunk = SagittaCodeStreamChunk {
             part: MessagePart::Text { text: String::new() }, 
             is_final: true,
             finish_reason: Some("REASONING_INTERNAL_STREAM_ENDED".to_string()),
@@ -305,9 +305,9 @@ impl StreamHandler for AgentStreamHandler {
     }
 
     async fn handle_stream_error(&self, stream_id: Uuid, error: ReasoningError) -> ReasoningEngineResult<()> {
-        let fred_error = FredAgentError::ReasoningError(format!("Internal stream {} failed: {}", stream_id, error));
-        if self.output_chunk_sender.send(Err(fred_error)).is_err() {
-            return Err(ReasoningError::streaming("output_channel_closed_on_error".to_string(), "Error sending FredAgentError after stream error".to_string()));
+        let sagitta_code_error = SagittaCodeError::ReasoningError(format!("Internal stream {} failed: {}", stream_id, error));
+        if self.output_chunk_sender.send(Err(sagitta_code_error)).is_err() {
+            return Err(ReasoningError::streaming("output_channel_closed_on_error".to_string(), "Error sending SagittaCodeError after stream error".to_string()));
         }
         Ok(())
     }
@@ -379,7 +379,7 @@ impl MetricsCollector for AgentMetricsCollector {
 
 pub use config::create_reasoning_config;
 pub use llm_adapter::ReasoningLlmClientAdapter;
-pub use intent_analyzer::FredIntentAnalyzer;
+pub use intent_analyzer::SagittaCodeIntentAnalyzer;
 
 #[cfg(test)]
 mod tests {

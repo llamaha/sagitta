@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use sagitta_search::AppConfig as SagittaAppConfig;
 
 /// Parameters for searching files in a repository
@@ -70,10 +70,10 @@ impl Tool for SearchFileInRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         // Parse parameters
         let params: SearchFileParams = serde_json::from_value(parameters)
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to parse search_file parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse search_file parameters: {}", e)))?;
         
         // Get the repository manager
         let repo_manager = self.repo_manager.lock().await;
@@ -96,7 +96,7 @@ impl Tool for SearchFileInRepositoryTool {
                 })))
             },
             Err(e) => {
-                Err(FredAgentError::ToolError(format!("Failed to search for files: {}", e)))
+                Err(SagittaCodeError::ToolError(format!("Failed to search for files: {}", e)))
             }
         }
     }

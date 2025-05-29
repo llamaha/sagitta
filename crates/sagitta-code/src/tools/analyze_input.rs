@@ -6,7 +6,7 @@ use regex::Regex;
 
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 // Import for ONNX provider
 use sagitta_search::embedding::provider::onnx::ThreadSafeOnnxProvider;
 use sagitta_search::embedding::provider::EmbeddingProvider;
@@ -87,11 +87,11 @@ struct AnalysisResult {
 */
 
 // New constant for the tools collection name
-pub const TOOLS_COLLECTION_NAME: &str = "fred_tools_collection";
+pub const TOOLS_COLLECTION_NAME: &str = "sagitta_code_tools_collection";
 const DEFAULT_STRING_PARAM_KEY: &str = "inferred_text_input"; // Default key for text when no specific param name found
 
 // Helper function for parameter extraction using Regex
-fn extract_parameters_regex(input_str: &str, tool_name: &str, schema_val: &Value) -> Result<(Value, Vec<String>), FredAgentError> {
+fn extract_parameters_regex(input_str: &str, tool_name: &str, schema_val: &Value) -> Result<(Value, Vec<String>), SagittaCodeError> {
     let mut processed_input = input_str.trim().to_string();
     let schema_properties = schema_val.get("properties").and_then(|p| p.as_object());
     let schema_has_properties = schema_properties.map_or(false, |props| !props.is_empty());
@@ -297,7 +297,7 @@ impl Tool for AnalyzeInputTool {
         }
     }
 
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         log::debug!("[SemanticAnalyzeInputTool]: executing with parameters: {:?}", parameters);
         let input_str = match parameters.get("input").and_then(|v| v.as_str()) {
             Some(s) => s,
@@ -307,10 +307,10 @@ impl Tool for AnalyzeInputTool {
         let input_embedding = match self.embedding_provider.embed_batch(&[input_str]) {
             Ok(mut embeddings) => match embeddings.pop() {
                 Some(emb) => Ok(emb),
-                None => Err(FredAgentError::ToolError("Embedding batch returned empty for single input".to_string())),
+                None => Err(SagittaCodeError::ToolError("Embedding batch returned empty for single input".to_string())),
             },
-            Err(e) => Err(FredAgentError::SagittaDbError(format!("Embedding provider error for input '{}': {}", input_str, e))),
-        }?; // Use ? to propagate FredAgentError
+            Err(e) => Err(SagittaCodeError::SagittaDbError(format!("Embedding provider error for input '{}': {}", input_str, e))),
+        }?; // Use ? to propagate SagittaCodeError
 
         let search_request = SearchPoints { 
             collection_name: TOOLS_COLLECTION_NAME.to_string(),

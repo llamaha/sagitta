@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use futures_util::stream::select_all;
 use bytes::Bytes;
 
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use crate::llm::client::{StreamChunk, MessagePart};
 use crate::llm::gemini::api::{GeminiResponse, Part};
 
@@ -49,7 +49,7 @@ impl GeminiStream {
     
     /// Process accumulated data and try to extract complete lines
     /// CRITICAL: Gemini sends "data: {json}\n" format, NOT standard SSE with \n\n separators
-    fn process_buffer(&mut self) -> Option<Result<StreamChunk, FredAgentError>> {
+    fn process_buffer(&mut self) -> Option<Result<StreamChunk, SagittaCodeError>> {
         // First, check if we have any queued chunks to emit
         if let Some(chunk) = self.chunk_queue.pop_front() {
             log::debug!("GeminiStream: Emitting queued chunk");
@@ -108,7 +108,7 @@ impl GeminiStream {
     }
     
     /// Process a single complete line
-    fn process_line(&self, line: &str) -> Option<Result<Vec<StreamChunk>, FredAgentError>> {
+    fn process_line(&self, line: &str) -> Option<Result<Vec<StreamChunk>, SagittaCodeError>> {
         let trimmed = line.trim();
         
         // Skip empty lines
@@ -144,7 +144,7 @@ impl GeminiStream {
     }
     
     /// Parse JSON data from a data line
-    fn parse_json_data(&self, json_data: &str) -> Result<Vec<StreamChunk>, FredAgentError> {
+    fn parse_json_data(&self, json_data: &str) -> Result<Vec<StreamChunk>, SagittaCodeError> {
         // Try parsing as a single GeminiResponse first
         match serde_json::from_str::<GeminiResponse>(json_data) {
             Ok(response) => {
@@ -159,14 +159,14 @@ impl GeminiStream {
                         if let Some(response) = responses.first() {
                             self.convert_response_to_chunks(response)
                         } else {
-                            Err(FredAgentError::LlmError("Empty response array".to_string()))
+                            Err(SagittaCodeError::LlmError("Empty response array".to_string()))
                         }
                     },
                     Err(array_err) => {
                         log::error!("GeminiStream: Failed to parse JSON as single response: {}", single_err);
                         log::error!("GeminiStream: Failed to parse JSON as response array: {}", array_err);
                         log::error!("GeminiStream: Problematic JSON: {}", &json_data[..json_data.len().min(500)]);
-                        Err(FredAgentError::LlmError(format!(
+                        Err(SagittaCodeError::LlmError(format!(
                             "Failed to parse Gemini response JSON: {}", single_err
                         )))
                     }
@@ -176,7 +176,7 @@ impl GeminiStream {
     }
     
     /// Convert a GeminiResponse to multiple StreamChunks (one per part)
-    fn convert_response_to_chunks(&self, response: &GeminiResponse) -> Result<Vec<StreamChunk>, FredAgentError> {
+    fn convert_response_to_chunks(&self, response: &GeminiResponse) -> Result<Vec<StreamChunk>, SagittaCodeError> {
         if let Some(candidate) = response.candidates.first() {
             // Check if this is the final chunk based on finishReason
             let finish_reason = candidate.finish_reason.as_ref();
@@ -207,7 +207,7 @@ impl GeminiStream {
                         token_usage: token_usage_data.clone(), // Add usage if this is the final completion marker
                     }]);
                 } else {
-                    return Err(FredAgentError::LlmError("Empty parts array without final finish reason".to_string()));
+                    return Err(SagittaCodeError::LlmError("Empty parts array without final finish reason".to_string()));
                 }
             }
             
@@ -278,19 +278,19 @@ impl GeminiStream {
             log::info!("GeminiStream: Successfully converted response to {} chunks", chunks.len());
             Ok(chunks)
         } else {
-            Err(FredAgentError::LlmError("No candidates found in response".to_string()))
+            Err(SagittaCodeError::LlmError("No candidates found in response".to_string()))
         }
     }
 
     /// Convert a GeminiResponse to a StreamChunk (DEPRECATED - use convert_response_to_chunks)
     #[deprecated(note = "Use convert_response_to_chunks to handle multiple parts correctly")]
-    fn convert_response_to_chunk(&self, response: &GeminiResponse) -> Result<StreamChunk, FredAgentError> {
+    fn convert_response_to_chunk(&self, response: &GeminiResponse) -> Result<StreamChunk, SagittaCodeError> {
         // Use the new multi-chunk method and return the first chunk for backward compatibility
         let chunks = self.convert_response_to_chunks(response)?;
         if let Some(first_chunk) = chunks.into_iter().next() {
             Ok(first_chunk)
         } else {
-            Err(FredAgentError::LlmError("No chunks generated from response".to_string()))
+            Err(SagittaCodeError::LlmError("No chunks generated from response".to_string()))
         }
     }
     
@@ -348,7 +348,7 @@ impl GeminiStream {
     }
     
     /// Convert a Gemini Part to a StreamChunk with finish reason
-    fn convert_part_to_chunk_with_reason(&self, part: &Part, is_final: bool, finish_reason: Option<&str>) -> Result<StreamChunk, FredAgentError> {
+    fn convert_part_to_chunk_with_reason(&self, part: &Part, is_final: bool, finish_reason: Option<&str>) -> Result<StreamChunk, SagittaCodeError> {
         let message_part = if let Some(text) = &part.text {
             // Check if this is a thought part
             if part.thought == Some(true) {
@@ -387,7 +387,7 @@ impl GeminiStream {
 }
 
 impl Stream for GeminiStream {
-    type Item = Result<StreamChunk, FredAgentError>;
+    type Item = Result<StreamChunk, SagittaCodeError>;
     
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.done {
@@ -454,7 +454,7 @@ impl Stream for GeminiStream {
             Poll::Ready(Some(Err(e))) => {
                 log::error!("GeminiStream: Error in HTTP stream: {}", e);
                 self.done = true;
-                Poll::Ready(Some(Err(FredAgentError::NetworkError(format!(
+                Poll::Ready(Some(Err(SagittaCodeError::NetworkError(format!(
                     "Error in Gemini stream: {}", e
                 )))))
             },
@@ -501,12 +501,12 @@ impl Stream for GeminiStream {
 
 /// A merged stream of text chunks
 pub struct MergedTextStream {
-    inner: Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>,
+    inner: Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>,
 }
 
 impl MergedTextStream {
     /// Create a new MergedTextStream
-    pub fn new(stream: impl Stream<Item = Result<StreamChunk, FredAgentError>> + Send + 'static) -> Self {
+    pub fn new(stream: impl Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + 'static) -> Self {
         Self {
             inner: Box::pin(stream),
         }
@@ -514,7 +514,7 @@ impl MergedTextStream {
 }
 
 impl Stream for MergedTextStream {
-    type Item = Result<StreamChunk, FredAgentError>;
+    type Item = Result<StreamChunk, SagittaCodeError>;
     
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         log::trace!("MergedTextStream: poll_next called");
@@ -545,9 +545,9 @@ impl Stream for MergedTextStream {
 /// Create a merged stream from multiple streams
 pub fn merge_streams<S>(
     streams: Vec<S>
-) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send + 'static>>
+) -> Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + 'static>>
 where
-    S: Stream<Item = Result<StreamChunk, FredAgentError>> + Send + 'static,
+    S: Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + 'static,
 {
     if streams.is_empty() {
         // Return an empty stream if no streams are provided
@@ -557,8 +557,8 @@ where
         Box::pin(streams.into_iter().next().unwrap())
     } else {
         // Use select_all to merge multiple streams
-        let pinned_streams: Vec<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send + 'static>>> = 
-            streams.into_iter().map(|s| Box::pin(s) as Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send + 'static>>).collect();
+        let pinned_streams: Vec<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + 'static>>> = 
+            streams.into_iter().map(|s| Box::pin(s) as Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + 'static>>).collect();
         Box::pin(select_all(pinned_streams))
     }
 }

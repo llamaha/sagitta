@@ -1,4 +1,4 @@
-// Tool result formatting for the Fred Agent application
+// Tool result formatting for the Sagitta Code application
 
 /// Tool result formatter for displaying tool outputs in a human-readable way
 pub struct ToolResultFormatter {

@@ -6,7 +6,7 @@ use std::pin::Pin;
 use uuid::Uuid;
 use std::collections::HashMap;
 
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Represents a role in the conversation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -210,21 +210,21 @@ pub trait LlmClient: Send + Sync {
     async fn generate(&self, 
         messages: &[Message], 
         tools: &[ToolDefinition]
-    ) -> Result<LlmResponse, FredAgentError>;
+    ) -> Result<LlmResponse, SagittaCodeError>;
     
     /// Generate a response from the LLM with thinking configuration
     async fn generate_with_thinking(&self,
         messages: &[Message],
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
-    ) -> Result<LlmResponse, FredAgentError>;
+    ) -> Result<LlmResponse, SagittaCodeError>;
     
     /// Generate a response from the LLM with grounding support
     async fn generate_with_grounding(&self,
         messages: &[Message],
         tools: &[ToolDefinition],
         grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError>;
+    ) -> Result<LlmResponse, SagittaCodeError>;
     
     /// Generate a response from the LLM with both thinking and grounding
     async fn generate_with_thinking_and_grounding(&self,
@@ -232,27 +232,27 @@ pub trait LlmClient: Send + Sync {
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
         grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError>;
+    ) -> Result<LlmResponse, SagittaCodeError>;
     
     /// Generate a streaming response from the LLM
     async fn generate_stream(&self, 
         messages: &[Message], 
         tools: &[ToolDefinition]
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
     
     /// Generate a streaming response from the LLM with thinking configuration
     async fn generate_stream_with_thinking(&self,
         messages: &[Message],
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
     
     /// Generate a streaming response from the LLM with grounding support
     async fn generate_stream_with_grounding(&self,
         messages: &[Message],
         tools: &[ToolDefinition],
         grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
     
     /// Generate a streaming response from the LLM with both thinking and grounding
     async fn generate_stream_with_thinking_and_grounding(&self,
@@ -260,6 +260,6 @@ pub trait LlmClient: Send + Sync {
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
         grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError>;
 }
 

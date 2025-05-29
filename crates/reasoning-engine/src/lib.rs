@@ -284,7 +284,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                     steps_executed: state.history.len() as u32,
                     tools_used: vec![],
                 }).await?;
-                return Ok(state); // Return Ok(state) here as per fred_agent's expectation of Ok(ReasoningState)
+                return Ok(state); // Return Ok(state) here as per sagitta_code's expectation of Ok(ReasoningState)
                                   // but the state itself indicates failure.
             }
         }

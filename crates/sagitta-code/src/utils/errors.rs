@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone)]
-pub enum FredAgentError {
+pub enum SagittaCodeError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
     
@@ -36,9 +36,9 @@ pub enum FredAgentError {
     Unknown(String),
 }
 
-/// Convert any error to a FredAgentError
-pub fn to_agent_error<E: std::error::Error>(err: E) -> FredAgentError {
-    FredAgentError::Unknown(err.to_string())
+/// Convert any error to a SagittaCodeError
+pub fn to_agent_error<E: std::error::Error>(err: E) -> SagittaCodeError {
+    SagittaCodeError::Unknown(err.to_string())
 }
 
 /// Log an error and return it (for use in ? operator chains)
@@ -50,23 +50,23 @@ pub fn log_error<T, E: std::error::Error>(result: Result<T, E>, context: &str) -
 }
 
 /// Implement From for broadcast::error::SendError
-impl<T> From<tokio::sync::broadcast::error::SendError<T>> for FredAgentError {
+impl<T> From<tokio::sync::broadcast::error::SendError<T>> for SagittaCodeError {
     fn from(err: tokio::sync::broadcast::error::SendError<T>) -> Self {
-        FredAgentError::EventError(format!("Failed to send event: {}", err))
+        SagittaCodeError::EventError(format!("Failed to send event: {}", err))
     }
 }
 
-// Add manual From<std::io::Error> for FredAgentError
-impl From<std::io::Error> for FredAgentError {
+// Add manual From<std::io::Error> for SagittaCodeError
+impl From<std::io::Error> for SagittaCodeError {
     fn from(err: std::io::Error) -> Self {
-        FredAgentError::IoError(err.to_string())
+        SagittaCodeError::IoError(err.to_string())
     }
 }
 
-// Add manual From<serde_json::Error> for FredAgentError
-impl From<serde_json::Error> for FredAgentError {
+// Add manual From<serde_json::Error> for SagittaCodeError
+impl From<serde_json::Error> for SagittaCodeError {
     fn from(err: serde_json::Error) -> Self {
-        FredAgentError::Unknown(format!("JSON serialization error: {}", err))
+        SagittaCodeError::Unknown(format!("JSON serialization error: {}", err))
     }
 }
 
@@ -79,41 +79,41 @@ mod tests {
 
     #[test]
     fn test_config_error() {
-        let error = FredAgentError::ConfigError("Invalid configuration".to_string());
+        let error = SagittaCodeError::ConfigError("Invalid configuration".to_string());
         assert_eq!(error.to_string(), "Configuration error: Invalid configuration");
     }
 
     #[test]
     fn test_llm_error() {
-        let error = FredAgentError::LlmError("API request failed".to_string());
+        let error = SagittaCodeError::LlmError("API request failed".to_string());
         assert_eq!(error.to_string(), "LLM client error: API request failed");
     }
 
     #[test]
     fn test_tool_error() {
-        let error = FredAgentError::ToolError("Tool execution failed".to_string());
+        let error = SagittaCodeError::ToolError("Tool execution failed".to_string());
         assert_eq!(error.to_string(), "Tool error: Tool execution failed");
     }
 
     #[test]
     fn test_tool_not_found() {
-        let error = FredAgentError::ToolNotFound("search_tool".to_string());
+        let error = SagittaCodeError::ToolNotFound("search_tool".to_string());
         assert_eq!(error.to_string(), "Tool not found: search_tool");
     }
 
     #[test]
     fn test_sagitta_error() {
-        let error = FredAgentError::SagittaDbError("Database connection failed".to_string());
+        let error = SagittaCodeError::SagittaDbError("Database connection failed".to_string());
         assert_eq!(error.to_string(), "Sagitta core error: Database connection failed");
     }
 
     #[test]
     fn test_io_error_conversion() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"); // Fully qualify
-        let agent_error = FredAgentError::from(io_error);
+        let agent_error = SagittaCodeError::from(io_error);
         
         match agent_error {
-            FredAgentError::IoError(ref msg) => { // Updated to match new IoError(String)
+            SagittaCodeError::IoError(ref msg) => { // Updated to match new IoError(String)
                 assert!(msg.contains("File not found"));
                 assert!(agent_error.to_string().contains("File not found"));
             },
@@ -123,19 +123,19 @@ mod tests {
 
     #[test]
     fn test_network_error() {
-        let error = FredAgentError::NetworkError("Connection timeout".to_string());
+        let error = SagittaCodeError::NetworkError("Connection timeout".to_string());
         assert_eq!(error.to_string(), "Network error: Connection timeout");
     }
 
     #[test]
     fn test_event_error() {
-        let error = FredAgentError::EventError("Event broadcast failed".to_string());
+        let error = SagittaCodeError::EventError("Event broadcast failed".to_string());
         assert_eq!(error.to_string(), "Event error: Event broadcast failed");
     }
 
     #[test]
     fn test_unknown_error() {
-        let error = FredAgentError::Unknown("Unexpected error occurred".to_string());
+        let error = SagittaCodeError::Unknown("Unexpected error occurred".to_string());
         assert_eq!(error.to_string(), "Unknown error: Unexpected error occurred");
     }
 
@@ -145,7 +145,7 @@ mod tests {
         let agent_error = to_agent_error(original_error);
         
         match agent_error {
-            FredAgentError::Unknown(msg) => {
+            SagittaCodeError::Unknown(msg) => {
                 assert!(msg.contains("Access denied"));
             },
             _ => panic!("Expected Unknown variant"),
@@ -178,9 +178,9 @@ mod tests {
         let send_result = tx.send("test message".to_string());
         assert!(send_result.is_err());
         
-        let agent_error = FredAgentError::from(send_result.unwrap_err());
+        let agent_error = SagittaCodeError::from(send_result.unwrap_err());
         match agent_error {
-            FredAgentError::EventError(msg) => {
+            SagittaCodeError::EventError(msg) => {
                 assert!(msg.contains("Failed to send event"));
             },
             _ => panic!("Expected EventError variant"),
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_error_debug_format() {
-        let error = FredAgentError::ConfigError("test".to_string());
+        let error = SagittaCodeError::ConfigError("test".to_string());
         let debug_str = format!("{:?}", error);
         assert!(debug_str.contains("ConfigError"));
         assert!(debug_str.contains("test"));
@@ -198,13 +198,13 @@ mod tests {
     #[test]
     fn test_error_chain() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "Original error"); // Fully qualify
-        let agent_error = FredAgentError::from(io_error);
+        let agent_error = SagittaCodeError::from(io_error);
         
         // Test that the error chain is preserved, now it won't be for IoError(String)
         // as it doesn't store the original error object.
         // assert!(agent_error.source().is_some()); // This will now fail for IoError(String)
         // Instead, check if the source() is None for our new IoError(String)
-        if let FredAgentError::IoError(_) = agent_error {
+        if let SagittaCodeError::IoError(_) = agent_error {
             assert!(agent_error.source().is_none(), "IoError(String) should not have a source().");
         } else {
             // For other errors that might have a source, this could still be true
@@ -216,17 +216,17 @@ mod tests {
     fn test_error_variants_exhaustive() {
         // Test that we can create all error variants
         let errors = vec![
-            FredAgentError::ConfigError("config".to_string()),
-            FredAgentError::LlmError("llm".to_string()),
-            FredAgentError::ToolError("tool".to_string()),
-            FredAgentError::ToolNotFound("not_found".to_string()),
-            FredAgentError::SagittaDbError("sagitta".to_string()),
-            FredAgentError::IoError("io error string".to_string()), // Updated
-            FredAgentError::NetworkError("network".to_string()),
-            FredAgentError::EventError("event".to_string()),
-            FredAgentError::ParseError("parse error".to_string()),
-            FredAgentError::ReasoningError("reasoning error".to_string()),
-            FredAgentError::Unknown("unknown".to_string()),
+            SagittaCodeError::ConfigError("config".to_string()),
+            SagittaCodeError::LlmError("llm".to_string()),
+            SagittaCodeError::ToolError("tool".to_string()),
+            SagittaCodeError::ToolNotFound("not_found".to_string()),
+            SagittaCodeError::SagittaDbError("sagitta".to_string()),
+            SagittaCodeError::IoError("io error string".to_string()), // Updated
+            SagittaCodeError::NetworkError("network".to_string()),
+            SagittaCodeError::EventError("event".to_string()),
+            SagittaCodeError::ParseError("parse error".to_string()),
+            SagittaCodeError::ReasoningError("reasoning error".to_string()),
+            SagittaCodeError::Unknown("unknown".to_string()),
         ];
         
         assert_eq!(errors.len(), 11); // Corrected count from 10 to 11
@@ -241,37 +241,37 @@ mod tests {
 
     #[test]
     fn test_error_equality_and_comparison() {
-        let error1 = FredAgentError::ConfigError("same message".to_string());
-        let error2 = FredAgentError::ConfigError("same message".to_string());
-        let error3 = FredAgentError::ConfigError("different message".to_string());
+        let error1 = SagittaCodeError::ConfigError("same message".to_string());
+        let error2 = SagittaCodeError::ConfigError("same message".to_string());
+        let error3 = SagittaCodeError::ConfigError("different message".to_string());
         
         // Test based on Clone + Debug (if PartialEq is not derived)
-        // FredAgentError derives Clone, so we can compare cloned instances
+        // SagittaCodeError derives Clone, so we can compare cloned instances
         assert_eq!(format!("{:?}", error1), format!("{:?}", error2));
         assert_ne!(format!("{:?}", error1), format!("{:?}", error3));
 
-        let io_error1 = FredAgentError::IoError("io same".to_string());
-        let io_error2 = FredAgentError::IoError("io same".to_string());
+        let io_error1 = SagittaCodeError::IoError("io same".to_string());
+        let io_error2 = SagittaCodeError::IoError("io same".to_string());
         assert_eq!(format!("{:?}", io_error1), format!("{:?}", io_error2));
     }
 
     #[test]
     fn test_error_with_empty_message() {
-        let error = FredAgentError::Unknown("".to_string());
+        let error = SagittaCodeError::Unknown("".to_string());
         assert_eq!(error.to_string(), "Unknown error: ");
     }
 
     #[test]
     fn test_error_with_special_characters() {
         let special_msg = "Error with special chars: !@#$%^&*(){}[]|\\:;\"'<>,.?/~`";
-        let error = FredAgentError::ToolError(special_msg.to_string());
+        let error = SagittaCodeError::ToolError(special_msg.to_string());
         assert!(error.to_string().contains(special_msg));
     }
 
     #[test]
     fn test_error_with_unicode() {
         let unicode_msg = "Error with unicode: 🚨 错误 エラー";
-        let error = FredAgentError::NetworkError(unicode_msg.to_string());
+        let error = SagittaCodeError::NetworkError(unicode_msg.to_string());
         assert!(error.to_string().contains(unicode_msg));
     }
 }

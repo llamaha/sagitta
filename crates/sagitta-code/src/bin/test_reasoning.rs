@@ -2,9 +2,9 @@ use std::sync::Arc;
 use tokio;
 use sagitta_code::{
     tools::registry::ToolRegistry,
-    reasoning::{AgentToolExecutor, AgentEventEmitter, create_reasoning_config, FredIntentAnalyzer},
+    reasoning::{AgentToolExecutor, AgentEventEmitter, create_reasoning_config, SagittaCodeIntentAnalyzer},
     reasoning::llm_adapter::ReasoningLlmClientAdapter,
-    config::FredAgentConfig,
+    config::SagittaCodeConfig,
     llm::gemini::client::GeminiClient,
     llm::client::LlmClient,
 };
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "=".repeat(60));
     
     // Create config
-    let config = FredAgentConfig::default();
+    let config = SagittaCodeConfig::default();
     
     // Check if we have the required API key
     if config.gemini.api_key.as_ref().map_or(true, |key| key.is_empty()) {
@@ -142,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create reasoning engine
     let llm_adapter = Arc::new(ReasoningLlmClientAdapter::new(llm_client.clone(), tool_registry.clone()));
-    let intent_analyzer = Arc::new(FredIntentAnalyzer::new(embedding_provider.clone()));
+    let intent_analyzer = Arc::new(SagittaCodeIntentAnalyzer::new(embedding_provider.clone()));
     let reasoning_config = create_reasoning_config(&config);
     
     let mut reasoning_engine = ReasoningEngine::new(

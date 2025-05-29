@@ -429,7 +429,7 @@ fn render_message_group(
     // Author name
     let author_name = match first_message.author {
         MessageAuthor::User => "You",
-        MessageAuthor::Agent => "Fred",
+        MessageAuthor::Agent => "Sagitta Code",
         MessageAuthor::System => "System",
         MessageAuthor::Tool => "Tool",
     };

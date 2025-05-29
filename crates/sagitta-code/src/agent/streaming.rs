@@ -12,8 +12,8 @@ use crate::agent::state::types::AgentMode;
 use crate::agent::events::AgentEvent;
 use crate::tools::executor::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
-use crate::utils::errors::FredAgentError;
-use crate::config::types::FredAgentConfig;
+use crate::utils::errors::SagittaCodeError;
+use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, StreamChunk, MessagePart, ToolDefinition};
 use crate::tools::types::ToolDefinition as ToolDefinitionType;
 
@@ -66,7 +66,7 @@ impl StreamingProcessor {
     
     /// Process a user message with streaming
     pub async fn process_message_stream(&self, message: impl Into<String>) 
-        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> 
+        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> 
     {
         let message_text = message.into();
         info!("Processing user message (stream): '{}'", message_text);

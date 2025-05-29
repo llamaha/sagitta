@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 use sagitta_search::AppConfig as SagittaAppConfig;
 
 /// Parameters for syncing a repository
@@ -36,21 +36,21 @@ impl SyncRepositoryTool {
     }
     
     /// Sync a repository
-    async fn sync_repository(&self, params: &SyncRepositoryParams) -> Result<String, FredAgentError> {
+    async fn sync_repository(&self, params: &SyncRepositoryParams) -> Result<String, SagittaCodeError> {
         let mut repo_manager = self.repo_manager.lock().await;
         
         // Check if repository exists
         let repositories = repo_manager.list_repositories().await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to list repositories: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
         let repo_exists = repositories.iter().any(|r| r.name == params.name);
         if !repo_exists {
-            return Err(FredAgentError::ToolError(format!("Repository '{}' not found", params.name)));
+            return Err(SagittaCodeError::ToolError(format!("Repository '{}' not found", params.name)));
         }
         
         // Perform the sync
         repo_manager.sync_repository(&params.name).await
-            .map_err(|e| FredAgentError::ToolError(format!("Failed to sync repository '{}': {}", params.name, e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to sync repository '{}': {}", params.name, e)))?;
         
         Ok(format!("Successfully synced repository '{}'", params.name))
     }
@@ -76,7 +76,7 @@ impl Tool for SyncRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, FredAgentError> {
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
         match serde_json::from_value::<SyncRepositoryParams>(parameters) {
             Ok(params) => {
                 match self.sync_repository(&params).await {

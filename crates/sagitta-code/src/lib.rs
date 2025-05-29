@@ -1,4 +1,4 @@
-//! Fred AI agent built on sagitta-search
+//! Sagitta Code AI agent built on sagitta-search
 //! 
 //! This crate provides a standalone agent for interacting with code repositories
 //! using Gemini and sagitta-search. It eliminates network dependencies by
@@ -27,5 +27,5 @@ pub mod reasoning;
 
 // Re-export commonly used items
 pub use agent::Agent;
-pub use config::FredAgentConfig;
+pub use config::SagittaCodeConfig;
 pub use utils::init_logger; 

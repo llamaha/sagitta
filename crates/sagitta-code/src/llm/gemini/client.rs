@@ -9,12 +9,12 @@ use std::sync::Arc;
 use uuid::Uuid;
 use log::{debug, trace, warn};
 
-use crate::config::FredAgentConfig;
+use crate::config::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, Message, ToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, TokenUsage, GroundingConfig, GroundingInfo, GroundingSource};
 use crate::llm::gemini::api::{GeminiRequest, Content, Tool, FunctionDeclaration, GeminiResponse, GeminiError, GenerationConfig, ThinkingConfig as GeminiThinkingConfig, GoogleSearch, DynamicRetrieval};
 use crate::llm::gemini::streaming::{GeminiStream, MergedTextStream};
 use crate::llm::gemini::models::{GeminiModel, ModelParameters, DEFAULT_MODEL};
-use crate::utils::errors::FredAgentError;
+use crate::utils::errors::SagittaCodeError;
 
 /// Gemini API client
 #[derive(Debug)]
@@ -34,14 +34,14 @@ pub struct GeminiClient {
 
 impl GeminiClient {
     /// Create a new GeminiClient
-    pub fn new(config: &FredAgentConfig) -> Result<Self, FredAgentError> {
+    pub fn new(config: &SagittaCodeConfig) -> Result<Self, SagittaCodeError> {
         // Try to get the API key from the config first
         let api_key = match config.gemini.api_key.clone() {
             Some(key) if !key.is_empty() => key,
             _ => {
                 // Try to get from environment variable as fallback
                 std::env::var("GEMINI_API_KEY").map_err(|_| {
-                    FredAgentError::ConfigError("Gemini API key is not set. Check your Gemini API key in settings.".to_string())
+                    SagittaCodeError::ConfigError("Gemini API key is not set. Check your Gemini API key in settings.".to_string())
                 })?
             }
         };
@@ -216,9 +216,9 @@ impl GeminiClient {
     }
     
     /// Convert a GeminiResponse to an LlmResponse
-    fn convert_response(&self, response: GeminiResponse) -> Result<LlmResponse, FredAgentError> {
+    fn convert_response(&self, response: GeminiResponse) -> Result<LlmResponse, SagittaCodeError> {
         if response.candidates.is_empty() {
-            return Err(FredAgentError::LlmError(
+            return Err(SagittaCodeError::LlmError(
                 "Gemini API returned no candidates".to_string()
             ));
         }
@@ -319,7 +319,7 @@ impl LlmClient for GeminiClient {
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         let url = self.build_url("generateContent");
         
         let request = GeminiRequest {
@@ -338,7 +338,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -350,14 +350,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -365,11 +365,11 @@ impl LlmClient for GeminiClient {
         }
         
         let response_text = response.text().await
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
         log::trace!("GeminiClient: Raw success response from API: {}", response_text);
         
         let response_data = serde_json::from_str::<GeminiResponse>(&response_text)
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
         
         self.convert_response(response_data)
     }
@@ -378,7 +378,7 @@ impl LlmClient for GeminiClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         let url = self.build_url("generateContent");
         
         let request = GeminiRequest {
@@ -397,7 +397,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -409,14 +409,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -424,11 +424,11 @@ impl LlmClient for GeminiClient {
         }
         
         let response_text = response.text().await
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
         log::trace!("GeminiClient: Raw success response from API (thinking): {}", response_text);
         
         let response_data = serde_json::from_str::<GeminiResponse>(&response_text)
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
         
         self.convert_response(response_data)
     }
@@ -437,7 +437,7 @@ impl LlmClient for GeminiClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         let url = self.build_url("generateContent");
         
         let request = GeminiRequest {
@@ -456,7 +456,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -468,14 +468,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -483,11 +483,11 @@ impl LlmClient for GeminiClient {
         }
         
         let response_text = response.text().await
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
         log::trace!("GeminiClient: Raw success response from API (grounding): {}", response_text);
         
         let response_data = serde_json::from_str::<GeminiResponse>(&response_text)
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
         
         self.convert_response(response_data)
     }
@@ -497,7 +497,7 @@ impl LlmClient for GeminiClient {
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
         grounding_config: &GroundingConfig,
-    ) -> Result<LlmResponse, FredAgentError> {
+    ) -> Result<LlmResponse, SagittaCodeError> {
         let url = self.build_url("generateContent");
         
         let request = GeminiRequest {
@@ -516,7 +516,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -528,14 +528,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -543,11 +543,11 @@ impl LlmClient for GeminiClient {
         }
         
         let response_text = response.text().await
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to read Gemini API success response text: {}", e)))?;
         log::trace!("GeminiClient: Raw success response from API (thinking+grounding): {}", response_text);
         
         let response_data = serde_json::from_str::<GeminiResponse>(&response_text)
-            .map_err(|e| FredAgentError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse Gemini API response: {}. Raw text: {}", e, response_text)))?;
         
         self.convert_response(response_data)
     }
@@ -556,7 +556,7 @@ impl LlmClient for GeminiClient {
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let url = self.build_streaming_url("streamGenerateContent");
         
         let request = GeminiRequest {
@@ -575,7 +575,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -587,14 +587,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -609,7 +609,7 @@ impl LlmClient for GeminiClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let url = self.build_streaming_url("streamGenerateContent");
         
         let request = GeminiRequest {
@@ -628,7 +628,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -640,14 +640,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -662,7 +662,7 @@ impl LlmClient for GeminiClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let url = self.build_streaming_url("streamGenerateContent");
         
         let request = GeminiRequest {
@@ -681,7 +681,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -693,14 +693,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -716,7 +716,7 @@ impl LlmClient for GeminiClient {
         tools: &[ToolDefinition],
         thinking_config: &ThinkingConfig,
         grounding_config: &GroundingConfig,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, FredAgentError>> + Send>>, FredAgentError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let url = self.build_streaming_url("streamGenerateContent");
         
         let request = GeminiRequest {
@@ -735,7 +735,7 @@ impl LlmClient for GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| FredAgentError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
+            .map_err(|e| SagittaCodeError::NetworkError(format!("Failed to send request to Gemini API: {}", e)))?;
         
         let status = response.status();
         
@@ -747,14 +747,14 @@ impl LlmClient for GeminiClient {
 
             // Try to parse as a GeminiError
             if let Ok(error) = serde_json::from_str::<GeminiError>(&error_text) {
-                return Err(FredAgentError::LlmError(format!(
+                return Err(SagittaCodeError::LlmError(format!(
                     "Gemini API error: {} ({})",
                     error.error.message,
                     error.error.status
                 )));
             }
             
-            return Err(FredAgentError::LlmError(format!(
+            return Err(SagittaCodeError::LlmError(format!(
                 "Gemini API returned an error: HTTP {}: {}",
                 status.as_u16(),
                 error_text
@@ -767,7 +767,7 @@ impl LlmClient for GeminiClient {
 }
 
 /// Factory function to create a new GeminiClient from a configuration
-pub fn create_gemini_client(config: &FredAgentConfig) -> Result<Arc<dyn LlmClient>, FredAgentError> {
+pub fn create_gemini_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>, SagittaCodeError> {
     let client = GeminiClient::new(config)?;
     Ok(Arc::new(client))
 }
@@ -775,13 +775,13 @@ pub fn create_gemini_client(config: &FredAgentConfig) -> Result<Arc<dyn LlmClien
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FredAgentConfig, GeminiConfig};
+    use crate::config::{SagittaCodeConfig, GeminiConfig};
     use serde_json::json;
     use std::collections::HashMap;
     use std::any::Any;
 
-    fn create_test_config() -> FredAgentConfig {
-        let mut config = FredAgentConfig::default();
+    fn create_test_config() -> SagittaCodeConfig {
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some("test-api-key".to_string());
         config.gemini.model = "gemini-2.5-pro-preview-05-06".to_string();
         config
@@ -804,7 +804,7 @@ mod tests {
         // Test fallback to environment variable
         std::env::set_var("GEMINI_API_KEY", "env-api-key");
         
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = None; // No API key in config
         config.gemini.model = "gemini-1.5-flash-latest".to_string();
         
@@ -819,7 +819,7 @@ mod tests {
     fn test_gemini_client_creation_no_api_key() {
         std::env::remove_var("GEMINI_API_KEY");
         
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = None;
         config.gemini.model = "gemini-1.5-pro-latest".to_string();
         
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_gemini_client_creation_empty_api_key() {
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some("".to_string());
         config.gemini.model = "gemini-1.5-pro-latest".to_string();
         
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_gemini_client_with_unknown_model() {
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some("test-key".to_string());
         config.gemini.model = "unknown-model".to_string();
         
@@ -1218,7 +1218,7 @@ mod tests {
 
     #[test]
     fn test_create_gemini_client_with_invalid_config() {
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = None;
         config.gemini.model = "invalid-model".to_string();
         
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn test_model_fallback_behavior() {
         // Test specific model ID that should trigger fallback
-        let mut config = FredAgentConfig::default();
+        let mut config = SagittaCodeConfig::default();
         config.gemini.api_key = Some("test-key".to_string());
         config.gemini.model = "gemini-1.5-pro-preview-05-06".to_string();
         

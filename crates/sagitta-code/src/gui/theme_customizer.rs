@@ -353,7 +353,7 @@ impl ThemeCustomizer {
                         // Author colors test
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("You").color(self.colors.user_color));
-                            ui.label(RichText::new("Fred").color(self.colors.agent_color));
+                            ui.label(RichText::new("Sagitta Code").color(self.colors.agent_color));
                             ui.label(RichText::new("System").color(self.colors.system_color));
                             ui.label(RichText::new("Tool").color(self.colors.tool_color));
                         });
@@ -542,7 +542,7 @@ impl ThemeCustomizer {
             .stroke(Stroke::new(2.0, Color32::RED))
             .inner_margin(Vec2::splat(8.0))
             .show(ui, |ui| {
-                ui.label(RichText::new("Fred is thinking about your request...").italics());
+                ui.label(RichText::new("Sagitta Code is thinking about your request...").italics());
                 ui.label("Used in: Thinking bubbles, reasoning displays");
             });
     }
@@ -676,8 +676,8 @@ impl ThemeCustomizer {
 
     fn test_agent_color(&self, ui: &mut Ui) {
         ui.label(RichText::new("Agent Color Test:").strong());
-        ui.label(RichText::new("🤖 Fred: This is an agent message").color(self.colors.agent_color));
-        ui.label("Used in: Agent messages, Fred's responses, AI indicators");
+        ui.label(RichText::new("🤖 Sagitta Code: This is an agent message").color(self.colors.agent_color));
+        ui.label("Used in: Agent messages, Sagitta Code's responses, AI indicators");
     }
 
     fn test_system_color(&self, ui: &mut Ui) {
@@ -827,7 +827,7 @@ impl ThemeCustomizer {
                     .spacing([8.0, 8.0])
                     .show(ui, |ui| {
                         changed |= color_picker_standalone(ui, "User (You)", &mut self.colors.user_color);
-                        changed |= color_picker_standalone(ui, "Agent (Fred)", &mut self.colors.agent_color);
+                        changed |= color_picker_standalone(ui, "Agent (Sagitta Code)", &mut self.colors.agent_color);
                         changed |= color_picker_standalone(ui, "System", &mut self.colors.system_color);
                         changed |= color_picker_standalone(ui, "Tool", &mut self.colors.tool_color);
                     });

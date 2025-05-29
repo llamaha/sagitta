@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Main configuration for Fred Agent
+/// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FredAgentConfig {
+pub struct SagittaCodeConfig {
     /// Gemini API configuration
     #[serde(default)]
     pub gemini: GeminiConfig,
@@ -25,7 +25,7 @@ pub struct FredAgentConfig {
     pub conversation: ConversationConfig,
 }
 
-impl Default for FredAgentConfig {
+impl Default for SagittaCodeConfig {
     fn default() -> Self {
         Self {
             gemini: GeminiConfig::default(),
@@ -37,9 +37,9 @@ impl Default for FredAgentConfig {
     }
 }
 
-impl FredAgentConfig {
+impl SagittaCodeConfig {
     /// Gets the path to the sagitta-search config file.
-    /// Uses Fred Agent's dedicated core config path.
+    /// Uses Sagitta Code's dedicated core config path.
     pub fn sagitta_config_path(&self) -> PathBuf {
         crate::config::paths::get_sagitta_code_core_config_path()
             .unwrap_or_else(|_| {
