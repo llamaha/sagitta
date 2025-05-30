@@ -269,7 +269,6 @@ async fn handle_simple_index(
     pb.set_message("Gathering files...");
 
     // --- Call Core Indexing Logic ---
-    let app_config = load_config(None)?;
     let index_result = sagitta_search::indexing::index_paths(
         &cmd_args.paths, 
         file_extensions_set,
@@ -277,7 +276,7 @@ async fn handle_simple_index(
         client.clone(),
         &embedding_handler,
         Some(Arc::new(IndicatifCliReporter::new(pb.clone()))),
-        &app_config, 
+        config, // Use the passed config instead of reloading
     ).await;
 
     // --- Handle Result ---
@@ -356,10 +355,8 @@ async fn handle_simple_query(
     );
 
     // 5. Perform Search
-    // Need the full AppConfig here
-    let app_config = load_config(None)?;
-    
-    let embedding_handler = EmbeddingHandler::new(&app_config)
+    // Use the already loaded config from the parameter
+    let embedding_handler = EmbeddingHandler::new(config)
         .context("Failed to initialize embedding handler for simple query")?;
     
     let start_time = std::time::Instant::now(); // Define start_time here
@@ -370,7 +367,7 @@ async fn handle_simple_query(
         &args.query,
         args.limit,
         filter,
-        &app_config, // <-- Pass the loaded config
+        config, // <-- Pass the loaded config
     ).await;
 
     let duration = start_time.elapsed();

@@ -528,22 +528,43 @@ mod tests {
             // Removed: println!("Skipping ONNX test because 'ort' feature is not enabled for sagitta-search");
             return Ok(());
         }
-        // Assume model paths are correctly set via environment or config for this test
-        let config = load_config(None)?;
-        let collection_name = "repo_test";
-        let _default_path = get_vocabulary_path(&config, collection_name)?;
-        let custom_config = config.clone();
-        let _custom_path = get_vocabulary_path(&custom_config, collection_name)?;
-        let handler = EmbeddingHandler::new(&config)?;
+        
+        // Set up test config isolation to avoid overwriting user's config
+        use tempfile::tempdir;
+        let temp_dir = tempdir()?;
+        let test_config_path = temp_dir.path().join("test_config.toml");
+        
+        // Set the test environment variable to use our temporary config
+        std::env::set_var("SAGITTA_TEST_CONFIG_PATH", test_config_path.to_str().unwrap());
+        
+        // Execute the test logic and ensure cleanup happens regardless of outcome
+        let result = std::panic::catch_unwind(|| -> crate::error::Result<()> {
+            // Now we can safely load config - it will create the test config file
+            let config = load_config(None)?;
+            let collection_name = "repo_test";
+            let _default_path = get_vocabulary_path(&config, collection_name)?;
+            let custom_config = config.clone();
+            let _custom_path = get_vocabulary_path(&custom_config, collection_name)?;
+            let handler = EmbeddingHandler::new(&config)?;
 
-        // Removed: println!("Using Model Path: {:?}", config.onnx_model_path.as_ref().unwrap());
-        // Removed: println!("Using Tokenizer Path: {:?}", config.onnx_tokenizer_path.as_ref().unwrap());
+            // Removed: println!("Using Model Path: {:?}", config.onnx_model_path.as_ref().unwrap());
+            // Removed: println!("Using Tokenizer Path: {:?}", config.onnx_tokenizer_path.as_ref().unwrap());
 
-        let texts = ["this is a test"];
-        let embeddings = handler.embed(&texts)?;
-        assert_eq!(embeddings.len(), 1);
-        // Placeholder assert - check dimension or non-zero values if possible
-        assert!(!embeddings[0].is_empty());
-        Ok(())
+            let texts = ["this is a test"];
+            let embeddings = handler.embed(&texts)?;
+            assert_eq!(embeddings.len(), 1);
+            // Placeholder assert - check dimension or non-zero values if possible
+            assert!(!embeddings[0].is_empty());
+            Ok(())
+        });
+        
+        // Clean up the environment variable
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+        
+        // Return the result, propagating any panics or errors
+        match result {
+            Ok(inner_result) => inner_result,
+            Err(panic_payload) => std::panic::resume_unwind(panic_payload),
+        }
     }
 } 

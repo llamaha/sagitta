@@ -30,10 +30,24 @@ use git2::Repository;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
 use serde_json::json; // For creating JSON content
-use git_manager::GitManager;
 use git_manager::GitRepository;
+use git_manager::GitManager;
 use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
+
+/// Helper function to save config with proper test isolation
+/// During tests, this will save to a temporary location if SAGITTA_TEST_CONFIG_PATH is set
+fn save_config_with_test_isolation(config: &AppConfig) -> Result<(), sagitta_search::error::SagittaError> {
+    if cfg!(test) && std::env::var("SAGITTA_TEST_CONFIG_PATH").is_ok() {
+        // During tests with isolation, save to the test path
+        if let Ok(test_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
+            let test_path_buf = std::path::PathBuf::from(test_path);
+            return save_config(config, Some(&test_path_buf)).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()));
+        }
+    }
+    // Normal operation: save to default location
+    save_config(config, None).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()))
+}
 
 #[instrument(skip(config, qdrant_client, auth_user_ext), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -157,7 +171,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
 
             config_write_guard.repositories.push(repo_config.clone());
 
-            if let Err(e) = save_config(&*config_write_guard, None) {
+            if let Err(e) = save_config_with_test_isolation(&*config_write_guard) {
                 error!(error = %e, repo_name=%repo_config.name, "Failed to save config after adding repository {} to memory", repo_config.name);
                 // Attempt to remove the repo we just added to memory if save fails
                 config_write_guard.repositories.pop();
@@ -316,7 +330,7 @@ pub async fn handle_repository_remove<C: QdrantClientTrait + Send + Sync + 'stat
     config_write_guard.repositories.remove(repo_index);
 
     // Save updated config
-    if let Err(e) = save_config(&*config_write_guard, None) {
+    if let Err(e) = save_config_with_test_isolation(&*config_write_guard) {
         error!(error = %e, "Failed to save config after removing repository");
         // TODO: Should we attempt to restore the removed repo in memory?
         return Err(ErrorObject {
@@ -442,7 +456,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                         // Use branch_to_sync_str (which is &str) for the key
                         repo_mut.last_synced_commits.insert(branch_to_sync_str.to_string(), commit.clone());
                         repo_mut.indexed_languages = Some(indexed_languages_from_sync.clone());
-                        sagitta_search::config::save_config(&*config_write, None).map_err(|e| {
+                        save_config_with_test_isolation(&*config_write).map_err(|e| {
                             error!(error = %e, "Failed to save config after repository sync update");
                             ErrorObject {
                                 code: error_codes::CONFIG_SAVE_FAILED,
@@ -994,7 +1008,7 @@ where
         }
         
         // Save configuration
-        sagitta_search::config::save_config(&*config_write_guard, None)
+        save_config_with_test_isolation(&*config_write_guard)
             .map_err(|e| ErrorObject {
                 code: error_codes::CONFIG_SAVE_FAILED,
                 message: format!("Failed to save configuration: {}", e),
@@ -1248,6 +1262,10 @@ mod tests {
     fn create_test_app_config(repositories: Vec<RepositoryConfig>, temp_dir_path_str: String) -> Arc<RwLock<AppConfig>> {
         let model_path = PathBuf::from(temp_dir_path_str.clone()).join("model.onnx");
         let tokenizer_path = PathBuf::from(temp_dir_path_str.clone()).join("tokenizer.json");
+        let test_config_path = PathBuf::from(temp_dir_path_str.clone()).join("test_config.toml");
+
+        // Set up test isolation to prevent overwriting user's real config
+        std::env::set_var("SAGITTA_TEST_CONFIG_PATH", test_config_path.to_str().unwrap());
 
         // Create dummy ONNX model file (content doesn't matter as much as existence for some basic checks)
         fs::write(&model_path, "dummy model content").expect("Failed to write dummy model file");
