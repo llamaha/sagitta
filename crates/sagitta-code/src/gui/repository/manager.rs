@@ -11,8 +11,7 @@ use qdrant_client::qdrant::{QueryResponse, Filter, Condition};
 use qdrant_client::Qdrant as QdrantClient;
 use qdrant_client::config::QdrantConfig;
 use sagitta_search::repo_add::{handle_repo_add, AddRepoArgs};
-use sagitta_search::config::{save_config, get_repo_base_path, AppConfig as SagittaAppConfig};
-use crate::config::paths::get_sagitta_code_core_config_path;
+use sagitta_search::config::{save_config, get_repo_base_path, AppConfig as SagittaAppConfig, load_config};
 use std::path::PathBuf;
 use log::{info, warn, error};
 use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
@@ -401,16 +400,22 @@ impl RepositoryManager {
     
     // Helper to save config when we already have the guard
     async fn save_core_config_with_guard(&self, config: &AppConfig) -> Result<()> {
-        let path = get_sagitta_code_core_config_path()?;
+        let shared_config_path = sagitta_search::config::get_config_path()
+            .unwrap_or_else(|_| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sagitta")
+                    .join("config.toml")
+            });
         
-        log::info!("Saving config to path: {}", path.display());
+        log::info!("Saving config to path: {}", shared_config_path.display());
         log::debug!("Config has {} repositories", config.repositories.len());
         
-        let result = save_config(config, Some(&path))
-            .with_context(|| format!("Failed to save core config to {:?}", path));
+        let result = save_config(config, Some(&shared_config_path))
+            .with_context(|| format!("Failed to save core config to {:?}", shared_config_path));
         
         match &result {
-            Ok(_) => log::info!("Successfully saved config to {}", path.display()),
+            Ok(_) => log::info!("Successfully saved config to {}", shared_config_path.display()),
             Err(e) => log::error!("Failed to save config: {}", e),
         }
         

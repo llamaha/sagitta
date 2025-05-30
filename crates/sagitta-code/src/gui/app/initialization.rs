@@ -8,7 +8,7 @@ use super::super::repository::manager::RepositoryManager;
 use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
 use super::super::chat::view::{StreamingMessage, MessageAuthor};
-use crate::config::paths::get_sagitta_code_core_config_path;
+use crate::config::loader::load_all_configs;
 use crate::llm::gemini::client::GeminiClient;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
@@ -62,26 +62,19 @@ use qdrant_client::Payload as QdrantPayload; // Corrected Payload import
 pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     log::info!("SagittaCodeApp: Initializing...");
 
-    // Load sagitta-search config
-    let core_config = match get_sagitta_code_core_config_path() {
-        Ok(core_config_path) => {
-            match sagitta_search::config::load_config(Some(&core_config_path)) {
-                Ok(config) => {
-                    log::info!("SagittaCodeApp: Loaded sagitta-search config from {:?}", core_config_path);
-                    config
-                }
-                Err(e) => {
-                    log::warn!("SagittaCodeApp: Could not load sagitta-search config from {:?}: {}. Using defaults.", core_config_path, e);
-                    sagitta_search::config::AppConfig::default()
-                }
-            }
-        },
+    // Load both sagitta-code and sagitta-search configs
+    let (code_config, core_config) = match load_all_configs() {
+        Ok(configs) => {
+            log::info!("SagittaCodeApp: Loaded both configurations successfully");
+            configs
+        }
         Err(e) => {
-            log::error!("SagittaCodeApp: Failed to get dedicated core config path: {}. Using default AppConfig.", e);
-            sagitta_search::config::AppConfig::default()
+            log::warn!("SagittaCodeApp: Could not load configurations: {}. Using defaults.", e);
+            (crate::config::SagittaCodeConfig::default(), sagitta_search::config::AppConfig::default())
         }
     };
-    // Store a clone for RepositoryManager if it needs the full config object, not just paths for embedding.
+
+    // Store a clone for RepositoryManager
     let repo_manager_core_config = Arc::new(Mutex::new(core_config.clone())); 
     app.repo_panel = RepoPanel::new(Arc::new(Mutex::new(RepositoryManager::new(repo_manager_core_config))));
     if let Err(e) = app.repo_panel.get_repo_manager().lock().await.initialize().await {

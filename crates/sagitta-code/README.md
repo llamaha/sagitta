@@ -180,28 +180,65 @@ sagitta-code/
 
 ### Configuration
 
-Sagitta Code uses a layered configuration system:
+Sagitta Code uses a unified configuration system that shares the core Sagitta namespace:
 
-1. **Core Configuration** (`~/.config/sagitta/config.toml`):
-   - See [configuration.md](../../docs/configuration.md) for sagitta-search settings
-   - Includes Qdrant URL, ONNX model paths, performance tuning
+#### Configuration Files
 
-2. **Sagitta Code Configuration** (`~/.config/sagitta-code/config.toml`):
-   ```toml
-   [gemini]
-   api_key = "your-gemini-api-key"
-   model = "gemini-1.5-pro"
-   
-   [agent]
-   default_mode = "ToolsWithConfirmation"
-   max_conversation_history = 100
-   auto_save_conversations = true
-   
-   [ui]
-   theme = "Dark"
-   show_thinking = true
-   enable_animations = true
+1. **Shared Core Configuration** (`~/.config/sagitta/config.toml`):
+   - Contains all sagitta-search settings (Qdrant, ONNX models, repositories, performance)
+   - Shared by sagitta-cli, sagitta-mcp, and sagitta-code
+   - See [configuration.md](../../docs/configuration.md) for detailed options
+
+2. **Sagitta Code Configuration** (`~/.config/sagitta/sagitta_code_config.json`):
+   - Contains sagitta-code specific settings (Gemini API, UI preferences, conversation management)
+   - Example configuration:
+   ```json
+   {
+     "gemini": {
+       "api_key": "your-gemini-api-key",
+       "model": "gemini-2.5-flash-preview-05-20",
+       "max_history_size": 20,
+       "max_reasoning_steps": 50
+     },
+     "ui": {
+       "dark_mode": true,
+       "theme": "default",
+       "window_width": 900,
+       "window_height": 700
+     },
+     "logging": {
+       "log_level": "info",
+       "log_to_file": false,
+       "log_file_path": null
+     },
+     "conversation": {
+       "storage_path": null,
+       "auto_save": true,
+       "auto_create": true,
+       "max_conversations": 100,
+       "auto_cleanup_days": 30,
+       "auto_checkpoints": true,
+       "auto_branching": false,
+       "default_tags": []
+     }
+   }
    ```
+
+#### Data Storage
+
+Following XDG Base Directory conventions:
+
+- **Conversations**: `~/.local/share/sagitta/conversations/`
+- **Logs**: `~/.local/share/sagitta/logs/` (if file logging enabled)
+- **Repository Data**: `~/.local/share/sagitta/repositories/` (unless custom path specified)
+
+#### Migration from Previous Versions
+
+Sagitta Code automatically migrates configuration from the old locations:
+- `~/.config/sagitta_code/sagitta_code_config.json` → `~/.config/sagitta/sagitta_code_config.json`
+- `~/.config/sagitta_code/core_config.toml` → `~/.config/sagitta/config.toml`
+
+The migration runs automatically on first startup and will remove the old directory if it's empty after migration.
 
 ### First Run
 

@@ -2,32 +2,100 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 use anyhow::Result; // Ensure anyhow::Result is used
 
-/// Gets the path to Sagitta Code's dedicated core configuration file (e.g., for sagitta-search settings).
-/// This will be something like ~/.config/sagitta-code/core_config.toml
-pub fn get_sagitta_code_core_config_path() -> Result<PathBuf> {
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta_code") { // Use empty vendor for typical ~/.config behavior
+/// Gets the path to Sagitta Code's application configuration file.
+/// This will be ~/.config/sagitta/sagitta_code_config.json (moved from sagitta_code subdirectory)
+pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta") { // Changed from "sagitta_code" to "sagitta"
         let config_dir = proj_dirs.config_dir();
         if !config_dir.exists() {
             std::fs::create_dir_all(config_dir).map_err(|e| anyhow::anyhow!("Failed to create config directory {:?}: {}", config_dir, e))?;
         }
-        Ok(config_dir.join("core_config.toml"))
+        Ok(config_dir.join("sagitta_code_config.json")) // Keep the filename for app-specific config
     } else {
-        Err(anyhow::anyhow!("Unable to determine Sagitta Code config directory"))
+        Err(anyhow::anyhow!("Unable to determine Sagitta config directory"))
     }
 }
 
-/// Gets the path to Sagitta Code's main application configuration file.
-/// This will be something like ~/.config/sagitta-code/sagitta_code_config.json
-pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta_code") {
-        let config_dir = proj_dirs.config_dir();
-        if !config_dir.exists() {
-            std::fs::create_dir_all(config_dir).map_err(|e| anyhow::anyhow!("Failed to create config directory {:?}: {}", config_dir, e))?;
+/// Gets the path to the shared sagitta configuration directory for data storage
+/// This will be ~/.local/share/sagitta/
+pub fn get_sagitta_data_dir() -> Result<PathBuf> {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta") {
+        let data_dir = proj_dirs.data_dir();
+        if !data_dir.exists() {
+            std::fs::create_dir_all(data_dir).map_err(|e| anyhow::anyhow!("Failed to create data directory {:?}: {}", data_dir, e))?;
         }
-        Ok(config_dir.join("sagitta_code_config.json"))
+        Ok(data_dir.to_path_buf())
     } else {
-        Err(anyhow::anyhow!("Unable to determine Sagitta Code config directory"))
+        Err(anyhow::anyhow!("Unable to determine Sagitta data directory"))
     }
+}
+
+/// Gets the path for conversation storage
+/// This will be ~/.local/share/sagitta/conversations/
+pub fn get_conversations_path() -> Result<PathBuf> {
+    let conversations_dir = get_sagitta_data_dir()?.join("conversations");
+    if !conversations_dir.exists() {
+        std::fs::create_dir_all(&conversations_dir).map_err(|e| anyhow::anyhow!("Failed to create conversations directory {:?}: {}", conversations_dir, e))?;
+    }
+    Ok(conversations_dir)
+}
+
+/// Gets the path for logs storage
+/// This will be ~/.local/share/sagitta/logs/
+pub fn get_logs_path() -> Result<PathBuf> {
+    let logs_dir = get_sagitta_data_dir()?.join("logs");
+    if !logs_dir.exists() {
+        std::fs::create_dir_all(&logs_dir).map_err(|e| anyhow::anyhow!("Failed to create logs directory {:?}: {}", logs_dir, e))?;
+    }
+    Ok(logs_dir)
+}
+
+/// Migrates configuration from old locations to new unified structure
+pub fn migrate_old_config() -> Result<()> {
+    // Old paths
+    let old_config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?
+        .join("sagitta_code");
+    
+    let old_app_config = old_config_dir.join("sagitta_code_config.json");
+    let old_core_config = old_config_dir.join("core_config.toml");
+    
+    // New paths
+    let new_app_config = get_sagitta_code_app_config_path()?;
+    let new_core_config = sagitta_search::config::get_config_path()?;
+    
+    let mut migrated = false;
+    
+    // Migrate app config
+    if old_app_config.exists() && !new_app_config.exists() {
+        std::fs::rename(&old_app_config, &new_app_config)
+            .map_err(|e| anyhow::anyhow!("Failed to migrate app config: {}", e))?;
+        log::info!("Migrated sagitta-code config from {} to {}", old_app_config.display(), new_app_config.display());
+        migrated = true;
+    }
+    
+    // Migrate core config if it exists and shared config doesn't exist
+    if old_core_config.exists() && !new_core_config.exists() {
+        std::fs::rename(&old_core_config, &new_core_config)
+            .map_err(|e| anyhow::anyhow!("Failed to migrate core config: {}", e))?;
+        log::info!("Migrated core config from {} to {}", old_core_config.display(), new_core_config.display());
+        migrated = true;
+    }
+    
+    // Remove old directory if it's empty
+    if migrated && old_config_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&old_config_dir) {
+            if entries.count() == 0 {
+                if let Err(e) = std::fs::remove_dir(&old_config_dir) {
+                    log::warn!("Could not remove old config directory {}: {}", old_config_dir.display(), e);
+                } else {
+                    log::info!("Removed old config directory: {}", old_config_dir.display());
+                }
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 #[cfg(test)]
@@ -45,128 +113,88 @@ mod tests {
                 // Should end with the correct filename
                 assert!(path.to_string_lossy().ends_with("sagitta_code_config.json"));
                 
-                // Should contain the .config directory
+                // Should contain the .config directory and sagitta (not sagitta_code)
                 assert!(path.to_string_lossy().contains(".config"));
-                assert!(path.to_string_lossy().contains("sagitta_code"));
+                assert!(path.to_string_lossy().contains("sagitta"));
+                // Should NOT contain sagitta_code in directory path (only in filename)
+                let path_str = path.to_string_lossy();
+                let path_without_filename = path.parent().unwrap().to_string_lossy();
+                assert!(!path_without_filename.contains("sagitta_code"));
                 
                 // Path should be absolute
                 assert!(path.is_absolute());
             },
             Err(e) => {
                 // Config errors are acceptable in test environments
-                // but we should at least verify the error is some kind of error
                 assert!(!e.to_string().is_empty());
             }
         }
     }
 
     #[test]
-    fn test_get_sagitta_code_core_config_path() {
-        let result = get_sagitta_code_core_config_path();
+    fn test_get_conversations_path() {
+        let result = get_conversations_path();
         
         match result {
             Ok(path) => {
-                // Should end with the correct filename
-                assert!(path.to_string_lossy().ends_with("core_config.toml"));
+                // Should end with conversations
+                assert!(path.to_string_lossy().ends_with("conversations"));
                 
-                // Should contain the .config directory
-                assert!(path.to_string_lossy().contains(".config"));
-                assert!(path.to_string_lossy().contains("sagitta_code"));
+                // Should be in data directory
+                assert!(path.to_string_lossy().contains("sagitta"));
                 
                 // Path should be absolute
                 assert!(path.is_absolute());
             },
             Err(e) => {
-                // Config errors are acceptable in test environments
-                // but we should at least verify the error is some kind of error
                 assert!(!e.to_string().is_empty());
             }
         }
     }
 
     #[test]
-    fn test_different_config_paths() {
-        let app_config_result = get_sagitta_code_app_config_path();
-        let core_config_result = get_sagitta_code_core_config_path();
+    fn test_get_logs_path() {
+        let result = get_logs_path();
         
-        // If both succeed, they should be different paths
-        if let (Ok(app_path), Ok(core_path)) = (app_config_result, core_config_result) {
-            assert_ne!(app_path, core_path);
-            
-            // Both should be in the same directory
-            assert_eq!(app_path.parent(), core_path.parent());
-            
-            // File extensions should be different
-            assert_eq!(app_path.extension().and_then(|s| s.to_str()), Some("json"));
-            assert_eq!(core_path.extension().and_then(|s| s.to_str()), Some("toml"));
-        }
-    }
-
-    #[test]
-    fn test_config_directory_structure() {
-        let app_config_result = get_sagitta_code_app_config_path();
-        
-        if let Ok(app_path) = app_config_result {
-            let parent_dir = app_path.parent().expect("Should have parent directory");
-            
-            // Parent directory should end with "sagitta_code"
-            assert_eq!(parent_dir.file_name().and_then(|s| s.to_str()), Some("sagitta_code"));
-            
-            // Grandparent should end with ".config"
-            if let Some(grandparent) = parent_dir.parent() {
-                assert_eq!(grandparent.file_name().and_then(|s| s.to_str()), Some(".config"));
+        match result {
+            Ok(path) => {
+                // Should end with logs
+                assert!(path.to_string_lossy().ends_with("logs"));
+                
+                // Should be in data directory
+                assert!(path.to_string_lossy().contains("sagitta"));
+                
+                // Path should be absolute
+                assert!(path.is_absolute());
+            },
+            Err(e) => {
+                assert!(!e.to_string().is_empty());
             }
         }
     }
 
     #[test]
-    fn test_path_string_conversion() {
+    fn test_data_and_config_separation() {
         let app_config_result = get_sagitta_code_app_config_path();
+        let conversations_result = get_conversations_path();
+        let logs_result = get_logs_path();
         
-        if let Ok(path) = app_config_result {
-            // Should be able to convert to string
-            let path_str = path.to_string_lossy();
-            assert!(!path_str.is_empty());
+        if let (Ok(app_path), Ok(conv_path), Ok(logs_path)) = (app_config_result, conversations_result, logs_result) {
+            let app_str = app_path.to_string_lossy();
+            let conv_str = conv_path.to_string_lossy();
+            let logs_str = logs_path.to_string_lossy();
             
-            // Should contain valid path separators for the platform
-            #[cfg(windows)]
-            assert!(path_str.contains('\\') || path_str.contains('/'));
-            #[cfg(not(windows))]
-            assert!(path_str.contains('/'));
-        }
-    }
-
-    #[test]
-    fn test_error_handling() {
-        // Test error handling by temporarily unsetting HOME (on Unix) or equivalent
-        let original_home = env::var("HOME").ok();
-        let original_userprofile = env::var("USERPROFILE").ok();
-        
-        // Temporarily remove home directory environment variables
-        env::remove_var("HOME");
-        env::remove_var("USERPROFILE");
-        
-        let app_config_result = get_sagitta_code_app_config_path();
-        let core_config_result = get_sagitta_code_core_config_path();
-        
-        // Should handle missing home directory gracefully
-        // (may succeed with fallback or fail with appropriate error)
-        match app_config_result {
-            Ok(_) => {}, // Success is fine (fallback mechanism)
-            Err(e) => assert!(!e.to_string().is_empty()),
-        }
-        
-        match core_config_result {
-            Ok(_) => {}, // Success is fine (fallback mechanism)  
-            Err(e) => assert!(!e.to_string().is_empty()),
-        }
-        
-        // Restore original environment
-        if let Some(home) = original_home {
-            env::set_var("HOME", home);
-        }
-        if let Some(userprofile) = original_userprofile {
-            env::set_var("USERPROFILE", userprofile);
+            // Config should be in .config
+            assert!(app_str.contains(".config"));
+            
+            // Data should be in .local/share or similar
+            assert!(!conv_str.contains(".config"));
+            assert!(!logs_str.contains(".config"));
+            
+            // All should be under sagitta namespace
+            assert!(app_str.contains("sagitta"));
+            assert!(conv_str.contains("sagitta"));
+            assert!(logs_str.contains("sagitta"));
         }
     }
 
@@ -179,65 +207,6 @@ mod tests {
         assert_eq!(path1.is_ok(), path2.is_ok());
         if let (Ok(p1), Ok(p2)) = (path1, path2) {
             assert_eq!(p1, p2);
-        }
-        
-        let core_path1 = get_sagitta_code_core_config_path();
-        let core_path2 = get_sagitta_code_core_config_path();
-        
-        assert_eq!(core_path1.is_ok(), core_path2.is_ok());
-        if let (Ok(p1), Ok(p2)) = (core_path1, core_path2) {
-            assert_eq!(p1, p2);
-        }
-    }
-
-    #[test]
-    fn test_filename_correctness() {
-        if let Ok(app_path) = get_sagitta_code_app_config_path() {
-            assert_eq!(
-                app_path.file_name().and_then(|s| s.to_str()),
-                Some("sagitta_code_config.json")
-            );
-        }
-        
-        if let Ok(core_path) = get_sagitta_code_core_config_path() {
-            assert_eq!(
-                core_path.file_name().and_then(|s| s.to_str()),
-                Some("core_config.toml")
-            );
-        }
-    }
-
-    #[test]
-    fn test_path_creation_readiness() {
-        // Test that the paths returned are suitable for file creation
-        if let Ok(app_path) = get_sagitta_code_app_config_path() {
-            if let Some(parent) = app_path.parent() {
-                // Parent directory path should be valid
-                assert!(!parent.to_string_lossy().is_empty());
-                
-                // Should be able to create the directory structure (in theory)
-                // We don't actually create it in tests to avoid side effects
-            }
-        }
-    }
-
-    #[test] 
-    fn test_config_separation() {
-        // Ensure Sagitta Code configs are separate from main sagitta configs
-        if let (Ok(app_path), Ok(core_path)) = (
-            get_sagitta_code_app_config_path(),
-            get_sagitta_code_core_config_path()
-        ) {
-            let app_path_str = app_path.to_string_lossy();
-            let core_path_str = core_path.to_string_lossy();
-            
-            // Both should be in sagitta_code subdirectory
-            assert!(app_path_str.contains("sagitta_code"));
-            assert!(core_path_str.contains("sagitta_code"));
-            
-            // Should not be in the root .config/sagitta directory
-            assert!(!app_path_str.ends_with(".config/sagitta/config.toml"));
-            assert!(!core_path_str.ends_with(".config/sagitta/config.toml"));
         }
     }
 } 

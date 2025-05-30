@@ -38,16 +38,15 @@ impl Default for SagittaCodeConfig {
 }
 
 impl SagittaCodeConfig {
-    /// Gets the path to the sagitta-search config file.
-    /// Uses Sagitta Code's dedicated core config path.
+    /// Gets the path to the shared sagitta-search config file.
+    /// Now uses the shared ~/.config/sagitta/config.toml
     pub fn sagitta_config_path(&self) -> PathBuf {
-        crate::config::paths::get_sagitta_code_core_config_path()
+        sagitta_search::config::get_config_path()
             .unwrap_or_else(|_| {
-                let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                path.push(".config");
-                path.push("sagitta");
-                path.push("config.toml");
-                path
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sagitta")
+                    .join("config.toml")
             })
     }
 }
@@ -153,7 +152,8 @@ impl Default for LoggingConfig {
         Self {
             log_level: default_log_level(),
             log_to_file: false,
-            log_file_path: None,
+            log_file_path: crate::config::paths::get_logs_path().ok()
+                .map(|p| p.join("sagitta_code.log")),
         }
     }
 }
@@ -194,7 +194,7 @@ pub struct ConversationConfig {
 impl Default for ConversationConfig {
     fn default() -> Self {
         Self {
-            storage_path: None,
+            storage_path: crate::config::paths::get_conversations_path().ok(),
             auto_save: default_auto_save(),
             auto_create: default_auto_create(),
             max_conversations: Some(100),

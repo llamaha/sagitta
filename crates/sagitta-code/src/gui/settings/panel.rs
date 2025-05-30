@@ -13,7 +13,7 @@ use log::{info, warn, error};
 
 use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
 use crate::config::types::GeminiConfig;
-use crate::config::paths::{get_sagitta_code_core_config_path, get_sagitta_code_app_config_path};
+use crate::config::paths::{get_sagitta_code_app_config_path};
 
 /// Settings panel for configuring Sagitta core settings
 #[derive(Clone)]
@@ -341,28 +341,29 @@ impl SettingsPanel {
             }
         }
         
-        // Save Sagitta Core AppConfig
+        // Save sagitta-search configuration to shared location
         let updated_sagitta_config = self.create_updated_sagitta_config();
-        match get_sagitta_code_core_config_path() {
-            Ok(core_config_path) => {
-                match sagitta_search::config::save_config(&updated_sagitta_config, Some(&core_config_path)) {
-                    Ok(_) => {
-                        let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.success_color()));
-                        self.status_message = Some((format!("{} Sagitta Core settings saved.", current_status.0).trim().to_string(), theme.success_color()));
-                        log::info!("SettingsPanel: Sagitta Core config saved to {:?}", core_config_path);
-                        changes_made = true;
-                    }
-                    Err(e) => {
-                        let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.error_color()));
-                        self.status_message = Some((format!("{} Error saving Sagitta Core settings: {}", current_status.0, e).trim().to_string(), theme.error_color()));
-                        log::error!("SettingsPanel: Error saving Sagitta Core config to {:?}: {}", core_config_path, e);
-                    }
-                }
+        
+        // Use the shared sagitta config path
+        let shared_config_path = sagitta_search::config::get_config_path()
+            .unwrap_or_else(|_| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sagitta")
+                    .join("config.toml")
+            });
+            
+        match sagitta_search::config::save_config(&updated_sagitta_config, Some(&shared_config_path)) {
+            Ok(_) => {
+                let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.success_color()));
+                self.status_message = Some((format!("{} Sagitta Core settings saved.", current_status.0).trim().to_string(), theme.success_color()));
+                log::info!("SettingsPanel: Sagitta Core config saved to {:?}", shared_config_path);
+                changes_made = true;
             }
             Err(e) => {
                 let current_status = self.status_message.take().unwrap_or(("".to_string(), theme.error_color()));
-                self.status_message = Some((format!("{} Error getting Sagitta Core config path for saving: {}", current_status.0, e).trim().to_string(), theme.error_color()));
-                log::error!("SettingsPanel: Error getting Sagitta Core config path for saving: {}", e);
+                self.status_message = Some((format!("{} Error saving Sagitta Core settings: {}", current_status.0, e).trim().to_string(), theme.error_color()));
+                log::error!("SettingsPanel: Error saving Sagitta Core config to {:?}: {}", shared_config_path, e);
             }
         }
         

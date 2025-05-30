@@ -89,15 +89,36 @@ Tools using `sagitta-search` (like `sagitta-cli`) require ONNX-format embedding 
 
 ### 4. Configuration File
 
-Both `sagitta-cli` and `sagitta-mcp` load settings (like Qdrant URL, repository paths, model paths if not overridden by environment variables or arguments) from a central configuration file. This file is typically located at:
+All Sagitta tools (`sagitta-cli`, `sagitta-mcp`, and `sagitta-code`) use a unified configuration system:
 
-`~/.config/sagitta/config.toml`
+#### Configuration Files
 
-You can initialize a default configuration using `sagitta-cli init` (see the `sagitta-cli` README).
+**Core Configuration:** `~/.config/sagitta/config.toml`
+- Contains shared settings for Qdrant, ONNX models, repositories, and performance tuning
+- Used by all Sagitta tools for core functionality
+- You can initialize a default configuration using `sagitta-cli init` (see the `sagitta-cli` README)
 
-**See [docs/configuration.md](./docs/configuration.md) for a full list and documentation of all configuration options.**
+**Tool-Specific Configurations:**
+- `sagitta-code`: `~/.config/sagitta/sagitta_code_config.json` for Gemini API, UI preferences, and conversation management
 
-For specific guidance on optimizing indexing performance, refer to the [Performance Tuning Guide](./docs/configuration.md#performance-tuning-guide) section in the configuration documentation.
+#### Data Storage
+
+Following XDG Base Directory conventions:
+- **Configuration**: `~/.config/sagitta/` (settings and preferences)
+- **Data**: `~/.local/share/sagitta/` (conversations, logs, repositories)
+- **Cache**: `~/.cache/sagitta/` (temporary data, future use)
+
+This unified approach ensures:
+- **Single namespace**: All Sagitta-related files are under `sagitta/` directories
+- **Proper separation**: Configuration vs. data vs. cache following XDG standards
+- **Easy backup**: All important data is in predictable locations
+- **Tool consistency**: All tools share core settings while maintaining their specific configurations
+
+#### Migration
+
+If you have existing configurations from previous versions, they will be automatically migrated to the new unified structure on first run.
+
+**See [docs/configuration.md](./docs/configuration.md) for a complete reference of all configuration options and performance tuning guidance.**
 
 ### 4a. Example: Setting ONNX Model and Tokenizer Paths in config.toml
 

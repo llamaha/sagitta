@@ -3,25 +3,23 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
 
 use super::types::{SagittaCodeConfig, GeminiConfig};
-use crate::config::paths::{get_sagitta_code_app_config_path, get_sagitta_code_core_config_path};
+use crate::config::paths::{get_sagitta_code_app_config_path, migrate_old_config};
 
 const CONFIG_FILENAME: &str = "sagitta_code_config.json";
-const CORE_CONFIG_FILENAME: &str = "core_config.toml";
 
-/// Get the path to the configuration file
+/// Get the path to the configuration file (deprecated - use get_sagitta_code_app_config_path)
 pub fn get_config_path() -> Result<PathBuf> {
-    let mut config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-    
-    config_dir.push("sagitta_code");
-    
-    Ok(config_dir.join(CONFIG_FILENAME))
+    get_sagitta_code_app_config_path()
 }
 
 /// Load configuration from the default location
 pub fn load_config() -> Result<SagittaCodeConfig> {
-    let config_path = get_sagitta_code_app_config_path()?;
+    // Run migration first
+    if let Err(e) = migrate_old_config() {
+        log::warn!("Failed to migrate old configuration: {}", e);
+    }
     
+    let config_path = get_sagitta_code_app_config_path()?;
     load_config_from_path(&config_path)
 }
 
@@ -49,47 +47,15 @@ pub fn load_config_from_path<P: AsRef<Path>>(path: P) -> Result<SagittaCodeConfi
     Ok(config)
 }
 
-/// Load core configuration (TOML format) and merge with app config
+/// Load configuration (simplified - no more core config merging)
+/// The shared sagitta-search config is now loaded separately
 pub fn load_merged_config() -> Result<SagittaCodeConfig> {
-    let mut config = load_config().unwrap_or_default();
-    
-    // Try to load core config (TOML) and merge it
-    if let Ok(core_config_path) = get_sagitta_code_core_config_path() {
-        if core_config_path.exists() {
-            match load_core_config_from_path(&core_config_path) {
-                Ok(core_config) => {
-                    config = merge_configs(config, core_config);
-                    log::info!("Loaded and merged core config from: {}", core_config_path.display());
-                }
-                Err(e) => {
-                    log::warn!("Failed to load core config from {}: {}", core_config_path.display(), e);
-                }
-            }
-        } else {
-            log::info!("Core config file does not exist: {}", core_config_path.display());
-        }
-    }
-    
-    Ok(config)
-}
-
-/// Load core configuration from TOML file
-pub fn load_core_config_from_path<P: AsRef<Path>>(path: P) -> Result<SagittaCodeConfig> {
-    let path = path.as_ref();
-    
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read core config file: {}", path.display()))?;
-    
-    let config: SagittaCodeConfig = toml::from_str(&content)
-        .with_context(|| format!("Failed to parse TOML core config file: {}", path.display()))?;
-    
-    Ok(config)
+    load_config()
 }
 
 /// Save configuration to the default location
 pub fn save_config(config: &SagittaCodeConfig) -> Result<()> {
     let config_path = get_sagitta_code_app_config_path()?;
-    
     save_config_to_path(config, &config_path)
 }
 
@@ -118,27 +84,13 @@ pub fn save_config_to_path<P: AsRef<Path>>(config: &SagittaCodeConfig, path: P) 
     Ok(())
 }
 
-/// Save core configuration to TOML file
-pub fn save_core_config(config: &SagittaCodeConfig) -> Result<()> {
-    let core_config_path = get_sagitta_code_core_config_path()?;
-    
-    // Ensure the parent directory exists
-    if let Some(parent) = core_config_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
-    }
-    
-    let content = toml::to_string_pretty(config)
-        .context("Failed to serialize core config to TOML")?;
-    
-    fs::write(&core_config_path, content)
-        .with_context(|| format!("Failed to write core config file: {}", core_config_path.display()))?;
-    
-    Ok(())
-}
-
 /// Initialize the configuration directory and create a default config if it doesn't exist
 pub fn initialize_config() -> Result<SagittaCodeConfig> {
+    // Run migration first
+    if let Err(e) = migrate_old_config() {
+        log::warn!("Failed to migrate old configuration: {}", e);
+    }
+    
     let config_path = get_sagitta_code_app_config_path()?;
     
     // Create the config directory if it doesn't exist
@@ -149,9 +101,9 @@ pub fn initialize_config() -> Result<SagittaCodeConfig> {
         }
     }
     
-    // Load or create default config (this will now merge core config if it exists)
-    let config = load_merged_config().unwrap_or_else(|_| {
-        log::info!("Creating default configuration");
+    // Load or create default config
+    let config = load_config().unwrap_or_else(|_| {
+        log::info!("Creating default sagitta-code configuration");
         SagittaCodeConfig::default()
     });
     
@@ -178,32 +130,16 @@ pub fn validate_config(config: &SagittaCodeConfig) -> Result<()> {
     Ok(())
 }
 
-/// Merge two configurations, with the second one taking precedence
-pub fn merge_configs(base: SagittaCodeConfig, override_config: SagittaCodeConfig) -> SagittaCodeConfig {
-    SagittaCodeConfig {
-        gemini: GeminiConfig {
-            api_key: override_config.gemini.api_key.or(base.gemini.api_key),
-            model: if override_config.gemini.model.is_empty() {
-                base.gemini.model
-            } else {
-                override_config.gemini.model
-            },
-            max_history_size: if override_config.gemini.max_history_size == 0 {
-                base.gemini.max_history_size
-            } else {
-                override_config.gemini.max_history_size
-            },
-            max_reasoning_steps: if override_config.gemini.max_reasoning_steps == 0 {
-                base.gemini.max_reasoning_steps
-            } else {
-                override_config.gemini.max_reasoning_steps
-            },
-        },
-        sagitta: override_config.sagitta,
-        ui: override_config.ui,
-        logging: override_config.logging,
-        conversation: override_config.conversation,
-    }
+/// Get both the sagitta-code config and the shared sagitta-search config
+pub fn load_all_configs() -> Result<(SagittaCodeConfig, sagitta_search::config::AppConfig)> {
+    // Load sagitta-code specific config
+    let code_config = load_config()?;
+    
+    // Load shared sagitta-search config
+    let core_config = sagitta_search::config::load_config(None)
+        .context("Failed to load shared sagitta-search configuration")?;
+    
+    Ok((code_config, core_config))
 }
 
 #[cfg(test)]
@@ -411,67 +347,22 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_configs_override_api_key() {
-        let mut base = SagittaCodeConfig::default();
-        base.gemini.api_key = Some("base-key".to_string());
-        base.gemini.model = "base-model".to_string();
+    fn test_load_all_configs() {
+        // This test just checks that the function doesn't panic
+        // In a real environment, it would load actual config files
+        let result = load_all_configs();
         
-        let mut override_config = SagittaCodeConfig::default();
-        override_config.gemini.api_key = Some("override-key".to_string());
-        override_config.gemini.model = "".to_string(); // Empty, should use base
-        
-        let merged = merge_configs(base, override_config);
-        
-        assert_eq!(merged.gemini.api_key, Some("override-key".to_string()));
-        assert_eq!(merged.gemini.model, "base-model");
-    }
-
-    #[test]
-    fn test_merge_configs_override_model() {
-        let mut base = SagittaCodeConfig::default();
-        base.gemini.api_key = Some("base-key".to_string());
-        base.gemini.model = "base-model".to_string();
-        
-        let mut override_config = SagittaCodeConfig::default();
-        override_config.gemini.api_key = None; // Should use base
-        override_config.gemini.model = "override-model".to_string();
-        
-        let merged = merge_configs(base, override_config);
-        
-        assert_eq!(merged.gemini.api_key, Some("base-key".to_string()));
-        assert_eq!(merged.gemini.model, "override-model");
-    }
-
-    #[test]
-    fn test_merge_configs_both_none() {
-        let mut base = SagittaCodeConfig::default();
-        base.gemini.api_key = None;
-        base.gemini.model = "base-model".to_string();
-        
-        let mut override_config = SagittaCodeConfig::default();
-        override_config.gemini.api_key = None;
-        override_config.gemini.model = "".to_string();
-        
-        let merged = merge_configs(base, override_config);
-        
-        assert_eq!(merged.gemini.api_key, None);
-        assert_eq!(merged.gemini.model, "base-model");
-    }
-
-    #[test]
-    fn test_merge_configs_complete_override() {
-        let mut base = SagittaCodeConfig::default();
-        base.gemini.api_key = Some("base-key".to_string());
-        base.gemini.model = "base-model".to_string();
-        
-        let mut override_config = SagittaCodeConfig::default();
-        override_config.gemini.api_key = Some("override-key".to_string());
-        override_config.gemini.model = "override-model".to_string();
-        
-        let merged = merge_configs(base, override_config);
-        
-        assert_eq!(merged.gemini.api_key, Some("override-key".to_string()));
-        assert_eq!(merged.gemini.model, "override-model");
+        // The function should either succeed or fail gracefully
+        match result {
+            Ok((code_config, core_config)) => {
+                // Both configs should be valid
+                assert!(!code_config.gemini.model.is_empty());
+                assert!(!core_config.qdrant_url.is_empty());
+            }
+            Err(_) => {
+                // Failure is acceptable in test environment where configs might not exist
+            }
+        }
     }
 
     #[test]
