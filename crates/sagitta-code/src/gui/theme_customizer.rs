@@ -109,6 +109,12 @@ impl ThemeCustomizer {
                     streaming_color: Color32::from_rgb(34, 139, 34),
                     thinking_indicator_color: Color32::from_rgb(70, 130, 180),
                     complete_color: Color32::from_rgb(34, 139, 34),
+                    
+                    // Diff colors
+                    diff_added_bg: Color32::from_rgb(200, 255, 200),   // Light green background
+                    diff_removed_bg: Color32::from_rgb(255, 200, 200), // Light red background
+                    diff_added_text: Color32::from_rgb(0, 100, 0),     // Dark green text
+                    diff_removed_text: Color32::from_rgb(100, 0, 0),   // Dark red text
                 };
             },
             AppTheme::Custom => {
@@ -251,6 +257,10 @@ impl ThemeCustomizer {
                             if self.render_status_colors(ui) {
                                 theme_changed = true;
                             }
+                            
+                            if self.render_diff_colors(ui) {
+                                theme_changed = true;
+                            }
                         });
                 });
             });
@@ -365,6 +375,27 @@ impl ThemeCustomizer {
                             ui.label(RichText::new("● Streaming").color(self.colors.streaming_color));
                             ui.label(RichText::new("● Thinking").color(self.colors.thinking_indicator_color));
                             ui.label(RichText::new("● Complete").color(self.colors.complete_color));
+                        });
+                        
+                        ui.add_space(4.0);
+                        
+                        // Diff colors test
+                        ui.horizontal(|ui| {
+                            // Added diff example
+                            Frame::none()
+                                .fill(self.colors.diff_added_bg)
+                                .inner_margin(Vec2::splat(2.0))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new("+ Added").color(self.colors.diff_added_text).monospace());
+                                });
+                            
+                            // Removed diff example
+                            Frame::none()
+                                .fill(self.colors.diff_removed_bg)
+                                .inner_margin(Vec2::splat(2.0))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new("- Removed").color(self.colors.diff_removed_text).monospace());
+                                });
                         });
                     });
             });
@@ -481,6 +512,21 @@ impl ThemeCustomizer {
                         self.test_thinking_indicator_color(ui);
                         ui.add_space(4.0);
                         self.test_complete_color(ui);
+                    });
+                
+                ui.add_space(8.0);
+                
+                // Diff color tests
+                CollapsingHeader::new("🔄 Diff Color Tests")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        self.test_diff_added_bg(ui);
+                        ui.add_space(4.0);
+                        self.test_diff_removed_bg(ui);
+                        ui.add_space(4.0);
+                        self.test_diff_added_text(ui);
+                        ui.add_space(4.0);
+                        self.test_diff_removed_text(ui);
                     });
             });
         
@@ -709,6 +755,42 @@ impl ThemeCustomizer {
         ui.label(RichText::new("✓ Complete").color(self.colors.complete_color));
         ui.label("Used in: Completion indicators, finished states, done status");
     }
+
+    fn test_diff_added_bg(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Added Background Test:").strong());
+        Frame::none()
+            .fill(self.colors.diff_added_bg)
+            .stroke(Stroke::new(2.0, Color32::RED))
+            .inner_margin(Vec2::splat(8.0))
+            .show(ui, |ui| {
+                ui.label("This entire frame should use the added background color");
+                ui.label("Used in: Added background areas, new content additions");
+            });
+    }
+
+    fn test_diff_removed_bg(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Removed Background Test:").strong());
+        Frame::none()
+            .fill(self.colors.diff_removed_bg)
+            .stroke(Stroke::new(2.0, Color32::RED))
+            .inner_margin(Vec2::splat(8.0))
+            .show(ui, |ui| {
+                ui.label("This entire frame should use the removed background color");
+                ui.label("Used in: Removed background areas, content deletions");
+            });
+    }
+
+    fn test_diff_added_text(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Added Text Test:").strong());
+        ui.label(RichText::new("This text should use the added text color").color(self.colors.diff_added_text));
+        ui.label("Used in: Added text content, new information introductions");
+    }
+
+    fn test_diff_removed_text(&self, ui: &mut Ui) {
+        ui.label(RichText::new("Removed Text Test:").strong());
+        ui.label(RichText::new("This text should use the removed text color").color(self.colors.diff_removed_text));
+        ui.label("Used in: Removed text content, information removals");
+    }
     
     /// Render background color controls
     fn render_background_colors(&mut self, ui: &mut Ui) -> bool {
@@ -856,6 +938,27 @@ impl ThemeCustomizer {
         changed
     }
     
+    /// Render diff color controls
+    fn render_diff_colors(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+        
+        CollapsingHeader::new("🔄 Diff Colors")
+            .default_open(false)
+            .show(ui, |ui| {
+                Grid::new("diff_colors_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 8.0])
+                    .show(ui, |ui| {
+                        changed |= color_picker_standalone(ui, "Added Background", &mut self.colors.diff_added_bg);
+                        changed |= color_picker_standalone(ui, "Removed Background", &mut self.colors.diff_removed_bg);
+                        changed |= color_picker_standalone(ui, "Added Text", &mut self.colors.diff_added_text);
+                        changed |= color_picker_standalone(ui, "Removed Text", &mut self.colors.diff_removed_text);
+                    });
+            });
+        
+        changed
+    }
+    
     /// Render a color picker with preview
     fn color_picker(&mut self, ui: &mut Ui, label: &str, color: &mut Color32) -> bool {
         color_picker_standalone(ui, label, color)
@@ -965,6 +1068,16 @@ impl ThemeCustomizer {
         self.colors.streaming_color = hsl_to_color32(get_next_hue(), accent_saturation, accent_lightness);
         self.colors.thinking_indicator_color = hsl_to_color32(get_next_hue(), accent_saturation, accent_lightness);
         self.colors.complete_color = hsl_to_color32(get_next_hue(), accent_saturation, accent_lightness);
+        
+        // Diff colors (use fixed hues for consistency: green for added, red for removed)
+        let diff_saturation = accent_saturation * 0.8;
+        let diff_bg_lightness = if is_dark { 0.2 } else { 0.8 };
+        let diff_text_lightness = if is_dark { 0.7 } else { 0.3 };
+        
+        self.colors.diff_added_bg = hsl_to_color32(120.0, diff_saturation, diff_bg_lightness);     // Green background
+        self.colors.diff_removed_bg = hsl_to_color32(0.0, diff_saturation, diff_bg_lightness);    // Red background
+        self.colors.diff_added_text = hsl_to_color32(120.0, diff_saturation, diff_text_lightness);  // Green text
+        self.colors.diff_removed_text = hsl_to_color32(0.0, diff_saturation, diff_text_lightness); // Red text
     }
     
     /// Generate an analogous color scheme (adjacent colors on color wheel)
@@ -1080,6 +1193,16 @@ impl ThemeCustomizer {
         self.colors.streaming_color = hsl_to_color32(get_hue(), accent_saturation, accent_lightness);
         self.colors.thinking_indicator_color = hsl_to_color32(get_hue(), accent_saturation, accent_lightness);
         self.colors.complete_color = hsl_to_color32(get_hue(), accent_saturation, accent_lightness);
+        
+        // Diff colors (use fixed hues for consistency: green for added, red for removed)
+        let diff_saturation = accent_saturation * 0.8;
+        let diff_bg_lightness = if is_dark { 0.2 } else { 0.8 };
+        let diff_text_lightness = if is_dark { 0.7 } else { 0.3 };
+        
+        self.colors.diff_added_bg = hsl_to_color32(120.0, diff_saturation, diff_bg_lightness);     // Green background
+        self.colors.diff_removed_bg = hsl_to_color32(0.0, diff_saturation, diff_bg_lightness);    // Red background
+        self.colors.diff_added_text = hsl_to_color32(120.0, diff_saturation, diff_text_lightness);  // Green text
+        self.colors.diff_removed_text = hsl_to_color32(0.0, diff_saturation, diff_text_lightness); // Red text
     }
 }
 
