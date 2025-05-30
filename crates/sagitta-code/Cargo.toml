@@ -47,7 +47,7 @@ dashmap = "5.5"
 regex = "1.10"
 rand = "0.8"
 walkdir = "2.4"           # For project detection
-similar = "2.3"           # For text similarity
+similar = "2.7"           # For text similarity and diffs
 
 # UI dependencies (optional, for GUI components)
 eframe = { version = "0.31.1", optional = true }

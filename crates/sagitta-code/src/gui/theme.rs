@@ -51,6 +51,12 @@ pub struct CustomThemeColors {
     pub streaming_color: Color32,
     pub thinking_indicator_color: Color32,
     pub complete_color: Color32,
+    
+    // Diff colors
+    pub diff_added_bg: Color32,
+    pub diff_removed_bg: Color32,
+    pub diff_added_text: Color32,
+    pub diff_removed_text: Color32,
 }
 
 impl Default for CustomThemeColors {
@@ -97,6 +103,12 @@ impl Default for CustomThemeColors {
             streaming_color: Color32::from_rgb(150, 255, 150),
             thinking_indicator_color: Color32::from_rgb(100, 150, 255),
             complete_color: Color32::from_rgb(100, 255, 100),
+            
+            // Diff colors
+            diff_added_bg: Color32::from_rgb(0, 80, 0),     // Dark green background
+            diff_removed_bg: Color32::from_rgb(80, 0, 0),   // Dark red background
+            diff_added_text: Color32::from_rgb(100, 200, 100), // Light green text
+            diff_removed_text: Color32::from_rgb(200, 100, 100), // Light red text
         }
     }
 }
@@ -410,6 +422,42 @@ impl AppTheme {
             AppTheme::Dark => Color32::from_rgb(100, 255, 100),
             AppTheme::Light => Color32::from_rgb(34, 139, 34),
             AppTheme::Custom => get_custom_theme_colors().complete_color,
+        }
+    }
+
+    /// Get diff added background color
+    pub fn diff_added_bg(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(0, 80, 0),     // Dark green
+            AppTheme::Light => Color32::from_rgb(200, 255, 200), // Light green
+            AppTheme::Custom => get_custom_theme_colors().diff_added_bg,
+        }
+    }
+
+    /// Get diff removed background color
+    pub fn diff_removed_bg(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(80, 0, 0),     // Dark red
+            AppTheme::Light => Color32::from_rgb(255, 200, 200), // Light red
+            AppTheme::Custom => get_custom_theme_colors().diff_removed_bg,
+        }
+    }
+
+    /// Get diff added text color
+    pub fn diff_added_text(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(120, 255, 120),  // Light green text
+            AppTheme::Light => Color32::from_rgb(0, 100, 0),     // Dark green text
+            AppTheme::Custom => get_custom_theme_colors().diff_added_text,
+        }
+    }
+
+    /// Get diff removed text color
+    pub fn diff_removed_text(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(255, 120, 120),  // Light red text
+            AppTheme::Light => Color32::from_rgb(100, 0, 0),     // Dark red text
+            AppTheme::Custom => get_custom_theme_colors().diff_removed_text,
         }
     }
 }

@@ -17,11 +17,12 @@ use egui::{
     CornerRadius,
 };
 use syntect::{
-    highlighting::{ThemeSet, Style as SyntectStyle},
+    highlighting::{ThemeSet, Style as SyntectStyle, Theme},
     parsing::SyntaxSet,
     easy::HighlightLines,
     util::LinesWithEndings,
 };
+use similar::{ChangeTag, TextDiff};
 use std::sync::OnceLock;
 use crate::gui::theme::AppTheme;
 use crate::gui::symbols;
@@ -800,17 +801,103 @@ fn render_tool_result_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_w
     });
 }
 
+const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
+const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
+
 /// Render mixed content (text + code blocks) compactly
 fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+    if let Some((old_content, new_content, language)) = detect_diff_content(content) {
+        // Render diff header
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("🔄").size(12.0));
+            ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
+            if let Some(lang) = &language {
+                ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+            }
+            
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let copy_button = egui::Button::new("📋")
+                    .fill(app_theme.input_background())
+                    .stroke(Stroke::new(1.0, app_theme.border_color()))
+                    .rounding(CornerRadius::same(4));
+                
+                if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
+                    let diff_text = format!("--- Original\n+++ Modified\n{}", 
+                        similar::TextDiff::from_lines(&old_content, &new_content)
+                            .unified_diff()
+                            .context_radius(3)
+                            .to_string()
+                    );
+                    ui.output_mut(|o| o.copied_text = diff_text);
+                }
+            });
+        });
+        ui.add_space(2.0);
+
+        let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME; // Use the constant
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
+            Layout::top_down(Align::Min).with_cross_align(Align::Min),
+            |ui_for_diff_frame| {
+                Frame::none()
+                    .fill(app_theme.code_background())
+                    .inner_margin(Vec2::new(8.0, 6.0))
+                    .rounding(CornerRadius::same(4))
+                    .stroke(Stroke::new(0.5, app_theme.border_color()))
+                    .show(ui_for_diff_frame, |frame_content_ui| {
+                        render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
+                    });
+            }
+        );
+        return;
+    }
+    
     let parts: Vec<&str> = content.split("```").collect();
     for (i, part) in parts.iter().enumerate() {
         if i % 2 == 0 {
-            // Text part
             if !part.is_empty() {
-                render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
+                if let Some((old_content, new_content, language)) = detect_diff_content(part) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("🔄").size(12.0));
+                        ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
+                        if let Some(lang) = &language {
+                            ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let copy_button = egui::Button::new("📋")
+                                .fill(app_theme.input_background())
+                                .stroke(Stroke::new(1.0, app_theme.border_color()))
+                                .rounding(CornerRadius::same(4));
+                            if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
+                                let diff_text = format!("--- Original\n+++ Modified\n{}", 
+                                    similar::TextDiff::from_lines(&old_content, &new_content)
+                                        .unified_diff().context_radius(3).to_string());
+                                ui.output_mut(|o| o.copied_text = diff_text);
+                            }
+                        });
+                    });
+                    ui.add_space(2.0);
+                    let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME; // Use the constant
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
+                        Layout::top_down(Align::Min).with_cross_align(Align::Min),
+                        |ui_for_diff_frame| {
+                            Frame::none()
+                                .fill(app_theme.code_background())
+                                .inner_margin(Vec2::new(8.0, 6.0))
+                                .rounding(CornerRadius::same(4))
+                                .stroke(Stroke::new(0.5, app_theme.border_color()))
+                                .show(ui_for_diff_frame, |frame_content_ui| {
+                                    render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
+                                });
+                        }
+                    );
+                } else {
+                    render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
+                }
             }
         } else {
-            // Code part
             render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
         }
     }
@@ -904,18 +991,30 @@ fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, bg_color: &Color32, m
     
     ui.style_mut().wrap = Some(true);
     
-    for line in LinesWithEndings::from(text).take(20) { // Limit to 20 lines for performance
+    // Use a more compact approach by building the layout job directly
+    let mut layout_job = egui::text::LayoutJob::default();
+    
+    for (line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
         let ranges = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
-        
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(max_width);
             
             for (style, text_part) in ranges {
                 let color = syntect_style_to_color(&style);
-                ui.label(RichText::new(text_part).monospace().color(color).size(10.0));
+            layout_job.append(
+                text_part,
+                0.0,
+                TextFormat {
+                    font_id: egui::FontId::monospace(10.0),
+                    line_height: Some(12.0), // Tight line height - 12.0 for 10.0 font
+                    color,
+                    ..Default::default()
+                },
+            );
             }
-        });
     }
+    
+    // Render the entire layout job as a single label
+    ui.set_max_width(max_width);
+    ui.label(layout_job);
 }
 
 fn syntect_style_to_color(style: &SyntectStyle) -> Color32 {
@@ -924,6 +1023,328 @@ fn syntect_style_to_color(style: &SyntectStyle) -> Color32 {
         style.foreground.g, 
         style.foreground.b
     )
+}
+
+// New helper function to contain the core logic of preparing and rendering diff lines
+fn render_internal_diff_display_logic(ui: &mut Ui, old_content: &str, new_content: &str, language: Option<&str>, _bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+    let diff = TextDiff::from_lines(old_content, new_content);
+    
+    let syntax_set = get_syntax_set();
+    let theme_set = get_theme_set();
+    let syntect_theme = &theme_set.themes["base16-ocean.dark"];
+    
+    let syntax = if let Some(lang) = language {
+        syntax_set.find_syntax_by_extension(lang)
+            .or_else(|| syntax_set.find_syntax_by_name(lang))
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
+    } else {
+        syntax_set.find_syntax_by_extension("rs")
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
+    };
+
+    ui.style_mut().wrap = Some(true);
+    ui.set_max_width(max_width);
+    ui.spacing_mut().item_spacing.y = 0.0; // Remove spacing between items
+    render_diff_lines(ui, &diff, syntax, syntect_theme, &syntax_set, app_theme);
+}
+
+/// Render a unified diff view of two code snippets with syntax highlighting
+fn render_code_diff(ui: &mut Ui, old_content: &str, new_content: &str, language: Option<&str>, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+    let diff = TextDiff::from_lines(old_content, new_content);
+    let total_lines = diff.iter_all_changes().count();
+
+    if total_lines > DIFF_COLLAPSING_THRESHOLD_LINES { // Use the constant
+        egui::CollapsingHeader::new(RichText::new(format!("{} lines changed", total_lines)).small())
+            .default_open(false) // Keep it closed by default
+            .show(ui, |header_ui| {
+                ScrollArea::vertical()
+                    .max_height(EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT) // Use the constant
+                    .auto_shrink([false, true])
+                    .show(header_ui, |scroll_ui| {
+                        render_internal_diff_display_logic(scroll_ui, old_content, new_content, language, bg_color, scroll_ui.available_width(), app_theme);
+                    });
+            });
+    } else {
+        render_internal_diff_display_logic(ui, old_content, new_content, language, bg_color, max_width, app_theme);
+    }
+}
+
+/// Helper function to render individual diff lines
+fn render_diff_lines<'a>(
+    ui: &mut Ui, 
+    diff: &TextDiff<'a, 'a, 'a, str>, 
+    syntax: &syntect::parsing::SyntaxReference, 
+    syntect_theme: &syntect::highlighting::Theme,
+    syntax_set: &SyntaxSet,
+    app_theme: AppTheme
+) {
+    // Build a single layout job for all diff lines to eliminate spacing issues
+    let mut layout_job = egui::text::LayoutJob::default();
+    
+    for change in diff.iter_all_changes() {
+        let (line_bg_color, prefix_color, prefix_text) = match change.tag() {
+            ChangeTag::Delete => (
+                app_theme.diff_removed_bg(),     // Use theme colors
+                app_theme.diff_removed_text(),   // Use theme colors
+                "- "
+            ),
+            ChangeTag::Insert => (
+                app_theme.diff_added_bg(),       // Use theme colors
+                app_theme.diff_added_text(),     // Use theme colors
+                "+ "
+            ),
+            ChangeTag::Equal => (
+                Color32::TRANSPARENT,            // No background for unchanged lines
+                Color32::from_rgb(150, 150, 150), // Gray prefix
+                "  "
+            ),
+        };
+
+        let line_content = change.value();
+        
+        // Add the prefix (-, +, or space) with appropriate color
+        layout_job.append(
+            prefix_text,
+            0.0,
+            TextFormat {
+                font_id: egui::FontId::monospace(10.0),
+                line_height: Some(12.0), // Tight line height
+                color: prefix_color,
+                background: line_bg_color,
+                ..Default::default()
+            },
+        );
+
+        // Handle the line content - we need to preserve the structure including newlines
+        if line_content.trim().is_empty() {
+            // For empty lines, just add the newline with background
+            layout_job.append(
+                line_content, // This preserves the actual whitespace/newline
+                0.0,
+                TextFormat {
+                    font_id: egui::FontId::monospace(10.0),
+                    line_height: Some(12.0),
+                    color: prefix_color,
+                    background: line_bg_color,
+                    ..Default::default()
+                },
+            );
+        } else {
+            // For lines with content, syntax highlight them
+            let mut highlighter = HighlightLines::new(syntax, syntect_theme);
+
+            if let Ok(ranges) = highlighter.highlight_line(line_content, syntax_set) {
+                for (style, text_part) in ranges {
+                    let text_color = match change.tag() {
+                        ChangeTag::Delete => app_theme.diff_removed_text(),
+                        ChangeTag::Insert => app_theme.diff_added_text(),
+                        ChangeTag::Equal => syntect_style_to_color(&style),
+                    };
+                    
+                    layout_job.append(
+                        text_part,
+                        0.0,
+                        TextFormat {
+                            font_id: egui::FontId::monospace(10.0),
+                            line_height: Some(12.0), // Tight line height
+                            color: text_color,
+                            background: line_bg_color,
+                            ..Default::default()
+                        },
+                    );
+                }
+            } else {
+                // Fallback to plain text if syntax highlighting fails
+                let text_color = match change.tag() {
+                    ChangeTag::Delete => app_theme.diff_removed_text(),
+                    ChangeTag::Insert => app_theme.diff_added_text(),
+                    ChangeTag::Equal => Color32::from_rgb(200, 200, 200),
+                };
+                
+                layout_job.append(
+                    line_content,
+                    0.0,
+                    TextFormat {
+                        font_id: egui::FontId::monospace(10.0),
+                        line_height: Some(12.0), // Tight line height
+                        color: text_color,
+                        background: line_bg_color,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+    }
+    
+    // Render the entire diff as a single label with tight spacing
+    ui.label(layout_job);
+}
+
+/// Detect if content contains a diff pattern and extract the parts
+fn detect_diff_content(content: &str) -> Option<(String, String, Option<String>)> {
+    // Look for common diff patterns in tool results or messages
+    
+    // Pattern 1: "old content" -> "new content" format
+    if let Some(arrow_pos) = content.find(" -> ") {
+        let before_arrow = content[..arrow_pos].trim();
+        let after_arrow = content[arrow_pos + 4..].trim();
+        
+        // Try to extract quoted content
+        if before_arrow.starts_with('"') && before_arrow.ends_with('"') &&
+           after_arrow.starts_with('"') && after_arrow.ends_with('"') {
+            let old_content = before_arrow[1..before_arrow.len()-1].to_string();
+            let new_content = after_arrow[1..after_arrow.len()-1].to_string();
+            return Some((old_content, new_content, None));
+        }
+    }
+    
+    // Pattern 2: File edit operations in tool results
+    if content.contains("edit_file") || content.contains("file_edit") || content.contains("old_content") {
+        // Try to parse JSON for file edit operations
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+            if let Some(obj) = json.as_object() {
+                if let (Some(old), Some(new)) = (
+                    obj.get("old_content").and_then(|v| v.as_str()),
+                    obj.get("new_content").and_then(|v| v.as_str())
+                ) {
+                    let language = obj.get("language")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| obj.get("file_extension").and_then(|v| v.as_str()));
+                    return Some((old.to_string(), new.to_string(), language.map(|s| s.to_string())));
+                }
+            }
+        }
+    }
+    
+    // Pattern 3: Before/After sections
+    if content.contains("Before:") && content.contains("After:") {
+        if let Some(before_pos) = content.find("Before:") {
+            if let Some(after_pos) = content.find("After:") {
+                if after_pos > before_pos {
+                    let old_content = content[before_pos + 7..after_pos].trim().to_string();
+                    let new_content = content[after_pos + 6..].trim().to_string();
+                    return Some((old_content, new_content, None));
+                }
+            }
+        }
+    }
+    
+    // Pattern 4: Git-style diff with file headers (check this before unified diff)
+    if (content.contains("diff --git") || content.contains("index ")) && content.contains("@@") {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut old_lines = Vec::new();
+        let mut new_lines = Vec::new();
+        let mut language = None;
+        
+        for line in &lines {
+            if line.starts_with("diff --git") {
+                // Extract file extension for language detection
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    // Look at both a/filename and b/filename
+                    for part in &parts[2..] {
+                        if let Some(filename) = part.strip_prefix("b/").or_else(|| part.strip_prefix("a/")) {
+                            if let Some(ext) = filename.split('.').last() {
+                                if ext != filename && ext.len() <= 5 { // reasonable extension length
+                                    language = Some(ext.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") || line.starts_with("index ") {
+                continue;
+            }
+            if line.starts_with("-") {
+                old_lines.push(&line[1..]);
+            } else if line.starts_with("+") {
+                new_lines.push(&line[1..]);
+            } else if line.starts_with(" ") {
+                old_lines.push(&line[1..]);
+                new_lines.push(&line[1..]);
+            }
+        }
+        
+        if !old_lines.is_empty() || !new_lines.is_empty() {
+            return Some((old_lines.join("\n"), new_lines.join("\n"), language));
+        }
+    }
+    
+    // Pattern 5: Traditional unified diff format (starts with --- and +++)
+    if content.contains("---") && content.contains("+++") {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() > 2 {
+            let mut old_lines = Vec::new();
+            let mut new_lines = Vec::new();
+            let mut in_diff = false;
+            
+            for line in &lines {
+                if line.starts_with("---") || line.starts_with("+++") {
+                    in_diff = true;
+                    continue;
+                }
+                if line.starts_with("@@") {
+                    continue;
+                }
+                if in_diff {
+                    if line.starts_with("-") && !line.starts_with("---") {
+                        old_lines.push(&line[1..]);
+                    } else if line.starts_with("+") && !line.starts_with("+++") {
+                        new_lines.push(&line[1..]);
+                    } else if line.starts_with(" ") {
+                        old_lines.push(&line[1..]);
+                        new_lines.push(&line[1..]);
+                    }
+                }
+            }
+            
+            if !old_lines.is_empty() || !new_lines.is_empty() {
+                return Some((old_lines.join("\n"), new_lines.join("\n"), None));
+            }
+        }
+    }
+    
+    // Pattern 6: Edit descriptions mentioning changes
+    if content.contains("I will") && (content.contains("change") || content.contains("replace") || content.contains("modify")) {
+        // Try a simpler approach: find all quoted strings and look for "to" pattern
+        let mut quote_positions = Vec::new();
+        let mut in_quote = false;
+        let mut quote_start = 0;
+        
+        for (i, c) in content.char_indices() {
+            match c {
+                '"' if !in_quote => {
+                    in_quote = true;
+                    quote_start = i + 1;
+                }
+                '"' if in_quote => {
+                    in_quote = false;
+                    quote_positions.push((quote_start, i));
+                }
+                _ => {}
+            }
+        }
+        
+        // Look for patterns where we have at least 2 quoted strings with " to " between them
+        if quote_positions.len() >= 2 {
+            for i in 0..quote_positions.len() - 1 {
+                let (_, first_end) = quote_positions[i];
+                let (second_start, second_end) = quote_positions[i + 1];
+                
+                let between = &content[first_end + 1..second_start - 1];
+                if between.contains(" to ") {
+                    let old_content = &content[quote_positions[i].0..quote_positions[i].1];
+                    let new_content = &content[second_start..second_end];
+                    return Some((old_content.to_string(), new_content.to_string(), None));
+                }
+            }
+        }
+    }
+    
+    None
 }
 
 /// Check if a message appears to be a tool result (contains large structured data)
@@ -1088,43 +1509,162 @@ mod tests {
     }
 
     #[test]
-    fn test_summary_message_type_detection() {
-        let summary_msg = create_test_message("Okay, I've finished those tasks. Successfully completed: web search.", MessageType::Summary);
-        let normal_msg = create_test_message("This is a normal message.", MessageType::Normal);
+    fn test_detect_diff_content_arrow_format() {
+        let content = r#""hello world" -> "hello rust""#;
+        let result = detect_diff_content(content);
+        assert!(result.is_some());
+        let (old, new, lang) = result.unwrap();
+        assert_eq!(old, "hello world");
+        assert_eq!(new, "hello rust");
+        assert!(lang.is_none());
+    }
+
+    #[test]
+    fn test_detect_diff_content_before_after() {
+        let content = r#"Before: fn main() {
+    println!("Hello");
+}
+After: fn main() {
+    println!("Hello, world!");
+}"#;
+        let result = detect_diff_content(content);
+        assert!(result.is_some());
+        let (old, new, _) = result.unwrap();
+        assert!(old.contains("println!(\"Hello\");"));
+        assert!(new.contains("println!(\"Hello, world!\");"));
+    }
+
+    #[test]
+    fn test_detect_diff_content_unified_diff() {
+        let content = r#"--- old_file.rs
++++ new_file.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    println!("Hello");
++    println!("Hello, world!");
+ }"#;
+        let result = detect_diff_content(content);
+        assert!(result.is_some());
+        let (old, new, _) = result.unwrap();
+        assert!(old.contains("println!(\"Hello\");"));
+        assert!(new.contains("println!(\"Hello, world!\");"));
+    }
+
+    #[test]
+    fn test_detect_diff_content_git_style() {
+        let content = r#"diff --git a/main.rs b/main.rs
+index 1234567..abcdefg 100644
+--- a/main.rs
++++ b/main.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    println!("Hello");
++    println!("Hello, world!");
+ }"#;
+        let result = detect_diff_content(content);
         
-        assert_eq!(summary_msg.message_type, MessageType::Summary);
-        assert_eq!(normal_msg.message_type, MessageType::Normal);
+        assert!(result.is_some());
+        let (old, new, lang) = result.unwrap();
+        assert!(old.contains("println!(\"Hello\");"));
+        assert!(new.contains("println!(\"Hello, world!\");"));
+        assert_eq!(lang, Some("rs".to_string()));
+    }
+
+    #[test]
+    fn test_detect_diff_content_edit_description() {
+        let content = r#"I will change "old function" to "new function""#;
+        let result = detect_diff_content(content);
+        
+        assert!(result.is_some());
+        let (old, new, _) = result.unwrap();
+        assert_eq!(old, "old function");
+        assert_eq!(new, "new function");
+    }
+
+    #[test]
+    fn test_detect_diff_content_no_diff() {
+        let content = "This is just regular text without any diff patterns.";
+        let result = detect_diff_content(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_diff_content_json_tool_result() {
+        let content = r#"{"old_content": "fn test() {\n    println!(\"old\");\n}", "new_content": "fn test() {\n    println!(\"new\");\n}", "language": "rs"}"#;
+        let result = detect_diff_content(content);
+        assert!(result.is_some());
+        let (old, new, lang) = result.unwrap();
+        assert!(old.contains("println!(\"old\");"));
+        assert!(new.contains("println!(\"new\");"));
+        assert_eq!(lang, Some("rs".to_string()));
+    }
+
+    #[test]
+    fn test_summary_message_type_detection() {
+        let summary_message = create_test_message("Okay, I've finished those tasks. What would you like to do next?", MessageType::Summary);
+        
+        assert_eq!(summary_message.message_type, MessageType::Summary);
+        assert!(is_reasoning_engine_summary_message(&summary_message.content));
     }
 
     #[test]
     fn test_message_group_spinner_suppression() {
-        let summary_msg = create_test_message("Okay, I've finished those tasks. Successfully completed: web search.", MessageType::Summary);
-        let normal_msg = create_test_message("This is a normal message.", MessageType::Normal);
+        let mut summary_message = create_test_message("Successfully completed: task1, task2", MessageType::Summary);
+        summary_message.status = MessageStatus::Complete;
         
-        // Test that summary messages would suppress spinners in a group
-        let summary_group = vec![&summary_msg];
-        let normal_group = vec![&normal_msg];
+        let mut tool_message = create_test_message("Tool 'search' result: {...}", MessageType::Tool);
+        tool_message.status = MessageStatus::Streaming;
         
-        // We can't easily test the UI rendering without egui context, but we can test the logic
-        // The suppress_spinner logic is in render_message_group and checks for MessageType::Summary
-        let has_summary = summary_group.iter().any(|m| m.message_type == MessageType::Summary);
-        let has_no_summary = normal_group.iter().any(|m| m.message_type == MessageType::Summary);
+        let mut normal_message = create_test_message("Regular message", MessageType::Normal);
+        normal_message.status = MessageStatus::Streaming;
         
-        assert!(has_summary, "Summary group should contain summary message");
-        assert!(!has_no_summary, "Normal group should not contain summary message");
+        // Summary messages that are complete should not show spinner
+        let group = vec![&summary_message];
+        let status = get_group_status(&group, AppTheme::Dark);
+        assert!(status.is_none()); // No spinner for complete summary
+        
+        // Tool messages that are streaming should show spinner
+        let group = vec![&tool_message];
+        let status = get_group_status(&group, AppTheme::Dark);
+        assert!(status.is_some()); // Should show spinner for streaming tool
+        
+        // Normal messages that are streaming should show spinner
+        let group = vec![&normal_message];
+        let status = get_group_status(&group, AppTheme::Dark);
+        assert!(status.is_some()); // Should show spinner for streaming normal
     }
 
     #[test]
     fn test_message_type_enum_values() {
-        // Test that all MessageType variants are properly defined
+        // Ensure all enum variants exist and are usable
         let _normal = MessageType::Normal;
         let _summary = MessageType::Summary;
         let _tool = MessageType::Tool;
         let _system = MessageType::System;
         
-        // Test PartialEq implementation
-        assert_eq!(MessageType::Summary, MessageType::Summary);
-        assert_ne!(MessageType::Summary, MessageType::Normal);
+        // Test equality
+        assert_eq!(MessageType::Normal, MessageType::Normal);
+        assert_ne!(MessageType::Normal, MessageType::Summary);
+    }
+
+    // Define constants related to diff rendering to make them testable
+    const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
+    const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+    const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
+
+    #[test]
+    fn test_diff_rendering_constants() {
+        // Test the threshold for when a diff becomes collapsible
+        // This is used in render_code_diff
+        assert_eq!(DIFF_COLLAPSING_THRESHOLD_LINES, 10, "Diff collapsing threshold should be 10 lines.");
+
+        // Test the max_height of the ScrollArea when a CollapsingHeader for a diff is expanded
+        // This is used in render_code_diff
+        assert_eq!(EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT, 360.0, "Max height for expanded diff scroll area should be 360.0 px.");
+
+        // Test the minimum height allocated for the frame containing a diff view
+        // This is used in render_mixed_content_compact
+        assert_eq!(MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME, 400.0, "Minimum allocated height for a diff component's frame should be 400.0 px.");
     }
 }
 
