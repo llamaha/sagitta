@@ -21,16 +21,16 @@ use crate::config::types::ConversationConfig;
 #[async_trait]
 pub trait ConversationManager: Send + Sync {
     /// Create a new conversation
-    async fn create_conversation(&mut self, title: String, workspace_id: Option<Uuid>) -> Result<Uuid>;
+    async fn create_conversation(&self, title: String, workspace_id: Option<Uuid>) -> Result<Uuid>;
     
     /// Get a conversation by ID
     async fn get_conversation(&self, id: Uuid) -> Result<Option<Conversation>>;
     
     /// Update an existing conversation
-    async fn update_conversation(&mut self, conversation: Conversation) -> Result<()>;
+    async fn update_conversation(&self, conversation: Conversation) -> Result<()>;
     
     /// Delete a conversation
-    async fn delete_conversation(&mut self, id: Uuid) -> Result<()>;
+    async fn delete_conversation(&self, id: Uuid) -> Result<()>;
     
     /// List conversations with optional workspace filter
     async fn list_conversations(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>>;
@@ -39,22 +39,22 @@ pub trait ConversationManager: Send + Sync {
     async fn search_conversations(&self, query: &ConversationQuery) -> Result<Vec<ConversationSearchResult>>;
     
     /// Create a new branch in a conversation
-    async fn create_branch(&mut self, conversation_id: Uuid, parent_message_id: Option<Uuid>, title: String) -> Result<Uuid>;
+    async fn create_branch(&self, conversation_id: Uuid, parent_message_id: Option<Uuid>, title: String) -> Result<Uuid>;
     
     /// Merge a branch back into the main conversation
-    async fn merge_branch(&mut self, conversation_id: Uuid, branch_id: Uuid) -> Result<()>;
+    async fn merge_branch(&self, conversation_id: Uuid, branch_id: Uuid) -> Result<()>;
     
     /// Create a checkpoint in a conversation
-    async fn create_checkpoint(&mut self, conversation_id: Uuid, message_id: Uuid, title: String) -> Result<Uuid>;
+    async fn create_checkpoint(&self, conversation_id: Uuid, message_id: Uuid, title: String) -> Result<Uuid>;
     
     /// Restore a conversation to a checkpoint
-    async fn restore_checkpoint(&mut self, conversation_id: Uuid, checkpoint_id: Uuid) -> Result<()>;
+    async fn restore_checkpoint(&self, conversation_id: Uuid, checkpoint_id: Uuid) -> Result<()>;
     
     /// Get conversation statistics
     async fn get_statistics(&self) -> Result<ConversationStatistics>;
     
     /// Archive old conversations based on criteria
-    async fn archive_conversations(&mut self, criteria: ArchiveCriteria) -> Result<usize>;
+    async fn archive_conversations(&self, criteria: ArchiveCriteria) -> Result<usize>;
 }
 
 /// Implementation of the conversation manager
@@ -169,7 +169,7 @@ impl ConversationManagerImpl {
 
 #[async_trait]
 impl ConversationManager for ConversationManagerImpl {
-    async fn create_conversation(&mut self, title: String, workspace_id: Option<Uuid>) -> Result<Uuid> {
+    async fn create_conversation(&self, title: String, workspace_id: Option<Uuid>) -> Result<Uuid> {
         let conversation = Conversation::new(title, workspace_id);
         let id = conversation.id;
         
@@ -193,7 +193,7 @@ impl ConversationManager for ConversationManagerImpl {
         Ok(conversations.get(&id).cloned())
     }
     
-    async fn update_conversation(&mut self, conversation: Conversation) -> Result<()> {
+    async fn update_conversation(&self, conversation: Conversation) -> Result<()> {
         let id = conversation.id;
         
         // Update memory cache
@@ -211,7 +211,7 @@ impl ConversationManager for ConversationManagerImpl {
         Ok(())
     }
     
-    async fn delete_conversation(&mut self, id: Uuid) -> Result<()> {
+    async fn delete_conversation(&self, id: Uuid) -> Result<()> {
         // Remove from memory cache
         {
             let mut conversations = self.conversations.write().await;
@@ -251,13 +251,14 @@ impl ConversationManager for ConversationManagerImpl {
         self.search_engine.search(query).await
     }
     
-    async fn create_branch(&mut self, conversation_id: Uuid, parent_message_id: Option<Uuid>, title: String) -> Result<Uuid> {
-        let mut conversation = self.get_conversation(conversation_id).await?
+    async fn create_branch(&self, conversation_id: Uuid, parent_message_id: Option<Uuid>, title: String) -> Result<Uuid> {
+        let conversation = self.get_conversation(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
         
         let branch = ConversationBranch::new(title, parent_message_id);
         let branch_id = branch.id;
         
+        let mut conversation = conversation.clone();
         conversation.branches.push(branch);
         conversation.last_active = chrono::Utc::now();
         
@@ -266,17 +267,15 @@ impl ConversationManager for ConversationManagerImpl {
         Ok(branch_id)
     }
     
-    async fn merge_branch(&mut self, conversation_id: Uuid, branch_id: Uuid) -> Result<()> {
-        let mut conversation = self.get_conversation(conversation_id).await?
+    async fn merge_branch(&self, conversation_id: Uuid, branch_id: Uuid) -> Result<()> {
+        let conversation = self.get_conversation(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
         
         // Find the branch to merge
         let branch_index = conversation.branches.iter().position(|b| b.id == branch_id)
             .ok_or_else(|| anyhow::anyhow!("Branch not found: {}", branch_id))?;
         
-        let mut branch = conversation.branches.remove(branch_index);
-        
-        // Clone messages before marking branch as merged
+        let mut branch = conversation.branches[branch_index].clone();
         let branch_messages = branch.messages.clone();
         
         // Mark branch as merged
@@ -284,39 +283,38 @@ impl ConversationManager for ConversationManagerImpl {
         branch.status = BranchStatus::Merged;
         
         // Append branch messages to main conversation
+        let mut conversation = conversation.clone();
         conversation.messages.extend(branch_messages);
         conversation.last_active = chrono::Utc::now();
         
-        // Add the merged branch back to history
-        conversation.branches.push(branch);
+        // Update the branch in the conversation
+        conversation.branches[branch_index] = branch;
         
         self.update_conversation(conversation).await?;
         
         Ok(())
     }
     
-    async fn create_checkpoint(&mut self, conversation_id: Uuid, message_id: Uuid, title: String) -> Result<Uuid> {
-        let mut conversation = self.get_conversation(conversation_id).await?
+    async fn create_checkpoint(&self, conversation_id: Uuid, message_id: Uuid, title: String) -> Result<Uuid> {
+        let conversation = self.get_conversation(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
         
-        // Verify message exists
-        let message_exists = conversation.messages.iter().any(|m| m.id == message_id) ||
-            conversation.branches.iter().any(|b| b.messages.iter().any(|m| m.id == message_id));
-        
-        if !message_exists {
-            return Err(anyhow::anyhow!("Message not found: {}", message_id));
+        // Verify the message exists in the conversation
+        if !conversation.messages.iter().any(|m| m.id == message_id) {
+            return Err(anyhow::anyhow!("Message not found in conversation: {}", message_id));
         }
         
         let context_snapshot = self.create_context_snapshot(conversation_id, message_id).await?;
         let checkpoint = ConversationCheckpoint::new(
             message_id, 
             title, 
-            None,
+            None, 
             Some(context_snapshot), 
             false
         );
         let checkpoint_id = checkpoint.id;
         
+        let mut conversation = conversation.clone();
         conversation.checkpoints.push(checkpoint);
         conversation.last_active = chrono::Utc::now();
         
@@ -325,8 +323,8 @@ impl ConversationManager for ConversationManagerImpl {
         Ok(checkpoint_id)
     }
     
-    async fn restore_checkpoint(&mut self, conversation_id: Uuid, checkpoint_id: Uuid) -> Result<()> {
-        let mut conversation = self.get_conversation(conversation_id).await?
+    async fn restore_checkpoint(&self, conversation_id: Uuid, checkpoint_id: Uuid) -> Result<()> {
+        let conversation = self.get_conversation(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
         
         // Find the checkpoint
@@ -336,9 +334,10 @@ impl ConversationManager for ConversationManagerImpl {
         
         let target_message_id = checkpoint.message_id;
         
-        // Find the position of the target message
+        // Find the message position and truncate
         if let Some(pos) = conversation.messages.iter().position(|m| m.id == target_message_id) {
             // Truncate messages after the checkpoint
+            let mut conversation = conversation.clone();
             conversation.messages.truncate(pos + 1);
             conversation.last_active = chrono::Utc::now();
             
@@ -392,7 +391,7 @@ impl ConversationManager for ConversationManagerImpl {
         })
     }
     
-    async fn archive_conversations(&mut self, criteria: ArchiveCriteria) -> Result<usize> {
+    async fn archive_conversations(&self, criteria: ArchiveCriteria) -> Result<usize> {
         let conversations = self.conversations.read().await;
         let mut to_archive = Vec::new();
         

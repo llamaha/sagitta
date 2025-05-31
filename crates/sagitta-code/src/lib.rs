@@ -25,7 +25,14 @@ pub mod gui;
 /// Reasoning module
 pub mod reasoning;
 
-// Re-export commonly used items
-pub use agent::Agent;
+/// Project management
+pub mod project;
+
+/// Tasks
+pub mod tasks;
+
+// Re-export commonly used types
 pub use config::SagittaCodeConfig;
-pub use utils::init_logger; 
+pub use utils::init_logger;
+pub use tasks::{Task, TaskManager, TaskScheduler};
+pub use tasks::conversation::ConversationTaskIntegration; 

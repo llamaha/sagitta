@@ -104,7 +104,31 @@ pub enum ProjectType {
 }
 
 impl ProjectType {
-    pub fn detect_from_path(_path: &std::path::Path) -> Self {
+    pub fn detect_from_path(path: &std::path::Path) -> Self {
+        // Check for Rust project markers
+        if path.join("Cargo.toml").exists() {
+            return ProjectType::Rust;
+        }
+        
+        // Check for Python project markers
+        if path.join("pyproject.toml").exists() || 
+           path.join("setup.py").exists() || 
+           path.join("requirements.txt").exists() ||
+           path.join("Pipfile").exists() {
+            return ProjectType::Python;
+        }
+        
+        // Check for JavaScript/Node.js project markers
+        if path.join("package.json").exists() {
+            return ProjectType::JavaScript;
+        }
+        
+        // Check for Go project markers
+        if path.join("go.mod").exists() {
+            return ProjectType::Go;
+        }
+        
+        // Default to Unknown if no markers found
         ProjectType::Unknown
     }
 }
@@ -215,9 +239,29 @@ pub struct ConversationMetadata {
     pub user_feedback_score: Option<f32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceSettings {
     pub default_project_type: Option<ProjectType>,
+    pub max_conversations: Option<usize>,
+    pub auto_cleanup_days: Option<u32>,
+    pub auto_context_loading: bool,
+    pub auto_checkpoints: bool,
+    pub auto_branching: bool,
+    pub default_tags: Vec<String>,
+}
+
+impl Default for WorkspaceSettings {
+    fn default() -> Self {
+        Self {
+            default_project_type: None,
+            max_conversations: Some(100),
+            auto_cleanup_days: Some(30),
+            auto_context_loading: true,
+            auto_checkpoints: true,
+            auto_branching: false,
+            default_tags: Vec::new(),
+        }
+    }
 }
 
 // Re-export ConversationStatus from agent::state::types to avoid circular dependency if it were defined here

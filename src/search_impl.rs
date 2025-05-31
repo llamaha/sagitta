@@ -54,15 +54,17 @@ where
     let vocab_path = config::get_vocabulary_path(config, collection_name)?;
     log::info!("Attempting to load vocabulary for collection '{}' from path: {}", collection_name, vocab_path.display());
     let vocabulary_manager = match VocabularyManager::load(&vocab_path) {
-        Ok(vm) => vm,
+        Ok(vm) => {
+            if vm.is_empty() {
+                log::warn!("Vocabulary for collection '{}' is empty. Performing dense-only search.", collection_name);
+            }
+            Some(vm)
+        },
         Err(e) => {
-            log::error!("Failed to load vocabulary from {}: {}. Cannot perform hybrid search.", vocab_path.display(), e);
-            return Err(SagittaError::Other(format!("Vocabulary not found for collection '{}'", collection_name)));
+            log::warn!("Failed to load vocabulary from {}: {}. Falling back to dense-only search.", vocab_path.display(), e);
+            None
         }
     };
-    if vocabulary_manager.is_empty() {
-         log::warn!("Vocabulary for collection '{}' is empty. Sparse search may not yield results.", collection_name);
-    }
     // --- End Load Vocabulary ---
 
     // 1a. Generate Dense Query Embedding
@@ -76,17 +78,23 @@ where
     log::trace!("Core: Generated dense query embedding.");
 
     // 1b. Generate Sparse Query Vector (TF = 1.0 for each known term)
-    let tokenizer_config = TokenizerConfig::default();
-    let query_tokens = tokenizer::tokenize_code(query_text, &tokenizer_config);
-    let mut sparse_query_map: HashMap<u32, f32> = HashMap::new();
-    for token in query_tokens {
-        if let Some(token_id) = vocabulary_manager.get_id(&token.text) {
-            // Using a map handles duplicate query terms implicitly (last one wins, which is fine for weight 1.0)
-            sparse_query_map.insert(token_id, 1.0f32);
+    let sparse_query_vec = if let Some(ref vocab_manager) = vocabulary_manager {
+        let tokenizer_config = TokenizerConfig::default();
+        let query_tokens = tokenizer::tokenize_code(query_text, &tokenizer_config);
+        let mut sparse_query_map: HashMap<u32, f32> = HashMap::new();
+        for token in query_tokens {
+            if let Some(token_id) = vocab_manager.get_id(&token.text) {
+                // Using a map handles duplicate query terms implicitly (last one wins, which is fine for weight 1.0)
+                sparse_query_map.insert(token_id, 1.0f32);
+            }
         }
-    }
-    let sparse_query_vec: Vec<(u32, f32)> = sparse_query_map.into_iter().collect();
-    log::trace!("Core: Generated sparse query vector with {} unique terms.", sparse_query_vec.len());
+        let sparse_vec: Vec<(u32, f32)> = sparse_query_map.into_iter().collect();
+        log::trace!("Core: Generated sparse query vector with {} unique terms.", sparse_vec.len());
+        sparse_vec
+    } else {
+        log::info!("No vocabulary available for collection '{}'. Performing dense-only search.", collection_name);
+        Vec::new()
+    };
 
     // Define prefetch parameters
     let prefetch_limit = limit * 5; // Fetch more candidates initially (configurable?)
@@ -115,8 +123,9 @@ where
         }
         let sparse_prefetch = sparse_prefetch_builder;
         query_builder = query_builder.add_prefetch(sparse_prefetch);
+        log::debug!("Core: Using hybrid search (dense + sparse).");
     } else {
-        log::warn!("Query text '{}' contained no terms found in the vocabulary. Performing dense-only search.", query_text);
+        log::info!("Performing dense-only search for query: '{}'", query_text);
     }
 
     query_builder = query_builder.query(Query::new_fusion(Fusion::Rrf)) // Use RRF fusion

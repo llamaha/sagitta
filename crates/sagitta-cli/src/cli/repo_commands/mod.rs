@@ -12,6 +12,9 @@ pub mod list_branches;
 pub mod create_branch;
 pub mod delete_branch;
 pub mod status;
+pub mod sync_branches;
+pub mod compare_branches;
+pub mod cleanup_branches;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Subcommand};
@@ -52,6 +55,12 @@ pub enum RepoCommand {
     DeleteBranch(delete_branch::DeleteBranchArgs),
     /// Show repository status
     Status(status::StatusArgs),
+    /// Sync multiple branches at once
+    SyncBranches(sync_branches::SyncBranchesArgs),
+    /// Compare branches and their sync status
+    CompareBranches(compare_branches::CompareBranchesArgs),
+    /// Clean up unused branch collections
+    CleanupBranches(cleanup_branches::CleanupBranchesArgs),
 }
 
 pub async fn handle_repo_command<C>(
@@ -153,6 +162,18 @@ where
         },
         RepoCommand::Status(status_args) => {
             status::handle_status(status_args, config).await?;
+            Ok(())
+        },
+        RepoCommand::SyncBranches(sync_branches_args) => {
+            sync_branches::handle_sync_branches(sync_branches_args, config, client.clone(), cli_args, override_path).await?;
+            Ok(())
+        },
+        RepoCommand::CompareBranches(compare_branches_args) => {
+            compare_branches::handle_compare_branches(compare_branches_args, config, client.clone(), cli_args).await?;
+            Ok(())
+        },
+        RepoCommand::CleanupBranches(cleanup_branches_args) => {
+            cleanup_branches::handle_cleanup_branches(cleanup_branches_args, config, client.clone(), cli_args, override_path).await?;
             Ok(())
         },
     };

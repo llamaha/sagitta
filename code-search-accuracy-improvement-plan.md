@@ -43,8 +43,6 @@
 
 ### **Milestone 1.2: BGE-Large-EN-v1.5 Integration**
 **Tasks:**
-- Replace st-codesearch-distilroberta-base with BAAI/bge-large-en-v1.5
-- Configure 1024-dimensional embedding handling
 - Optimize for 512-token context window with regex preprocessing
 - Implement memory monitoring and auto-batch adjustment
 - Test embedding generation with new tokenizer integration

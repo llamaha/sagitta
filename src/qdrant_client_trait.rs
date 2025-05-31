@@ -6,7 +6,7 @@ use qdrant_client::qdrant::{
     UpsertPoints, PointsOperationResponse, CreateCollection, Distance,
     VectorParamsBuilder, QueryPoints, QueryResponse,
     VectorsConfig, VectorParamsMap, vectors_config::Config as VectorsConfig_oneof_config,
-    SparseVectorParams, SparseVectorConfig, Modifier
+    SparseVectorParams, SparseVectorConfig, Modifier, ListCollectionsRequest
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead
@@ -46,6 +46,8 @@ pub trait QdrantClientTrait: Send + Sync {
     async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse>;
     /// Performs a query on points in a collection.
     async fn query(&self, request: QueryPoints) -> Result<QueryResponse>;
+    /// Lists all collections.
+    async fn list_collections(&self) -> Result<Vec<String>>;
     // Add other methods used by the application as needed
 }
 
@@ -159,5 +161,14 @@ impl QdrantClientTrait for Qdrant {
 
     async fn query(&self, request: QueryPoints) -> Result<QueryResponse> {
         self.query(request).await.map_err(SagittaError::from)
+    }
+
+    async fn list_collections(&self) -> Result<Vec<String>> {
+        let response = self.list_collections().await.map_err(|e| SagittaError::QdrantError(e))?;
+        let collection_names = response.collections
+            .into_iter()
+            .map(|collection| collection.name)
+            .collect();
+        Ok(collection_names)
     }
 } 

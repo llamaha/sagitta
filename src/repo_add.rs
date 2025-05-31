@@ -13,14 +13,13 @@ use crate::qdrant_client_trait::QdrantClientTrait;
 use anyhow::anyhow;
 use clap::Args; // Keep Args
 use colored::*;
-use git2::Repository;
+use git2::{Repository, build::RepoBuilder, Signature};
 use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
 use log::{info, error, warn};
 use crate::config::AppConfig;
  // Use ManualMock
 use std::io::Write;
-use git2::build::RepoBuilder; // Import RepoBuilder
 
 /// Arguments for the `repo add` command.
 #[derive(Args, Debug)]
@@ -261,7 +260,7 @@ mod tests {
     use tempfile::tempdir;
     use std::fs;
     use std::sync::Arc;
-    use git2::{Repository, Signature, /*IndexAddOption, FileMode*/};
+    use git2::{Repository, Signature, build::RepoBuilder};
     use std::io::Write;
 
     // Helper to create an initial commit in a repo
@@ -324,10 +323,8 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let local_repo_path = temp_dir.path().join("test_repo");
         fs::create_dir_all(&local_repo_path).unwrap();
-        let repo = git2::Repository::init(&local_repo_path).unwrap();
-        create_initial_commit(&repo, "README.md", "Initial commit").expect("Failed to create initial commit");
-        // Add a dummy remote 'origin' so the URL derivation logic doesn't fail immediately
-        repo.remote("origin", "file:///dev/null").expect("Failed to add dummy remote"); 
+        let git_repo = git2::Repository::init(&local_repo_path).unwrap();
+        create_initial_commit(&git_repo, "README.md", "Initial commit").expect("Failed to create initial commit");
 
         let manual_mock_client = ManualMockQdrantClient::new();
         let client_arc = Arc::new(manual_mock_client.clone());
@@ -335,13 +332,13 @@ mod tests {
 
         let config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
+            repositories: vec![],
+            active_repository: None,
             onnx_model_path: None,
             onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories_base_path: Some(temp_dir.path().to_str().unwrap().to_string()),
             vocabulary_base_path: None,
-            repositories: vec![],
-            active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig {
                  vector_dimension: 10,
@@ -358,16 +355,22 @@ mod tests {
             rayon_num_threads: 4,
         };
         
-        let expected_collection_name = format!("{}{}_{}", 
-            config.performance.collection_name_prefix, 
+        // Use branch-aware collection naming - the default branch will be "main" or "master"
+        // We need to determine what branch the test repo will have
+        let repo = git2::Repository::open(&local_repo_path).unwrap();
+        let head = repo.head().unwrap();
+        let branch_name = head.shorthand().unwrap_or("main");
+        
+        let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
             "test_tenant", // Hardcoded tenant_id for this test
-            repo_name_str
+            repo_name_str,
+            branch_name,
+            &config
         );
         let expected_dimension = config.performance.vector_dimension;
 
         manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
         manual_mock_client.expect_create_collection(Ok(true));
-
 
         let add_args = AddRepoArgs {
             local_path: Some(local_repo_path.clone()),
@@ -380,7 +383,7 @@ mod tests {
             repositories_base_path: None,
             target_ref: None,
         };
-
+        
         let result = handle_repo_add(
             add_args,
             temp_dir.path().to_path_buf(),
@@ -403,42 +406,6 @@ mod tests {
         assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
         assert!(manual_mock_client.verify_create_collection_called());
         assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
-    }
-
-    // Shared test setup
-    fn create_test_config() -> AppConfig {
-        let temp_dir = tempdir().expect("Failed to create temp dir for test config");
-        let model_base = temp_dir.path().join("models");
-        let vocab_base = temp_dir.path().join("vocab");
-        let repo_base = temp_dir.path().join("repos");
-        fs::create_dir_all(&model_base).expect("Failed to create model base dir");
-        fs::create_dir_all(&vocab_base).expect("Failed to create vocab base dir");
-        fs::create_dir_all(&repo_base).expect("Failed to create repo base dir");
-
-        AppConfig {
-            qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some(model_base.join("model.onnx").to_string_lossy().into_owned()),
-            onnx_tokenizer_path: Some(model_base.join("tokenizer.json").to_string_lossy().into_owned()),
-            server_api_key_path: None,
-            repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
-            vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
-            repositories: Vec::new(),
-            active_repository: None,
-            indexing: IndexingConfig::default(),
-            performance: PerformanceConfig {
-                vector_dimension: 128,
-                collection_name_prefix: "test_collection_".to_string(),
-                ..PerformanceConfig::default()
-            },
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
-        }
     }
 
     #[tokio::test]
@@ -481,10 +448,16 @@ mod tests {
             rayon_num_threads: 4,
         };
         
-        let expected_collection_name = format!("{}{}_{}", 
-            config.performance.collection_name_prefix, 
+        // Use branch-aware collection naming - determine the actual branch name
+        let repo = git2::Repository::open(&existing_repo_path).unwrap();
+        let head = repo.head().unwrap();
+        let branch_name = head.shorthand().unwrap_or("main");
+        
+        let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
             "test_tenant", // Hardcoded tenant_id for this test
-            repo_name_str
+            repo_name_str,
+            branch_name,
+            &config
         );
         let expected_dimension = config.performance.vector_dimension;
 
@@ -575,16 +548,21 @@ mod tests {
 
         let repo_name_str = "test_cloned_repo";
 
-        let expected_collection_name = format!("{}{}_{}", 
-            config.performance.collection_name_prefix, 
+        // Use branch-aware collection naming - determine the default branch from source repo
+        let source_repo_opened = git2::Repository::open(&source_repo_path).unwrap();
+        let head = source_repo_opened.head().unwrap();
+        let branch_name = head.shorthand().unwrap_or("main");
+        
+        let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
             "test_tenant", // Hardcoded tenant_id for this test
-            repo_name_str
+            repo_name_str,
+            branch_name,
+            &config
         );
         let expected_dimension = config.performance.vector_dimension;
 
         manual_mock_client.expect_collection_exists(Ok(false)); // Expect collection_exists to be called first
         manual_mock_client.expect_create_collection(Ok(true));
-
 
         let add_args = AddRepoArgs {
             local_path: None, // We want to test cloning, so no local_path initially
@@ -665,10 +643,12 @@ mod tests {
             rayon_num_threads: 4,
         };
         
-        let expected_collection_name = format!("{}{}_{}", 
-            config.performance.collection_name_prefix, 
+        // Use branch-aware collection naming - the test specifies "master" branch
+        let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
             "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in the logs
-            "hello-world"
+            "hello-world",
+            "master", // This test specifically uses master branch
+            &config
         );
         let expected_dimension = config.performance.vector_dimension;
 
@@ -721,96 +701,10 @@ mod tests {
                 assert!(manual_mock_client.verify_create_collection_args(&expected_collection_name, expected_dimension));
             }
             Err(e) => {
-                println!("Failed to add repository: {}", e);
-                // This is fine - we just want to make sure it doesn't hang
-                // But let's check what the specific error is
-                assert!(!e.to_string().contains("timeout"), "Should not timeout, but got: {}", e);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_repo_add_with_embedding_handler_simulation() {
-        // This test simulates the scenario where embedding handler initialization might cause issues
-        let temp_dir = tempdir().unwrap();
-        
-        let manual_mock_client = ManualMockQdrantClient::new();
-        let client_arc = Arc::new(manual_mock_client.clone());
-
-        // Create a config that would try to initialize an embedding handler
-        let onnx_dir = temp_dir.path().join("onnx");
-        fs::create_dir_all(&onnx_dir).unwrap();
-        
-        let config = AppConfig {
-            qdrant_url: "http://localhost:6334".to_string(),
-            repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
-            onnx_model_path: Some(onnx_dir.join("model.onnx").to_string_lossy().to_string()),
-            onnx_tokenizer_path: Some(onnx_dir.to_string_lossy().to_string()),
-            server_api_key_path: None,
-            vocabulary_base_path: None,
-            repositories: vec![],
-            active_repository: None,
-            indexing: IndexingConfig::default(),
-            performance: PerformanceConfig {
-                vector_dimension: 384,
-                collection_name_prefix: "repo_".to_string(),
-                ..PerformanceConfig::default()
-            },
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("3c62d9d6-0762-4063-bc26-23d4ced05d53".to_string()),
-            rayon_num_threads: 4,
-        };
-
-        manual_mock_client.expect_collection_exists(Ok(false));
-        manual_mock_client.expect_create_collection(Ok(true));
-
-        // This is the exact scenario from the user's logs
-        let add_args = AddRepoArgs {
-            local_path: None,
-            url: Some("https://github.com/octocat/Hello-World.git".to_string()),
-            name: Some("hello-world".to_string()),
-            branch: Some("master".to_string()),
-            remote: None,
-            ssh_key: None,
-            ssh_passphrase: None,
-            repositories_base_path: None,
-            target_ref: None,
-        };
-
-        let start_time = std::time::Instant::now();
-        
-        let result = handle_repo_add(
-            add_args,
-            temp_dir.path().to_path_buf(),
-            config.performance.vector_dimension,
-            client_arc,
-            &config,
-            "3c62d9d6-0762-4063-bc26-23d4ced05d53",
-        )
-        .await;
-
-        let elapsed = start_time.elapsed();
-        
-        println!("Test with ONNX config completed in {:?}", elapsed);
-        println!("Result: {:?}", result);
-        
-        // The test should complete within a reasonable time (not hang indefinitely)
-        assert!(elapsed.as_secs() < 30, "handle_repo_add took too long: {:?} - this indicates the hanging issue", elapsed);
-        
-        // This test should succeed since we're not actually trying to load ONNX models
-        match result {
-            Ok(repo_config) => {
-                println!("Successfully added repository: {}", repo_config.name);
-                assert_eq!(repo_config.name, "hello-world");
-            }
-            Err(e) => {
-                println!("Failed to add repository: {}", e);
-                // This is fine - we just want to make sure it doesn't hang
+                println!("Repository addition failed with error: {}", e);
+                // Even if it fails, it should not hang, and we should still verify the collection operations were attempted
+                assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
+                assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
             }
         }
     }

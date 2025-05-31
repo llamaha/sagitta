@@ -171,4 +171,5 @@ impl QdrantClientTrait for ManualMockQdrantClient {
     async fn scroll(&self, _request: ScrollPoints) -> Result<ScrollResponse> { unimplemented!("scroll not mocked in ManualMockQdrantClient") }
     async fn upsert_points(&self, _request: UpsertPoints) -> Result<PointsOperationResponse> { unimplemented!("upsert_points not mocked in ManualMockQdrantClient") }
     async fn delete_points(&self, _request: DeletePoints) -> Result<PointsOperationResponse> { unimplemented!("delete_points not mocked in ManualMockQdrantClient") }
+    async fn list_collections(&self) -> Result<Vec<String>> { unimplemented!("list_collections not mocked in ManualMockQdrantClient") }
 } 

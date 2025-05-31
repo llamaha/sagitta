@@ -277,18 +277,19 @@ fn get_default_vocabulary_base_path() -> Result<PathBuf> {
 /// Uses the `vocabulary_base_path` from the config if set, otherwise derives a default path.
 pub fn get_vocabulary_path(config: &AppConfig, collection_name: &str) -> Result<PathBuf> {
     let base_path = match &config.vocabulary_base_path {
-        Some(p) => PathBuf::from(p),
-        None => get_default_vocabulary_base_path()?,
+        Some(p) => {
+            let path = PathBuf::from(p);
+            // Ensure base directory exists for custom path
+            fs::create_dir_all(&path).map_err(|e| {
+                SagittaError::DirectoryCreationError {
+                    path: path.clone(),
+                    source: e,
+                }
+            })?;
+            path
+        },
+        None => get_default_vocabulary_base_path()?, // This already creates the directory
     };
-    // Ensure base directory exists if explicitly configured
-    if config.vocabulary_base_path.is_some() {
-         fs::create_dir_all(&base_path).map_err(|e| {
-            SagittaError::DirectoryCreationError {
-                path: base_path.clone(),
-                source: e,
-            }
-        })?;
-    }
 
     // Derive filename from collection name (e.g., repo_my-repo -> my-repo_vocab.json)
     let vocab_filename = format!(

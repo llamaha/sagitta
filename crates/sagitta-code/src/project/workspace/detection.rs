@@ -104,11 +104,12 @@ impl WorkspaceDetector {
         
         for marker in &markers {
             if marker.contains('*') {
-                // Handle glob patterns
+                // Handle glob patterns - check for proper file extension match
+                let extension = marker.strip_prefix("*.").unwrap_or("");
                 if let Ok(entries) = std::fs::read_dir(path) {
                     for entry in entries.flatten() {
                         if let Some(name) = entry.file_name().to_str() {
-                            if marker.replace('*', "").chars().all(|c| name.contains(c)) {
+                            if name.ends_with(&format!(".{}", extension)) {
                                 return true;
                             }
                         }
@@ -374,7 +375,8 @@ version = "0.1.0"
         
         // No project files, should fall back to directory name
         let name = detector.generate_workspace_name(path);
-        assert!(name.starts_with("tmp") || name.contains("temp")); // tempfile creates dirs with these patterns
+        // tempfile creates dirs with patterns like ".tmpXXXXXX"
+        assert!(name.starts_with(".tmp") || name.starts_with("tmp") || name.contains("temp"));
     }
     
     #[test]

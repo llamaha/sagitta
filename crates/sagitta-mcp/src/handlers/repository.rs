@@ -1286,6 +1286,10 @@ mod tests {
         async fn query(&self, _request: QueryPoints) -> Result<QueryResponse, SagittaError> {
             unimplemented!("MockQdrantClient query not implemented")
         }
+        
+        async fn list_collections(&self) -> Result<Vec<String>, SagittaError> {
+            unimplemented!("MockQdrantClient list_collections not implemented")
+        }
     }
 
     fn create_test_auth_user(tenant_id_param: Option<&str>) -> Option<Extension<AuthenticatedUser>> {
