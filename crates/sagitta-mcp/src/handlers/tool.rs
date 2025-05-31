@@ -376,3 +376,68 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_switch_branch_tool_is_exposed() {
+        let tools = get_tool_definitions();
+        
+        // Find the switch branch tool
+        let switch_branch_tool = tools.iter()
+            .find(|tool| tool.name == "repository_switch_branch")
+            .expect("repository_switch_branch tool should be defined");
+        
+        // Verify the tool has proper description
+        assert!(switch_branch_tool.description.is_some());
+        assert!(switch_branch_tool.description.as_ref().unwrap().contains("branch"));
+        
+        // Verify the tool has proper input schema
+        let schema = &switch_branch_tool.input_schema;
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["repositoryName"].is_object());
+        assert!(schema["properties"]["branchName"].is_object());
+        assert!(schema["properties"]["targetRef"].is_object());
+        
+        // Verify required fields
+        assert!(schema["required"].as_array().unwrap().contains(&serde_json::Value::String("repositoryName".to_string())));
+        
+        // Verify annotations
+        assert!(switch_branch_tool.annotations.is_some());
+        let annotations = switch_branch_tool.annotations.as_ref().unwrap();
+        assert_eq!(annotations.read_only_hint, Some(false));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+    }
+
+    #[test]
+    fn test_all_expected_tools_are_exposed() {
+        let tools = get_tool_definitions();
+        let tool_names: Vec<&String> = tools.iter().map(|t| &t.name).collect();
+        
+        // Verify all expected tools are present
+        let expected_tools = vec![
+            "ping",
+            "repository_add",
+            "repository_list",
+            "repository_remove",
+            "repository_sync",
+            "query",
+            "repository_search_file",
+            "repository_view_file",
+            "repository_map",
+            "repository_switch_branch",
+            "repository_list_branches",
+        ];
+        
+        for expected_tool in expected_tools {
+            assert!(
+                tool_names.contains(&&expected_tool.to_string()),
+                "Tool '{}' should be exposed in tools list",
+                expected_tool
+            );
+        }
+    }
+}
