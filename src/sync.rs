@@ -365,8 +365,100 @@ where
     // --- Qdrant Operations ---
     let tenant_id = repo_config.tenant_id.as_deref()
         .ok_or_else(|| anyhow!("Tenant ID missing in RepositoryConfig for repository '{}' during sync operation", repo_name))?;
-    let collection_name = repo_helpers::get_collection_name(tenant_id, repo_name, app_config);
+    
     let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
+    
+    // Use branch-aware collection naming for better sync management
+    let collection_name = repo_helpers::get_branch_aware_collection_name(
+        tenant_id, 
+        repo_name, 
+        current_sync_branch_or_ref, 
+        app_config
+    );
+    
+    info!("Using branch-aware collection: '{}' for branch/ref: '{}'", collection_name, current_sync_branch_or_ref);
+    
+    // Check if we already have sync metadata for this branch/ref
+    let sync_metadata = repo_helpers::get_branch_sync_metadata(
+        client.as_ref(),
+        tenant_id,
+        repo_name,
+        current_sync_branch_or_ref,
+        app_config,
+    ).await.context("Failed to get branch sync metadata")?;
+    
+    // Determine if sync is actually needed
+    let needs_sync = repo_helpers::should_sync_branch(
+        &commit_oid_str,
+        sync_metadata.as_ref(),
+        force_sync,
+    );
+    
+    if !needs_sync {
+        if let Some(metadata) = &sync_metadata {
+            info!(
+                "Branch '{}' is already synced (collection: '{}', {} files). Skipping sync.",
+                current_sync_branch_or_ref,
+                metadata.collection_name,
+                metadata.files_count
+            );
+            
+            // Still query for languages to return accurate result
+            let mut indexed_languages_set = HashSet::new();
+            let scroll_filter = repo_helpers::create_branch_filter(current_sync_branch_or_ref);
+            let mut scroll_offset: Option<qdrant_client::qdrant::PointId> = None;
+            
+            loop {
+                let mut scroll_request = ScrollPointsBuilder::new(collection_name.clone())
+                    .filter(scroll_filter.clone())
+                    .limit(250)
+                    .with_payload(PayloadIncludeSelector { fields: vec![FIELD_LANGUAGE.to_string()] })
+                    .with_vectors(false);
+                if let Some(offset) = scroll_offset {
+                    scroll_request = scroll_request.offset(offset);
+                }
+                
+                let response = client.scroll(scroll_request.into()).await
+                    .context("Failed to scroll points for language query")?;
+                    
+                if response.result.is_empty() {
+                    break;
+                }
+                
+                for point in response.result {
+                    if let Some(lang_val) = point.payload.get(FIELD_LANGUAGE) {
+                        if let Some(QdrantValueKind::StringValue(lang)) = &lang_val.kind {
+                            indexed_languages_set.insert(lang.clone());
+                        }
+                    }
+                }
+                
+                scroll_offset = response.next_page_offset;
+                if scroll_offset.is_none() {
+                    break;
+                }
+            }
+            
+            let mut indexed_languages: Vec<String> = indexed_languages_set.into_iter().collect();
+            indexed_languages.sort();
+            
+            let skip_message = format!(
+                "Skipped sync for repository '{}' branch/ref '{}' - already up to date (commit: {})",
+                repo_name, current_sync_branch_or_ref, commit_oid_str
+            );
+            
+            return Ok(SyncResult {
+                success: true,
+                message: skip_message,
+                indexed_languages,
+                last_synced_commit: Some(commit_oid_str),
+                files_indexed: 0,
+                files_deleted: 0,
+            });
+        }
+    }
+    
+    info!("Proceeding with sync for branch '{}' (collection: '{}')", current_sync_branch_or_ref, collection_name);
     
     // Ensure collection exists (might need embedding dimension)
     // Get dimension from AppConfig or model - requires AppConfig here
@@ -562,6 +654,7 @@ mod tests {
     use crate::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter}; // Added
     use std::sync::Mutex; // Added for Mock
     use qdrant_client::qdrant::Distance;
+    use mockall::predicate::*;
 
     /// Create a test repository config
     fn create_test_repo_config(temp_dir: &TempDir, name: &str, branch: &str) -> RepositoryConfig {
@@ -664,5 +757,41 @@ mod tests {
         let result = sync_repository(mock_client, &repo_config, options, &app_config, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open repository"));
+    }
+
+    #[tokio::test]
+    async fn test_branch_aware_sync_collection_naming() {
+        use crate::repo_helpers::{get_branch_aware_collection_name, BranchSyncMetadata};
+        
+        let config = create_test_app_config();
+        
+        // Test that different branches get different collection names
+        let main_collection = get_branch_aware_collection_name("tenant1", "my-repo", "main", &config);
+        let dev_collection = get_branch_aware_collection_name("tenant1", "my-repo", "dev", &config);
+        
+        // Verify they are different
+        assert_ne!(main_collection, dev_collection);
+        
+        // Verify they follow the expected pattern
+        assert!(main_collection.contains("_br_"));
+        assert!(dev_collection.contains("_br_"));
+        
+        // Test sync decision logic
+        let metadata_with_content = BranchSyncMetadata {
+            collection_name: main_collection.clone(),
+            last_commit_hash: Some("abc123".to_string()),
+            branch_or_ref: "main".to_string(),
+            last_sync_timestamp: None,
+            files_count: 50,
+        };
+        
+        // Same commit should not need sync
+        assert!(!crate::repo_helpers::should_sync_branch("abc123", Some(&metadata_with_content), false));
+        
+        // Different commit should need sync
+        assert!(crate::repo_helpers::should_sync_branch("def456", Some(&metadata_with_content), false));
+        
+        // Force sync should always sync
+        assert!(crate::repo_helpers::should_sync_branch("abc123", Some(&metadata_with_content), true));
     }
 } 

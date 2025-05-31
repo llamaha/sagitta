@@ -11,10 +11,147 @@ use crate::QdrantClientTrait;
 use crate::config::AppConfig;
 use crate::sync_progress::{SyncProgressReporter, SyncStage, NoOpProgressReporter, SyncProgress};
 use std::sync::Arc;
+use sha2::{Sha256, Digest};
 
 /// Generates the Qdrant collection name for a given repository name based on the config prefix.
+/// This is the legacy function that doesn't include branch information.
 pub fn get_collection_name(tenant_id: &str, repo_name: &str, config: &AppConfig) -> String {
     format!("{}{}_{}", config.performance.collection_name_prefix, tenant_id, repo_name)
+}
+
+/// Generates a branch-aware Qdrant collection name that includes branch/ref information.
+/// This enables separate collections per branch to avoid unnecessary re-syncing.
+/// 
+/// Format: {prefix}{tenant_id}_{repo_name}_{branch_hash}
+/// Where branch_hash is a short hash of the branch/ref name to keep collection names manageable.
+pub fn get_branch_aware_collection_name(
+    tenant_id: &str, 
+    repo_name: &str, 
+    branch_or_ref: &str, 
+    config: &AppConfig
+) -> String {
+    // Create a short hash of the branch/ref name to keep collection names manageable
+    // and handle special characters that might not be valid in collection names
+    let mut hasher = Sha256::new();
+    hasher.update(branch_or_ref.as_bytes());
+    let hash = hasher.finalize();
+    let branch_hash = format!("{:x}", hash)[..8].to_string(); // Use first 8 chars of hash
+    
+    format!("{}{}_{}_br_{}", 
+        config.performance.collection_name_prefix, 
+        tenant_id, 
+        repo_name, 
+        branch_hash
+    )
+}
+
+/// Checks if a collection already exists for a specific repository + branch/ref combination.
+/// This helps determine if we need to sync or can reuse existing indexed data.
+pub async fn collection_exists_for_branch<C>(
+    client: &C,
+    tenant_id: &str,
+    repo_name: &str,
+    branch_or_ref: &str,
+    config: &AppConfig,
+) -> Result<bool, Error>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+    client.collection_exists(collection_name).await
+        .map_err(|e| Error::Other(format!("Failed to check collection existence: {}", e)))
+}
+
+/// Metadata about a repository's sync status for a specific branch/ref
+#[derive(Debug, Clone)]
+pub struct BranchSyncMetadata {
+    pub collection_name: String,
+    pub last_commit_hash: Option<String>,
+    pub branch_or_ref: String,
+    pub last_sync_timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub files_count: usize,
+}
+
+/// Retrieves sync metadata for a specific repository branch/ref by checking the collection
+/// and extracting metadata from stored points.
+pub async fn get_branch_sync_metadata<C>(
+    client: &C,
+    tenant_id: &str,
+    repo_name: &str,
+    branch_or_ref: &str,
+    config: &AppConfig,
+) -> Result<Option<BranchSyncMetadata>, Error>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+    
+    // Check if collection exists
+    let exists = client.collection_exists(collection_name.clone()).await
+        .map_err(|e| Error::Other(format!("Failed to check collection existence: {}", e)))?;
+    
+    if !exists {
+        return Ok(None);
+    }
+    
+    // Get collection info to check if it has any points
+    let collection_info = client.get_collection_info(collection_name.clone()).await
+        .map_err(|e| Error::Other(format!("Failed to get collection info: {}", e)))?;
+    
+    let points_count = collection_info.points_count.unwrap_or(0) as usize;
+    
+    if points_count == 0 {
+        return Ok(Some(BranchSyncMetadata {
+            collection_name,
+            last_commit_hash: None,
+            branch_or_ref: branch_or_ref.to_string(),
+            last_sync_timestamp: None,
+            files_count: 0,
+        }));
+    }
+    
+    // TODO: In a future enhancement, we could store commit hash and timestamp 
+    // as metadata in the collection or in specific points. For now, we just
+    // return basic metadata indicating the collection exists and has content.
+    
+    Ok(Some(BranchSyncMetadata {
+        collection_name,
+        last_commit_hash: None, // Could be extracted from point metadata in future
+        branch_or_ref: branch_or_ref.to_string(),
+        last_sync_timestamp: None, // Could be extracted from collection metadata in future
+        files_count: points_count,
+    }))
+}
+
+/// Determines if a repository branch needs to be synced based on current commit vs last synced commit.
+/// Returns true if sync is needed, false if the branch is already up to date.
+pub fn should_sync_branch(
+    current_commit_hash: &str,
+    sync_metadata: Option<&BranchSyncMetadata>,
+    force_sync: bool,
+) -> bool {
+    if force_sync {
+        return true;
+    }
+    
+    match sync_metadata {
+        None => {
+            // No existing collection/metadata, definitely need to sync
+            true
+        }
+        Some(metadata) => {
+            match &metadata.last_commit_hash {
+                None => {
+                    // Collection exists but no commit hash recorded, need to sync
+                    true
+                }
+                Some(last_commit) => {
+                    // Compare commit hashes
+                    last_commit != current_commit_hash
+                }
+            }
+        }
+    }
 }
 
 /// Deletes points associated with specific file paths within a given branch from a Qdrant collection.
@@ -236,4 +373,118 @@ pub async fn delete_points_by_branch(
     log::info!("Successfully deleted {} points for branch '{}' in collection '{}'.",
         point_ids_to_delete.len(), branch, collection_name);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, PerformanceConfig};
+
+    fn create_test_config() -> AppConfig {
+        AppConfig {
+            performance: PerformanceConfig {
+                collection_name_prefix: "test_".to_string(),
+                batch_size: 100,
+                internal_embed_batch_size: 50,
+                max_file_size_bytes: 1024 * 1024,
+                vector_dimension: 384,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_get_collection_name_legacy() {
+        let config = create_test_config();
+        let result = get_collection_name("tenant1", "my-repo", &config);
+        assert_eq!(result, "test_tenant1_my-repo");
+    }
+
+    #[test]
+    fn test_get_branch_aware_collection_name() {
+        let config = create_test_config();
+        
+        // Test with main branch
+        let result = get_branch_aware_collection_name("tenant1", "my-repo", "main", &config);
+        assert!(result.starts_with("test_tenant1_my-repo_br_"));
+        assert_eq!(result.len(), "test_tenant1_my-repo_br_".len() + 8); // 8-char hash
+        
+        // Test with different branch - should produce different hash
+        let result2 = get_branch_aware_collection_name("tenant1", "my-repo", "feature-branch", &config);
+        assert!(result2.starts_with("test_tenant1_my-repo_br_"));
+        assert_ne!(result, result2); // Different branches should have different collection names
+        
+        // Test with special characters in branch name
+        let result3 = get_branch_aware_collection_name("tenant1", "my-repo", "feature/special-chars_123", &config);
+        assert!(result3.starts_with("test_tenant1_my-repo_br_"));
+        assert!(result3.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')); // Should be safe for collection names
+    }
+
+    #[test]
+    fn test_should_sync_branch_logic() {
+        // Test force sync
+        assert!(should_sync_branch("abc123", None, true));
+        assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
+            collection_name: "test".to_string(),
+            last_commit_hash: Some("def456".to_string()),
+            branch_or_ref: "main".to_string(),
+            last_sync_timestamp: None,
+            files_count: 10,
+        }), true));
+        
+        // Test no metadata (first sync)
+        assert!(should_sync_branch("abc123", None, false));
+        
+        // Test metadata with no commit hash
+        assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
+            collection_name: "test".to_string(),
+            last_commit_hash: None,
+            branch_or_ref: "main".to_string(),
+            last_sync_timestamp: None,
+            files_count: 0,
+        }), false));
+        
+        // Test metadata with different commit hash (needs sync)
+        assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
+            collection_name: "test".to_string(),
+            last_commit_hash: Some("def456".to_string()),
+            branch_or_ref: "main".to_string(),
+            last_sync_timestamp: None,
+            files_count: 10,
+        }), false));
+        
+        // Test metadata with same commit hash (no sync needed)
+        assert!(!should_sync_branch("abc123", Some(&BranchSyncMetadata {
+            collection_name: "test".to_string(),
+            last_commit_hash: Some("abc123".to_string()),
+            branch_or_ref: "main".to_string(),
+            last_sync_timestamp: None,
+            files_count: 10,
+        }), false));
+    }
+
+    #[test]
+    fn test_branch_hash_consistency() {
+        let config = create_test_config();
+        
+        // Same inputs should always produce same collection name
+        let result1 = get_branch_aware_collection_name("tenant1", "repo1", "main", &config);
+        let result2 = get_branch_aware_collection_name("tenant1", "repo1", "main", &config);
+        assert_eq!(result1, result2);
+        
+        // Different branches should produce different names
+        let main_name = get_branch_aware_collection_name("tenant1", "repo1", "main", &config);
+        let dev_name = get_branch_aware_collection_name("tenant1", "repo1", "dev", &config);
+        assert_ne!(main_name, dev_name);
+        
+        // Different repos should produce different names
+        let repo1_name = get_branch_aware_collection_name("tenant1", "repo1", "main", &config);
+        let repo2_name = get_branch_aware_collection_name("tenant1", "repo2", "main", &config);
+        assert_ne!(repo1_name, repo2_name);
+        
+        // Different tenants should produce different names
+        let tenant1_name = get_branch_aware_collection_name("tenant1", "repo1", "main", &config);
+        let tenant2_name = get_branch_aware_collection_name("tenant2", "repo1", "main", &config);
+        assert_ne!(tenant1_name, tenant2_name);
+    }
 } 

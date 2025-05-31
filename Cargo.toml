@@ -50,6 +50,7 @@ chrono = { version = "0.4.38", features = ["serde"] } # Keep this one
 lazy_static = "1.4.0" # Added lazy_static
 dirs = "5.0.1" # Added dirs
 toml = "0.8.13" # Added toml
+sha2 = "0.10" # Added for branch-aware collection naming
 
 # Add HTML grammar (using older version for compatibility)
 tree-sitter-html = "0.20.3"
