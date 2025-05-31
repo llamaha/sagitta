@@ -49,7 +49,7 @@ fn save_config_with_test_isolation(config: &AppConfig) -> Result<(), sagitta_sea
     save_config(config, None).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()))
 }
 
-#[instrument(skip(config, qdrant_client, auth_user_ext), fields(repo_name = ?params.name, url = ?params.url))]
+#[instrument(skip(config, qdrant_client), fields(repo_name = ?params.name, url = ?params.url))]
 pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>(
     params: RepositoryAddParams,
     config: Arc<RwLock<AppConfig>>,
@@ -832,7 +832,7 @@ pub async fn handle_repository_view_file(
 }
 
 /// Handle repository branch switching with automatic resync
-#[instrument(skip(config, qdrant_client), fields(repo_name = %params.repository_name, target_branch = %params.branch_name))]
+#[instrument(skip(config, qdrant_client), fields(repo_name = %params.repository_name))]
 pub async fn handle_repository_switch_branch<C>(
     params: RepositorySwitchBranchParams,
     config: Arc<RwLock<AppConfig>>,
@@ -844,7 +844,28 @@ where
 {
     info!("Handling repository/switch_branch request");
     let repo_name = &params.repository_name;
-    let target_branch = &params.branch_name;
+    
+    // Determine the target reference - either from branch_name or target_ref
+    let (target_ref_to_checkout, is_target_ref) = match (&params.branch_name, &params.target_ref) {
+        (Some(branch_name), None) => (branch_name.clone(), false),
+        (None, Some(target_ref)) => (target_ref.clone(), true),
+        (Some(_), Some(_)) => {
+            return Err(ErrorObject {
+                code: error_codes::INVALID_PARAMS,
+                message: "Cannot specify both branch_name and target_ref. Use one or the other.".to_string(),
+                data: None,
+            });
+        }
+        (None, None) => {
+            return Err(ErrorObject {
+                code: error_codes::INVALID_PARAMS,
+                message: "Must specify either branch_name or target_ref.".to_string(),
+                data: None,
+            });
+        }
+    };
+    
+    info!("Target ref to checkout: '{}' (is_target_ref: {})", target_ref_to_checkout, is_target_ref);
     
     let config_guard = config.read().await;
 
@@ -915,7 +936,8 @@ where
     // Initialize git manager and perform branch switch
     let git_manager = GitManager::new();
     
-    // Check if target branch exists
+    // Check if target branch exists (only for branches, not for target refs)
+    if !is_target_ref {
     let branches = git_manager.list_branches(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
@@ -923,12 +945,13 @@ where
             data: None,
         })?;
     
-    if !branches.contains(target_branch) {
+        if !branches.contains(&target_ref_to_checkout) {
         return Err(ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Branch '{}' not found in repository", target_branch),
+                message: format!("Branch '{}' not found in repository", target_ref_to_checkout),
             data: None,
         });
+        }
     }
 
     // Perform branch switch with git-manager
@@ -940,7 +963,7 @@ where
             data: None,
         })?;
     
-    let previous_branch = repo.switch_branch(target_branch)
+    let previous_branch = repo.switch_branch(&target_ref_to_checkout)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
             message: format!("Failed to switch branch: {}", e),
@@ -950,7 +973,7 @@ where
     info!(
         repo_name = %repo_name,
         previous_branch = %current_branch,
-        new_branch = %target_branch,
+        new_branch = %target_ref_to_checkout,
         "Branch switch completed successfully"
     );
 
@@ -1001,9 +1024,18 @@ where
         let mut config_write_guard = config.write().await;
         if let Some(repo_mut) = config_write_guard.repositories.iter_mut()
             .find(|r| r.name == *repo_name) {
-            repo_mut.active_branch = Some(target_branch.clone());
-            if !repo_mut.tracked_branches.contains(target_branch) {
-                repo_mut.tracked_branches.push(target_branch.clone());
+            
+            if is_target_ref {
+                // If using target_ref, update the target_ref field and set active_branch to the ref
+                repo_mut.target_ref = Some(target_ref_to_checkout.clone());
+                repo_mut.active_branch = Some(target_ref_to_checkout.clone());
+            } else {
+                // If using branch name, clear target_ref and set active_branch
+                repo_mut.target_ref = None;
+                repo_mut.active_branch = Some(target_ref_to_checkout.clone());
+                if !repo_mut.tracked_branches.contains(&target_ref_to_checkout) {
+                    repo_mut.tracked_branches.push(target_ref_to_checkout.clone());
+                }
             }
         }
         
@@ -1018,7 +1050,7 @@ where
 
     Ok(RepositorySwitchBranchResult {
         previous_branch: previous_branch,
-        new_branch: target_branch.clone(),
+        new_branch: target_ref_to_checkout.clone(),
         sync_performed,
         files_changed,
         sync_details,
@@ -1633,7 +1665,8 @@ mod tests {
 
         let params = RepositorySwitchBranchParams {
             repository_name: "nonexistent_repo".to_string(),
-            branch_name: "main".to_string(),
+            branch_name: Some("main".to_string()),
+            target_ref: None,
             force: false,
             no_auto_resync: false,
         };

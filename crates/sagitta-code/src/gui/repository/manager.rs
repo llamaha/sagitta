@@ -927,6 +927,24 @@ impl RepositoryManager {
         Ok(branches)
     }
     
+    /// List tags for a repository
+    pub async fn list_tags(&self, repo_name: &str) -> Result<Vec<String>> {
+        let config_guard = self.config.lock().await;
+        
+        // Find the repository configuration
+        let repo_config = config_guard.repositories
+            .iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        // Create GitManager for this repository
+        let git_manager = GitManager::new();
+        
+        // List tags
+        let tags = git_manager.list_tags(&repo_config.local_path)?;
+        Ok(tags)
+    }
+    
     /// Get current branch for a repository
     pub async fn get_current_branch(&self, repo_name: &str) -> Result<String> {
         let config_guard = self.config.lock().await;
@@ -947,7 +965,13 @@ impl RepositoryManager {
     
     /// Switch branch with automatic resync
     pub async fn switch_branch(&self, repo_name: &str, target_branch: &str, auto_resync: bool) -> Result<super::types::BranchSyncResult> {
-        info!("[GUI RepoManager] Switching to branch '{}' in repository '{}'", target_branch, repo_name);
+        // Delegate to switch_to_ref for consistency
+        self.switch_to_ref(repo_name, target_branch, auto_resync).await
+    }
+    
+    /// Switch to any Git reference (branch, tag, commit) with automatic resync
+    pub async fn switch_to_ref(&self, repo_name: &str, target_ref: &str, auto_resync: bool) -> Result<super::types::BranchSyncResult> {
+        info!("[GUI RepoManager] Switching to ref '{}' in repository '{}'", target_ref, repo_name);
         
         let mut config_guard = self.config.lock().await;
         
@@ -966,10 +990,10 @@ impl RepositoryManager {
         // Initialize repository if needed
         git_manager.initialize_repository(&repo_config.local_path).await?;
         
-        // Switch branch
+        // Switch to the target ref
         let switch_result = if auto_resync {
             // Switch with automatic resync
-            git_manager.switch_branch(&repo_config.local_path, target_branch).await?
+            git_manager.switch_branch(&repo_config.local_path, target_ref).await?
         } else {
             // Switch without resync using switch_branch_with_options
             let options = git_manager::SwitchOptions {
@@ -977,11 +1001,23 @@ impl RepositoryManager {
                 auto_resync: false,
                 ..Default::default()
             };
-            git_manager.switch_branch_with_options(&repo_config.local_path, target_branch, options).await?
+            git_manager.switch_branch_with_options(&repo_config.local_path, target_ref, options).await?
         };
         
         // Update repository configuration
-        repo_config.active_branch = Some(target_branch.to_string());
+        // For target refs, we update both target_ref and active_branch
+        if self.is_likely_branch_name(target_ref) {
+            // If it looks like a branch name, clear target_ref and set active_branch
+            repo_config.target_ref = None;
+            repo_config.active_branch = Some(target_ref.to_string());
+            if !repo_config.tracked_branches.contains(&target_ref.to_string()) {
+                repo_config.tracked_branches.push(target_ref.to_string());
+            }
+        } else {
+            // If it's likely a tag or commit, set target_ref and update active_branch
+            repo_config.target_ref = Some(target_ref.to_string());
+            repo_config.active_branch = Some(target_ref.to_string());
+        }
         
         // Save configuration
         self.save_core_config_with_guard(&*config_guard).await?;
@@ -1010,6 +1046,33 @@ impl RepositoryManager {
             files_processed,
             error_message: switch_result.sync_result.and_then(|sr| sr.error_message),
         })
+    }
+    
+    /// Helper method to determine if a ref looks like a branch name vs tag/commit
+    fn is_likely_branch_name(&self, ref_name: &str) -> bool {
+        // Simple heuristics to determine if this looks like a branch name
+        // - Not a commit hash (not 40 hex chars)
+        // - Not a tag pattern (doesn't start with v followed by digits)
+        // - Contains common branch patterns
+        
+        // Check if it's a commit hash (40 hex characters)
+        if ref_name.len() >= 7 && ref_name.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+        
+        // Check if it looks like a semantic version tag
+        if ref_name.starts_with('v') && ref_name[1..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            return false;
+        }
+        
+        // Common branch patterns
+        let branch_patterns = ["main", "master", "develop", "dev", "feature/", "hotfix/", "release/", "bugfix/"];
+        if branch_patterns.iter().any(|pattern| ref_name.starts_with(pattern) || ref_name == "main" || ref_name == "master") {
+            return true;
+        }
+        
+        // Default assumption: if it doesn't look like a tag or commit, treat as branch
+        true
     }
     
     /// Create a new branch

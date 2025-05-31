@@ -464,6 +464,42 @@ where
         repo.list_branches(Some(git2::BranchType::Local))
     }
 
+    /// List all tags in a repository
+    ///
+    /// Returns a list of all tags in the repository.
+    ///
+    /// # Examples
+    /// ```rust,no_run
+    /// use git_manager::GitManager;
+    /// use std::path::PathBuf;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let manager = GitManager::new();
+    /// let repo_path = PathBuf::from("/path/to/repo");
+    ///
+    /// let tags = manager.list_tags(&repo_path)?;
+    /// for tag in tags {
+    ///     println!("Tag: {}", tag);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_tags(&self, repo_path: &std::path::Path) -> GitResult<Vec<String>> {
+        let repo = GitRepository::open(repo_path)?;
+        let git2_repo = repo.repo();
+        
+        let mut tags = Vec::new();
+        if let Ok(tag_names) = git2_repo.tag_names(None) {
+            for tag_name in tag_names.iter() {
+                if let Some(tag) = tag_name {
+                    tags.push(tag.to_string());
+                }
+            }
+        }
+        
+        Ok(tags)
+    }
+
     /// Create a new branch
     ///
     /// Creates a new branch from the specified starting point.

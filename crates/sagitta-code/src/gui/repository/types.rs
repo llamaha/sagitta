@@ -234,8 +234,10 @@ pub struct RepoPanelState {
 pub struct BranchManagementState {
     pub selected_repo_for_branches: Option<String>,
     pub available_branches: Vec<String>,
+    pub available_tags: Vec<String>,
     pub current_branch: Option<String>,
     pub is_loading_branches: bool,
+    pub is_loading_tags: bool,
     pub is_switching_branch: bool,
     pub switch_error: Option<String>,
     pub switch_success: Option<String>,
@@ -249,6 +251,24 @@ pub struct BranchManagementState {
     pub delete_success: Option<String>,
     pub show_delete_confirmation: bool,
     pub last_sync_result: Option<BranchSyncResult>,
+    
+    // New fields for target_ref support
+    pub manual_ref_input: String,
+    pub ref_type_tab: RefTypeTab,
+}
+
+/// Different types of Git references that can be displayed
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefTypeTab {
+    Branches,
+    Tags,
+    Manual,
+}
+
+impl Default for RefTypeTab {
+    fn default() -> Self {
+        Self::Branches
+    }
 }
 
 /// Channel for file search results

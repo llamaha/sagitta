@@ -6,6 +6,7 @@ pub mod search;
 pub mod view;
 pub mod map;
 pub mod targeted_view;
+pub mod switch_branch;
 
 // Re-export all implemented tools
 pub use add::AddRepositoryTool;
@@ -16,6 +17,7 @@ pub use search::SearchFileInRepositoryTool;
 pub use view::ViewFileInRepositoryTool;
 pub use map::RepositoryMapTool;
 pub use targeted_view::TargetedViewTool;
+pub use switch_branch::SwitchBranchTool;
 
 #[cfg(test)]
 mod tests {

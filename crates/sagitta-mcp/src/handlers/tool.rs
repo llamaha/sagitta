@@ -331,22 +331,27 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Repository Switch Branch ---
         ToolDefinition {
             name: "repository_switch_branch".to_string(),
-            description: Some("Switches to a different branch in a repository with automatic resync. This operation will update the repository's active branch and optionally trigger a resync of the vector database to reflect the new branch's content.".to_string()),
+            description: Some("Switches to a different branch or Git reference in a repository with automatic resync. This operation will update the repository's active branch/ref and optionally trigger a resync of the vector database to reflect the new content. Supports branches, tags, commits, and remote references.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "repositoryName": { "type": "string", "description": "Name of the repository to switch branches in." },
-                    "branchName": { "type": "string", "description": "Target branch name to switch to." },
+                    "branchName": { "type": "string", "description": "Target branch name to switch to. Either this or targetRef must be provided, but not both." },
+                    "targetRef": { "type": "string", "description": "Optional specific Git ref (tag, commit hash, branch name) to check out. If provided, this ref will be checked out instead of branchName. Supports any valid git reference including tags, commits, and remote branches." },
                     "force": { "type": "boolean", "description": "Force switch even with uncommitted changes (default: false)." },
                     "noAutoResync": { "type": "boolean", "description": "Disable automatic resync after branch switch (default: false)." }
                 },
-                "required": ["repositoryName", "branchName"]
+                "required": ["repositoryName"],
+                "oneOf": [
+                    { "required": ["branchName"] },
+                    { "required": ["targetRef"] }
+                ]
             }),
              annotations: Some(ToolAnnotations {
-                title: Some("Switch Repository Branch".to_string()),
+                title: Some("Switch Repository Branch/Ref".to_string()),
                 read_only_hint: Some(false),
                 destructive_hint: Some(false), // Changes state but doesn't delete data
-                idempotent_hint: Some(true), // Switching to the same branch is safe
+                idempotent_hint: Some(true), // Switching to the same branch/ref is safe
                 open_world_hint: Some(false),
             }),
         },

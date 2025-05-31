@@ -219,6 +219,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     tool_registry.register(Arc::new(TargetedViewTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
     tool_registry.register(Arc::new(EditTool::new(repo_manager.clone()))).await?; // Added EditTool registration
+    tool_registry.register(Arc::new(crate::tools::repository::SwitchBranchTool::new(repo_manager.clone()))).await?;
     let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::test_execution::TestExecutionTool::new(default_working_dir.clone()))).await?;

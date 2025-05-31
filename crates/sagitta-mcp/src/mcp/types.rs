@@ -500,8 +500,14 @@ pub struct RepositoryMapSummary {
 pub struct RepositorySwitchBranchParams {
     /// Name of the repository
     pub repository_name: String,
-    /// Target branch name
-    pub branch_name: String,
+    /// Target branch name (optional if target_ref is provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    /// Optional specific Git ref (tag, commit hash, branch name) to check out.
+    /// If provided, this ref will be checked out instead of the branch name.
+    /// This supports any valid git reference including tags, commits, and remote branches.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<String>,
     /// Force switch even with uncommitted changes
     #[serde(default)]
     pub force: bool,

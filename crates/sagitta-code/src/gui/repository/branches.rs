@@ -2,7 +2,7 @@ use std::sync::Arc;
 use egui::{Ui, RichText, Color32, Grid, ScrollArea, Button};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
-use super::types::{RepoPanelState, BranchSyncResult};
+use super::types::{RepoPanelState, BranchSyncResult, RefTypeTab};
 use git_manager::GitManager;
 use log::{info, error, warn};
 
@@ -13,21 +13,35 @@ pub fn render_branch_management(
     repo_manager: Arc<Mutex<RepositoryManager>>,
     theme: crate::gui::theme::AppTheme,
 ) {
-    ui.heading("Branch Management");
+    ui.heading("Git Reference Management");
     ui.separator();
 
     // Repository selection
     render_repository_selector(ui, state);
     ui.separator();
 
-    // Only show branch operations if a repository is selected
+    // Only show reference operations if a repository is selected
     if let Some(repo_name) = state.branch_management.selected_repo_for_branches.clone() {
         render_current_branch_info(ui, state, theme);
         ui.separator();
         
-        render_branch_list(ui, state, repo_manager.clone(), &repo_name, theme);
+        // Reference type tabs
+        render_ref_type_tabs(ui, state, theme);
         ui.separator();
         
+        match state.branch_management.ref_type_tab {
+            RefTypeTab::Branches => {
+                render_branch_list(ui, state, repo_manager.clone(), &repo_name, theme);
+            }
+            RefTypeTab::Tags => {
+                render_tag_list(ui, state, repo_manager.clone(), &repo_name, theme);
+            }
+            RefTypeTab::Manual => {
+                render_manual_ref_input(ui, state, repo_manager.clone(), &repo_name, theme);
+            }
+        }
+        
+        ui.separator();
         render_branch_operations(ui, state, repo_manager, &repo_name, theme);
         
         // Show last sync result if available
@@ -36,7 +50,7 @@ pub fn render_branch_management(
             render_sync_result(ui, sync_result, theme);
         }
     } else {
-        ui.label("Select a repository to manage branches");
+        ui.label("Select a repository to manage Git references");
     }
 }
 
@@ -65,19 +79,43 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
                         Some(repo.name.clone()),
                         &repo.name
                     ).clicked() && !is_selected {
-                        // Repository changed, reset branch state and load branches
+                        // Repository changed, reset state and load data
                         reset_branch_state(state);
                         state.branch_management.selected_repo_for_branches = Some(repo.name.clone());
                         state.branch_management.is_loading_branches = true;
+                        state.branch_management.is_loading_tags = true;
                     }
                 }
             });
             
-        if ui.button("Refresh Branches").clicked() {
+        if ui.button("Refresh").clicked() {
             if state.branch_management.selected_repo_for_branches.is_some() {
                 state.branch_management.is_loading_branches = true;
+                state.branch_management.is_loading_tags = true;
                 clear_messages(state);
             }
+        }
+    });
+}
+
+/// Render reference type tabs
+fn render_ref_type_tabs(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>, theme: crate::gui::theme::AppTheme) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        
+        let selected_branches = state.branch_management.ref_type_tab == RefTypeTab::Branches;
+        if ui.selectable_label(selected_branches, "Branches").clicked() {
+            state.branch_management.ref_type_tab = RefTypeTab::Branches;
+        }
+        
+        let selected_tags = state.branch_management.ref_type_tab == RefTypeTab::Tags;
+        if ui.selectable_label(selected_tags, "Tags").clicked() {
+            state.branch_management.ref_type_tab = RefTypeTab::Tags;
+        }
+        
+        let selected_manual = state.branch_management.ref_type_tab == RefTypeTab::Manual;
+        if ui.selectable_label(selected_manual, "Manual Ref").clicked() {
+            state.branch_management.ref_type_tab = RefTypeTab::Manual;
         }
     });
 }
@@ -85,7 +123,7 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
 /// Render current branch information
 fn render_current_branch_info(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>, theme: crate::gui::theme::AppTheme) {
     ui.horizontal(|ui| {
-        ui.label("Current Branch:");
+        ui.label("Current Branch/Ref:");
         
         if let Some(current_branch) = &state.branch_management.current_branch {
             ui.label(RichText::new(current_branch).color(theme.success_color()).strong());
@@ -124,26 +162,112 @@ fn render_branch_list(
         return;
     }
     
+    render_ref_grid(ui, state, repo_manager, repo_name, &state.branch_management.available_branches.clone(), "Branch", theme);
+}
+
+/// Render the list of available tags with switch buttons
+fn render_tag_list(
+    ui: &mut Ui,
+    state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
+    repo_manager: Arc<Mutex<RepositoryManager>>,
+    repo_name: &str,
+    theme: crate::gui::theme::AppTheme,
+) {
+    ui.label(RichText::new("Available Tags:").strong());
+    
+    if state.branch_management.is_loading_tags {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label("Loading tags...");
+        });
+        
+        // Trigger tag loading
+        load_tags(repo_manager, repo_name.to_string());
+        return;
+    }
+    
+    if state.branch_management.available_tags.is_empty() {
+        ui.label("No tags found");
+        return;
+    }
+    
+    render_ref_grid(ui, state, repo_manager, repo_name, &state.branch_management.available_tags.clone(), "Tag", theme);
+}
+
+/// Render manual reference input
+fn render_manual_ref_input(
+    ui: &mut Ui,
+    state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
+    repo_manager: Arc<Mutex<RepositoryManager>>,
+    repo_name: &str,
+    theme: crate::gui::theme::AppTheme,
+) {
+    ui.label(RichText::new("Manual Git Reference:").strong());
+    ui.label("Enter any valid Git reference (commit hash, remote branch, etc.):");
+    
+    ui.horizontal(|ui| {
+        ui.label("Ref:");
+        ui.text_edit_singleline(&mut state.branch_management.manual_ref_input);
+        
+        let switch_button = Button::new("Switch to Ref");
+        let is_switching = state.branch_management.is_switching_branch;
+        let has_ref = !state.branch_management.manual_ref_input.trim().is_empty();
+        
+        if ui.add_enabled(!is_switching && has_ref, switch_button).clicked() {
+            // Trigger switch to manual ref
+            switch_to_ref(
+                repo_manager.clone(),
+                repo_name.to_string(),
+                state.branch_management.manual_ref_input.trim().to_string(),
+            );
+            state.branch_management.is_switching_branch = true;
+            clear_messages(state);
+        }
+        
+        if is_switching {
+            ui.spinner();
+            ui.label("Switching...");
+        }
+    });
+    
+    ui.separator();
+    ui.label(RichText::new("Examples:").strong());
+    ui.label("• Commit hash: abc123def456789...");
+    ui.label("• Tag: v1.0.0, release-2023-01");
+    ui.label("• Remote branch: origin/feature-branch");
+    ui.label("• Short commit: abc123d");
+}
+
+/// Common function to render a grid of refs (branches or tags)
+fn render_ref_grid(
+    ui: &mut Ui,
+    state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
+    repo_manager: Arc<Mutex<RepositoryManager>>,
+    repo_name: &str,
+    refs: &[String],
+    ref_type: &str,
+    theme: crate::gui::theme::AppTheme,
+) {
     ScrollArea::vertical()
-        .max_height(200.0)
+        .max_height(300.0)
         .show(ui, |ui| {
-            Grid::new("branches_grid")
+            Grid::new(format!("{}_grid", ref_type.to_lowercase()))
                 .num_columns(3)
                 .striped(true)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
                     // Header
-                    ui.label(RichText::new("Branch").strong());
+                    ui.label(RichText::new(ref_type).strong());
                     ui.label(RichText::new("Status").strong());
                     ui.label(RichText::new("Actions").strong());
                     ui.end_row();
                     
-                    for branch in &state.branch_management.available_branches.clone() {
-                        // Branch name
-                        ui.label(branch);
+                    for git_ref in refs {
+                        // Ref name
+                        ui.label(git_ref);
                         
                         // Status
-                        if branch == state.branch_management.current_branch.as_ref().unwrap_or(&String::new()) {
+                        if git_ref == state.branch_management.current_branch.as_ref().unwrap_or(&String::new()) {
                             ui.label(RichText::new("Current").color(theme.success_color()));
                         } else {
                             ui.label("");
@@ -151,16 +275,18 @@ fn render_branch_list(
                         
                         // Actions
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Delete").clicked() {
-                                state.branch_management.branch_to_delete = Some(branch.clone());
+                            // Only show delete for branches, not tags
+                            if ref_type == "Branch" && ui.button("Delete").clicked() {
+                                state.branch_management.branch_to_delete = Some(git_ref.clone());
+                                state.branch_management.show_delete_confirmation = true;
                             }
                             
                             if ui.button("Switch").clicked() {
-                                // Trigger switch branch operation
-                                switch_branch(
+                                // Trigger switch to ref operation
+                                switch_to_ref(
                                     repo_manager.clone(),
                                     repo_name.to_string(),
-                                    branch.clone(),
+                                    git_ref.clone(),
                                 );
                                 state.branch_management.is_switching_branch = true;
                                 clear_messages(state);
@@ -313,8 +439,10 @@ fn render_sync_result(ui: &mut Ui, sync_result: &BranchSyncResult, theme: crate:
 
 fn reset_branch_state(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
     state.branch_management.available_branches.clear();
+    state.branch_management.available_tags.clear();
     state.branch_management.current_branch = None;
     state.branch_management.is_loading_branches = false;
+    state.branch_management.is_loading_tags = false;
     clear_messages(state);
 }
 
@@ -347,18 +475,36 @@ fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String)
     });
 }
 
-fn switch_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String) {
+fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String) {
     tokio::spawn(async move {
-        info!("Switching to branch '{}' in repository '{}'", branch_name, repo_name);
+        info!("Loading tags for repository: {}", repo_name);
         
-        match repo_manager.lock().await.switch_branch(&repo_name, &branch_name, true).await {
+        match repo_manager.lock().await.list_tags(&repo_name).await {
+            Ok(tags) => {
+                info!("Successfully loaded {} tags for repository '{}'", tags.len(), repo_name);
+                // TODO: Update UI state with tags
+                // This would require a channel or callback mechanism to update the UI state
+            }
+            Err(e) => {
+                error!("Failed to load tags for repository '{}': {}", repo_name, e);
+                // TODO: Update UI state with error
+            }
+        }
+    });
+}
+
+fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, ref_name: String) {
+    tokio::spawn(async move {
+        info!("Switching to ref '{}' in repository '{}'", ref_name, repo_name);
+        
+        match repo_manager.lock().await.switch_to_ref(&repo_name, &ref_name, true).await {
             Ok(result) => {
-                info!("Successfully switched to branch '{}' in repository '{}'. Sync type: {}, Files processed: {}", 
-                      branch_name, repo_name, result.sync_type, result.files_processed);
+                info!("Successfully switched to ref '{}' in repository '{}'. Sync type: {}, Files processed: {}", 
+                      ref_name, repo_name, result.sync_type, result.files_processed);
                 // TODO: Update UI state with success result
             }
             Err(e) => {
-                error!("Failed to switch to branch '{}' in repository '{}': {}", branch_name, repo_name, e);
+                error!("Failed to switch to ref '{}' in repository '{}': {}", ref_name, repo_name, e);
                 // TODO: Update UI state with error
             }
         }
