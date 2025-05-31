@@ -102,7 +102,7 @@ where
     println!("Clearing repository sync status in configuration...");
     let repo_config_mut = &mut config.repositories[repo_config_index];
     repo_config_mut.last_synced_commits.clear();
-    repo_config_mut.indexed_languages = None; 
+    repo_config_mut.indexed_languages = None;
 
     // Clear git-manager state to ensure sync detection works correctly after clear
     let repo_path = PathBuf::from(&repo_config_mut.local_path);

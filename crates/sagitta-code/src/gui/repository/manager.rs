@@ -237,129 +237,106 @@ impl RepositoryManager {
         *log_sender = Some(sender);
     }
     
-    /// Send a log message for a sync operation
-    async fn send_sync_log(&self, repo_name: &str, message: &str) {
-        if let Ok(log_sender_guard) = self.sync_log_sender.try_lock() {
-            if let Some(ref sender) = *log_sender_guard {
-                let log_msg = SyncLogMessage {
-                    repo_name: repo_name.to_string(),
-                    message: message.to_string(),
-                    timestamp: std::time::Instant::now(),
-                };
-                
-                if let Err(_) = sender.send(log_msg) {
-                    // Log sender was closed, ignore the error
-                    log::warn!("Sync log sender was closed for repository: {}", repo_name);
-                }
-            }
-        }
-    }
-    
     /// Task to process GuiSyncReport messages from the channel.
     async fn process_progress_updates(
         mut rx: mpsc::UnboundedReceiver<GuiSyncReport>,
         sync_status_map_arc: Arc<Mutex<HashMap<String, SyncStatus>>>,
         simple_sync_status_map_arc: Arc<Mutex<HashMap<String, SimpleSyncStatus>>>,
     ) {
-        log::info!("[RepositoryManager] Progress processing task started.");
-        let mut last_sync_start_time: HashMap<String, std::time::Instant> = HashMap::new();
-
         while let Some(report) = rx.recv().await {
-            log::debug!("[RepositoryManager] Received progress report for repo '{}': {:?}", report.repo_id, report.progress.stage);
+            let repo_id = report.repo_id.clone();
             
-            let repo_id = report.repo_id;
-            let core_progress = report.progress;
-
-            // Track elapsed time per repository
-            let start_time = last_sync_start_time.entry(repo_id.clone()).or_insert_with(std::time::Instant::now);
-            let elapsed_seconds = start_time.elapsed().as_secs_f64();
-
-            // Convert core progress to displayable progress
-            let displayable_progress = DisplayableSyncProgress::from_core_progress(&core_progress, elapsed_seconds);
-
-            // Update the detailed sync_status_map
-            { // Scope for sync_status_map lock
-                let mut status_map = sync_status_map_arc.lock().await;
-                let status_entry = status_map.entry(repo_id.clone()).or_insert_with(SyncStatus::default);
-                
-                status_entry.detailed_progress = Some(displayable_progress.clone());
-                status_entry.progress = displayable_progress.percentage_overall;
-                status_entry.state = format!("{}: {}", displayable_progress.stage_detail.name, displayable_progress.message);
-
-                match core_progress.stage {
-                    CoreSyncStage::Completed { .. } => {
-                        status_entry.success = true;
-                        status_entry.state = "Completed".to_string();
-                        last_sync_start_time.remove(&repo_id); // Reset timer for this repo
-                    }
-                    CoreSyncStage::Error { .. } => {
-                        status_entry.success = false;
-                        status_entry.state = "Error".to_string();
-                        last_sync_start_time.remove(&repo_id); // Reset timer for this repo
-                    }
-                    _ => { // In progress
-                        status_entry.success = false; // Not yet successfully completed
-                    }
-                }
-            } // Lock released
-
-            // Update the simple_sync_status_map (for compatibility or simpler GUI views)
-            { // Scope for simple_sync_status_map_arc lock
-                let mut simple_map = simple_sync_status_map_arc.lock().await;
-                let simple_status_entry = simple_map.entry(repo_id.clone()).or_insert_with(SimpleSyncStatus::default);
-
-                simple_status_entry.is_running = true;
-                simple_status_entry.is_complete = false;
-                simple_status_entry.is_success = false;
-                
-                let mut log_line = format!("[{}] {}", displayable_progress.stage_detail.name, displayable_progress.message);
-                if let Some(file) = &displayable_progress.stage_detail.current_file {
-                    log_line.push_str(&format!(" (File: {})", file));
-                }
-                if let Some((curr, tot)) = displayable_progress.stage_detail.current_progress {
-                     if tot > 0 {
-                        log_line.push_str(&format!(" {}/{}", curr, tot));
-                     }
-                }
-
-                simple_status_entry.output_lines.push(log_line.clone());
-                if simple_status_entry.output_lines.len() > 50 { // Keep it bounded
-                    simple_status_entry.output_lines.remove(0);
-                }
-
-                match core_progress.stage {
-                    CoreSyncStage::Completed { message } => {
-                        simple_status_entry.is_running = false;
-                        simple_status_entry.is_complete = true;
-                        simple_status_entry.is_success = true;
-                        simple_status_entry.final_message = message;
-                        simple_status_entry.output_lines.push("✅ Sync Completed Successfully.".to_string());
-                    }
-                    CoreSyncStage::Error { message } => {
-                        simple_status_entry.is_running = false;
-                        simple_status_entry.is_complete = true;
-                        simple_status_entry.is_success = false;
-                        simple_status_entry.final_message = message;
-                        simple_status_entry.output_lines.push("❌ Sync Failed.".to_string());
-                    }
-                     _ => {} // In progress
-                }
-            } // Lock released
+            // Create displayable progress from core progress
+            let elapsed_seconds = 0.0; // We don't track elapsed time in this context
+            let displayable_progress = DisplayableSyncProgress::from_core_progress(&report.progress, elapsed_seconds);
             
-            // TODO: Call a send_sync_log equivalent here if needed, using a passed-in sender.
-            // For example:
-            // if let Some(ref sender) = *sync_log_sender_arc.lock().await {
-            //     let log_msg = SyncLogMessage {
-            //         repo_name: repo_id.clone(),
-            //         message: log_line, // from above
-            //         timestamp: std::time::Instant::now(),
-            //     };
-            //     if sender.send(log_msg).is_err() {
-            //         warn!("[ProgressProcessor] Failed to send log message for repo {}", repo_id);
-            //     }
-            // }
+            // Update detailed sync status
+            let mut sync_status_map = sync_status_map_arc.lock().await;
+            let status = sync_status_map.entry(repo_id.clone()).or_insert_with(|| {
+                info!("Creating new sync status entry for repo: {}", repo_id);
+                SyncStatus::default()
+            });
+            
+            // Update the status based on the displayable progress
+            status.state = format!("{}: {}", displayable_progress.stage_detail.name, displayable_progress.stage_detail.overall_message);
+            status.progress = displayable_progress.percentage_overall;
+            status.success = matches!(report.progress.stage, CoreSyncStage::Completed { .. });
+            status.detailed_progress = Some(displayable_progress.clone());
+            
+            // Update simple sync status
+            let mut simple_status_map = simple_sync_status_map_arc.lock().await;
+            let simple_status = simple_status_map.entry(repo_id).or_insert_with(|| {
+                info!("Creating new simple sync status entry for repo");
+                SimpleSyncStatus::default()
+            });
+            
+            // Update the simple status
+            let is_completed = matches!(report.progress.stage, CoreSyncStage::Completed { .. });
+            let is_error = matches!(report.progress.stage, CoreSyncStage::Error { .. });
+            
+            simple_status.is_running = !is_completed && !is_error;
+            simple_status.is_complete = is_completed || is_error;
+            simple_status.is_success = is_completed;
+            
+            // Format output line based on stage
+            let output_line = match &report.progress.stage {
+                CoreSyncStage::Idle => "[Idle] Waiting for sync to start.".to_string(),
+                CoreSyncStage::GitFetch { message, progress } => {
+                    if let Some((current, total)) = progress {
+                        format!("[Git Fetch] {} {}/{}", message, current, total)
+                    } else {
+                        format!("[Git Fetch] {}", message)
+                    }
+                },
+                CoreSyncStage::DiffCalculation { message } => {
+                    format!("[Diff Calculation] {}", message)
+                },
+                CoreSyncStage::IndexFile { current_file, total_files, current_file_num, files_per_second, .. } => {
+                    let file_display = current_file.as_ref()
+                        .map(|p| format!(" (File: {})", p.to_string_lossy()))
+                        .unwrap_or_default();
+                    let speed_display = files_per_second
+                        .map(|fps| format!(" {:.2} files/s", fps))
+                        .unwrap_or_default();
+                    format!("[Indexing] Indexing file {} of {}{}{} {}/{}", 
+                           current_file_num, total_files, file_display, speed_display, current_file_num, total_files)
+                },
+                CoreSyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, .. } => {
+                    let file_display = current_file.as_ref()
+                        .map(|p| format!(" (File: {})", p.to_string_lossy()))
+                        .unwrap_or_default();
+                    let speed_display = files_per_second
+                        .map(|fps| format!(" {:.2} files/s", fps))
+                        .unwrap_or_default();
+                    format!("[Deleting] Deleting file {} of {}{}{} {}/{}", 
+                           current_file_num, total_files, file_display, speed_display, current_file_num, total_files)
+                },
+                CoreSyncStage::CollectFiles { total_files, message } => {
+                    format!("[Collect Files] {} (Total: {})", message, total_files)
+                },
+                CoreSyncStage::QueryLanguages { message } => {
+                    format!("[Query Languages] {}", message)
+                },
+                CoreSyncStage::VerifyingCollection { message } => {
+                    format!("[Verifying Collection] {}", message)
+                },
+                CoreSyncStage::Completed { message } => {
+                    simple_status.final_message = message.clone();
+                    "✅ Sync Completed Successfully.".to_string()
+                },
+                CoreSyncStage::Error { message } => {
+                    simple_status.final_message = message.clone();
+                    "❌ Sync Failed.".to_string()
+                },
+            };
+            
+            simple_status.output_lines.push(output_line);
+            
+            // Limit output lines to prevent memory issues
+            if simple_status.output_lines.len() > 50 {
+                simple_status.output_lines.remove(0);
+            }
         }
-        log::info!("[RepositoryManager] Progress processing task finished.");
     }
     
     /// Get repositories for updating from async tasks
@@ -683,9 +660,9 @@ impl RepositoryManager {
         let sync_result_future = sync_repository(
             client_clone,
             &repo_config,
-            options, // Pass the options with the reporter
-            &config_clone_for_sync,
-            Some(progress_reporter as Arc<dyn CoreSyncProgressReporter>),
+            options,
+            &config_clone_for_sync, // Pass reference instead of Arc<RwLock<>>
+            Some(progress_reporter),
         );
 
         // The actual sync_repository call is async. We await it here.
@@ -711,7 +688,7 @@ impl RepositoryManager {
                     }
                     
                     log::info!("Repository '{}' sync completed successfully. Message: {}", name, sync_outcome.message);
-                     self.cleanup_gpu_memory_after_sync().await; // Perform cleanup
+                    self.cleanup_gpu_memory_after_sync().await; // Perform cleanup
                     Ok(())
                 } else {
                     log::error!("Repository '{}' sync failed. Message: {}", name, sync_outcome.message);
@@ -1220,7 +1197,7 @@ mod tests {
 
             let simple_map = repo_manager.simple_sync_status_map.lock().await;
             let simple_status = simple_map.get(&repo_name).expect("Simple status for index");
-            assert!(simple_status.output_lines.last().unwrap().contains("Indexing file 20 of 200 (File: /path/to/file.rs) 20/200"));
+            assert!(simple_status.output_lines.last().unwrap().contains("Indexing file 20 of 200 (File: /path/to/file.rs) 10.50 files/s 20/200"));
         }
 
         // --- Test Completed State --- 
@@ -1232,7 +1209,7 @@ mod tests {
         {
             let detail_map = repo_manager.sync_status_map.lock().await;
             let status = detail_map.get(&repo_name).expect("Status should exist for completed");
-        assert_eq!(status.state, "Completed");
+        assert_eq!(status.state, "Completed: All done!");
             assert_eq!(status.progress, 1.0);
         assert!(status.success);
             let displayable = status.detailed_progress.as_ref().unwrap();
@@ -1258,7 +1235,7 @@ mod tests {
         {
             let detail_map = repo_manager.sync_status_map.lock().await;
             let status = detail_map.get(&error_repo_name).expect("Status should exist for error");
-            assert_eq!(status.state, "Error");
+            assert_eq!(status.state, "Error: Something went wrong");
             assert!(!status.success);
              let displayable = status.detailed_progress.as_ref().unwrap();
             assert_eq!(displayable.stage_detail.name, "Error");

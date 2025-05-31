@@ -74,78 +74,59 @@ where
     );
 
     // Initialize git manager for enhanced sync detection
-    if !args.force {
-        let mut git_manager = GitManager::new();
-        match git_manager.initialize_repository(&repo_path).await {
-            Ok(_) => {
-                // Check current branch sync requirements
-                match git_manager.calculate_sync_requirements(&repo_path, active_branch_str).await {
-                    Ok(sync_req) => {
-                        match sync_req.sync_type {
-                            SyncType::None => {
-                                println!("✅ Repository is already up to date");
-                                return Ok(());
-                            },
-                            SyncType::Incremental => {
-                                println!("🔄 Incremental sync needed: {} files to update", 
-                                    sync_req.files_to_update.len() + sync_req.files_to_add.len());
-                            },
-                            SyncType::Full => {
-                                println!("🔄 Full resync required");
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        warn!("Failed to calculate sync requirements: {}, proceeding with normal sync", e);
-                    }
-                }
-            },
-            Err(e) => {
-                warn!("Failed to initialize git manager: {}, proceeding with normal sync", e);
-            }
+    let mut git_manager = GitManager::new();
+    git_manager.initialize_repository(&repo_path).await?;
+
+    // Calculate sync requirements
+    let sync_req = git_manager.calculate_sync_requirements(&repo_path, &current_sync_identifier).await?;
+    
+    match sync_req.sync_type {
+        SyncType::None => {
+            println!("✅ Repository '{}' is already up to date.", repo_name_str.green());
+            return Ok(());
+        },
+        SyncType::Incremental => {
+            println!("🔄 Incremental sync required: {} files to update", 
+                sync_req.files_to_update.len() + sync_req.files_to_add.len());
+        },
+        SyncType::Full => {
+            println!("🔄 Full resync required");
         }
-    } else {
-        println!("🔄 Force sync enabled - bypassing change detection");
     }
 
+    // Create progress reporter
+    let progress_reporter = Arc::new(IndicatifProgressReporter::new());
+
+    // Create sync options
     let options = SyncOptions {
         force: args.force,
-        extensions: args.extensions.clone(),
-        // progress_reporter: Some(Arc::new(IndicatifProgressReporter::new())),
+        extensions: args.extensions,
     };
 
     match sync_repository(
-        Arc::clone(&client), 
-        repo_config,
-        options, 
-        &app_config_clone,
-        Some(Arc::new(IndicatifProgressReporter::new())),
+        client,
+        &repo_config,
+        options,
+        &app_config_clone, // Pass reference instead of Arc<RwLock<>>
+        Some(progress_reporter),
     ).await {
         Ok(sync_result) => {
             if sync_result.success {
-                info!(
-                    "{}",
-                    format!("Successfully synced repository '{}'", repo_name_str).green()
-                );
-                println!("{}", sync_result.message.green());
-                 println!(
-                    "Files Indexed: {}, Files Deleted: {}", 
-                    sync_result.files_indexed.to_string().yellow(), 
-                    sync_result.files_deleted.to_string().yellow()
-                );
-                if !sync_result.indexed_languages.is_empty() {
-                    println!("Detected/updated languages: {}", sync_result.indexed_languages.join(", ").blue());
-                }
+                println!("✅ {}", sync_result.message);
                 
+                // Update the config with the new commit hash
                 if let Some(commit) = sync_result.last_synced_commit {
-                     if let Some(repo_mut) = config.repositories.get_mut(repo_config_index) {
-                        repo_mut.last_synced_commits.insert(current_sync_identifier.clone(), commit);
+                    let current_sync_identifier = repo_config.active_branch.as_deref()
+                        .or(repo_config.target_ref.as_deref())
+                        .unwrap_or(&repo_config.default_branch)
+                        .to_string();
+                    
+                    let repo_name_for_update = repo_config.name.clone();
+                    if let Some(repo_mut) = config.repositories.iter_mut().find(|r| r.name == repo_name_for_update) {
+                        // Update last_synced_commits map
+                        repo_mut.last_synced_commits.insert(current_sync_identifier, commit);
                         repo_mut.indexed_languages = Some(sync_result.indexed_languages);
-                     } else {
-                         error!("Failed to get mutable repository config to update sync status.");
-                     }
-                } else {
-                     warn!("Sync successful but no commit hash returned to update config.");
+                    }
                 }
 
                 if let Err(e) = save_config(config, override_path) {
@@ -155,25 +136,20 @@ where
                      println!("{}", "Configuration saved.".dimmed());
                 }
             } else {
-                warn!("Sync report for '{}': {}", repo_name_str, sync_result.message);
-                println!("{}", sync_result.message.yellow());
-                 println!(
-                    "Files Indexed: {}, Files Deleted: {}", 
-                    sync_result.files_indexed.to_string().yellow(), 
-                    sync_result.files_deleted.to_string().yellow()
-                );
+                error!("Sync failed: {}", sync_result.message);
+                println!("{}", format!("❌ Sync failed: {}", sync_result.message).red());
+                return Err(anyhow!("Sync failed: {}", sync_result.message));
             }
         }
         Err(e) => {
-             error!("Sync failed for repository '{}': {:?}", repo_name_str, e);
-             println!("{}", format!("Error during sync for repository '{}'.", repo_name_str).red());
-             println!("{}", format!("  Details: {}", e).red());
-            return Err(anyhow!(e).context(format!("Failed to sync repository '{}'", repo_name_str)));
+            error!("Sync error: {}", e);
+            println!("{}", format!("❌ Sync error: {}", e).red());
+            return Err(e.into());
         }
     }
 
     let duration = start_time.elapsed();
-    println!("Sync operation finished in {:.2?}s.", duration.as_secs_f32());
+    println!("{}", format!("Sync completed in {:.2}s", duration.as_secs_f64()).dimmed());
 
     Ok(())
 } 

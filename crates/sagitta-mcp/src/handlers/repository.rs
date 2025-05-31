@@ -38,12 +38,33 @@ use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
 /// Helper function to save config with proper test isolation
 /// During tests, this will save to a temporary location if SAGITTA_TEST_CONFIG_PATH is set
 fn save_config_with_test_isolation(config: &AppConfig) -> Result<(), sagitta_search::error::SagittaError> {
-    if cfg!(test) && std::env::var("SAGITTA_TEST_CONFIG_PATH").is_ok() {
-        // During tests with isolation, save to the test path
+    if cfg!(test) {
+        // During tests, try to use the test path from environment variable
         if let Ok(test_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
             let test_path_buf = std::path::PathBuf::from(test_path);
+            
+            // Ensure the parent directory exists
+            if let Some(parent) = test_path_buf.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    sagitta_search::error::SagittaError::ConfigurationError(
+                        format!("Failed to create test config directory {}: {}", parent.display(), e)
+                    )
+                })?;
+            }
+            
             return save_config(config, Some(&test_path_buf)).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()));
         }
+        
+        // Fallback: if no test path is set, create a temporary config file in /tmp
+        let fallback_path = std::path::PathBuf::from("/tmp/sagitta_test_config.toml");
+        if let Some(parent) = fallback_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                sagitta_search::error::SagittaError::ConfigurationError(
+                    format!("Failed to create fallback test config directory {}: {}", parent.display(), e)
+                )
+            })?;
+        }
+        return save_config(config, Some(&fallback_path)).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()));
     }
     // Normal operation: save to default location
     save_config(config, None).map_err(|e| sagitta_search::error::SagittaError::ConfigurationError(e.to_string()))

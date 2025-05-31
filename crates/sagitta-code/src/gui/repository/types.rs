@@ -255,6 +255,13 @@ pub struct BranchManagementState {
     // New fields for target_ref support
     pub manual_ref_input: String,
     pub ref_type_tab: RefTypeTab,
+    
+    // Channels for async operation results
+    pub branch_result_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<BranchOperationResult>>,
+    pub tag_result_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<TagOperationResult>>,
+    pub switch_result_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<SwitchOperationResult>>,
+    pub create_result_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<CreateBranchResult>>,
+    pub delete_result_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<DeleteBranchResult>>,
 }
 
 /// Different types of Git references that can be displayed
@@ -470,6 +477,53 @@ pub struct BranchSyncResult {
     pub new_branch: String,
     pub sync_type: String,
     pub files_processed: usize,
+    pub error_message: Option<String>,
+}
+
+/// Result of branch listing operation
+#[derive(Debug, Clone)]
+pub struct BranchOperationResult {
+    pub repo_name: String,
+    pub success: bool,
+    pub branches: Vec<String>,
+    pub current_branch: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Result of tag listing operation
+#[derive(Debug, Clone)]
+pub struct TagOperationResult {
+    pub repo_name: String,
+    pub success: bool,
+    pub tags: Vec<String>,
+    pub error_message: Option<String>,
+}
+
+/// Result of switch operation
+#[derive(Debug, Clone)]
+pub struct SwitchOperationResult {
+    pub repo_name: String,
+    pub target_ref: String,
+    pub success: bool,
+    pub sync_result: Option<BranchSyncResult>,
+    pub error_message: Option<String>,
+}
+
+/// Result of create branch operation
+#[derive(Debug, Clone)]
+pub struct CreateBranchResult {
+    pub repo_name: String,
+    pub branch_name: String,
+    pub success: bool,
+    pub error_message: Option<String>,
+}
+
+/// Result of delete branch operation
+#[derive(Debug, Clone)]
+pub struct DeleteBranchResult {
+    pub repo_name: String,
+    pub branch_name: String,
+    pub success: bool,
     pub error_message: Option<String>,
 }
 

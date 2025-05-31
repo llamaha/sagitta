@@ -2,7 +2,7 @@ use std::sync::Arc;
 use egui::{Ui, RichText, Color32, Grid, ScrollArea, Button};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
-use super::types::{RepoPanelState, BranchSyncResult, RefTypeTab};
+use super::types::{RepoPanelState, BranchSyncResult, RefTypeTab, BranchOperationResult, TagOperationResult, SwitchOperationResult, CreateBranchResult, DeleteBranchResult};
 use git_manager::GitManager;
 use log::{info, error, warn};
 
@@ -16,8 +16,11 @@ pub fn render_branch_management(
     ui.heading("Git Reference Management");
     ui.separator();
 
+    // Process async operation results first
+    process_async_results(state);
+
     // Repository selection
-    render_repository_selector(ui, state);
+    render_repository_selector(ui, state, repo_manager.clone());
     ui.separator();
 
     // Only show reference operations if a repository is selected
@@ -54,8 +57,130 @@ pub fn render_branch_management(
     }
 }
 
+/// Process results from async operations and update UI state
+fn process_async_results(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
+    let selected_repo = state.branch_management.selected_repo_for_branches.clone();
+    let selected_repo_str = selected_repo.as_ref().map(|s| s.as_str()).unwrap_or("");
+
+    // Collect branch results
+    let mut branch_results = Vec::new();
+    if let Some(ref mut receiver) = state.branch_management.branch_result_receiver {
+        while let Ok(result) = receiver.try_recv() {
+            if result.repo_name == selected_repo_str {
+                branch_results.push(result);
+            }
+        }
+    }
+
+    // Process branch results
+    for result in branch_results {
+        state.branch_management.is_loading_branches = false;
+        if result.success {
+            state.branch_management.available_branches = result.branches;
+            state.branch_management.current_branch = result.current_branch;
+        } else {
+            state.branch_management.switch_error = result.error_message;
+        }
+    }
+
+    // Collect tag results
+    let mut tag_results = Vec::new();
+    if let Some(ref mut receiver) = state.branch_management.tag_result_receiver {
+        while let Ok(result) = receiver.try_recv() {
+            if result.repo_name == selected_repo_str {
+                tag_results.push(result);
+            }
+        }
+    }
+
+    // Process tag results
+    for result in tag_results {
+        state.branch_management.is_loading_tags = false;
+        if result.success {
+            state.branch_management.available_tags = result.tags;
+        } else {
+            state.branch_management.switch_error = result.error_message;
+        }
+    }
+
+    // Collect switch results
+    let mut switch_results = Vec::new();
+    if let Some(ref mut receiver) = state.branch_management.switch_result_receiver {
+        while let Ok(result) = receiver.try_recv() {
+            if result.repo_name == selected_repo_str {
+                switch_results.push(result);
+            }
+        }
+    }
+
+    // Process switch results
+    for result in switch_results {
+        state.branch_management.is_switching_branch = false;
+        if result.success {
+            state.branch_management.switch_success = Some(format!("Successfully switched to '{}'", result.target_ref));
+            state.branch_management.last_sync_result = result.sync_result;
+            // Refresh current branch info
+            state.branch_management.current_branch = Some(result.target_ref);
+            // Clear any previous errors
+            state.branch_management.switch_error = None;
+        } else {
+            state.branch_management.switch_error = result.error_message;
+            state.branch_management.switch_success = None;
+        }
+    }
+
+    // Collect create results
+    let mut create_results = Vec::new();
+    if let Some(ref mut receiver) = state.branch_management.create_result_receiver {
+        while let Ok(result) = receiver.try_recv() {
+            if result.repo_name == selected_repo_str {
+                create_results.push(result);
+            }
+        }
+    }
+
+    // Process create results
+    for result in create_results {
+        state.branch_management.is_creating_branch = false;
+        if result.success {
+            state.branch_management.create_success = Some(format!("Successfully created branch '{}'", result.branch_name));
+            state.branch_management.new_branch_name.clear();
+            // Trigger branch list refresh
+            state.branch_management.is_loading_branches = true;
+            state.branch_management.create_error = None;
+        } else {
+            state.branch_management.create_error = result.error_message;
+            state.branch_management.create_success = None;
+        }
+    }
+
+    // Collect delete results
+    let mut delete_results = Vec::new();
+    if let Some(ref mut receiver) = state.branch_management.delete_result_receiver {
+        while let Ok(result) = receiver.try_recv() {
+            if result.repo_name == selected_repo_str {
+                delete_results.push(result);
+            }
+        }
+    }
+
+    // Process delete results
+    for result in delete_results {
+        state.branch_management.is_deleting_branch = false;
+        if result.success {
+            state.branch_management.delete_success = Some(format!("Successfully deleted branch '{}'", result.branch_name));
+            // Trigger branch list refresh
+            state.branch_management.is_loading_branches = true;
+            state.branch_management.delete_error = None;
+        } else {
+            state.branch_management.delete_error = result.error_message;
+            state.branch_management.delete_success = None;
+        }
+    }
+}
+
 /// Render repository selector dropdown
-fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
+fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>, repo_manager: Arc<Mutex<RepositoryManager>>) {
     ui.horizontal(|ui| {
         ui.label("Repository:");
         
@@ -84,15 +209,29 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
                         state.branch_management.selected_repo_for_branches = Some(repo.name.clone());
                         state.branch_management.is_loading_branches = true;
                         state.branch_management.is_loading_tags = true;
+                        
+                        // Initialize channels if not already done
+                        initialize_channels_if_needed(state);
+                        
+                        // Start loading operations
+                        load_branches(repo_manager.clone(), repo.name.clone(), get_branch_sender(state));
+                        load_tags(repo_manager.clone(), repo.name.clone(), get_tag_sender(state));
                     }
                 }
             });
             
         if ui.button("Refresh").clicked() {
-            if state.branch_management.selected_repo_for_branches.is_some() {
+            if let Some(repo_name) = state.branch_management.selected_repo_for_branches.clone() {
                 state.branch_management.is_loading_branches = true;
                 state.branch_management.is_loading_tags = true;
                 clear_messages(state);
+                
+                // Initialize channels if not already done
+                initialize_channels_if_needed(state);
+                
+                // Start loading operations
+                load_branches(repo_manager.clone(), repo_name.clone(), get_branch_sender(state));
+                load_tags(repo_manager.clone(), repo_name.clone(), get_tag_sender(state));
             }
         }
     });
@@ -153,7 +292,7 @@ fn render_branch_list(
         });
         
         // Trigger branch loading
-        load_branches(repo_manager, repo_name.to_string());
+        load_branches(repo_manager, repo_name.to_string(), get_branch_sender(state));
         return;
     }
     
@@ -182,7 +321,7 @@ fn render_tag_list(
         });
         
         // Trigger tag loading
-        load_tags(repo_manager, repo_name.to_string());
+        load_tags(repo_manager, repo_name.to_string(), get_tag_sender(state));
         return;
     }
     
@@ -219,6 +358,7 @@ fn render_manual_ref_input(
                 repo_manager.clone(),
                 repo_name.to_string(),
                 state.branch_management.manual_ref_input.trim().to_string(),
+                get_switch_sender(state),
             );
             state.branch_management.is_switching_branch = true;
             clear_messages(state);
@@ -287,6 +427,7 @@ fn render_ref_grid(
                                     repo_manager.clone(),
                                     repo_name.to_string(),
                                     git_ref.clone(),
+                                    get_switch_sender(state),
                                 );
                                 state.branch_management.is_switching_branch = true;
                                 clear_messages(state);
@@ -323,6 +464,7 @@ fn render_branch_operations(
                 repo_manager.clone(),
                 repo_name.to_string(),
                 state.branch_management.new_branch_name.trim().to_string(),
+                get_create_sender(state),
             );
             state.branch_management.is_creating_branch = true;
             clear_messages(state);
@@ -392,6 +534,7 @@ fn render_delete_confirmation(
                         repo_manager.clone(),
                         repo_name.to_string(),
                         branch_to_delete.clone(),
+                        get_delete_sender(state),
                     );
                     state.branch_management.is_deleting_branch = true;
                     state.branch_management.show_delete_confirmation = false;
@@ -457,25 +600,43 @@ fn clear_messages(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
 
 /// Async operations (these will be implemented to work with the repository manager)
 
-fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String) {
+fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sender: Option<Sender<BranchOperationResult>>) {
     tokio::spawn(async move {
         info!("Loading branches for repository: {}", repo_name);
         
         match repo_manager.lock().await.list_branches(&repo_name).await {
             Ok(branches) => {
                 info!("Successfully loaded {} branches for repository '{}'", branches.len(), repo_name);
-                // TODO: Update UI state with branches
-                // This would require a channel or callback mechanism to update the UI state
+                
+                if let Some(sender) = sender {
+                    let current_branch = branches.first().cloned();
+                    sender.send(BranchOperationResult {
+                        repo_name,
+                        success: true,
+                        branches,
+                        current_branch,
+                        error_message: None,
+                    }).unwrap();
+                }
             }
             Err(e) => {
                 error!("Failed to load branches for repository '{}': {}", repo_name, e);
-                // TODO: Update UI state with error
+                
+                if let Some(sender) = sender {
+                    sender.send(BranchOperationResult {
+                        repo_name,
+                        success: false,
+                        branches: Vec::new(),
+                        current_branch: None,
+                        error_message: Some(e.to_string()),
+                    }).unwrap();
+                }
             }
         }
     });
 }
 
-fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String) {
+fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sender: Option<Sender<TagOperationResult>>) {
     tokio::spawn(async move {
         info!("Loading tags for repository: {}", repo_name);
         
@@ -484,16 +645,32 @@ fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String) {
                 info!("Successfully loaded {} tags for repository '{}'", tags.len(), repo_name);
                 // TODO: Update UI state with tags
                 // This would require a channel or callback mechanism to update the UI state
+                if let Some(sender) = sender {
+                    sender.send(TagOperationResult {
+                        repo_name,
+                        success: true,
+                        tags,
+                        error_message: None,
+                    }).unwrap();
+                }
             }
             Err(e) => {
                 error!("Failed to load tags for repository '{}': {}", repo_name, e);
                 // TODO: Update UI state with error
+                if let Some(sender) = sender {
+                    sender.send(TagOperationResult {
+                        repo_name,
+                        success: false,
+                        tags: Vec::new(),
+                        error_message: Some(e.to_string()),
+                    }).unwrap();
+                }
             }
         }
     });
 }
 
-fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, ref_name: String) {
+fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, ref_name: String, sender: Option<Sender<SwitchOperationResult>>) {
     tokio::spawn(async move {
         info!("Switching to ref '{}' in repository '{}'", ref_name, repo_name);
         
@@ -501,46 +678,167 @@ fn switch_to_ref(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
             Ok(result) => {
                 info!("Successfully switched to ref '{}' in repository '{}'. Sync type: {}, Files processed: {}", 
                       ref_name, repo_name, result.sync_type, result.files_processed);
-                // TODO: Update UI state with success result
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(SwitchOperationResult {
+                        repo_name,
+                        target_ref: ref_name,
+                        success: true,
+                        sync_result: Some(result),
+                        error_message: None,
+                    });
+                }
             }
             Err(e) => {
                 error!("Failed to switch to ref '{}' in repository '{}': {}", ref_name, repo_name, e);
-                // TODO: Update UI state with error
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(SwitchOperationResult {
+                        repo_name,
+                        target_ref: ref_name,
+                        success: false,
+                        sync_result: None,
+                        error_message: Some(e.to_string()),
+                    });
+                }
             }
         }
     });
 }
 
-fn create_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String) {
+fn create_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String, sender: Option<Sender<CreateBranchResult>>) {
     tokio::spawn(async move {
         info!("Creating branch '{}' in repository '{}'", branch_name, repo_name);
         
         match repo_manager.lock().await.create_branch(&repo_name, &branch_name, false).await {
             Ok(()) => {
                 info!("Successfully created branch '{}' in repository '{}'", branch_name, repo_name);
-                // TODO: Update UI state with success and refresh branch list
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(CreateBranchResult {
+                        repo_name,
+                        branch_name,
+                        success: true,
+                        error_message: None,
+                    });
+                }
             }
             Err(e) => {
                 error!("Failed to create branch '{}' in repository '{}': {}", branch_name, repo_name, e);
-                // TODO: Update UI state with error
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(CreateBranchResult {
+                        repo_name,
+                        branch_name,
+                        success: false,
+                        error_message: Some(e.to_string()),
+                    });
+                }
             }
         }
     });
 }
 
-fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String) {
+fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, branch_name: String, sender: Option<Sender<DeleteBranchResult>>) {
     tokio::spawn(async move {
         info!("Deleting branch '{}' in repository '{}'", branch_name, repo_name);
         
         match repo_manager.lock().await.delete_branch(&repo_name, &branch_name, false).await {
             Ok(()) => {
                 info!("Successfully deleted branch '{}' in repository '{}'", branch_name, repo_name);
-                // TODO: Update UI state with success and refresh branch list
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(DeleteBranchResult {
+                        repo_name,
+                        branch_name,
+                        success: true,
+                        error_message: None,
+                    });
+                }
             }
             Err(e) => {
                 error!("Failed to delete branch '{}' in repository '{}': {}", branch_name, repo_name, e);
-                // TODO: Update UI state with error
+                
+                if let Some(sender) = sender {
+                    let _ = sender.send(DeleteBranchResult {
+                        repo_name,
+                        branch_name,
+                        success: false,
+                        error_message: Some(e.to_string()),
+                    });
+                }
             }
         }
     });
+}
+
+/// Helper functions for channel management
+
+fn initialize_channels_if_needed(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
+    if state.branch_management.branch_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.branch_result_receiver = Some(receiver);
+        // Store sender in a way that can be accessed later - we'll use a different approach
+    }
+    
+    if state.branch_management.tag_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.tag_result_receiver = Some(receiver);
+    }
+    
+    if state.branch_management.switch_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.switch_result_receiver = Some(receiver);
+    }
+    
+    if state.branch_management.create_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.create_result_receiver = Some(receiver);
+    }
+    
+    if state.branch_management.delete_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.delete_result_receiver = Some(receiver);
+    }
+}
+
+// We need to store senders in the state as well
+type Sender<T> = tokio::sync::mpsc::UnboundedSender<T>;
+
+fn get_branch_sender(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) -> Option<Sender<BranchOperationResult>> {
+    // For now, create a new channel each time - this is not ideal but will work
+    if state.branch_management.branch_result_receiver.is_none() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.branch_result_receiver = Some(receiver);
+        Some(sender)
+    } else {
+        // We can't easily get the sender from the receiver, so we'll create a new channel
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        state.branch_management.branch_result_receiver = Some(receiver);
+        Some(sender)
+    }
+}
+
+fn get_tag_sender(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) -> Option<Sender<TagOperationResult>> {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    state.branch_management.tag_result_receiver = Some(receiver);
+    Some(sender)
+}
+
+fn get_switch_sender(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) -> Option<Sender<SwitchOperationResult>> {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    state.branch_management.switch_result_receiver = Some(receiver);
+    Some(sender)
+}
+
+fn get_create_sender(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) -> Option<Sender<CreateBranchResult>> {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    state.branch_management.create_result_receiver = Some(receiver);
+    Some(sender)
+}
+
+fn get_delete_sender(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) -> Option<Sender<DeleteBranchResult>> {
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    state.branch_management.delete_result_receiver = Some(receiver);
+    Some(sender)
 } 
