@@ -18,7 +18,7 @@ use sagitta_search::{
     indexing::{self, gather_files},
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{handle_repo_add, AddRepoArgs},
-    repo_helpers::{delete_repository_data, get_collection_name},
+    repo_helpers::{delete_repository_data, get_collection_name, get_branch_aware_collection_name},
     error::SagittaError,
     sync::{sync_repository, SyncOptions},
     sync_progress::{SyncProgressReporter, SyncProgress},
@@ -521,7 +521,10 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         })?;
 
     let vocab_exists_before_sync = {
-        let collection_name_for_vocab = get_collection_name(tenant_id_for_indexing, &repo_name, &app_config_clone);
+        let context_identifier = repo_config.target_ref.as_deref()
+            .or(repo_config.active_branch.as_deref())
+            .unwrap_or(&repo_config.default_branch);
+        let collection_name_for_vocab = get_branch_aware_collection_name(tenant_id_for_indexing, &repo_name, context_identifier, &app_config_clone);
         config::get_vocabulary_path(&app_config_clone, &collection_name_for_vocab)
             .map(|p| p.exists())
             .unwrap_or(false)
@@ -585,7 +588,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         let context_identifier = repo_config.target_ref.as_deref()
             .or(repo_config.active_branch.as_deref())
             .unwrap_or(&repo_config.default_branch);
-        let collection_name = get_collection_name(tenant_id_for_indexing, &repo_name, &app_config_clone);
+        let collection_name = get_branch_aware_collection_name(tenant_id_for_indexing, &repo_name, context_identifier, &app_config_clone);
 
         let files_to_index_abs = match gather_files(&[repo_root.clone()], None) {
             Ok(files) => files,

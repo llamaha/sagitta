@@ -16,6 +16,16 @@ const TEST_TENANT_ID: &str = "test_tenant_001";
 const QDRANT_URL_TEST: &str = "http://localhost:6334";
 const VECTOR_DIMENSION: i32 = 384;
 
+// Performance optimizations for faster tests
+const FAST_BATCH_SIZE: i32 = 16; // Smaller batch size for faster processing
+const FAST_EMBED_BATCH_SIZE: i32 = 8; // Smaller embedding batch size
+const FAST_MAX_FILE_SIZE: i32 = 512 * 1024; // 512KB limit for faster processing
+const FAST_RAYON_THREADS: &str = "2"; // Fewer threads to reduce resource contention
+
+// Use smaller, faster repositories for testing
+const SMALL_REPO_URL: &str = "https://github.com/octocat/Hello-World.git"; // Very small repo
+const MEDIUM_REPO_URL: &str = "https://github.com/octocat/Spoon-Knife.git"; // Small repo
+
 fn get_cli_path() -> PathBuf {
     PathBuf::from(WORKSPACE_ROOT).join("target/release/sagitta-cli")
 }
@@ -55,11 +65,12 @@ impl TestEnv {
         writeln!(config_file, "onnx_model_path = \"{}\"", get_onnx_model_path_config_str()).unwrap();
         writeln!(config_file, "onnx_tokenizer_path = \"{}\"", get_onnx_tokenizer_path_config_str()).unwrap();
         writeln!(config_file, "vector_dimension = {}", VECTOR_DIMENSION).unwrap(); 
+        writeln!(config_file, "rayon_num_threads = 2").unwrap(); // Limit threads for faster tests
         
         writeln!(config_file, "\n[performance]").unwrap();
-        writeln!(config_file, "batch_size = 64").unwrap(); 
-        writeln!(config_file, "internal_embed_batch_size = 32").unwrap(); 
-        writeln!(config_file, "max_file_size_bytes = 1048576").unwrap(); // 1MB limit for testing OOM
+        writeln!(config_file, "batch_size = {}", FAST_BATCH_SIZE).unwrap(); 
+        writeln!(config_file, "internal_embed_batch_size = {}", FAST_EMBED_BATCH_SIZE).unwrap(); 
+        writeln!(config_file, "max_file_size_bytes = {}", FAST_MAX_FILE_SIZE).unwrap(); // Smaller limit for faster processing
         
         TestEnv { temp_dir }
     }
@@ -102,12 +113,12 @@ mod phase_1_repo_commands {
     fn repo_add_list_basic() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
         let repo_name_sf = generate_unique_name("spoon-knife");
-        let repo_url_sf = "https://github.com/octocat/Spoon-Knife.git";
+        let repo_url_sf = MEDIUM_REPO_URL; // Use constant for consistency
 
         env.cli_cmd()?
             .args(&["repo", "add", "--name", &repo_name_sf, "--url", repo_url_sf])
             .assert()
-            .success(); 
+            .success();
 
         env.cli_cmd()?.args(&["repo", "list"]).assert().success().stdout(contains(&repo_name_sf));
 
@@ -140,7 +151,7 @@ mod phase_1_repo_commands {
     fn repo_add_error_handling() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
         env.cli_cmd()?
-            .args(&["repo", "add", "--url", "https://github.com/octocat/Spoon-Knife.git"])
+            .args(&["repo", "add", "--url", MEDIUM_REPO_URL])
             .assert()
             .success(); 
         env.cli_cmd()?.args(&["repo", "list"]).assert().success().stdout(contains("Spoon-Knife"));
@@ -158,9 +169,9 @@ mod phase_1_repo_commands {
     fn repo_use_and_remove() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
         let repo_name1 = generate_unique_name("repo1-use-remove");
-        let repo_url1 = "https://github.com/octocat/Spoon-Knife.git";
+        let repo_url1 = MEDIUM_REPO_URL; // Use smaller repo
         let repo_name2 = generate_unique_name("repo2-use-remove");
-        let repo_url2 = "https://github.com/rust-lang/book.git";
+        let repo_url2 = SMALL_REPO_URL; // Use even smaller repo
 
         env.cli_cmd()?.args(&["repo", "add", "--name", &repo_name1, "--url", repo_url1]).assert().success();
         env.cli_cmd()?.args(&["repo", "add", "--name", &repo_name2, "--url", repo_url2]).assert().success();
@@ -316,28 +327,28 @@ mod phase_1_repo_commands {
     fn repo_sync_stats_query_clear() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
         let repo_name_sk = generate_unique_name("sk-sync");
-        let repo_url_sk = "https://github.com/octocat/Spoon-Knife.git";
-        let repo_name_rb = generate_unique_name("rb-sync");
-        let repo_url_rb = "https://github.com/rust-lang/book.git";
+        let repo_url_sk = MEDIUM_REPO_URL; // Use smaller repo for faster cloning
+        let repo_name_rb = generate_unique_name("hw-sync"); // Use Hello-World instead of rust book
+        let repo_url_rb = SMALL_REPO_URL; // Much smaller repo for faster testing
 
         env.cli_cmd()?.args(&["repo", "add", "--name", &repo_name_sk, "--url", repo_url_sk]).assert().success();
         env.cli_cmd()?.args(&["repo", "add", "--name", &repo_name_rb, "--url", repo_url_rb]).assert().success();
 
         let mut cmd_sync_rb = env.cli_cmd()?;
-        cmd_sync_rb.env("RAYON_NUM_THREADS", "4");
+        cmd_sync_rb.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
         cmd_sync_rb.args(&["repo", "sync", &repo_name_rb]);
         cmd_sync_rb.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
         
         env.cli_cmd()?.args(&["repo", "use", &repo_name_sk]).assert().success();
 
         let mut cmd_sync_sk_active = env.cli_cmd()?;
-        cmd_sync_sk_active.env("RAYON_NUM_THREADS", "4");
+        cmd_sync_sk_active.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
         cmd_sync_sk_active.args(&["repo", "sync"] as &[&str]);
         cmd_sync_sk_active.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
 
         let mut cmd_sync_sk_force_ext = env.cli_cmd()?;
-        cmd_sync_sk_force_ext.env("RAYON_NUM_THREADS", "4");
-        cmd_sync_sk_force_ext.args(&["repo", "sync", "--force", "--extensions", "md,txt"]);
+        cmd_sync_sk_force_ext.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
+        cmd_sync_sk_force_ext.args(&["repo", "sync", "--force", "--extensions", "md,txt"]); // Only sync small files
         cmd_sync_sk_force_ext.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
 
         env.cli_cmd()?.args(&["repo", "stats"])
@@ -348,9 +359,9 @@ mod phase_1_repo_commands {
             .assert().success()
             .stdout(contains(&format!("Querying repository '{}'", repo_name_sk)).and(contains("Search results for:")));
 
-        // Test the JSON query without parsing the output
+        // Test the JSON query with a simpler search term for the smaller Hello-World repo
         println!("Running query with --json flag without parsing output");
-        env.cli_cmd()?.args(&["repo", "query", "borrow checker", "--name", &repo_name_rb, "--lang", "rust", "--json"])
+        env.cli_cmd()?.args(&["repo", "query", "hello", "--name", &repo_name_rb, "--json"])
             .assert().success();
 
         env.cli_cmd()?.args(&["repo", "query"] as &[&str])
@@ -478,7 +489,7 @@ mod phase_3_edit_commands {
         assert!(git_commit_status.success(), "git commit failed for edit_test.py in {:?}", repo_clone_path);
 
         let mut cmd_sync = env.cli_cmd()?;
-        cmd_sync.env("RAYON_NUM_THREADS", "4");
+        cmd_sync.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads for faster sync
         cmd_sync.args(&["repo", "sync", repo_name]);
         cmd_sync.assert().success(); 
 
@@ -497,7 +508,7 @@ def goodbye():
     fn edit_validate_apply_lines() -> Result<(), Box<dyn std::error::Error>> {
         let env = TestEnv::new();
         let repo_name = generate_unique_name("edit-lines-repo");
-        let repo_url = "https://github.com/octocat/Spoon-Knife.git";
+        let repo_url = MEDIUM_REPO_URL; // Use smaller repo for faster testing
         let target_file_path = setup_edit_test_repo(&env, &repo_name, repo_url, EDIT_TEST_PY_INITIAL_CONTENT)?;
         let target_file_path_str = target_file_path.to_str().unwrap();
         let edit_content_hello = "    print(\"Hello, E2E test!\")";

@@ -14,6 +14,7 @@ use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::embedding::EmbeddingHandler;
 use crate::repo_helpers::get_collection_name;
+use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_CHUNK_CONTENT};
 // --- End imports --- 
@@ -25,13 +26,14 @@ pub async fn search_semantic<C>(
     filter: Option<Filter>,
     tenant_id: &str,
     repo_name: &str,
+    branch_name: &str,
     config: &Arc<AppConfig>, // Use Arc<AppConfig> for consistency
     client: Arc<C>,
 ) -> Result<Vec<SearchResult>, SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    debug!("Performing semantic search query=\"{}\" repo=\"{}\" limit={} filter={:?}", query, repo_name, limit, filter);
+    debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
 
     // 1. Get Query Embedding
     let embedding_handler = EmbeddingHandler::new(&*config)
@@ -43,8 +45,8 @@ where
 
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
-    // 2. Determine Collection Name
-    let collection_name = get_collection_name(tenant_id, repo_name, &**config);
+    // 2. Determine Collection Name using branch-aware naming
+    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &**config);
     debug!("Searching collection: {}", collection_name);
 
     // 3. Build Qdrant Search Request

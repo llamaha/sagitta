@@ -6,7 +6,7 @@ use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
 use sagitta_search::{AppConfig, RepositoryConfig}; // Added RepositoryConfig
 use sagitta_search::qdrant_client_trait::QdrantClientTrait; // Use core trait
-use sagitta_search::repo_helpers::get_collection_name; // Use core helper
+use sagitta_search::repo_helpers::{get_collection_name, get_branch_aware_collection_name}; // Use core helper
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {
@@ -44,8 +44,15 @@ pub async fn handle_clear(
         .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
         .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
 
+    let repo_config = &config.repositories[repo_config_index];
+    let branch_name = repo_config.target_ref.as_deref()
+        .or(repo_config.active_branch.as_deref())
+        .unwrap_or(&repo_config.default_branch);
+
+    // Use branch-aware collection naming to match the new sync behavior
+    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name_to_clear, branch_name, &config);
+
     // --- Check Qdrant Collection Status (Informational) ---
-    let collection_name = get_collection_name(cli_tenant_id, &repo_name_to_clear, &config);
     log::info!("Preparing to clear data for repository: '{}', collection: '{}'", repo_name_to_clear, collection_name);
 
     // --- Confirmation --- 

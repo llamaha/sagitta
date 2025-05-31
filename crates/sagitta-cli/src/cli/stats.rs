@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use qdrant_client::qdrant::CountPointsBuilder;
 use serde::Serialize;
 use serde_json;
+use sagitta_search::repo_helpers::get_branch_aware_collection_name;
 
 // use super::commands::CODE_SEARCH_COLLECTION; // REMOVED
 
@@ -88,7 +89,12 @@ where
         .find(|r| r.name == target_repo_name && r.tenant_id.as_deref() == Some(cli_tenant_id))
         .ok_or_else(|| anyhow!("Repository '{}' not found for tenant '{}', or active repository does not belong to this tenant.", target_repo_name, cli_tenant_id))?;
 
-    let collection_name = get_collection_name(cli_tenant_id, &repo_config.name, &config);
+    let branch_name = repo_config.target_ref.as_deref()
+        .or(repo_config.active_branch.as_deref())
+        .unwrap_or(&repo_config.default_branch);
+
+    // Use branch-aware collection naming to match the new sync behavior
+    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_config.name, branch_name, &config);
 
     if !args.json {
         println!("Fetching stats for repository: {} (Tenant: {})", repo_config.name.cyan(), cli_tenant_id.cyan());

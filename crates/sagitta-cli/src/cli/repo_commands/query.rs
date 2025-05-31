@@ -85,7 +85,7 @@ where
         .or_else(|| repo_config.active_branch.clone())
         .unwrap_or_else(|| repo_config.default_branch.clone());
 
-    let collection_name = repo_helpers::get_collection_name(cli_tenant_id, &repo_name, config);
+    let collection_name = repo_helpers::get_branch_aware_collection_name(cli_tenant_id, &repo_name, &branch_name, config);
 
     let model_env_var = std::env::var("SAGITTA_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").ok();

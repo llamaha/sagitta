@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use colored::*;
 use std::{sync::Arc, path::PathBuf};
-use sagitta_search::repo_helpers::{get_collection_name};
+use sagitta_search::repo_helpers::{get_collection_name, get_branch_aware_collection_name};
 use log;
 use sagitta_search::{AppConfig, save_config};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -51,7 +51,12 @@ where
         .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
         .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
 
-    let collection_name = get_collection_name(cli_tenant_id, &repo_name_to_clear, &config);
+    let repo_config = &config.repositories[repo_config_index];
+    let branch_name = repo_config.target_ref.as_deref()
+        .or(repo_config.active_branch.as_deref())
+        .unwrap_or(&repo_config.default_branch);
+
+    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name_to_clear, branch_name, &config);
     let collection_existed_before_clear = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {

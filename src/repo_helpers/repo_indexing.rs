@@ -14,6 +14,7 @@ use crate::QdrantClientTrait;
 use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
 use crate::error::SagittaError as Error;
 use crate::repo_helpers::qdrant_utils::get_collection_name;
+use crate::repo_helpers::qdrant_utils::get_branch_aware_collection_name;
 use anyhow::anyhow;
 use std::process::{Command, Stdio};
 use walkdir::WalkDir;
@@ -168,7 +169,10 @@ where
 
     let url_str = url.to_string(); // Clone url for closure
     let repo_name_str = repo_name.to_string(); // Clone repo_name for closure
-    let collection_name = get_collection_name(tenant_id, &repo_name_str, config);
+    
+    // Use branch-aware collection naming to match the new sync behavior
+    let current_branch_or_ref = target_ref_opt.unwrap_or(final_branch);
+    let collection_name = get_branch_aware_collection_name(tenant_id, &repo_name_str, current_branch_or_ref, config);
 
     let mut was_cloned = false;
     if !final_local_path.exists() {
@@ -451,19 +455,62 @@ where
     let tenant_id = repo_config.tenant_id.as_deref()
         .ok_or_else(|| Error::Other(format!("Tenant ID missing in RepositoryConfig for repository '{}' during delete operation", repo_name)))?;
     
-    let collection_name = get_collection_name(tenant_id, repo_name, config);
-    info!("Attempting to delete Qdrant collection '{collection_name}' for tenant '{tenant_id}'...");
-    match client.delete_collection(collection_name.clone()).await {
+    // With branch-aware collections, we need to delete all collections for this repository
+    // For now, we'll try to delete the legacy collection and the current branch collection
+    // In the future, we could list all collections and filter by pattern
+    
+    // Try to delete legacy collection (for backward compatibility)
+    let legacy_collection_name = get_collection_name(tenant_id, repo_name, config);
+    info!("Attempting to delete legacy Qdrant collection '{legacy_collection_name}' for tenant '{tenant_id}'...");
+    match client.delete_collection(legacy_collection_name.clone()).await {
         Ok(deleted) => {
             if deleted {
-                info!("Successfully deleted Qdrant collection '{collection_name}'.");
+                info!("Successfully deleted legacy Qdrant collection '{legacy_collection_name}'.");
             } else {
-                info!("Qdrant collection '{collection_name}' did not exist or was already deleted.");
+                info!("Legacy Qdrant collection '{legacy_collection_name}' did not exist or was already deleted.");
             }
         }
         Err(e) => {
             let error_str = e.to_string();
-            warn!("Failed to delete Qdrant collection '{collection_name}': {error_str}. Continuing removal process.");
+            warn!("Failed to delete legacy Qdrant collection '{legacy_collection_name}': {error_str}. Continuing removal process.");
+        }
+    }
+    
+    // Try to delete branch-aware collections for known branches
+    let branches_to_try = vec![
+        repo_config.default_branch.as_str(),
+        repo_config.active_branch.as_deref().unwrap_or("main"),
+        "main",
+        "master",
+        "develop",
+        "dev"
+    ];
+    
+    // Also include target_ref if it exists
+    let mut all_refs_to_try = branches_to_try;
+    if let Some(target_ref) = &repo_config.target_ref {
+        all_refs_to_try.push(target_ref.as_str());
+    }
+    
+    // Remove duplicates
+    all_refs_to_try.sort();
+    all_refs_to_try.dedup();
+    
+    for branch_or_ref in all_refs_to_try {
+        let branch_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+        info!("Attempting to delete branch-aware Qdrant collection '{branch_collection_name}' for branch/ref '{branch_or_ref}'...");
+        match client.delete_collection(branch_collection_name.clone()).await {
+            Ok(deleted) => {
+                if deleted {
+                    info!("Successfully deleted branch-aware Qdrant collection '{branch_collection_name}'.");
+                } else {
+                    info!("Branch-aware Qdrant collection '{branch_collection_name}' did not exist or was already deleted.");
+                }
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+                warn!("Failed to delete branch-aware Qdrant collection '{branch_collection_name}': {error_str}. Continuing removal process.");
+            }
         }
     }
 
