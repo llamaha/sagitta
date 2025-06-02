@@ -541,12 +541,36 @@ pub struct SyncDetails {
     pub files_removed: usize,
 }
 
-/// Parameters for listing branches
+/// Parameters for listing repository branches
 #[derive(Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryListBranchesParams {
     /// Name of the repository
     pub repository_name: String,
+    /// Optional filter pattern for branch/ref names (supports glob patterns)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
+    /// Include remote branches (default: true)
+    #[serde(default = "default_include_remote")]
+    pub include_remote: bool,
+    /// Include tags (default: true)
+    #[serde(default = "default_include_tags")]
+    pub include_tags: bool,
+    /// Maximum number of results to return (default: 50, max: 200)
+    #[serde(default = "default_branch_limit")]
+    pub limit: usize,
+}
+
+fn default_include_remote() -> bool {
+    true
+}
+
+fn default_include_tags() -> bool {
+    true
+}
+
+fn default_branch_limit() -> usize {
+    50
 }
 
 /// Result of listing branches

@@ -464,6 +464,32 @@ where
         repo.list_branches(Some(git2::BranchType::Local))
     }
 
+    /// List all available references (local branches, remote branches, tags)
+    ///
+    /// Returns a comprehensive list of all references that can be checked out,
+    /// including local branches, remote branches (without remote prefix), and tags.
+    ///
+    /// # Examples
+    /// ```rust,no_run
+    /// use git_manager::GitManager;
+    /// use std::path::PathBuf;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let manager = GitManager::new();
+    /// let repo_path = PathBuf::from("/path/to/repo");
+    ///
+    /// let refs = manager.list_all_references(&repo_path)?;
+    /// for ref_name in refs {
+    ///     println!("Reference: {}", ref_name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn list_all_references(&self, repo_path: &std::path::Path) -> GitResult<Vec<String>> {
+        let repo = GitRepository::open(repo_path)?;
+        repo.list_all_references()
+    }
+
     /// List all tags in a repository
     ///
     /// Returns a list of all tags in the repository.

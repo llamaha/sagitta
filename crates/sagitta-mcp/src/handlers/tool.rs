@@ -331,7 +331,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Repository Switch Branch ---
         ToolDefinition {
             name: "repository_switch_branch".to_string(),
-            description: Some("Switches to a different branch or Git reference in a repository with automatic resync. This operation will update the repository's active branch/ref and optionally trigger a resync of the vector database to reflect the new content. Supports branches, tags, commits, and remote references.".to_string()),
+            description: Some("Switches to a different branch or Git reference in a repository with automatic resync.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -341,11 +341,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     "force": { "type": "boolean", "description": "Force switch even with uncommitted changes (default: false)." },
                     "noAutoResync": { "type": "boolean", "description": "Disable automatic resync after branch switch (default: false)." }
                 },
-                "required": ["repositoryName"],
-                "oneOf": [
-                    { "required": ["branchName"] },
-                    { "required": ["targetRef"] }
-                ]
+                "required": ["repositoryName"]
             }),
              annotations: Some(ToolAnnotations {
                 title: Some("Switch Repository Branch/Ref".to_string()),
@@ -358,11 +354,15 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         // --- Repository List Branches ---
         ToolDefinition {
             name: "repository_list_branches".to_string(),
-            description: Some("Lists all available branches in a repository, showing the current active branch.".to_string()),
+            description: Some("Lists branches and references in a repository with optional filtering. Use filters to avoid overwhelming output in large repositories.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository to list branches for." }
+                    "repositoryName": { "type": "string", "description": "Name of the repository to list branches for." },
+                    "filter": { "type": "string", "description": "Optional: Filter pattern for branch/ref names (e.g., 'feature*', 'v1.*', 'main'). Supports glob patterns." },
+                    "includeRemote": { "type": "boolean", "description": "Include remote branches (default: true)." },
+                    "includeTags": { "type": "boolean", "description": "Include tags (default: true)." },
+                    "limit": { "type": "integer", "description": "Maximum number of results to return (default: 50, max: 200)." }
                 },
                 "required": ["repositoryName"]
             }),
@@ -410,6 +410,50 @@ mod tests {
         assert_eq!(annotations.read_only_hint, Some(false));
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));
+    }
+
+    #[test]
+    fn test_debug_branch_tool_json_size() {
+        let tools = get_tool_definitions();
+        
+        // Find the problematic tools
+        let switch_branch_tool = tools.iter()
+            .find(|tool| tool.name == "repository_switch_branch")
+            .expect("repository_switch_branch tool should be defined");
+            
+        let list_branches_tool = tools.iter()
+            .find(|tool| tool.name == "repository_list_branches")
+            .expect("repository_list_branches tool should be defined");
+        
+        // Serialize to JSON to see actual size and content
+        let switch_json = serde_json::to_string_pretty(switch_branch_tool).unwrap();
+        let list_json = serde_json::to_string_pretty(list_branches_tool).unwrap();
+        
+        println!("=== SWITCH BRANCH TOOL JSON ({} chars) ===", switch_json.len());
+        println!("{}", switch_json);
+        println!("\n=== LIST BRANCHES TOOL JSON ({} chars) ===", list_json.len());
+        println!("{}", list_json);
+        
+        // Check for specific problematic patterns
+        if switch_json.contains("oneOf") {
+            println!("\n⚠️  SWITCH BRANCH TOOL CONTAINS 'oneOf' SCHEMA CONSTRAINT");
+        }
+        
+        if switch_json.len() > 2000 {
+            println!("\n⚠️  SWITCH BRANCH TOOL JSON IS VERY LARGE: {} characters", switch_json.len());
+        }
+        
+        // Check description lengths
+        let switch_desc = switch_branch_tool.description.as_ref().unwrap();
+        let list_desc = list_branches_tool.description.as_ref().unwrap();
+        
+        println!("\n=== DESCRIPTION LENGTHS ===");
+        println!("Switch branch: {} characters", switch_desc.len());
+        println!("List branches: {} characters", list_desc.len());
+        
+        if switch_desc.len() > 200 {
+            println!("⚠️  SWITCH BRANCH DESCRIPTION IS VERY LONG");
+        }
     }
 
     #[test]

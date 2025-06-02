@@ -962,7 +962,7 @@ where
     
     // Check if target branch exists (only for branches, not for target refs)
     if !is_target_ref {
-    let branches = git_manager.list_branches(&repo_path)
+    let branches = git_manager.list_all_references(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
             message: format!("Failed to list branches: {}", e),
@@ -1155,24 +1155,98 @@ pub async fn handle_repository_list_branches(
     
     drop(config_guard);
 
-    // List branches using git manager
+    // List branches using git manager with filtering
     let git_manager = GitManager::new();
-    let branches = git_manager.list_branches(&repo_path)
+    let repo = git_manager::GitRepository::open(&repo_path)
         .map_err(|e| ErrorObject {
             code: error_codes::GIT_OPERATION_FAILED,
-            message: format!("Failed to list branches: {}", e),
+            message: format!("Failed to open repository: {}", e),
             data: None,
         })?;
 
+    let mut all_refs = Vec::new();
+    
+    // Add local branches
+    let local_branches = repo.list_branches(Some(git2::BranchType::Local))
+        .map_err(|e| ErrorObject {
+            code: error_codes::GIT_OPERATION_FAILED,
+            message: format!("Failed to list local branches: {}", e),
+            data: None,
+        })?;
+    all_refs.extend(local_branches);
+    
+    // Add remote branches if requested
+    if params.include_remote {
+        let remote_branches = repo.list_branches(Some(git2::BranchType::Remote))
+            .map_err(|e| ErrorObject {
+                code: error_codes::GIT_OPERATION_FAILED,
+                message: format!("Failed to list remote branches: {}", e),
+                data: None,
+            })?;
+        
+        // Strip remote prefix for display (e.g., "origin/feature" -> "feature")
+        for remote_branch in remote_branches {
+            if let Some(branch_name) = remote_branch.split('/').nth(1) {
+                if !all_refs.contains(&branch_name.to_string()) {
+                    all_refs.push(branch_name.to_string());
+                }
+            }
+        }
+    }
+    
+    // Add tags if requested
+    if params.include_tags {
+        let tags = git_manager.list_tags(&repo_path)
+            .map_err(|e| ErrorObject {
+                code: error_codes::GIT_OPERATION_FAILED,
+                message: format!("Failed to list tags: {}", e),
+                data: None,
+            })?;
+        all_refs.extend(tags);
+    }
+    
+    // Apply filter if provided
+    if let Some(filter_pattern) = &params.filter {
+        all_refs.retain(|ref_name| {
+            // Simple glob-like matching (can be enhanced with proper glob crate later)
+            if filter_pattern.contains('*') {
+                let pattern = filter_pattern.replace('*', "");
+                if filter_pattern.starts_with('*') && filter_pattern.ends_with('*') {
+                    // *pattern* - contains
+                    ref_name.contains(&pattern)
+                } else if filter_pattern.starts_with('*') {
+                    // *pattern - ends with
+                    ref_name.ends_with(&pattern)
+                } else if filter_pattern.ends_with('*') {
+                    // pattern* - starts with
+                    ref_name.starts_with(&pattern)
+                } else {
+                    // Fallback to contains for complex patterns
+                    ref_name.contains(&pattern)
+                }
+            } else {
+                // Exact match
+                ref_name == filter_pattern
+            }
+        });
+    }
+    
+    // Apply limit (max 200 to prevent overwhelming output)
+    let limit = std::cmp::min(params.limit, 200);
+    all_refs.truncate(limit);
+    
+    // Sort for consistent output
+    all_refs.sort();
+
     info!(
         repo_name = %repo_name,
-        branch_count = branches.len(),
+        branch_count = all_refs.len(),
         current_branch = %current_branch,
         "Successfully listed branches"
     );
 
     Ok(RepositoryListBranchesResult {
-        branches,
+        branches: all_refs,
         current_branch,
     })
 }
