@@ -13,7 +13,8 @@ use sagitta_code::{
     llm::client::{LlmClient, Message, ToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
     utils::errors::SagittaCodeError,
 };
-use sagitta_search::embedding::provider::{EmbeddingProvider, onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider}};
+use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
+use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
 use futures_util::StreamExt;
 use std::path::Path;
 use sagitta_code::agent::state::types::AgentMode;

@@ -7,7 +7,8 @@ use sagitta_code::{
     llm::client::{LlmClient, Message, ToolDefinition as LlmToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
     utils::errors::SagittaCodeError,
 };
-use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
+use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
+use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
 use futures_util::StreamExt;
 use std::path::Path;
 use sagitta_code::agent::state::types::AgentMode;
@@ -168,7 +169,12 @@ async fn test_conversation_flow_context_continuity() {
     
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
-    let embedding_provider = Arc::new(ThreadSafeOnnxProvider::new(onnx_model));
+    
+    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
+    let embedding_provider = Arc::new(
+        EmbeddingHandler::new(&embedding_config)
+            .expect("Failed to create embedding handler")
+    );
     
     let tool_registry = Arc::new(ToolRegistry::new());
     
@@ -300,7 +306,12 @@ async fn test_reasoning_session_continuity() {
     
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
-    let embedding_provider = Arc::new(ThreadSafeOnnxProvider::new(onnx_model));
+    
+    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
+    let embedding_provider = Arc::new(
+        EmbeddingHandler::new(&embedding_config)
+            .expect("Failed to create embedding handler")
+    );
     
     let tool_registry = Arc::new(ToolRegistry::new());
     

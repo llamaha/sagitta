@@ -12,7 +12,7 @@ use log::{debug, warn};
 use qdrant_client::qdrant::{SearchPointsBuilder, Filter};
 use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
-use crate::embedding::EmbeddingHandler;
+use crate::EmbeddingHandler;
 use crate::repo_helpers::get_collection_name;
 use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;

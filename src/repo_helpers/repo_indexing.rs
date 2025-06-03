@@ -9,7 +9,7 @@ use tracing::{info, warn, error, debug};
 use qdrant_client::qdrant::{Filter, Condition, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, PointId};
 use crate::constants::{FIELD_BRANCH, FIELD_LANGUAGE};
 use crate::config::AppConfig;
-use crate::embedding::EmbeddingHandler;
+use crate::EmbeddingHandler;
 use crate::QdrantClientTrait;
 use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
 use crate::error::SagittaError as Error;
@@ -112,7 +112,7 @@ pub async fn index_files<
         return Ok(0);
     }
 
-    let embedding_handler = EmbeddingHandler::new(config)
+    let embedding_handler = EmbeddingHandler::new(&crate::app_config_to_embedding_config(config))
         .context("Failed to initialize embedding handler for repo indexing")?;
     info!("Embedding dimension for repo: {}", embedding_handler.dimension()?);
 

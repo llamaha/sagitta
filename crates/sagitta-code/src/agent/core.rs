@@ -60,7 +60,7 @@ use reasoning_engine::traits::{
 };
 use reasoning_engine::streaming::StreamChunk as ReasoningEngineStreamingChunk; // The one from reasoning_engine/src/streaming.rs
 // Import the EmbeddingProvider trait for generic use
-use sagitta_search::embedding::provider::EmbeddingProvider;
+use sagitta_embed::provider::EmbeddingProvider;
 // --- End New Imports ---
 
 // Tokio stream wrappers

@@ -25,6 +25,7 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,

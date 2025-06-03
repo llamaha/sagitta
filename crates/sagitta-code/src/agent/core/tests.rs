@@ -23,8 +23,9 @@ mod tests {
     use crate::agent::recovery::RecoveryConfig;
     use std::sync::Arc;
     use std::path::Path;
-    use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
-    use sagitta_search::embedding::provider::EmbeddingProvider;
+    use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
+    use sagitta_embed::provider::EmbeddingProvider;
+    use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
     
     // Mock tool for testing
     #[derive(Debug)]
@@ -210,9 +211,12 @@ mod tests {
         // Create agent
         let model_path = Path::new("/tmp/sagitta_code_test_onnx/model.onnx");
         let tokenizer_path = Path::new("/tmp/sagitta_code_test_onnx/tokenizer.json");
-        let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
-            .expect("Failed to create test ONNX model for autonomous_reasoning test");
-        let embedding_provider_for_agent = Arc::new(ThreadSafeOnnxProvider::new(onnx_model));
+        
+        let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
+        let embedding_provider_for_agent = Arc::new(
+            EmbeddingHandler::new(&embedding_config)
+                .expect("Failed to create embedding handler for autonomous_reasoning test")
+        );
         let agent = Agent::new(config, tool_registry, embedding_provider_for_agent).await.unwrap();
         
         // Verify agent is in autonomous mode
@@ -395,9 +399,12 @@ mod tests {
         // Create agent with real Gemini client
         let model_path_real = Path::new("/tmp/sagitta_code_test_onnx/model.onnx");
         let tokenizer_path_real = Path::new("/tmp/sagitta_code_test_onnx/tokenizer.json");
-        let onnx_model_real = OnnxEmbeddingModel::new(model_path_real, tokenizer_path_real)
-            .expect("Failed to create test ONNX model for real_gemini test");
-        let embedding_provider_for_real_agent = Arc::new(ThreadSafeOnnxProvider::new(onnx_model_real));
+        
+        let embedding_config = EmbeddingConfig::new_onnx(model_path_real, tokenizer_path_real);
+        let embedding_provider_for_real_agent = Arc::new(
+            EmbeddingHandler::new(&embedding_config)
+                .expect("Failed to create embedding handler for real_gemini test")
+        );
         
         // Create persistence and search engine
         let persistence: Box<dyn crate::agent::conversation::persistence::ConversationPersistence> = Box::new(

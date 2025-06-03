@@ -34,7 +34,6 @@ pub struct SettingsPanel {
     tenant_id: Option<String>,
     indexing_max_concurrent_upserts: u32,
     performance_batch_size: u32,
-    performance_internal_embed_batch_size: u32,
     performance_collection_name_prefix: String,
     performance_max_file_size_bytes: u32,
     rayon_num_threads: u32,
@@ -63,7 +62,6 @@ impl SettingsPanel {
             tenant_id: initial_app_config.tenant_id.clone(),
             indexing_max_concurrent_upserts: initial_app_config.indexing.max_concurrent_upserts as u32,
             performance_batch_size: initial_app_config.performance.batch_size as u32,
-            performance_internal_embed_batch_size: initial_app_config.performance.internal_embed_batch_size as u32,
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             rayon_num_threads: initial_app_config.rayon_num_threads as u32,
@@ -268,12 +266,6 @@ impl SettingsPanel {
                                             .speed(1.0));
                                         ui.end_row();
                                         
-                                        ui.label("Internal Embed Batch Size:");
-                                        ui.add(egui::DragValue::new(&mut self.performance_internal_embed_batch_size)
-                                            .clamp_range(8..=256)
-                                            .speed(1.0));
-                                        ui.end_row();
-                                        
                                         ui.label("Collection Name Prefix:");
                                         ui.text_edit_singleline(&mut self.performance_collection_name_prefix);
                                         ui.end_row();
@@ -389,7 +381,6 @@ impl SettingsPanel {
         
         // Performance settings
         config.performance.batch_size = self.performance_batch_size as usize;
-        config.performance.internal_embed_batch_size = self.performance_internal_embed_batch_size as usize;
         config.performance.collection_name_prefix = self.performance_collection_name_prefix.clone();
         config.performance.max_file_size_bytes = self.performance_max_file_size_bytes as u64;
         
@@ -437,11 +428,11 @@ mod tests {
             },
             performance: PerformanceConfig {
                 batch_size: 200,
-                internal_embed_batch_size: 64,
                 collection_name_prefix: "test_sagitta".to_string(),
                 max_file_size_bytes: 2097152,
                 vector_dimension: 384,
             },
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -486,7 +477,6 @@ mod tests {
         assert_eq!(panel.tenant_id, Some("test-tenant-123".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 8);
         assert_eq!(panel.performance_batch_size, 200);
-        assert_eq!(panel.performance_internal_embed_batch_size, 64);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
         assert_eq!(panel.performance_max_file_size_bytes, 2097152);
         assert_eq!(panel.rayon_num_threads, 8);
@@ -511,7 +501,6 @@ mod tests {
         assert_eq!(panel.tenant_id, Some("test-tenant-123".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 8);
         assert_eq!(panel.performance_batch_size, 200);
-        assert_eq!(panel.performance_internal_embed_batch_size, 64);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
         assert_eq!(panel.performance_max_file_size_bytes, 2097152);
         assert_eq!(panel.rayon_num_threads, 8);
@@ -552,7 +541,6 @@ mod tests {
         panel.tenant_id = Some("custom-tenant".to_string());
         panel.indexing_max_concurrent_upserts = 16;
         panel.performance_batch_size = 300;
-        panel.performance_internal_embed_batch_size = 128;
         panel.performance_collection_name_prefix = "custom_sagitta".to_string();
         panel.performance_max_file_size_bytes = 4194304;
         panel.rayon_num_threads = 16;
@@ -567,7 +555,6 @@ mod tests {
         assert_eq!(config.tenant_id, Some("custom-tenant".to_string()));
         assert_eq!(config.indexing.max_concurrent_upserts, 16);
         assert_eq!(config.performance.batch_size, 300);
-        assert_eq!(config.performance.internal_embed_batch_size, 128);
         assert_eq!(config.performance.collection_name_prefix, "custom_sagitta");
         assert_eq!(config.performance.max_file_size_bytes, 4194304);
         assert_eq!(config.rayon_num_threads, 16);
@@ -619,7 +606,6 @@ mod tests {
         assert_eq!(panel.tenant_id, default_app_config.tenant_id);
         assert_eq!(panel.indexing_max_concurrent_upserts as usize, default_app_config.indexing.max_concurrent_upserts);
         assert_eq!(panel.performance_batch_size as usize, default_app_config.performance.batch_size);
-        assert_eq!(panel.performance_internal_embed_batch_size as usize, default_app_config.performance.internal_embed_batch_size);
         assert_eq!(panel.performance_collection_name_prefix, default_app_config.performance.collection_name_prefix);
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
         assert_eq!(panel.rayon_num_threads as usize, default_app_config.rayon_num_threads);

@@ -69,7 +69,6 @@ impl TestEnv {
         
         writeln!(config_file, "\n[performance]").unwrap();
         writeln!(config_file, "batch_size = {}", FAST_BATCH_SIZE).unwrap(); 
-        writeln!(config_file, "internal_embed_batch_size = {}", FAST_EMBED_BATCH_SIZE).unwrap(); 
         writeln!(config_file, "max_file_size_bytes = {}", FAST_MAX_FILE_SIZE).unwrap(); // Smaller limit for faster processing
         
         TestEnv { temp_dir }

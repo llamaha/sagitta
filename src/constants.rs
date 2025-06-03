@@ -26,8 +26,6 @@ pub const FIELD_COMMIT_HASH: &str = "commit_hash";
 // Other constants
 /// Default batch size for Qdrant upsert operations.
 pub const BATCH_SIZE: usize = 256; // Batch size for Qdrant upserts
-/// Batch size specifically for internal embedding generation.
-pub const INTERNAL_EMBED_BATCH_SIZE: usize = 512; // Increased batch size again (was 256)
 /// Default prefix for Qdrant collection names associated with repositories.
 pub const COLLECTION_NAME_PREFIX: &str = "repo_"; // Example value, adjust if needed
 /// Default maximum file size (in bytes) to process during indexing.

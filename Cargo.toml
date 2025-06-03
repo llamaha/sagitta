@@ -8,6 +8,7 @@ members = [
     ".", "crates/sagitta-code",
     "crates/sagitta-cli",
     "crates/sagitta-mcp",
+    "crates/sagitta-embed",
     "crates/repo-mapper",
     "crates/reasoning-engine",
     "crates/git-manager"
@@ -68,6 +69,9 @@ ort = { version = "2.0.0-rc.9", default-features = false, optional = true, featu
 # Dependencies for embedding/provider/onnx.rs
 tokenizers = { version = "0.21.1" }
 ndarray = { version = "0.16" }
+
+# Add sagitta-embed dependency
+sagitta-embed = { path = "crates/sagitta-embed", features = ["onnx"] }
 
 # Dependencies for repo_add / repo_helpers
 clap = { version = "4.5.7", features = ["derive"] } # For AddRepoArgs

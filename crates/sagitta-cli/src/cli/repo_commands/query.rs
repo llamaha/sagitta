@@ -21,7 +21,7 @@ use crate::{
 };
 
 // Core imports
-use sagitta_search::embedding::EmbeddingHandler;
+use sagitta_search::EmbeddingHandler;
 use sagitta_search::error::SagittaError;
 use sagitta_search::search_collection;
 
@@ -100,7 +100,7 @@ where
         .or(config.onnx_tokenizer_path.as_deref())
         .ok_or_else(|| anyhow!("ONNX tokenizer dir not found. Provide via --onnx-tokenizer-dir, env var, or config."))?;
 
-    let embedding_handler = EmbeddingHandler::new(config)?;
+    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))?;
 
     println!(
         "Querying repository '{}' (collection: '{}', branch: '{}')...",

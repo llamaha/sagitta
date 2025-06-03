@@ -7,9 +7,6 @@ use regex::Regex;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::utils::errors::SagittaCodeError;
-// Import for ONNX provider
-use sagitta_search::embedding::provider::onnx::ThreadSafeOnnxProvider;
-use sagitta_search::embedding::provider::EmbeddingProvider;
 // Import Qdrant client trait from sagitta_search
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 // Import Qdrant types needed for search
@@ -19,12 +16,13 @@ use qdrant_client::qdrant::{
     vectors_config::Config as VectorsConfigEnum,
     PointId, NamedVectors, Vectors, vectors::VectorsOptions // Added PointStruct, PointId, NamedVectors, Vectors, VectorsOptions to imports
 };
+use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
 
 
 // #[derive(Debug)] // Removed derive Debug
 pub struct AnalyzeInputTool {
     tool_registry: Arc<ToolRegistry>,
-    embedding_provider: Arc<ThreadSafeOnnxProvider>,
+    embedding_provider: Arc<dyn EmbeddingProvider>,
     qdrant_client: Arc<dyn QdrantClientTrait>, // Added Qdrant client
 }
 
@@ -33,7 +31,7 @@ impl std::fmt::Debug for AnalyzeInputTool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AnalyzeInputTool")
          .field("tool_registry", &self.tool_registry)
-         .field("embedding_provider", &self.embedding_provider)
+         .field("embedding_provider", &"Arc<dyn EmbeddingProvider>")
          // Not including qdrant_client directly as it may not be Debug
          .field("qdrant_client", &"Arc<dyn QdrantClientTrait>") 
          .finish()
@@ -44,7 +42,7 @@ impl AnalyzeInputTool {
     // Updated constructor
     pub fn new(
         tool_registry: Arc<ToolRegistry>, 
-        embedding_provider: Arc<ThreadSafeOnnxProvider>,
+        embedding_provider: Arc<dyn EmbeddingProvider>,
         qdrant_client: Arc<dyn QdrantClientTrait> // Added Qdrant client to constructor
     ) -> Self {
         Self { tool_registry, embedding_provider, qdrant_client }
@@ -436,9 +434,9 @@ mod tests {
         vectors_config::Config as VectorsConfigEnum
     };
     use sagitta_search::config::AppConfig as SagittaAppConfig;
-    use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
+    use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
     use sagitta_search::qdrant_client_trait::QdrantClientTrait;
-    use sagitta_search::embedding::provider::EmbeddingProvider;
+    use sagitta_embed::provider::EmbeddingProvider;
     use std::path::Path;
     use tempfile::TempDir;
 

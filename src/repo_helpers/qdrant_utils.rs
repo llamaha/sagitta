@@ -383,10 +383,9 @@ mod tests {
     fn create_test_config() -> AppConfig {
         AppConfig {
             performance: PerformanceConfig {
-                collection_name_prefix: "test_".to_string(),
-                batch_size: 100,
-                internal_embed_batch_size: 50,
-                max_file_size_bytes: 1024 * 1024,
+                batch_size: 256,
+                collection_name_prefix: "test_repo_".to_string(),
+                max_file_size_bytes: 5 * 1024 * 1024,
                 vector_dimension: 384,
             },
             ..Default::default()
@@ -397,7 +396,7 @@ mod tests {
     fn test_get_collection_name_legacy() {
         let config = create_test_config();
         let result = get_collection_name("tenant1", "my-repo", &config);
-        assert_eq!(result, "test_tenant1_my-repo");
+        assert_eq!(result, "test_repo_tenant1_my-repo");
     }
 
     #[test]
@@ -406,17 +405,17 @@ mod tests {
         
         // Test with main branch
         let result = get_branch_aware_collection_name("tenant1", "my-repo", "main", &config);
-        assert!(result.starts_with("test_tenant1_my-repo_br_"));
-        assert_eq!(result.len(), "test_tenant1_my-repo_br_".len() + 8); // 8-char hash
+        assert!(result.starts_with("test_repo_tenant1_my-repo_br_"));
+        assert_eq!(result.len(), "test_repo_tenant1_my-repo_br_".len() + 8); // 8-char hash
         
         // Test with different branch - should produce different hash
         let result2 = get_branch_aware_collection_name("tenant1", "my-repo", "feature-branch", &config);
-        assert!(result2.starts_with("test_tenant1_my-repo_br_"));
+        assert!(result2.starts_with("test_repo_tenant1_my-repo_br_"));
         assert_ne!(result, result2); // Different branches should have different collection names
         
         // Test with special characters in branch name
         let result3 = get_branch_aware_collection_name("tenant1", "my-repo", "feature/special-chars_123", &config);
-        assert!(result3.starts_with("test_tenant1_my-repo_br_"));
+        assert!(result3.starts_with("test_repo_tenant1_my-repo_br_"));
         assert!(result3.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')); // Should be safe for collection names
     }
 
@@ -425,7 +424,7 @@ mod tests {
         // Test force sync
         assert!(should_sync_branch("abc123", None, true));
         assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
-            collection_name: "test".to_string(),
+            collection_name: "test_repo_tenant1_my-repo_br_main".to_string(),
             last_commit_hash: Some("def456".to_string()),
             branch_or_ref: "main".to_string(),
             last_sync_timestamp: None,
@@ -437,7 +436,7 @@ mod tests {
         
         // Test metadata with no commit hash
         assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
-            collection_name: "test".to_string(),
+            collection_name: "test_repo_tenant1_my-repo_br_main".to_string(),
             last_commit_hash: None,
             branch_or_ref: "main".to_string(),
             last_sync_timestamp: None,
@@ -446,7 +445,7 @@ mod tests {
         
         // Test metadata with different commit hash (needs sync)
         assert!(should_sync_branch("abc123", Some(&BranchSyncMetadata {
-            collection_name: "test".to_string(),
+            collection_name: "test_repo_tenant1_my-repo_br_main".to_string(),
             last_commit_hash: Some("def456".to_string()),
             branch_or_ref: "main".to_string(),
             last_sync_timestamp: None,
@@ -455,7 +454,7 @@ mod tests {
         
         // Test metadata with same commit hash (no sync needed)
         assert!(!should_sync_branch("abc123", Some(&BranchSyncMetadata {
-            collection_name: "test".to_string(),
+            collection_name: "test_repo_tenant1_my-repo_br_main".to_string(),
             last_commit_hash: Some("abc123".to_string()),
             branch_or_ref: "main".to_string(),
             last_sync_timestamp: None,

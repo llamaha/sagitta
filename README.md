@@ -7,6 +7,7 @@ This repository also contains:
 - [`crates/sagitta-mcp`](./crates/sagitta-mcp/README.md): A server component (MCP) for `sagitta-search`.
 - [`crates/git-manager`](./crates/git-manager/README.md): Centralized git operations with branch management and automatic resync capabilities.
 - [`crates/sagitta-code`](./crates/sagitta-code/README.md): AI agent with conversation management and repository integration.
+- [`crates/sagitta-embed`](./crates/sagitta-embed/README.md): High-performance, thread-safe embedding generation library with ONNX model support.
 - [`crates/reasoning-engine`](./crates/reasoning-engine/README.md): Advanced reasoning and orchestration engine for AI workflows.
 - [`crates/repo-mapper`](./crates/repo-mapper/README.md): Repository structure analysis and mapping utilities.
 

@@ -6,8 +6,6 @@ use crate::repo_helpers as helpers;
 use crate::qdrant_client_trait::QdrantClientTrait;
 
 // Use modules from the main sagitta_cli crate
-// Remove the below line if it exists:
-// use sagitta_cli::sagitta::embedding_logic::EmbeddingHandler;
 
 // Other dependencies
 use anyhow::anyhow;
@@ -18,6 +16,7 @@ use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
 use thiserror::Error;
 use log::{info, error, warn};
 use crate::config::AppConfig;
+use crate::config::EmbeddingEngineConfig;
  // Use ManualMock
 use std::io::Write;
 
@@ -307,6 +306,7 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -345,6 +345,7 @@ mod tests {
                  collection_name_prefix: "test_prefix_".to_string(),
                  ..PerformanceConfig::default()
             },
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -438,6 +439,7 @@ mod tests {
                  collection_name_prefix: "test_prefix_".to_string(),
                  ..PerformanceConfig::default()
             },
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -536,6 +538,7 @@ mod tests {
                 collection_name_prefix: "test_cloned_".to_string(),
                 ..PerformanceConfig::default()
             },
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -633,6 +636,7 @@ mod tests {
                 collection_name_prefix: "repo_".to_string(),
                 ..PerformanceConfig::default()
             },
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,

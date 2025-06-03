@@ -6,6 +6,7 @@ use tempfile::tempdir;
 
 use sagitta_search::AppConfig;
 use sagitta_search::config::{save_config, get_config_path_or_default, IndexingConfig, load_config, PerformanceConfig};
+use sagitta_search::config::EmbeddingEngineConfig;
 use crate::cli::CliArgs;
 use crate::cli::commands::Commands;
 use crate::cli::simple;
@@ -98,6 +99,7 @@ fn get_default_config() -> AppConfig {
             collection_name_prefix: "test_collection_".to_string(),
             ..PerformanceConfig::default()
         },
+        embedding: EmbeddingEngineConfig::default(),
         oauth: None,
         tls_enable: false,
         tls_cert_path: None,
@@ -139,6 +141,7 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -187,6 +190,7 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -240,6 +244,7 @@ mod tests {
             indexing: IndexingConfig::default(),
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
