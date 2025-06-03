@@ -108,7 +108,7 @@ max_sequence_length = 128
 session_timeout_seconds = 300
 enable_session_cleanup = true
 ```
-- `max_sessions` (integer, default: 4): Maximum number of concurrent ONNX sessions for session pooling. Higher values allow more parallel embedding generation but use more GPU memory.
+- `max_sessions` (integer, default: 4): Maximum number of concurrent ONNX sessions for session pooling. Higher values allow more parallel embedding generation but use more GPU memory. In the decoupled processing architecture, this directly controls the number of embedding model instances and GPU memory usage regardless of file processing concurrency.
 - `enable_cuda` (bool, default: false): Enable CUDA acceleration for embedding generation. Requires CUDA-compatible hardware and drivers.
 - `max_sequence_length` (integer, default: 128): Maximum sequence length for tokenization. Longer sequences use more memory and processing time.
 - `session_timeout_seconds` (integer, default: 300): Session timeout in seconds. Set to 0 for no timeout.
