@@ -5,7 +5,7 @@
 // mod utils; // Removed
 // mod gui; // This is conditionally compiled, might be okay or also via lib.rs
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
 
 use sagitta_code::{
@@ -132,7 +132,7 @@ mod gui_app {
             "Sagitta Code",
             options,
             Box::new(app_creator)
-        ).map_err(|e| anyhow::anyhow!("eframe error: {}", e))?;
+        ).map_err(|e| anyhow!("eframe error: {}", e))?;
         
         Ok(())
     }
@@ -149,7 +149,6 @@ mod cli_app {
     // Imports for sagitta-search components
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
-    use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
     use sagitta_search::qdrant_client_trait::QdrantClientTrait;
     use qdrant_client::Qdrant;
     use qdrant_client::qdrant::{
@@ -159,7 +158,8 @@ mod cli_app {
     };
     use sagitta_code::tools::analyze_input::TOOLS_COLLECTION_NAME;
     use serde_json;
-    use sagitta_search::embedding::provider::EmbeddingProvider;
+    use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
+    use sagitta_embed::EmbeddingModelType;
     use qdrant_client::Payload;
     use sagitta_code::llm::client::LlmClient; // Corrected path
     use sagitta_code::llm::gemini::client::GeminiClient; // Corrected path
@@ -184,19 +184,10 @@ mod cli_app {
         };
 
         // Initialize Embedding Provider
-        let embedding_provider = {
-            let model_path_str = sagitta_app_config.onnx_model_path.as_deref()
-                .ok_or_else(|| anyhow::anyhow!("ONNX model path not set in sagitta_search config"))?;
-            let tokenizer_path_str = sagitta_app_config.onnx_tokenizer_path.as_deref()
-                .ok_or_else(|| anyhow::anyhow!("ONNX tokenizer path not set in sagitta_search config"))?;
-
-            let onnx_model = OnnxEmbeddingModel::new(
-                Path::new(model_path_str),
-                Path::new(tokenizer_path_str),
-            ).map_err(|e| anyhow::anyhow!("Failed to create OnnxEmbeddingModel: {}", e))?;
-            
-            Arc::new(ThreadSafeOnnxProvider::new(onnx_model))
-        };
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&sagitta_app_config);
+        let embedding_handler = sagitta_search::EmbeddingHandler::new(&embedding_config)
+            .context("Failed to create embedding handler")?;
+        let embedding_provider = Arc::new(embedding_handler);
         
         // Initialize Qdrant Client
         let qdrant_client_result = Qdrant::from_url(&sagitta_app_config.qdrant_url).build();
@@ -206,7 +197,7 @@ mod cli_app {
                 log::error!("Failed to connect to Qdrant at {}: {}. Semantic tool analysis will be disabled.", sagitta_app_config.qdrant_url, e);
                 // Create a mock/dummy client or handle error appropriately for graceful degradation
                 // For now, let's panic or return an error, as it's critical for the new AnalyzeInputTool
-                return Err(anyhow::anyhow!("Failed to initialize Qdrant client: {}", e));
+                return Err(anyhow!("Failed to initialize Qdrant client: {}", e));
             }
         };
         
@@ -229,7 +220,9 @@ mod cli_app {
         
         // --- Populate Qdrant tool collection (run once or ensure exists) ---
         // This logic is NOW MOVED to after all tools are registered.
-        let vector_size = embedding_provider.dimension() as u64;
+        let vector_size = embedding_provider.dimension().map_err(|e| {
+            anyhow!("Failed to get embedding dimension: {}", e)
+        })? as u64;
         match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
             Ok(exists) => {
                 if !exists {
@@ -330,7 +323,7 @@ mod cli_app {
 
         let persistence: Box<dyn sagitta_code::agent::conversation::persistence::ConversationPersistence> = Box::new(
             sagitta_code::agent::conversation::persistence::disk::DiskConversationPersistence::new(storage_path).await
-                .map_err(|e| anyhow::anyhow!("Failed to create disk conversation persistence: {}", e))?
+                .map_err(|e| anyhow!("Failed to create disk conversation persistence: {}", e))?
         );
         
         let search_engine: Box<dyn sagitta_code::agent::conversation::search::ConversationSearchEngine> = Box::new(
@@ -340,7 +333,7 @@ mod cli_app {
         // Create the LLM client for the CLI app
         let llm_client_cli: Arc<dyn LlmClient> = Arc::new(
             GeminiClient::new(&config)
-                .map_err(|e| anyhow::anyhow!("Failed to create GeminiClient for CLI: {}", e))?
+                .map_err(|e| anyhow!("Failed to create GeminiClient for CLI: {}", e))?
         );
 
         let agent = match Agent::new(
@@ -354,7 +347,7 @@ mod cli_app {
             Ok(agent) => agent,
             Err(e) => {
                 eprintln!("Failed to create agent: {}", e);
-                return Err(anyhow::anyhow!("Failed to create agent: {}", e));
+                return Err(anyhow!("Failed to create agent: {}", e));
             }
         };
         

@@ -19,7 +19,7 @@ use std::{
 
 use sagitta_search::config::AppConfig;
 use crate::cli::CliArgs;
-use sagitta_search::embedding::EmbeddingHandler;
+use sagitta_search::EmbeddingHandler; // Use re-export from main crate
 use crate::cli::commands::{ // Only import necessary items from commands
     LEGACY_INDEX_COLLECTION, 
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
@@ -243,8 +243,8 @@ async fn handle_simple_index(
     }
     log::debug!("Input paths: {:?}", cmd_args.paths);
 
-    let embedding_handler = EmbeddingHandler::new(config)
-        .context("Failed to initialize embedding handler for simple index")?;
+    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
+        .context("Failed to initialize embedding handler")?;
     log::info!("Embedding dimension (from handler): {}", embedding_handler.dimension()?);
 
     // --- Prepare Filters ---
@@ -356,8 +356,8 @@ async fn handle_simple_query(
 
     // 5. Perform Search
     // Use the already loaded config from the parameter
-    let embedding_handler = EmbeddingHandler::new(config)
-        .context("Failed to initialize embedding handler for simple query")?;
+    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
+        .context("Failed to initialize embedding handler")?;
     
     let start_time = std::time::Instant::now(); // Define start_time here
     let search_response_result: Result<QueryResponse, SagittaError> = search_collection(

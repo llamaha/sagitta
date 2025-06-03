@@ -9,9 +9,8 @@ use sagitta_code::{
     llm::client::LlmClient,
 };
 use reasoning_engine::{ReasoningEngine, traits::{LlmMessage, LlmMessagePart}};
-use sagitta_search::embedding::provider::onnx::{OnnxEmbeddingModel, ThreadSafeOnnxProvider};
-use sagitta_search::embedding::provider::EmbeddingProvider;
-use sagitta_search::embedding::EmbeddingModelType;
+use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
+use sagitta_embed::{EmbeddingModelType, error::SagittaEmbedError};
 use sagitta_search::error::SagittaError;
 use futures_util::StreamExt;
 use std::path::Path;
@@ -66,7 +65,7 @@ impl MockEmbeddingProvider {
 }
 
 impl EmbeddingProvider for MockEmbeddingProvider {
-    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, SagittaError> {
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, SagittaEmbedError> {
         // Return mock embeddings (just random vectors for testing)
         let embeddings = texts.iter().map(|_| {
             (0..384).map(|i| (i as f32) * 0.001).collect()
@@ -103,28 +102,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create embedding provider (use a fallback if models don't exist)
     let embedding_provider = {
-        let model_path = Path::new("./models/all-MiniLM-L6-v2.onnx");
-        let tokenizer_path = Path::new("./models/tokenizer.json");
-        
-        if model_path.exists() && tokenizer_path.exists() {
-            println!("✓ Using ONNX embedding model");
-            let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)?;
-            Arc::new(ThreadSafeOnnxProvider::new(onnx_model))
-        } else {
-            println!("⚠️  ONNX models not found, using mock embedding provider");
-            // For testing, we'll just use the mock provider directly
-            // In a real scenario, we'd need to handle this type mismatch properly
-            println!("⚠️  Note: Using mock provider for testing - this may cause type issues");
-            Arc::new(ThreadSafeOnnxProvider::new(
-                OnnxEmbeddingModel::new(
-                    Path::new("./dummy.onnx"), 
-                    Path::new("./dummy.json")
-                ).unwrap_or_else(|_| {
-                    // If we can't create a real ONNX model, we'll need to skip this test
-                    eprintln!("❌ Cannot create ONNX model for testing. Please ensure ONNX models are available or run with proper embedding setup.");
-                    std::process::exit(1);
-                })
-            ))
+        // Try to load sagitta-search config to get embedding paths
+        match sagitta_search::config::load_config(None) {
+            Ok(sagitta_config) => {
+                println!("✓ Using sagitta-search embedding configuration");
+                let embedding_config = sagitta_search::app_config_to_embedding_config(&sagitta_config);
+                match sagitta_search::EmbeddingHandler::new(&embedding_config) {
+                    Ok(handler) => Arc::new(handler) as Arc<dyn EmbeddingProvider>,
+                    Err(e) => {
+                        println!("⚠️  Failed to create embedding handler: {}, using mock provider", e);
+                        Arc::new(MockEmbeddingProvider::new()) as Arc<dyn EmbeddingProvider>
+                    }
+                }
+            }
+            Err(e) => {
+                println!("⚠️  Failed to load sagitta-search config: {}, using mock provider", e);
+                Arc::new(MockEmbeddingProvider::new()) as Arc<dyn EmbeddingProvider>
+            }
         }
     };
     

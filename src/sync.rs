@@ -1,15 +1,18 @@
 // crates/sagitta-search/src/sync.rs
 
-use crate::config::{AppConfig, RepositoryConfig};
-use crate::constants::FIELD_LANGUAGE;
-use crate::qdrant_client_trait::QdrantClientTrait;
+use crate::{
+    config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig, EmbeddingEngineConfig},
+    error::{Result, SagittaError},
+    qdrant_client_trait::QdrantClientTrait,
+    repo_helpers::{
+        repo_indexing::{index_files, sync_repository_branch, update_sync_status_and_languages},
+        qdrant_utils::{get_branch_aware_collection_name, delete_points_for_files},
+    },
+    sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
+    constants::{FIELD_BRANCH, FIELD_COMMIT_HASH, FIELD_LANGUAGE},
+};
 use crate::repo_helpers; // Use core repo_helpers
-use crate::error::Result; // Use core Result
-use anyhow::{anyhow, Context}; // Ensure anyhow macro is imported
-
-// Remove CLI specific import
-// use crate::cli::CliArgs;
-
+use anyhow::{anyhow, Context, Result as AnyhowResult};
 use qdrant_client::qdrant::{
     ScrollPointsBuilder,
     PayloadIncludeSelector,
@@ -28,7 +31,6 @@ use log::{info, warn, debug, trace};
 // Import git-manager traits for integration
 use git_manager::{VectorSyncTrait, VectorSyncResult};
 use async_trait::async_trait;
-use crate::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter, NoOpProgressReporter}; // Added
 use std::sync::Mutex; // Added for Mock
 use qdrant_client::qdrant::Distance;
 
@@ -462,8 +464,8 @@ where
     
     // Ensure collection exists (might need embedding dimension)
     // Get dimension from AppConfig or model - requires AppConfig here
-    let embedding_handler = crate::embedding::EmbeddingHandler::new(app_config)
-        .context("Failed to initialize embedding handler for sync")?;
+    let embedding_handler = crate::EmbeddingHandler::new(&crate::app_config_to_embedding_config(app_config))
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     let embedding_dim = embedding_handler.dimension()
         .context("Failed to get embedding dimension for sync")?;
     
@@ -642,7 +644,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig};
+    use crate::config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig, EmbeddingEngineConfig};
     use std::collections::HashMap;
     use std::path::{PathBuf, Path};
     use tempfile::TempDir;
@@ -692,12 +694,12 @@ mod tests {
                 max_concurrent_upserts: 4,
             },
             performance: PerformanceConfig {
-                batch_size: 100,
-                internal_embed_batch_size: 32,
-                collection_name_prefix: "sagitta".to_string(),
-                max_file_size_bytes: 1048576,
+                batch_size: 64,
+                collection_name_prefix: "test_".to_string(),
+                max_file_size_bytes: 1024 * 1024,
                 vector_dimension: 384,
             },
+            embedding: EmbeddingEngineConfig::default(),
             rayon_num_threads: 4,
             repositories: Vec::new(),
             active_repository: None,

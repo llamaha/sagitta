@@ -629,7 +629,7 @@ mod tests {
         
         // Create a minimal config for embedding handler
         let config = AppConfig::default();
-        let embedding_handler = EmbeddingHandler::new(&config).unwrap();
+        let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config)).unwrap();
         
         (qdrant_client, embedding_handler)
     }

@@ -7,6 +7,7 @@ description = "Sagitta AI code agent built on sagitta-search"
 [dependencies]
 # Core Sagitta dependency (local)
 sagitta_search = { path = "../../", features = ["onnx"] }
+sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 repo-mapper = { path = "../repo-mapper" }
 reasoning-engine = { path = "../reasoning-engine" }
 git-manager = { path = "../git-manager" }

@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use sagitta_search::AppConfig;
 use sagitta_search::RepositoryConfig;
 use sagitta_search::search_impl::search_collection;
-use sagitta_search::embedding::EmbeddingHandler;
+use sagitta_search::EmbeddingHandler;
 use sagitta_search::repo_helpers;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::qdrant::{QueryResponse, Filter, Condition};
@@ -190,7 +190,7 @@ impl RepositoryManager {
             } else {
                 log::info!("[RepositoryManager] ONNX files exist, creating embedding handler...");
                 
-                match EmbeddingHandler::new(&config_guard) {
+                match EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_guard)) {
                     Ok(handler) => {
                         log::info!("[RepositoryManager] Embedding handler created successfully");
                         self.embedding_handler = Some(Arc::new(handler));

@@ -21,7 +21,7 @@ use clap::{Args, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 use sagitta_search::config::{AppConfig, save_config};
-use sagitta_search::embedding::EmbeddingHandler;
+use sagitta_search::EmbeddingHandler;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_search::config::get_repo_base_path;
 use crate::cli::CliArgs;
@@ -82,8 +82,8 @@ where
                 }
             };
 
-            let embedding_handler = EmbeddingHandler::new(config)
-                 .context("Failed to initialize embedding handler (check ONNX config)")?;
+            let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
+                .context("Failed to initialize embedding handler")?;
             let embedding_dim = embedding_handler.dimension()
                  .context("Failed to get embedding dimension")?;
             let repo_base_path = match &add_args.repositories_base_path {
@@ -215,6 +215,7 @@ mod tests {
             active_repository: None,
             indexing: Default::default(),
             performance: PerformanceConfig::default(),
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -285,6 +286,7 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,

@@ -40,8 +40,8 @@ use crate::agent::conversation::search::{
     ConversationSearchEngine, 
     text::TextConversationSearchEngine
 };
-use sagitta_search::embedding::provider::onnx::{ThreadSafeOnnxProvider, OnnxEmbeddingModel};
-use sagitta_search::embedding::provider::EmbeddingProvider;
+use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
+use sagitta_search::EmbeddingHandler;
 use std::path::PathBuf;
 
 // Imports for sagitta-search components for embedding provider
@@ -82,21 +82,13 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     }
 
     // Initialize Embedding Provider using the loaded core_config
-    let embedding_provider_arc = {
-        let model_path_str = core_config.onnx_model_path.as_deref()
-            .ok_or_else(|| anyhow::anyhow!("ONNX model path not set in sagitta_search config (core_config.toml)"))?;
-        let tokenizer_path_str = core_config.onnx_tokenizer_path.as_deref()
-            .ok_or_else(|| anyhow::anyhow!("ONNX tokenizer path not set in sagitta_search config (core_config.toml)"))?;
-
-        match OnnxEmbeddingModel::new(
-            Path::new(model_path_str),
-            Path::new(tokenizer_path_str),
-        ) {
-            Ok(onnx_model) => Arc::new(ThreadSafeOnnxProvider::new(onnx_model)),
+    let embedding_handler_arc = {
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&core_config);
+        match sagitta_search::EmbeddingHandler::new(&embedding_config) {
+            Ok(handler) => Arc::new(handler),
             Err(e) => {
-                log::error!("Failed to create OnnxEmbeddingModel for GUI App: {}. Intent analysis will be impaired.", e);
-                // Return an error or a dummy provider? For now, let initialization fail if critical.
-                return Err(anyhow::anyhow!("Failed to create OnnxEmbeddingModel for GUI: {}", e));
+                log::error!("Failed to create EmbeddingHandler for GUI App: {}. Intent analysis will be impaired.", e);
+                return Err(anyhow::anyhow!("Failed to create EmbeddingHandler for GUI: {}", e));
             }
         }
     };
@@ -140,8 +132,10 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         }
     };
 
-    // Use the locally scoped embedding_provider_arc, which is correctly typed.
-    let vector_size = embedding_provider_arc.dimension() as u64;
+    // Use the locally scoped embedding_handler_arc, which is correctly typed.
+    let vector_size = embedding_handler_arc.dimension().map_err(|e| {
+        anyhow::anyhow!("Failed to get embedding dimension: {}", e)
+    })? as u64;
 
     // Ensure Qdrant "tools" collection exists
     match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
@@ -206,7 +200,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
 
     // Register tools first
-    tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_arc.clone(), qdrant_client.clone()))).await?;
+    tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_handler_arc.clone(), qdrant_client.clone()))).await?;
     tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
@@ -229,7 +223,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let mut points_to_upsert_gui = Vec::new();
     for (idx, tool_def) in all_tool_defs_for_qdrant.iter().enumerate() {
         let tool_desc_text = format!("{}: {}", tool_def.name, tool_def.description);
-        match embedding_provider_arc.embed_batch(&[&tool_desc_text]) {
+        match embedding_handler_arc.embed_batch(&[&tool_desc_text]) {
             Ok(mut embeddings) => {
                 if let Some(embedding) = embeddings.pop() {
                     let mut payload_map: std::collections::HashMap<String, qdrant_client::qdrant::Value> = std::collections::HashMap::new();
@@ -287,7 +281,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let agent_result = Agent::new(
         app.config.as_ref().clone(), 
         tool_registry.clone(), // tool_registry is now defined
-        embedding_provider_arc.clone(), // embedding_provider_arc is already passed
+        embedding_handler_arc.clone(), // embedding_handler_arc is already passed
         persistence, // Pass concrete persistence
         search_engine, // Pass concrete search engine
         llm_client.clone() // Add the llm_client argument here

@@ -205,14 +205,24 @@ pub enum SagittaError {
 // Tries to downcast to preserve the original SagittaError type if possible.
 impl From<anyhow::Error> for SagittaError {
     fn from(err: anyhow::Error) -> Self {
-        // Attempt to downcast to the original SagittaError
-        if let Some(specific_err) = err.downcast_ref::<SagittaError>() {
-            specific_err.clone() // Clone the original error if downcast succeeds
-        } else {
-            // Fallback: If downcast fails, wrap the error message in Other
-            // This preserves the error context but loses the specific variant type.
-            SagittaError::Other(format!("{:?}", err))
+        // First, try to downcast to SagittaError to preserve the original error type
+        if let Some(sagitta_err) = err.downcast_ref::<SagittaError>() {
+            return sagitta_err.clone();
         }
+        
+        // Check if the error is a specific type we want to handle differently
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            SagittaError::IOError(io_err.kind().into())
+        } else {
+            SagittaError::Other(err.to_string())
+        }
+    }
+}
+
+// Add conversion from SagittaEmbedError to SagittaError
+impl From<sagitta_embed::error::SagittaEmbedError> for SagittaError {
+    fn from(err: sagitta_embed::error::SagittaEmbedError) -> Self {
+        SagittaError::EmbeddingError(err.to_string())
     }
 }
 

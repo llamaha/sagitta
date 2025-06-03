@@ -10,11 +10,11 @@ use sagitta_search::{
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    embedding::EmbeddingHandler,
+    EmbeddingHandler,
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
     repo_helpers::get_collection_name,
-    search_collection,
+    search_impl::search_collection,
 };
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
@@ -131,7 +131,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     
     // Create EmbeddingHandler instance locally for this operation
     let local_embedding_handler = Arc::new(
-        EmbeddingHandler::new(&config_read_guard).map_err(|e| {
+        EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_guard)).map_err(|e| {
             error!(error = %e, "Failed to create embedding handler for query");
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR,

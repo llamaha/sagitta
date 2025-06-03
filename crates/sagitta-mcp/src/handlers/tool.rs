@@ -16,7 +16,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::instrument;
-use sagitta_search::{config::AppConfig, embedding::EmbeddingHandler, qdrant_client_trait::QdrantClientTrait};
+use sagitta_search::{config::AppConfig, EmbeddingHandler, qdrant_client_trait::QdrantClientTrait};
 
 #[instrument(skip(config, qdrant_client), fields(tool_name = %params.name))]
 pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(

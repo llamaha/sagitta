@@ -83,9 +83,6 @@ pub struct PerformanceConfig {
     /// Batch size for Qdrant upserts
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    /// Batch size for internal embedding operations
-    #[serde(default = "default_internal_embed_batch_size")]
-    pub internal_embed_batch_size: usize,
     /// Prefix for collection names in Qdrant
     #[serde(default = "default_collection_name_prefix")]
     pub collection_name_prefix: String,
@@ -101,7 +98,6 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             batch_size: default_batch_size(),
-            internal_embed_batch_size: default_internal_embed_batch_size(),
             collection_name_prefix: default_collection_name_prefix(),
             max_file_size_bytes: default_max_file_size_bytes(),
             vector_dimension: default_vector_dimension(),
@@ -111,10 +107,6 @@ impl Default for PerformanceConfig {
 
 fn default_batch_size() -> usize {
     256
-}
-
-fn default_internal_embed_batch_size() -> usize {
-    128
 }
 
 fn default_collection_name_prefix() -> String {
@@ -127,6 +119,58 @@ fn default_max_file_size_bytes() -> u64 {
 
 fn default_vector_dimension() -> u64 {
     384
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// Configuration for the embedding engine
+pub struct EmbeddingEngineConfig {
+    /// Maximum number of concurrent sessions for session pooling
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
+    /// Enable CUDA acceleration (requires CUDA feature)
+    #[serde(default = "default_enable_cuda")]
+    pub enable_cuda: bool,
+    /// Maximum sequence length for tokenization
+    #[serde(default = "default_max_sequence_length")]
+    pub max_sequence_length: usize,
+    /// Session timeout in seconds (0 = no timeout)
+    #[serde(default = "default_session_timeout_seconds")]
+    pub session_timeout_seconds: u64,
+    /// Enable session cleanup on idle
+    #[serde(default = "default_enable_session_cleanup")]
+    pub enable_session_cleanup: bool,
+}
+
+impl Default for EmbeddingEngineConfig {
+    fn default() -> Self {
+        Self {
+            max_sessions: default_max_sessions(),
+            enable_cuda: default_enable_cuda(),
+            max_sequence_length: default_max_sequence_length(),
+            session_timeout_seconds: default_session_timeout_seconds(),
+            enable_session_cleanup: default_enable_session_cleanup(),
+        }
+    }
+}
+
+fn default_max_sessions() -> usize {
+    4 // Match sagitta-embed default
+}
+
+fn default_enable_cuda() -> bool {
+    false
+}
+
+fn default_max_sequence_length() -> usize {
+    128 // Match sagitta-embed default
+}
+
+fn default_session_timeout_seconds() -> u64 {
+    300 // 5 minutes, match sagitta-embed default
+}
+
+fn default_enable_session_cleanup() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -194,6 +238,9 @@ pub struct AppConfig {
     /// Performance-related configuration settings
     #[serde(default)]
     pub performance: PerformanceConfig,
+    /// Embedding engine configuration settings
+    #[serde(default)]
+    pub embedding: EmbeddingEngineConfig,
     /// Optional OAuth configuration
     #[serde(default)]
     pub oauth: Option<OAuthConfig>,
@@ -237,6 +284,7 @@ impl Default for AppConfig {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -552,6 +600,7 @@ mod tests {
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -613,6 +662,7 @@ mod tests {
             vocabulary_base_path: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -964,11 +1014,9 @@ mod tests {
     fn test_performance_config_default() {
         let default_perf = PerformanceConfig::default();
         assert_eq!(default_perf.batch_size, default_batch_size());
-        assert_eq!(default_perf.internal_embed_batch_size, default_internal_embed_batch_size());
         assert_eq!(default_perf.collection_name_prefix, default_collection_name_prefix());
         assert_eq!(default_perf.max_file_size_bytes, default_max_file_size_bytes());
         assert_eq!(default_perf.vector_dimension, default_vector_dimension());
-        // Add more assertions here if PerformanceConfig gets more fields with defaults
     }
 
     #[test]

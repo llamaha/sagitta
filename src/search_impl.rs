@@ -1,5 +1,5 @@
 use crate::{
-    embedding::EmbeddingHandler,
+    EmbeddingHandler, // Use re-export from main crate
     error::{Result, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
 };
@@ -14,7 +14,6 @@ use std::collections::HashMap; // Add HashMap
 use log;
 use crate::config::AppConfig; // Import AppConfig
 use crate::config; // Import config module
- // <-- Add this line
 
 /// Performs a hybrid vector search in a specified Qdrant collection using a rescoring approach.
 ///
@@ -152,7 +151,7 @@ mod tests {
     use super::*; // Import items from parent module
     use crate::config::{self, AppConfig}; // Removed TokenizerConfig from here
      // Added direct import for TokenizerConfig
-    use crate::embedding::EmbeddingHandler; 
+    use crate::EmbeddingHandler; // Use re-export from main crate
      
      
     use crate::vocabulary::VocabularyManager; 
@@ -205,7 +204,7 @@ mod tests {
         dummy_vocab.add_token("test"); // Add at least one token the query might match
         dummy_vocab.save(&vocab_path).expect("Failed to save dummy vocab");
 
-        let embedder_handler_result = EmbeddingHandler::new(&dummy_config);
+        let embedder_handler_result = EmbeddingHandler::new(&crate::app_config_to_embedding_config(&dummy_config));
 
         if let Err(e) = &embedder_handler_result {
             warn!("Skipping search_collection test: Failed to create dummy EmbeddingHandler as expected due to dummy model setup: {:?}", e);

@@ -5438,6 +5438,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "regex",
+ "sagitta-embed",
  "sagitta_search",
  "serde",
  "serde_json",
@@ -5492,6 +5493,7 @@ dependencies = [
  "repo-mapper",
  "reqwest 0.11.27",
  "rfd",
+ "sagitta-embed",
  "sagitta_search",
  "serde",
  "serde_json",
@@ -5507,6 +5509,26 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "sagitta-embed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger 0.11.8",
+ "log",
+ "mockall",
+ "ndarray",
+ "num_cpus",
+ "ort",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-log",
+ "thiserror 1.0.69",
+ "tokenizers",
+ "tokio",
 ]
 
 [[package]]
@@ -5537,6 +5559,7 @@ dependencies = [
  "rand 0.8.5",
  "repo-mapper",
  "reqwest 0.11.27",
+ "sagitta-embed",
  "sagitta_search",
  "serde",
  "serde_json",
@@ -5580,6 +5603,7 @@ dependencies = [
  "qdrant-client",
  "rayon",
  "regex",
+ "sagitta-embed",
  "serde",
  "serde_json",
  "sha2",

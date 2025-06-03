@@ -43,6 +43,7 @@ cuda = ["ort/cuda"]
 [dependencies]
 git-manager = { path = "../git-manager" }
 sagitta_search = { path = "../../" }
+sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 
 # CLI specific dependencies
 clap = { version = "4.5.7", features = ["derive", "env"] }

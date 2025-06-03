@@ -20,7 +20,7 @@ use sagitta_search::{
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    embedding::EmbeddingHandler,
+    EmbeddingHandler,
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{AddRepoArgs, handle_repo_add, AddRepoError},

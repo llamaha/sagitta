@@ -14,10 +14,10 @@ use tokio::sync::RwLock;
 use tracing::{error, info, instrument, warn};
 use sagitta_search::{
     config::{self, get_repo_base_path, save_config, AppConfig, RepositoryConfig},
-    embedding::EmbeddingHandler,
-    indexing::{self, gather_files},
+    EmbeddingHandler, // Use re-export
+    indexing::{self, gather_files, index_repo_files},
     qdrant_client_trait::QdrantClientTrait,
-    repo_add::{handle_repo_add, AddRepoArgs},
+    repo_add::{handle_repo_add, AddRepoArgs, AddRepoError},
     repo_helpers::{delete_repository_data, get_collection_name, get_branch_aware_collection_name},
     error::SagittaError,
     sync::{sync_repository, SyncOptions},
@@ -107,7 +107,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
 
     // Create EmbeddingHandler instance locally for this operation
     let local_embedding_handler = Arc::new(
-        EmbeddingHandler::new(&config_read_guard).map_err(|e| {
+        EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_guard)).map_err(|e| {
             error!(error = %e, "Failed to create embedding handler for repo_add");
             ErrorObject {
                 code: error_codes::INTERNAL_ERROR,
@@ -538,7 +538,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         // >>>>>>>>>> Moved EmbeddingHandler creation here <<<<<<<<<<
         let config_read_for_embedding = config.read().await; // Re-acquire read lock briefly
         let local_embedding_handler = Arc::new(
-            EmbeddingHandler::new(&config_read_for_embedding).map_err(|e| {
+            EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_for_embedding)).map_err(|e| {
                 error!(error = %e, "Failed to create embedding handler for indexing stage");
                 ErrorObject {
                     code: error_codes::INTERNAL_ERROR,
@@ -1439,6 +1439,7 @@ mod tests {
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -1476,6 +1477,7 @@ mod tests {
                 collection_name_prefix: "test_collection_".to_string(),
                 ..PerformanceConfig::default()
             },
+            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
@@ -1747,6 +1749,10 @@ mod tests {
 
         let params = RepositoryListBranchesParams {
             repository_name: "nonexistent_repo".to_string(),
+            filter: None,
+            include_remote: true,
+            include_tags: true,
+            limit: 50,
         };
 
         let result = handle_repository_list_branches(params, config, auth_user).await;
@@ -1795,6 +1801,10 @@ mod tests {
 
         let params = RepositoryListBranchesParams {
             repository_name: repo_name.to_string(),
+            filter: None,
+            include_remote: true,
+            include_tags: true,
+            limit: 50,
         };
 
         let result = handle_repository_list_branches(params, config, auth_user).await;

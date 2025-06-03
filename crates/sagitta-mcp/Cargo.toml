@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 sagitta_search = { path = "../../", features = ["onnx"] }
+sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 repo-mapper = { path = "../repo-mapper" }
 git-manager = { path = "../git-manager" }
 anyhow = "1.0"

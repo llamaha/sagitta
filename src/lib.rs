@@ -27,13 +27,14 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use sagitta_search::{AppConfig, EmbeddingHandler};
+//! use sagitta_search::{AppConfig, EmbeddingHandler, app_config_to_embedding_config};
 //!
 //! // Load configuration
 //! let config = AppConfig::default();
 //!
-//! // Initialize embedding handler
-//! let embedding_handler = EmbeddingHandler::new(&config)?;
+//! // Convert to embedding config and initialize embedding handler
+//! let embedding_config = app_config_to_embedding_config(&config);
+//! let embedding_handler = EmbeddingHandler::new(&embedding_config)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -50,7 +51,7 @@
 /// Configuration management for the application.
 pub mod config;
 /// Embedding generation and handling.
-pub mod embedding;
+// pub mod embedding; // Migrated to sagitta-embed crate
 /// Defines the core error types and Result alias.
 pub mod error;
 /// Trait defining the interface for a Qdrant client, enabling mocking.
@@ -90,8 +91,11 @@ pub mod sync_progress;
 /// Utilities specific to testing within the core library.
 pub mod test_utils;
 
-pub use config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
-pub use embedding::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
+pub use config::{AppConfig, IndexingConfig, RepositoryConfig, EmbeddingEngineConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
+// Re-export from sagitta-embed crate
+pub use sagitta_embed::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
+// Re-export EmbeddingConfig for convenience
+pub use sagitta_embed::config::EmbeddingConfig;
 pub use error::{SagittaError, Result};
 pub use qdrant_client_trait::QdrantClientTrait;
 pub use constants::*;
@@ -126,7 +130,101 @@ mod tests {
         let result = add(2, 2);
         assert_eq!(result, 4);
     }
+
+    #[test]
+    fn test_app_config_to_embedding_config_mapping() {
+        use crate::config::{AppConfig, EmbeddingEngineConfig, PerformanceConfig};
+        
+        // Create a test AppConfig with custom embedding settings
+        let mut app_config = AppConfig::default();
+        app_config.onnx_model_path = Some("/path/to/model.onnx".to_string());
+        app_config.onnx_tokenizer_path = Some("/path/to/tokenizer.json".to_string());
+        app_config.tenant_id = Some("test-tenant".to_string());
+        app_config.performance.vector_dimension = 512;
+        
+        // Set custom embedding configuration
+        app_config.embedding = EmbeddingEngineConfig {
+            max_sessions: 8,
+            enable_cuda: true,
+            max_sequence_length: 256,
+            session_timeout_seconds: 600,
+            enable_session_cleanup: false,
+        };
+        
+        // Convert to EmbeddingConfig
+        let embedding_config = app_config_to_embedding_config(&app_config);
+        
+        // Verify all fields are properly mapped
+        assert_eq!(embedding_config.model_type, EmbeddingModelType::Onnx);
+        assert_eq!(embedding_config.onnx_model_path, Some("/path/to/model.onnx".into()));
+        assert_eq!(embedding_config.onnx_tokenizer_path, Some("/path/to/tokenizer.json".into()));
+        assert_eq!(embedding_config.max_sessions, 8);
+        assert_eq!(embedding_config.enable_cuda, true);
+        assert_eq!(embedding_config.max_sequence_length, 256);
+        assert_eq!(embedding_config.session_timeout_seconds, 600);
+        assert_eq!(embedding_config.enable_session_cleanup, false);
+        assert_eq!(embedding_config.tenant_id, Some("test-tenant".to_string()));
+        assert_eq!(embedding_config.expected_dimension, Some(512));
+    }
+
+    #[test]
+    fn test_app_config_to_embedding_config_defaults() {
+        // Test with default AppConfig
+        let app_config = AppConfig::default();
+        let embedding_config = app_config_to_embedding_config(&app_config);
+        
+        // Verify defaults are properly set
+        assert_eq!(embedding_config.model_type, EmbeddingModelType::Default);
+        assert_eq!(embedding_config.onnx_model_path, None);
+        assert_eq!(embedding_config.onnx_tokenizer_path, None);
+        assert_eq!(embedding_config.max_sessions, 4); // Default from EmbeddingEngineConfig
+        assert_eq!(embedding_config.enable_cuda, false);
+        assert_eq!(embedding_config.max_sequence_length, 128);
+        assert_eq!(embedding_config.session_timeout_seconds, 300);
+        assert_eq!(embedding_config.enable_session_cleanup, true);
+        assert_eq!(embedding_config.tenant_id, None);
+        assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
+    }
 }
 
 #[macro_use]
 extern crate log;
+
+/// Helper function to convert AppConfig to EmbeddingConfig for the new sagitta-embed crate
+pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig {
+    use sagitta_embed::config::EmbeddingConfig;
+    use std::path::PathBuf;
+    
+    let mut embedding_config = EmbeddingConfig::new();
+    
+    // Set ONNX paths if available
+    if let Some(ref model_path) = app_config.onnx_model_path {
+        embedding_config.onnx_model_path = Some(PathBuf::from(model_path));
+    }
+    
+    if let Some(ref tokenizer_path) = app_config.onnx_tokenizer_path {
+        embedding_config.onnx_tokenizer_path = Some(PathBuf::from(tokenizer_path));
+    }
+    
+    // Set model type based on available paths
+    if app_config.onnx_model_path.is_some() && app_config.onnx_tokenizer_path.is_some() {
+        embedding_config.model_type = EmbeddingModelType::Onnx;
+    }
+    
+    // Map embedding engine configuration
+    embedding_config.max_sessions = app_config.embedding.max_sessions;
+    embedding_config.enable_cuda = app_config.embedding.enable_cuda;
+    embedding_config.max_sequence_length = app_config.embedding.max_sequence_length;
+    embedding_config.session_timeout_seconds = app_config.embedding.session_timeout_seconds;
+    embedding_config.enable_session_cleanup = app_config.embedding.enable_session_cleanup;
+    
+    // Map tenant ID if available
+    if let Some(ref tenant_id) = app_config.tenant_id {
+        embedding_config.tenant_id = Some(tenant_id.clone());
+    }
+    
+    // Set expected dimension from performance config
+    embedding_config.expected_dimension = Some(app_config.performance.vector_dimension as usize);
+    
+    embedding_config
+}

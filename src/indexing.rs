@@ -1,45 +1,33 @@
 use crate::{
-    embedding::EmbeddingHandler,
+    EmbeddingHandler, // Use re-export from main crate
     error::{Result, SagittaError},
-    embedding::provider::EmbeddingProvider,
     qdrant_client_trait::QdrantClientTrait,
-    syntax::{self},
-    constants::{ // Import necessary constants
-        FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_LANGUAGE, 
-        FIELD_FILE_EXTENSION, FIELD_ELEMENT_TYPE, FIELD_CHUNK_CONTENT, 
-        FIELD_BRANCH, FIELD_COMMIT_HASH, BATCH_SIZE, MAX_FILE_SIZE_BYTES, INTERNAL_EMBED_BATCH_SIZE
-    },
-    config::AppConfig, // Import AppConfig
+    config::{self, AppConfig},
+    constants::*,
+    syntax::{self, CodeChunk},
+    vocabulary::VocabularyManager,
+    tokenizer::{self, TokenizerConfig, TokenKind},
+    sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
+    qdrant_ops::{self, upsert_batch, delete_collection_by_name},
 };
 use qdrant_client::{
-    qdrant::PointStruct,
-    Payload, // Corrected import location
+    qdrant::{PointStruct, Vector, NamedVectors},
+    Payload,
 };
 use std::{
-    collections::{HashSet},
-    path::{PathBuf},
-    sync::Arc, // Removed unused AtomicUsize, Ordering
-    // cell::RefCell, // Added RefCell
-    // thread_local, // Added thread_local
-    time::Instant, // Added for timing
+    collections::{HashSet, HashMap},
+    path::PathBuf,
+    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    time::Instant,
 };
 use walkdir::WalkDir;
-use uuid::Uuid; // Add Uuid import
-use tokio::sync::Semaphore; // Import Semaphore
-// use futures::future::try_join_all; // Removed unused
-use crate::qdrant_ops::upsert_batch;
-use rayon::prelude::*; // Added Rayon
-use crate::syntax::parser::CodeChunk; // Use CodeChunk from parser
-use crate::tokenizer::{self, TokenKind, TokenizerConfig}; // Import tokenizer module
-use crate::vocabulary::VocabularyManager; // Import vocabulary manager
-use qdrant_client::qdrant::{Vector, NamedVectors};
-use std::collections::{HashMap};
-use crate::config; // Import config module
-use anyhow::anyhow; // Added for context in ensure_collection_exists
-use crate::qdrant_ops; // Ensure qdrant_ops module is accessible for delete_collection_by_name
-use crate::qdrant_ops::delete_collection_by_name;
-use crate::sync_progress::{SyncProgressReporter, SyncStage, NoOpProgressReporter, SyncProgress}; // Added
-use std::sync::atomic::{AtomicUsize, Ordering};
+use uuid::Uuid;
+use tokio::sync::Semaphore;
+use rayon::prelude::*;
+use anyhow::anyhow;
+
+// Import from sagitta-embed
+use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
 
 // Add chunk size optimization constants
 const MIN_CHUNK_SIZE: usize = 100;  // Merge chunks smaller than this
@@ -322,7 +310,7 @@ fn process_single_file_for_indexing(
     relative_path_str: &str, // Use &str for efficiency
     branch_name: &str,
     commit_hash: &str,
-    embedding_provider: &crate::embedding::provider::onnx::OnnxEmbeddingModel, // Take reference directly
+    embedding_provider: &OnnxEmbeddingModel, // Use sagitta-embed type
 ) -> std::result::Result<(Vec<IntermediatePointData>, HashSet<String>), String> { 
     use std::time::Instant;
     // --- File Size Check (as before) ---
@@ -369,9 +357,9 @@ fn process_single_file_for_indexing(
     // --- Dense Embeddings (as before) --- 
     let embed_start = Instant::now();
     let mut all_dense_embeddings = Vec::with_capacity(chunks.len());
-    log::info!("[PROFILE] Processing {} chunks from file {} with INTERNAL_EMBED_BATCH_SIZE={}", chunks.len(), full_path.display(), INTERNAL_EMBED_BATCH_SIZE);
+    log::info!("[PROFILE] Processing {} chunks from file {} with batch size of 128", chunks.len(), full_path.display());
     
-    for chunk_batch in chunks.chunks(INTERNAL_EMBED_BATCH_SIZE) {
+    for chunk_batch in chunks.chunks(128) { // Use reasonable default, batching is handled by sagitta-embed internally
         let contents_batch: Vec<&str> = chunk_batch.iter().map(|c| c.content.as_str()).collect();
         log::info!("[PROFILE] Processing batch of {} chunks ({}% of file)", 
             contents_batch.len(),
@@ -582,7 +570,6 @@ pub async fn index_repo_files<
         relative_paths,
         branch_name,
         commit_hash,
-        config.performance.internal_embed_batch_size,
         files_processed.clone(),
     );
 
@@ -904,11 +891,9 @@ fn process_repo_files_parallel_with_progress(
     relative_paths: &[PathBuf],
     branch_name: &str,
     commit_hash: &str,
-    internal_embed_batch_size: usize,
     files_processed: Arc<AtomicUsize>,
 ) -> (Vec<IntermediatePointData>, Vec<HashSet<String>>, Vec<String>) {
     use std::cell::RefCell;
-    use crate::embedding::provider::onnx::OnnxEmbeddingModel;
     use std::sync::Mutex;
     thread_local! {
         static ONNX_MODEL: RefCell<Option<OnnxEmbeddingModel>> = RefCell::new(None);
@@ -985,7 +970,7 @@ fn process_repo_files_parallel_with_progress(
             let batch_content_size: usize = batch.iter().map(|c| c.chunk.content.len()).sum();
             
             if batch_content_size + chunk_meta.chunk.content.len() <= MAX_BATCH_CONTENT_SIZE 
-                && batch.len() < internal_embed_batch_size {
+                && batch.len() < 128 { // Reasonable default batch size for number of chunks
                 batch.push(chunk_meta);
             } else {
                 // Process current batch before adding new chunk

@@ -5,8 +5,8 @@ use serde_json::Value;
 use tokio::runtime::Handle;
 
 // Corrected paths to refer to sagitta_search library
-use sagitta_search::embedding::provider::EmbeddingProvider; // The trait
-use sagitta_search::embedding::provider::onnx::ThreadSafeOnnxProvider;
+use sagitta_embed::provider::EmbeddingProvider; // The trait
+use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
 
 // Corrected ReasoningError import
 use reasoning_engine::traits::{IntentAnalyzer, DetectedIntent, LlmMessage};
