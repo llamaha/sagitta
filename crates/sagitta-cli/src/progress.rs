@@ -102,8 +102,8 @@ impl IndicatifProgressReporter {
                 stage_progress.pb.tick();
 
             }
-            SyncStage::IndexFile { current_file, total_files, current_file_num, files_per_second, .. }
-            | SyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, .. } => {
+            SyncStage::IndexFile { current_file, total_files, current_file_num, files_per_second, message }
+            | SyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, message } => {
                 stage_progress.pb.set_style(style.clone());
                 let action = if matches!(progress_info.stage, SyncStage::IndexFile {..}) { "Indexing" } else { "Deleting" };
                 stage_progress.total_items = Some(*total_files);
@@ -113,12 +113,45 @@ impl IndicatifProgressReporter {
                 stage_progress.pb.set_length(*total_files as u64);
                 stage_progress.pb.set_position(*current_file_num as u64);
 
-                let mut msg_parts = vec![format!("[{}]", action)];
-                if let Some(f) = current_file {
-                    msg_parts.push(format!("File: {}", f.file_name().unwrap_or_default().to_string_lossy()));
+                // Create clearer messaging based on whether this is file processing or chunk processing
+                let mut msg_parts = vec![];
+                
+                if let Some(ref message) = message {
+                    if message.contains("chunk") || message.contains("embedding") {
+                        // This is chunk/embedding processing - ensure it uses progress bar style
+                        stage_progress.pb.set_style(style.clone()); // Force progress bar style
+                        msg_parts.push(format!("[Embedding]"));
+                        if message.contains("Starting embedding generation") {
+                            msg_parts.push("Starting...".to_string());
+                        } else if message.contains("Generating embeddings") {
+                            msg_parts.push(message.clone());
+                        } else if message.contains("completed") {
+                            msg_parts.push("Completed".to_string());
+                        } else {
+                            msg_parts.push(message.clone());
+                        }
+                    } else {
+                        // This is file processing
+                        msg_parts.push(format!("[{}]", action));
+                        if let Some(f) = current_file {
+                            msg_parts.push(format!("File: {}", f.file_name().unwrap_or_default().to_string_lossy()));
+                        }
+                    }
+                } else {
+                    // Fallback to original behavior
+                    msg_parts.push(format!("[{}]", action));
+                    if let Some(f) = current_file {
+                        msg_parts.push(format!("File: {}", f.file_name().unwrap_or_default().to_string_lossy()));
+                    }
                 }
+                
                 if let Some(fps) = files_per_second {
-                    stage_progress.pb.set_message(format!("{} {:.2} files/s", msg_parts.join(" "), fps));
+                    let unit = if message.as_ref().map_or(false, |m| m.contains("chunk")) {
+                        "chunks/s"
+                    } else {
+                        "files/s"
+                    };
+                    stage_progress.pb.set_message(format!("{} {:.2} {}", msg_parts.join(" "), fps, unit));
                 } else {
                     stage_progress.pb.set_message(msg_parts.join(" "));
                 }
@@ -157,8 +190,7 @@ impl IndicatifProgressReporter {
                 return;
             }
             SyncStage::Idle => {
-                stage_progress.pb.set_message("Idle");
-                // stage_progress.pb.reset(); // or hide
+                // Don't create progress bars for Idle state - it's not useful
                 return;
             }
         }
@@ -177,13 +209,13 @@ impl SyncProgressReporter for IndicatifProgressReporter {
         let keys_to_clear: Vec<String> = stage_pbs_guard
             .iter()
             .filter_map(|(key, sp)| {
-                if key != &stage_key && sp.pb.is_finished() { // Don't clear self, completed, or error states explicitly yet
+                // Only clear bars that are truly not useful anymore
+                if key != &stage_key && (
+                    key == "idle" || // Always clear idle bars
+                    (sp.pb.is_finished() && sp.pb.message().contains("[Error]")) // Clear error bars
+                ) {
                     Some(key.clone())
-                } else if key != &stage_key && !matches!(progress.stage, SyncStage::Completed{..} | SyncStage::Error{..}) && (sp.pb.message().contains("[Completed]") || sp.pb.message().contains("[Error]")) {
-                    // Clear bars that were marked as completed/error if we are moving to a new stage
-                    Some(key.clone())
-                }
-                else {
+                } else {
                     None
                 }
             })
@@ -208,10 +240,16 @@ impl SyncProgressReporter for IndicatifProgressReporter {
         // If the stage is Completed or Error, we might want to ensure all other bars are cleared
         // and this one is prominently displayed.
         if matches!(progress.stage, SyncStage::Completed { .. } | SyncStage::Error { .. }) {
+            // Don't clear other progress bars on completion - they show useful information
+            // about file processing speed and embedding speed that users want to see
+            // Only clear bars that are truly not useful (like Idle bars)
             let mut stage_pbs_guard = self.stage_pbs.lock().await;
             let keys_to_remove: Vec<String> = stage_pbs_guard
                 .keys()
-                .filter(|key| *key != &stage_key)
+                .filter(|key| {
+                    // Only remove idle or error bars, keep useful progress information
+                    *key == "idle" || (*key != &stage_key && key.starts_with("error"))
+                })
                 .cloned()
                 .collect();
             
@@ -220,8 +258,7 @@ impl SyncProgressReporter for IndicatifProgressReporter {
                     sp.pb.finish_and_clear();
                 }
             }
-            // Optional: Wait for MultiProgress to draw and then exit or hold
-            // self.multi_progress.join().unwrap();
+            // Don't wait for MultiProgress to join - let the bars remain visible
         }
     }
 }
@@ -419,12 +456,11 @@ mod tests {
         let index_key = IndicatifProgressReporter::get_stage_key(&SyncStage::IndexFile{current_file:None, total_files:0, current_file_num:0, files_per_second:None, message: None});
         {
             let stage_pbs = reporter.stage_pbs.lock().await;
-            // Due to how MultiProgress works with finish_and_clear, the bar might be removed async.
-            // The primary check is that the new bar exists and the old one is not the *active* one.
-            // A more robust test would be to check `multi_progress.bars()` if API allowed.
-            assert_eq!(stage_pbs.len(), 1, "Expected only one active progress bar (IndexFile), old one should be cleared.");
-            assert!(stage_pbs.contains_key(&index_key));
-            assert!(!stage_pbs.contains_key(&fetch_key), "Fetch key should have been removed after being marked completed and a new stage started");
+            // With our new logic, we preserve useful progress bars, so both might be present
+            // The key thing is that the new IndexFile bar exists
+            assert!(stage_pbs.len() >= 1, "Expected at least one active progress bar (IndexFile)");
+            assert!(stage_pbs.contains_key(&index_key), "IndexFile progress bar should exist");
+            // Note: We no longer automatically clear the fetch bar since it might contain useful info
         }
 
         // Stage 3: Completed (overall)
@@ -435,10 +471,9 @@ mod tests {
         let completed_key = IndicatifProgressReporter::get_stage_key(&SyncStage::Completed{message:"".into()});
         {
             let stage_pbs = reporter.stage_pbs.lock().await;
-            // The IndexFile bar should be cleared, and only the final Completed bar should remain.
-            assert_eq!(stage_pbs.len(), 1, "Expected only the final Completed bar");
-            assert!(stage_pbs.contains_key(&completed_key));
-            assert!(!stage_pbs.contains_key(&index_key), "IndexFile key should have been removed after final completion");
+            // With our new logic, we preserve useful progress information, so multiple bars may remain
+            assert!(stage_pbs.len() >= 1, "Expected at least the final Completed bar");
+            assert!(stage_pbs.contains_key(&completed_key), "Completed progress bar should exist");
             let sp = stage_pbs.get(&completed_key).unwrap();
             assert!(sp.pb.is_finished());
         }

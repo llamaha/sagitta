@@ -185,6 +185,29 @@ mod tests {
         assert_eq!(embedding_config.tenant_id, None);
         assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
     }
+
+    #[test]
+    fn test_config_toml_to_decoupled_processing() {
+        use sagitta_embed::processor::ProcessingConfig;
+        
+        // Simulate different max_sessions values that could be set in config.toml
+        for max_sessions in [1, 2, 4, 8, 16] {
+            let mut app_config = AppConfig::default();
+            app_config.embedding.max_sessions = max_sessions;
+            
+            // Bridge to embedding config (this is what happens in practice)
+            let embedding_config = app_config_to_embedding_config(&app_config);
+            assert_eq!(embedding_config.max_sessions, max_sessions);
+            
+            // Create processing config for decoupled architecture
+            let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
+            
+            // Verify that GPU memory control respects config.toml setting
+            assert_eq!(processing_config.max_embedding_sessions, max_sessions,
+                "max_embedding_sessions should respect config.toml [embedding].max_sessions = {}", 
+                max_sessions);
+        }
+    }
 }
 
 #[macro_use]

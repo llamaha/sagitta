@@ -1,274 +1,161 @@
-# Sagitta-Embed
+# Sagitta Embedding Engine
 
-A high-performance, thread-safe embedding generation library for the Sagitta ecosystem. This crate provides a unified interface for generating text embeddings using various models, with optimized support for ONNX models and session pooling.
+A high-performance, modular embedding engine supporting multiple providers
+and optimized for code search and semantic analysis.
 
 ## Features
 
-- **Multiple Model Support**: ONNX models with extensible architecture for future model types
-- **Thread-Safe Operations**: Concurrent embedding generation with session pooling
-- **High Performance**: Optimized ONNX runtime with CUDA support
-- **Batch Processing**: Efficient batch embedding generation
-- **Session Management**: Automatic session pooling and lifecycle management
-- **Error Handling**: Comprehensive error types with detailed context
-- **Configuration-Driven**: Flexible configuration system
-
-## Quick Start
-
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-sagitta-embed = { path = "../sagitta-embed" }
-```
-
-### Basic Usage
-
-```rust
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
-use std::path::Path;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Configure for ONNX model
-    let model_path = Path::new("path/to/model.onnx");
-    let tokenizer_path = Path::new("path/to/tokenizer.json");
-    
-    let config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
-    
-    // Create embedding handler
-    let handler = EmbeddingHandler::new(&config)?;
-    
-    // Generate embeddings
-    let texts = vec!["Hello world", "How are you?"];
-    let embeddings = handler.embed_batch(&texts)?;
-    
-    println!("Generated {} embeddings", embeddings.len());
-    for (i, embedding) in embeddings.iter().enumerate() {
-        println!("Text: '{}' -> Embedding dimension: {}", texts[i], embedding.len());
-    }
-    
-    Ok(())
-}
-```
-
-### Advanced Configuration
-
-```rust
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig, EmbeddingModelType};
-
-let config = EmbeddingConfig {
-    model_type: EmbeddingModelType::Onnx,
-    onnx_model_path: Some("path/to/model.onnx".into()),
-    onnx_tokenizer_path: Some("path/to/tokenizer.json".into()),
-    max_sessions: 4,
-    enable_cuda: true,
-    max_batch_size: 32,
-    normalize_embeddings: true,
-    cache_size: 1000,
-};
-
-let handler = EmbeddingHandler::new(&config)?;
-```
+- **Multiple Providers**: Support for ONNX and other embedding providers
+- **High Performance**: Optimized for concurrent access with session pooling
+- **CUDA Support**: Optional GPU acceleration for ONNX models
+- **Modular Design**: Clean separation of concerns with pluggable providers
+- **Type Safety**: Comprehensive error handling and type safety
+- **Optimized Processing**: CPU-intensive file processing scales independently from GPU-intensive embedding generation
 
 ## Architecture
 
-### Core Components
+### Processing Pipeline
 
-- **`EmbeddingHandler`**: Main interface for embedding generation
-- **`EmbeddingProvider`**: Trait for different embedding model implementations
-- **`OnnxEmbeddingModel`**: ONNX-specific implementation with session pooling
-- **`SessionPool`**: Thread-safe session management for ONNX models
-- **`EmbeddingConfig`**: Configuration structure for all embedding settings
+The engine features a modern architecture that separates CPU-intensive file processing from GPU-intensive embedding generation:
 
-### Model Types
+- **File Processor**: Handles I/O, parsing, and chunking. Scales to all CPU cores without GPU memory concerns.
+- **Embedding Pool**: Manages a controlled number of embedding model instances for optimal GPU memory usage.
+- **Async Pipeline**: Provides natural backpressure and prevents blocking between processing phases.
 
-Currently supported:
-- **ONNX Models**: Optimized for performance with session pooling
-- **Default**: Fallback implementation
+### Benefits
 
-Planned:
-- **OpenAI API**: Remote embedding generation
-- **HuggingFace**: Local transformer models
-- **Custom**: User-defined embedding functions
+- ✅ **CPU Optimization**: File processing utilizes all available CPU cores independently
+- ✅ **GPU Memory Control**: Fixed number of embedding models regardless of file processing concurrency  
+- ✅ **Better Resource Utilization**: Parallel file I/O/parsing with controlled embedding throughput
+- ✅ **Improved Scalability**: Process large repositories without GPU OOM issues
+- ✅ **Configurable Trade-offs**: Independent tuning of CPU vs GPU resource usage
 
-### Session Pooling
+## Quick Start
 
-The ONNX provider uses an intelligent session pool that:
-- Maintains multiple ONNX runtime sessions for concurrent processing
-- Automatically scales based on demand
-- Handles session lifecycle and cleanup
-- Provides thread-safe access to sessions
-- Supports CUDA acceleration when available
-
-## Configuration Options
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `model_type` | `EmbeddingModelType` | `Onnx` | Type of embedding model to use |
-| `onnx_model_path` | `Option<PathBuf>` | `None` | Path to ONNX model file |
-| `onnx_tokenizer_path` | `Option<PathBuf>` | `None` | Path to tokenizer JSON file |
-| `max_sessions` | `usize` | `2` | Maximum number of ONNX sessions in pool |
-| `enable_cuda` | `bool` | `false` | Enable CUDA acceleration |
-| `max_batch_size` | `usize` | `16` | Maximum batch size for processing |
-| `normalize_embeddings` | `bool` | `true` | Whether to normalize output embeddings |
-| `cache_size` | `usize` | `0` | Size of embedding cache (0 = disabled) |
-
-## Error Handling
-
-The crate provides comprehensive error handling through the `SagittaEmbedError` enum:
+### Traditional Embedding API
 
 ```rust
-use sagitta_embed::{Result, SagittaEmbedError};
+use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+use std::path::PathBuf;
 
-match handler.embed_batch(&texts) {
-    Ok(embeddings) => println!("Success: {} embeddings", embeddings.len()),
-    Err(SagittaEmbedError::ModelNotFound(path)) => {
-        eprintln!("Model file not found: {}", path);
-    },
-    Err(SagittaEmbedError::TokenizerError(msg)) => {
-        eprintln!("Tokenizer error: {}", msg);
-    },
-    Err(SagittaEmbedError::OnnxError(msg)) => {
-        eprintln!("ONNX runtime error: {}", msg);
-    },
-    Err(e) => eprintln!("Other error: {}", e),
-}
+let config = EmbeddingConfig::new_onnx(
+    PathBuf::from("model.onnx"),
+    PathBuf::from("tokenizer.json")
+);
+
+let handler = EmbeddingHandler::new(&config)?;
+let embeddings = handler.embed(&["Hello world", "Rust programming"])?;
+println!("Generated {} embeddings", embeddings.len());
 ```
 
-## Performance Considerations
+### Processing API
 
-### Batch Processing
-- Use batch processing for multiple texts to maximize throughput
-- Optimal batch sizes depend on model size and available memory
-- The library automatically handles batching within configured limits
+```rust
+use sagitta_embed::{
+    DefaultFileProcessor, EmbeddingPool, FileProcessor, EmbeddingProcessor,
+    ProcessingConfig, EmbeddingConfig
+};
+use std::path::PathBuf;
 
-### Session Pooling
-- Configure `max_sessions` based on your concurrency needs
-- More sessions = higher memory usage but better concurrency
-- Monitor session utilization in high-load scenarios
+// Configure embedding settings (e.g., from config.toml via app_config_to_embedding_config)
+let embedding_config = EmbeddingConfig::new_onnx(
+    PathBuf::from("model.onnx"),
+    PathBuf::from("tokenizer.json")
+).with_max_sessions(2); // ⭐ This controls GPU memory usage
 
-### CUDA Acceleration
-- Enable CUDA for significant performance improvements on compatible hardware
-- Ensure CUDA toolkit and compatible ONNX runtime are installed
-- CUDA sessions require more memory but provide faster inference
+// Create embedding pool with configured sessions
+let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config.clone())?;
 
-### Memory Management
-- Sessions are automatically cleaned up when the handler is dropped
-- Consider embedding cache for frequently used texts
-- Monitor memory usage with large models or high session counts
+// Create file processor with config that respects max_sessions
+let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
+let file_processor = DefaultFileProcessor::new(processing_config);
+
+// Process files (CPU-intensive, parallel)
+let files = vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")];
+let processed_chunks = file_processor.process_files(&files).await?;
+
+// Generate embeddings (GPU-intensive, controlled)
+let embedded_chunks = embedding_pool.process_chunks(processed_chunks).await?;
+
+println!("Generated {} embeddings", embedded_chunks.len());
+```
+
+## Configuration
+
+### Processing Configuration
+
+```rust
+use sagitta_embed::ProcessingConfig;
+
+let config = ProcessingConfig {
+    file_processing_concurrency: 16,   // CPU cores for file processing
+    max_embedding_sessions: 2,         // GPU memory instances  
+    processing_queue_size: 1000,       // Buffer size
+    embedding_batch_size: 64,          // Batch size for embedding
+    max_file_size_bytes: 5 * 1024 * 1024, // 5MB file limit
+};
+```
+
+### Embedding Configuration
+
+```rust
+use sagitta_embed::EmbeddingConfig;
+
+let config = EmbeddingConfig {
+    model_type: EmbeddingModelType::Onnx,
+    onnx_model_path: Some("model.onnx".into()),
+    onnx_tokenizer_path: Some("tokenizer.json".into()),
+    max_sessions: 4,
+    enable_cuda: true,
+    max_sequence_length: 512,
+    expected_dimension: Some(384),
+    session_timeout_seconds: 300,
+    enable_session_cleanup: true,
+    tenant_id: None,
+};
+```
+
+## Performance Tuning
+
+### CPU vs GPU Resource Balance
+
+The architecture allows you to tune CPU and GPU usage independently:
+
+- **High CPU, Low GPU Memory**: Increase `file_processing_concurrency`, keep `max_embedding_sessions` low
+- **Balanced**: Use defaults (CPU cores for processing, 4 embedding sessions)  
+- **GPU Heavy**: Increase `max_embedding_sessions` if you have abundant GPU memory
+
+### Batch Size Optimization
+
+- **Small batches**: Lower memory usage, higher overhead
+- **Large batches**: Better GPU utilization, higher memory usage
+- **Recommended**: Start with 64-128, adjust based on your model and memory
+
+### File Processing Concurrency
+
+- **Default**: Uses all CPU cores (`num_cpus::get()`)
+- **Memory Limited**: Reduce if you have memory constraints
+- **I/O Limited**: May not need all cores if disk/network is bottleneck
 
 ## Examples
 
-### Concurrent Processing
+See the `examples/` directory for complete examples:
 
-```rust
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
-use std::sync::Arc;
-use tokio::task;
+- `processing.rs` - Modern processing architecture
+- `concurrent_processing.rs` - Traditional concurrent embedding
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = EmbeddingConfig::new_onnx("model.onnx", "tokenizer.json");
-    let handler = Arc::new(EmbeddingHandler::new(&config)?);
-    
-    let mut handles = vec![];
-    
-    for i in 0..10 {
-        let handler_clone = handler.clone();
-        let handle = task::spawn(async move {
-            let texts = vec![format!("Text batch {}", i)];
-            handler_clone.embed_batch(&texts)
-        });
-        handles.push(handle);
-    }
-    
-    for handle in handles {
-        let result = handle.await??;
-        println!("Batch completed: {} embeddings", result.len());
-    }
-    
-    Ok(())
-}
-```
+## Features Flags
 
-### Custom Error Handling
+- `default = ["onnx"]` - ONNX provider enabled by default
+- `onnx` - Enable ONNX Runtime support
+- `cuda` - Enable CUDA acceleration (requires ONNX feature)
 
-```rust
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig, SagittaEmbedError};
+## Requirements
 
-fn handle_embedding_error(error: SagittaEmbedError) {
-    match error {
-        SagittaEmbedError::ModelNotFound(path) => {
-            eprintln!("Please check that the model file exists: {}", path);
-        },
-        SagittaEmbedError::InsufficientMemory => {
-            eprintln!("Not enough memory. Try reducing batch size or max_sessions.");
-        },
-        SagittaEmbedError::TokenizerError(msg) => {
-            eprintln!("Tokenizer issue: {}. Check tokenizer file format.", msg);
-        },
-        _ => eprintln!("Unexpected error: {}", error),
-    }
-}
-```
-
-## Integration with Sagitta Search
-
-This crate is designed to integrate seamlessly with the broader Sagitta ecosystem:
-
-```rust
-// In sagitta-search
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
-
-let embedding_config = EmbeddingConfig::new_onnx(
-    &app_config.embedding.model_path,
-    &app_config.embedding.tokenizer_path,
-);
-
-let embedding_handler = Arc::new(EmbeddingHandler::new(&embedding_config)?);
-
-// Use in search operations
-let query_embedding = embedding_handler.embed_batch(&[query])?;
-```
-
-## Development
-
-### Building
-
-```bash
-cargo build --release
-```
-
-### Testing
-
-```bash
-cargo test
-```
-
-### Running Examples
-
-```bash
-cargo run --example basic_usage
-cargo run --example concurrent_processing
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+- Rust 1.70+
+- ONNX Runtime (when using ONNX features)
+- CUDA Toolkit (when using CUDA features)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Changelog
-
-### v0.1.0
-- Initial release with ONNX model support
-- Session pooling implementation
-- Thread-safe embedding generation
-- Comprehensive error handling
-- Integration with sagitta-search ecosystem 
+MIT License 

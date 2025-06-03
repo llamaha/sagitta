@@ -36,6 +36,7 @@ pub mod model;
 pub mod provider;
 pub mod handler;
 pub mod utils;
+pub mod processor;
 
 // Re-export main types for convenience
 pub use handler::EmbeddingHandler;
@@ -43,6 +44,12 @@ pub use model::{EmbeddingModel, EmbeddingModelType};
 pub use provider::EmbeddingProvider;
 pub use config::EmbeddingConfig;
 pub use error::{SagittaEmbedError, Result};
+
+// Re-export processor types for the new decoupled architecture
+pub use processor::{
+    FileProcessor, EmbeddingProcessor, ProcessedChunk, EmbeddedChunk,
+    ChunkMetadata, ProcessingConfig, EmbeddingPool, DefaultFileProcessor, PoolStats
+};
 
 /// Current version of the sagitta-embed crate
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
