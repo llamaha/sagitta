@@ -237,7 +237,7 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 
     let mut chat_message = ChatMessage::new(author, agent_msg.content.clone());
     chat_message.id = Some(agent_msg.id.to_string());
-    // Optionally, set a summary marker in the ChatMessage (if needed)
+    chat_message.timestamp = agent_msg.timestamp; // Preserve original timestamp
     chat_message
 }
 
@@ -248,6 +248,7 @@ pub fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: boo
     if app.state.current_response_id.is_none() {
         let response_id = app.chat_manager.start_agent_response();
         app.state.current_response_id = Some(response_id);
+        app.state.is_streaming_response = true; // Set streaming state
         log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", app.state.current_response_id.as_ref().unwrap());
     }
     
@@ -314,6 +315,7 @@ pub fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: boo
             
             app.chat_manager.finish_streaming(response_id);
             app.state.current_response_id = None;
+            app.state.is_streaming_response = false; // Clear streaming state
             app.state.is_waiting_for_response = false;
             log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
         }
@@ -328,6 +330,22 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
         format!("Executing tool (events.rs): {}", tool_call.name)
     );
     
+    // Store pending tool call in state
+    app.state.pending_tool_calls.push_back(tool_call.clone());
+    
+    // Always create a chat message for the tool call
+    let tool_call_message = format!("🔧 Calling tool: {}\nArguments: {}", 
+        tool_call.name, 
+        serde_json::to_string_pretty(&tool_call.arguments).unwrap_or_default()
+    );
+    
+    let streaming_message = StreamingMessage::from_text(
+        MessageAuthor::Agent, 
+        tool_call_message
+    );
+    
+    app.chat_manager.add_complete_message(streaming_message);
+    
     // Add tool call to the current streaming message if one exists
     if let Some(ref response_id) = app.state.current_response_id {
         let view_tool_call = ViewToolCall {
@@ -337,12 +355,6 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             status: MessageStatus::Streaming,
         };
         app.chat_manager.add_tool_call(response_id, view_tool_call);
-    } else {
-        // Add to events panel instead of chat to save space
-        app.panels.events_panel.add_event(
-            SystemEventType::ToolExecution,
-            format!("Calling tool (events.rs): {}", tool_call.name)
-        );
     }
     
     // Optionally show detailed arguments in the preview pane if needed
@@ -370,7 +382,7 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     
     app.panels.events_panel.add_event(event_type, event_message);
     
-    // CRITICAL FIX: Update tool call status in the streaming chat manager
+    // Create the result string
     let result_string = match &result {
         crate::tools::types::ToolResult::Success(data) => {
             serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
@@ -381,6 +393,20 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     };
     
     let is_success = matches!(result, crate::tools::types::ToolResult::Success(_));
+    
+    // Always create a chat message for the tool result
+    let result_message = if is_success {
+        format!("✅ Tool result from {}: {}", tool_name, result_string)
+    } else {
+        format!("❌ Tool error from {}: {}", tool_name, result_string)
+    };
+    
+    let streaming_message = StreamingMessage::from_text(
+        MessageAuthor::Tool, 
+        result_message
+    );
+    
+    app.chat_manager.add_complete_message(streaming_message);
     
     // Update tool call status in the streaming chat manager
     // Try to update by tool_call_id first (most precise)
@@ -403,6 +429,9 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
 
 /// Handle agent state changes
 pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
+    // Update the current agent state first
+    app.state.current_agent_state = state.clone();
+    
     // Add state changes to events panel
     let (state_message, event_type) = match &state {
         AgentState::Idle => {
@@ -516,14 +545,15 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
 
 /// Refresh conversation data asynchronously
 pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
-    if let Some(agent) = &app.agent {
-        // Check if we should refresh (every 10 seconds max to reduce flickering)
-        let should_refresh = app.state.last_conversation_refresh
-            .map(|last| last.elapsed().as_secs() >= 10)
-            .unwrap_or(true);
+    // Always set loading state when refresh is requested
+    let should_refresh = app.state.last_conversation_refresh
+        .map(|last| last.elapsed().as_secs() >= 10)
+        .unwrap_or(true);
+    
+    if should_refresh && !app.state.conversation_data_loading {
+        app.state.conversation_data_loading = true;
         
-        if should_refresh && !app.state.conversation_data_loading {
-            app.state.conversation_data_loading = true;
+        if let Some(agent) = &app.agent {
             let agent_clone = agent.clone();
             let sender = app.conversation_event_sender.clone();
             
@@ -544,21 +574,31 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                     });
                 }
             });
-            
-            app.state.last_conversation_refresh = Some(std::time::Instant::now());
         }
+        
+        app.state.last_conversation_refresh = Some(std::time::Instant::now());
     }
 }
 
 /// Force refresh conversation data immediately
 pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
     app.state.last_conversation_refresh = None;
-    app.state.conversation_data_loading = false;
+    app.state.conversation_data_loading = true; // Set loading state immediately
     refresh_conversation_data(app);
 }
 
 /// Switch to a conversation and update the chat view
 pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
+    // Clear current response state immediately
+    app.state.current_response_id = None;
+    app.state.is_streaming_response = false;
+    app.state.is_waiting_for_response = false;
+    app.state.tool_results.clear();
+    app.state.pending_tool_calls.clear();
+    
+    // Set the new conversation ID
+    app.state.current_conversation_id = Some(conversation_id);
+    
     if let Some(agent) = &app.agent {
         let agent_clone = agent.clone();
         let sender = app.conversation_event_sender.clone();
@@ -697,6 +737,7 @@ impl SagittaCodeApp {
         if self.state.current_response_id.is_none() {
             let response_id = self.chat_manager.start_agent_response();
             self.state.current_response_id = Some(response_id);
+            self.state.is_streaming_response = true; // Set streaming state
             log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", self.state.current_response_id.as_ref().unwrap());
         }
         
@@ -732,6 +773,7 @@ impl SagittaCodeApp {
                 
                 self.chat_manager.finish_streaming(response_id);
                 self.state.current_response_id = None;
+                self.state.is_streaming_response = false; // Clear streaming state
                 self.state.is_waiting_for_response = false;
                 log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
             }
