@@ -28,17 +28,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Configure with multiple sessions for concurrency
+    let config = EmbeddingConfig::new()
+        .with_model_type(EmbeddingModelType::Onnx)
+        .with_max_sessions(4) // Allow up to 4 concurrent sessions
+        .with_max_sequence_length(512)
+        .with_expected_dimension(384) // Adjust based on your model
+        .with_session_timeout(300)
+        .with_embedding_batch_size(128); // Add the new field
+    
+    // Set the ONNX paths
     let config = EmbeddingConfig {
-        model_type: EmbeddingModelType::Onnx,
         onnx_model_path: Some(model_path.into()),
         onnx_tokenizer_path: Some(tokenizer_path.into()),
-        max_sessions: 4, // Allow up to 4 concurrent sessions
-        max_sequence_length: 512,
-        expected_dimension: Some(384), // Adjust based on your model
-        session_timeout_seconds: 300,
         enable_session_cleanup: true,
         tenant_id: None,
-        embedding_batch_size: Some(128), // Add the new field
+        ..config
     };
     
     println!("Creating embedding pool with {} max sessions...", config.max_sessions);

@@ -154,6 +154,54 @@ You can also override these via CLI arguments:
     export RAYON_NUM_THREADS=N 
     sagitta-cli repo sync # Or other tool commands
 
+### 5a. Execution Provider Support
+
+`sagitta-search` supports **all execution providers** available in ONNX Runtime through its advanced execution provider auto-selection system. This includes hardware acceleration for:
+
+- **NVIDIA CUDA** - GPU acceleration for NVIDIA graphics cards
+- **NVIDIA TensorRT** - Optimized inference for NVIDIA GPUs  
+- **Microsoft DirectML** - GPU acceleration on Windows
+- **Apple CoreML** - Optimized inference on Apple devices
+- **AMD ROCm** - GPU acceleration for AMD graphics cards
+- **Intel OpenVINO** - Optimized inference for Intel hardware
+- **Qualcomm QNN** - Mobile/edge device acceleration
+- **And many more** - See the complete list below
+
+#### Automatic Provider Selection
+
+The embedding engine automatically detects available hardware and selects the best execution provider:
+
+```toml
+# In your config.toml - the engine will auto-select the best available provider
+[performance]
+enable_provider_auto_selection = true
+enable_hardware_detection = true
+```
+
+#### Manual Provider Configuration  
+
+You can also manually specify provider preferences with automatic fallback:
+
+```toml
+[performance]
+execution_providers = ["cuda", "cpu"]  # Try CUDA first, fallback to CPU
+```
+
+#### Complete Provider Information
+
+For the **authoritative and up-to-date list** of all supported execution providers, their requirements, configuration options, and platform availability, see:
+
+**📖 [ONNX Runtime Execution Providers Documentation](https://ort.pyke.io/perf/execution-providers)**
+
+This official documentation provides:
+- Complete provider list with platform support
+- Hardware requirements and driver dependencies  
+- Performance optimization tips
+- Configuration examples for each provider
+- Troubleshooting guidance
+
+*Note: Provider availability depends on your ONNX Runtime build and system configuration. The sagitta-embed engine will automatically handle provider detection and fallback.*
+
 ### 6. Using Different Embedding Models
 
 `sagitta-search` supports using alternative sentence-transformer models compatible with ONNX.

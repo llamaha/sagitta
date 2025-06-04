@@ -38,7 +38,7 @@ impl EmbeddingHandler {
                 let tokenizer_path = config.onnx_tokenizer_path.as_ref()
                     .ok_or_else(|| SagittaEmbedError::configuration("ONNX tokenizer path not set in config"))?;
 
-                OnnxEmbeddingModel::new(model_path, tokenizer_path)
+                OnnxEmbeddingModel::new_with_config(model_path, tokenizer_path, config)
                     .map(|p| Arc::new(Mutex::new(p)))
             },
         };
@@ -120,9 +120,10 @@ impl EmbeddingHandler {
                 let tokenizer_path = self.config.onnx_tokenizer_path.as_ref().ok_or_else(|| {
                     SagittaEmbedError::configuration("ONNX tokenizer path not set in handler.")
                 })?;
-                let provider = Arc::new(Mutex::new(OnnxEmbeddingModel::new(
+                let provider = Arc::new(Mutex::new(OnnxEmbeddingModel::new_with_config(
                     model_path,
                     tokenizer_path,
+                    &self.config,
                 )?));
                 Ok(provider)
             }
@@ -188,7 +189,7 @@ impl EmbeddingHandler {
             {
                 self.onnx_provider = None; // Clear existing provider
                 if let (Some(model_p), Some(tok_p)) = (&self.config.onnx_model_path, &self.config.onnx_tokenizer_path) {
-                    match OnnxEmbeddingModel::new(model_p, tok_p) {
+                    match OnnxEmbeddingModel::new_with_config(model_p, tok_p, &self.config) {
                         Ok(p) => self.onnx_provider = Some(Arc::new(Mutex::new(p))),
                         Err(e) => log::error!("Failed to re-initialize ONNX provider after config change: {}", e),
                     }
