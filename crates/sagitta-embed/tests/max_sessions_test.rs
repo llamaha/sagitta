@@ -40,17 +40,20 @@ fn create_test_embedding_config(max_sessions: usize) -> EmbeddingConfig {
     });
     fs::write(&tokenizer_path, tokenizer_content.to_string()).unwrap();
 
+    let config = EmbeddingConfig::new()
+        .with_model_type(EmbeddingModelType::Onnx)
+        .with_max_sessions(max_sessions)
+        .with_max_sequence_length(128)
+        .with_expected_dimension(384)
+        .with_session_timeout(300)
+        .with_embedding_batch_size(128);
+    
     EmbeddingConfig {
-        model_type: EmbeddingModelType::Onnx,
         onnx_model_path: Some(model_path),
         onnx_tokenizer_path: Some(tokenizer_path),
-        max_sessions,
-        max_sequence_length: 128,
-        expected_dimension: Some(384),
-        session_timeout_seconds: 300,
         enable_session_cleanup: true,
         tenant_id: None,
-        embedding_batch_size: Some(128),
+        ..config
     }
 }
 

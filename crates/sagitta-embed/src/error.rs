@@ -73,6 +73,10 @@ pub enum SagittaEmbedError {
     #[error("Thread safety error: {message}")]
     ThreadSafety { message: String },
 
+    /// Memory management errors
+    #[error("Memory error: {message}")]
+    Memory { message: String },
+
     /// Generic I/O errors
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -183,6 +187,13 @@ impl SagittaEmbedError {
     /// Create a thread safety error
     pub fn thread_safety<S: Into<String>>(message: S) -> Self {
         Self::ThreadSafety {
+            message: message.into(),
+        }
+    }
+
+    /// Create a memory management error
+    pub fn memory<S: Into<String>>(message: S) -> Self {
+        Self::Memory {
             message: message.into(),
         }
     }
