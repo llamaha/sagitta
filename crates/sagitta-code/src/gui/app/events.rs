@@ -12,6 +12,9 @@ use crate::llm::client::Role;
 use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall, MessageType};
 use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
+use crate::config::types::SagittaCodeConfig;
+use sagitta_search::AppConfig;
+use crate::gui::repository::manager::RepositoryManager;
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -736,4 +739,527 @@ impl SagittaCodeApp {
     }
 
     // ... (other methods like switch_to_conversation, etc.) ...
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::state::types::{AgentMode, ConversationStatus, AgentStateInfo};
+    use crate::agent::message::types::{AgentMessage, ToolCall as AgentToolCall};
+    use crate::tools::types::ToolResult as ToolResultType;
+    use crate::config::types::SagittaCodeConfig;
+    use sagitta_search::AppConfig;
+    use crate::gui::repository::manager::RepositoryManager;
+    use uuid::Uuid;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use serde_json::Value;
+
+    // Helper function to create a minimal app for testing
+    fn create_test_app() -> SagittaCodeApp {
+        let app_config = AppConfig::default();
+        let repo_manager = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
+        ));
+        let sagitta_config = SagittaCodeConfig::default();
+        
+        let mut app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+        
+        // Create test event channels
+        let (_agent_sender, agent_receiver) = tokio::sync::broadcast::channel(100);
+        let (_app_sender, app_receiver) = mpsc::unbounded_channel();
+        
+        app.agent_event_receiver = Some(agent_receiver);
+        app.app_event_receiver = Some(app_receiver);
+        
+        app
+    }
+
+    // Helper function to create a test agent message
+    fn create_test_agent_message(role: crate::llm::client::Role, content: &str) -> AgentMessage {
+        AgentMessage {
+            id: Uuid::new_v4(),
+            role,
+            content: content.to_string(),
+            is_streaming: false,
+            timestamp: chrono::Utc::now(),
+            metadata: HashMap::new(),
+            tool_calls: Vec::new(),
+        }
+    }
+
+    // Helper function to create a test tool call
+    fn create_test_tool_call(name: &str, args: Value) -> AgentToolCall {
+        AgentToolCall {
+            id: Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            arguments: args,
+            result: None,
+            successful: false,
+            execution_time: None,
+        }
+    }
+
+    #[test]
+    fn test_app_event_enum() {
+        let event = AppEvent::ResponseProcessingComplete;
+        match event {
+            AppEvent::ResponseProcessingComplete => assert!(true),
+        }
+    }
+
+    #[test]
+    fn test_conversation_event_enum() {
+        let conversation_id = Uuid::new_v4();
+        
+        // Test DataLoaded variant
+        let event1 = ConversationEvent::DataLoaded {
+            current_title: Some("Test Conversation".to_string()),
+            conversations: vec![],
+        };
+        match event1 {
+            ConversationEvent::DataLoaded { current_title, conversations } => {
+                assert_eq!(current_title, Some("Test Conversation".to_string()));
+                assert!(conversations.is_empty());
+            },
+            _ => panic!("Wrong event type"),
+        }
+
+        // Test ConversationCreated variant
+        let event2 = ConversationEvent::ConversationCreated(conversation_id);
+        match event2 {
+            ConversationEvent::ConversationCreated(id) => assert_eq!(id, conversation_id),
+            _ => panic!("Wrong event type"),
+        }
+
+        // Test ConversationSwitched variant
+        let event3 = ConversationEvent::ConversationSwitched(conversation_id);
+        match event3 {
+            ConversationEvent::ConversationSwitched(id) => assert_eq!(id, conversation_id),
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_make_chat_message_from_agent_message() {
+        use crate::llm::client::Role;
+        use crate::gui::chat::view::{ChatMessage, MessageAuthor};
+        
+        // Test user message
+        let user_msg = create_test_agent_message(Role::User, "Hello, world!");
+        let chat_msg = make_chat_message_from_agent_message(&user_msg);
+        
+        assert_eq!(chat_msg.author, MessageAuthor::User);
+        assert_eq!(chat_msg.text, "Hello, world!");
+        assert_eq!(chat_msg.id, Some(user_msg.id.to_string()));
+        assert_eq!(chat_msg.timestamp, user_msg.timestamp);
+
+        // Test assistant message
+        let assistant_msg = create_test_agent_message(Role::Assistant, "Hello, user!");
+        let chat_msg = make_chat_message_from_agent_message(&assistant_msg);
+        
+        assert_eq!(chat_msg.author, MessageAuthor::Agent);
+        assert_eq!(chat_msg.text, "Hello, user!");
+
+        // Test system message
+        let system_msg = create_test_agent_message(Role::System, "System status OK");
+        let chat_msg = make_chat_message_from_agent_message(&system_msg);
+        
+        assert_eq!(chat_msg.author, MessageAuthor::System);
+        assert_eq!(chat_msg.text, "System status OK");
+    }
+
+    #[test]
+    fn test_handle_llm_chunk_new_response() {
+        let mut app = create_test_app();
+        
+        // Test starting a new response
+        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        
+        // Should create a new streaming message
+        assert!(app.state.current_response_id.is_some());
+        assert!(app.state.is_streaming_response);
+        
+        // Should have one message in chat manager
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        
+        let message = &messages[0];
+        assert_eq!(message.content, "Hello");
+        assert!(!message.is_complete());
+    }
+
+    #[test]
+    fn test_handle_llm_chunk_continuation() {
+        let mut app = create_test_app();
+        
+        // Start a response
+        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        let response_id = app.state.current_response_id.clone();
+        
+        // Continue the response
+        handle_llm_chunk(&mut app, " world".to_string(), false, None);
+        
+        // Should still be the same response
+        assert_eq!(app.state.current_response_id, response_id);
+        assert!(app.state.is_streaming_response);
+        
+        // Content should be appended
+        let messages = app.chat_manager.get_all_messages();
+        let message = &messages[0];
+        assert_eq!(message.content, "Hello world");
+        assert!(!message.is_complete());
+    }
+
+    #[test]
+    fn test_handle_llm_chunk_final() {
+        let mut app = create_test_app();
+        
+        // Start and complete a response
+        handle_llm_chunk(&mut app, "Complete response".to_string(), true, None);
+        
+        // Should complete the response
+        assert!(app.state.current_response_id.is_none());
+        assert!(!app.state.is_streaming_response);
+        assert!(!app.state.is_waiting_for_response);
+        
+        let messages = app.chat_manager.get_all_messages();
+        let message = &messages[0];
+        assert_eq!(message.content, "Complete response");
+        assert!(message.is_complete());
+    }
+
+    #[test]
+    fn test_handle_tool_call() {
+        let mut app = create_test_app();
+        let args = serde_json::json!({"query": "rust programming"});
+        let tool_call = create_test_tool_call("web_search", args);
+        
+        handle_tool_call(&mut app, tool_call.clone());
+        
+        // Should create a tool call message
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Agent);
+        assert!(message.content.contains("web_search"));
+        
+        // Should store pending tool call
+        assert_eq!(app.state.pending_tool_calls.len(), 1);
+        let stored_tool_call = &app.state.pending_tool_calls[0];
+        assert_eq!(stored_tool_call.id, tool_call.id);
+        assert_eq!(stored_tool_call.name, tool_call.name);
+    }
+
+    #[test]
+    fn test_handle_tool_call_result_success() {
+        let mut app = create_test_app();
+        let tool_call_id = "test-tool-call-id".to_string();
+        let tool_name = "web_search".to_string();
+        let result = ToolResultType::Success(serde_json::json!("Search results: Found 10 results"));
+        
+        // Add a tool result to state first
+        app.state.add_tool_result(tool_call_id.clone(), "pending".to_string());
+        
+        handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name.clone(), result);
+        
+        // Should add tool result message
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Tool);
+        assert!(message.content.contains("Search results"));
+        
+        // Should update tool results
+        let stored_result = app.state.tool_results.get(&tool_call_id);
+        assert!(stored_result.is_some());
+        assert!(stored_result.unwrap().contains("Search results"));
+    }
+
+    #[test]
+    fn test_handle_tool_call_result_error() {
+        let mut app = create_test_app();
+        let tool_call_id = "test-tool-call-id".to_string();
+        let tool_name = "web_search".to_string();
+        let result = ToolResultType::Error {
+            error: "Network connection failed".to_string(),
+        };
+        
+        handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name.clone(), result);
+        
+        // Should add error message
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Tool);
+        assert!(message.content.contains("Error"));
+        assert!(message.content.contains("Network connection failed"));
+    }
+
+    #[test]
+    fn test_handle_state_change() {
+        let mut app = create_test_app();
+        let new_state = AgentState::Thinking { message: "Processing...".to_string() };
+        
+        handle_state_change(&mut app, new_state.clone());
+        
+        // Should update current agent state
+        assert_eq!(app.state.current_agent_state, new_state);
+    }
+
+    #[test]
+    fn test_handle_state_change_mode_update() {
+        let mut app = create_test_app();
+        
+        // Set current mode
+        app.state.current_agent_mode = AgentMode::FullyAutonomous;
+        
+        let new_state = AgentState::Idle;
+        
+        handle_state_change(&mut app, new_state);
+        
+        // Should update current state
+        assert_eq!(app.state.current_agent_state, AgentState::Idle);
+    }
+
+    #[test]
+    fn test_process_app_events_no_receiver() {
+        let mut app = create_test_app();
+        app.app_event_receiver = None;
+        
+        // Should not panic when no receiver is present
+        process_app_events(&mut app);
+    }
+
+    #[test]
+    fn test_refresh_conversation_data() {
+        let mut app = create_test_app();
+        
+        // Initially should not be loading
+        assert!(!app.state.conversation_data_loading);
+        
+        refresh_conversation_data(&mut app);
+        
+        // Should set loading state
+        assert!(app.state.conversation_data_loading);
+    }
+
+    #[test]
+    fn test_force_refresh_conversation_data() {
+        let mut app = create_test_app();
+        let now = std::time::Instant::now();
+        app.state.last_conversation_refresh = Some(now);
+        
+        force_refresh_conversation_data(&mut app);
+        
+        // Should clear last refresh time and set loading
+        assert!(app.state.last_conversation_refresh.is_none());
+        assert!(app.state.conversation_data_loading);
+    }
+
+    #[test]
+    fn test_switch_to_conversation() {
+        let mut app = create_test_app();
+        let conversation_id = Uuid::new_v4();
+        
+        switch_to_conversation(&mut app, conversation_id);
+        
+        // Should update current conversation
+        assert_eq!(app.state.current_conversation_id, Some(conversation_id));
+        
+        // Should clear current state
+        assert!(app.state.current_response_id.is_none());
+        assert!(!app.state.is_streaming_response);
+        assert!(!app.state.is_waiting_for_response);
+        
+        // Should clear chat state
+        let messages = app.chat_manager.get_all_messages();
+        assert!(messages.is_empty());
+        assert!(app.state.tool_results.is_empty());
+        assert!(app.state.pending_tool_calls.is_empty());
+    }
+
+    #[test]
+    fn test_agent_event_processing_workflow() {
+        let mut app = create_test_app();
+        
+        // Simulate a complete workflow: user input -> llm chunks -> tool call -> result
+        
+        // 1. Start with LLM chunk
+        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false, None);
+        assert!(app.state.is_streaming_response);
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        
+        // 2. Complete LLM chunk
+        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true, None);
+        assert!(!app.state.is_streaming_response);
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages[0].content, "I'll search for information about Rust programming.");
+        
+        // 3. Tool call
+        let args = serde_json::json!({"query": "rust programming"});
+        let tool_call = create_test_tool_call("web_search", args);
+        handle_tool_call(&mut app, tool_call.clone());
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(app.state.pending_tool_calls.len(), 1);
+        
+        // 4. Tool result
+        let result = ToolResultType::Success(serde_json::json!("Found comprehensive Rust tutorials"));
+        handle_tool_call_result(&mut app, tool_call.id, tool_call.name, result);
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 3);
+        
+        // Verify message sequence
+        assert_eq!(messages[0].author, crate::gui::chat::view::MessageAuthor::Agent);
+        assert_eq!(messages[1].author, crate::gui::chat::view::MessageAuthor::Agent);
+        assert_eq!(messages[2].author, crate::gui::chat::view::MessageAuthor::Tool);
+    }
+
+    #[test]
+    fn test_error_handling_in_llm_chunk() {
+        let mut app = create_test_app();
+        
+        // Test empty content
+        handle_llm_chunk(&mut app, "".to_string(), false, None);
+        
+        // Should still create a message entry but with empty content
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "");
+    }
+
+    #[test]
+    fn test_multiple_tool_calls() {
+        let mut app = create_test_app();
+        
+        // Add multiple tool calls
+        let args1 = serde_json::json!({"query": "rust"});
+        let args2 = serde_json::json!({"pattern": "fn main"});
+        let tool_call1 = create_test_tool_call("web_search", args1);
+        let tool_call2 = create_test_tool_call("code_search", args2);
+        
+        handle_tool_call(&mut app, tool_call1);
+        handle_tool_call(&mut app, tool_call2);
+        
+        // Should have 2 tool call messages
+        let messages = app.chat_manager.get_all_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(app.state.pending_tool_calls.len(), 2);
+        
+        // Verify both tool calls are stored
+        assert!(app.state.pending_tool_calls.iter().any(|tc| tc.name == "web_search"));
+        assert!(app.state.pending_tool_calls.iter().any(|tc| tc.name == "code_search"));
+    }
+
+    #[test]
+    fn test_conversation_switching_clears_state() {
+        let mut app = create_test_app();
+        
+        // Set up some state
+        app.state.current_response_id = Some("test-response".to_string());
+        app.state.is_streaming_response = true;
+        app.state.is_waiting_for_response = true;
+        app.state.add_tool_result("tool1".to_string(), "result1".to_string());
+        
+        let new_conversation_id = Uuid::new_v4();
+        switch_to_conversation(&mut app, new_conversation_id);
+        
+        // Should clear all response state
+        assert!(app.state.current_response_id.is_none());
+        assert!(!app.state.is_streaming_response);
+        assert!(!app.state.is_waiting_for_response);
+        assert!(app.state.tool_results.is_empty());
+        assert!(app.state.pending_tool_calls.is_empty());
+        let messages = app.chat_manager.get_all_messages();
+        assert!(messages.is_empty());
+        
+        // Should set new conversation
+        assert_eq!(app.state.current_conversation_id, Some(new_conversation_id));
+    }
+
+    #[test]
+    fn test_agent_message_content_parsing() {
+        use crate::llm::client::Role;
+        
+        // Test message with content
+        let agent_msg = create_test_agent_message(Role::Assistant, "Hello world!");
+        let chat_msg = make_chat_message_from_agent_message(&agent_msg);
+        assert_eq!(chat_msg.text, "Hello world!");
+    }
+
+    #[test]
+    fn test_tool_result_metadata_handling() {
+        let mut app = create_test_app();
+        let tool_call_id = "test-tool-call-id".to_string();
+        let tool_name = "file_search".to_string();
+        
+        let result = ToolResultType::Success(serde_json::json!({
+            "output": "Found 5 files",
+            "metadata": {
+                "file_count": 5,
+                "search_time": "150ms"
+            }
+        }));
+        
+        handle_tool_call_result(&mut app, tool_call_id, tool_name, result);
+        
+        // Should include result in the message
+        let messages = app.chat_manager.get_all_messages();
+        let message = &messages[0];
+        assert!(message.content.contains("Found 5 files") || message.content.contains("file_count"));
+    }
+
+    #[test]
+    fn test_state_change_conversation_switching() {
+        let mut app = create_test_app();
+        let old_conversation_id = Uuid::new_v4();
+        let new_conversation_id = Uuid::new_v4();
+        
+        app.state.current_conversation_id = Some(old_conversation_id);
+        
+        let new_state = AgentState::Responding { 
+            is_streaming: true, 
+            step_info: Some("Processing new conversation".to_string()) 
+        };
+        
+        handle_state_change(&mut app, new_state.clone());
+        
+        // Should update agent state
+        assert_eq!(app.state.current_agent_state, new_state);
+    }
+
+    #[test]
+    fn test_agent_state_variants() {
+        let mut app = create_test_app();
+        
+        // Test different agent state variants
+        let idle_state = AgentState::Idle;
+        handle_state_change(&mut app, idle_state.clone());
+        assert_eq!(app.state.current_agent_state, idle_state);
+        
+        let thinking_state = AgentState::Thinking { message: "Thinking...".to_string() };
+        handle_state_change(&mut app, thinking_state.clone());
+        assert_eq!(app.state.current_agent_state, thinking_state);
+        
+        let responding_state = AgentState::Responding { is_streaming: true, step_info: None };
+        handle_state_change(&mut app, responding_state.clone());
+        assert_eq!(app.state.current_agent_state, responding_state);
+        
+        let tool_state = AgentState::ExecutingTool { 
+            tool_call_id: "test-id".to_string(), 
+            tool_name: "test-tool".to_string() 
+        };
+        handle_state_change(&mut app, tool_state.clone());
+        assert_eq!(app.state.current_agent_state, tool_state);
+        
+        let error_state = AgentState::Error { 
+            message: "Test error".to_string(), 
+            details: Some("Error details".to_string()) 
+        };
+        handle_state_change(&mut app, error_state.clone());
+        assert_eq!(app.state.current_agent_state, error_state);
+    }
 } 

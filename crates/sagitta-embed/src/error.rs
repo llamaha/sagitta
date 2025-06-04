@@ -250,4 +250,158 @@ mod tests {
         assert!(matches!(err, SagittaEmbedError::FeatureNotEnabled { .. }));
         assert_eq!(err.to_string(), "Feature 'cuda' is not enabled");
     }
+
+    #[test]
+    fn test_all_error_variants() {
+        // Test all error creation methods
+        let config_err = SagittaEmbedError::configuration("config message");
+        assert!(matches!(config_err, SagittaEmbedError::Configuration { .. }));
+
+        let model_err = SagittaEmbedError::model("model message");
+        assert!(matches!(model_err, SagittaEmbedError::Model { .. }));
+
+        let provider_err = SagittaEmbedError::provider("provider message");
+        assert!(matches!(provider_err, SagittaEmbedError::Provider { .. }));
+
+        let onnx_err = SagittaEmbedError::onnx_runtime("onnx message");
+        assert!(matches!(onnx_err, SagittaEmbedError::OnnxRuntime { .. }));
+
+        let tokenization_err = SagittaEmbedError::tokenization("tokenizer message");
+        assert!(matches!(tokenization_err, SagittaEmbedError::Tokenization { .. }));
+
+        let fs_err = SagittaEmbedError::file_system("filesystem message");
+        assert!(matches!(fs_err, SagittaEmbedError::FileSystem { .. }));
+
+        let input_err = SagittaEmbedError::invalid_input("invalid input");
+        assert!(matches!(input_err, SagittaEmbedError::InvalidInput { .. }));
+
+        let not_impl_err = SagittaEmbedError::not_implemented("not implemented");
+        assert!(matches!(not_impl_err, SagittaEmbedError::NotImplemented { .. }));
+
+        let session_err = SagittaEmbedError::session_pool("session pool error");
+        assert!(matches!(session_err, SagittaEmbedError::SessionPool { .. }));
+
+        let invalid_model_path = SagittaEmbedError::invalid_model_path("/invalid/model.onnx");
+        assert!(matches!(invalid_model_path, SagittaEmbedError::InvalidModelPath { .. }));
+
+        let invalid_tokenizer_path = SagittaEmbedError::invalid_tokenizer_path("/invalid/tokenizer.json");
+        assert!(matches!(invalid_tokenizer_path, SagittaEmbedError::InvalidTokenizerPath { .. }));
+
+        let embedding_err = SagittaEmbedError::embedding_generation("embedding failed");
+        assert!(matches!(embedding_err, SagittaEmbedError::EmbeddingGeneration { .. }));
+
+        let thread_err = SagittaEmbedError::thread_safety("thread safety error");
+        assert!(matches!(thread_err, SagittaEmbedError::ThreadSafety { .. }));
+
+        let memory_err = SagittaEmbedError::memory("memory error");
+        assert!(matches!(memory_err, SagittaEmbedError::Memory { .. }));
+    }
+
+    #[test]
+    fn test_io_error_conversion() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let sagitta_err: SagittaEmbedError = io_err.into();
+        assert!(matches!(sagitta_err, SagittaEmbedError::Io { .. }));
+    }
+
+    #[test]
+    fn test_anyhow_error_conversion() {
+        let anyhow_err = anyhow::anyhow!("test anyhow error");
+        let sagitta_err: SagittaEmbedError = anyhow_err.into();
+        assert!(matches!(sagitta_err, SagittaEmbedError::External { .. }));
+    }
+
+    #[test]
+    fn test_tokenizer_error_conversion() {
+        // Test that the conversion trait exists and works
+        // We'll create a simple test that validates the conversion function compiles
+        let _test_fn = |err: tokenizers::Error| -> SagittaEmbedError {
+            err.into()
+        };
+    }
+
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn test_ort_error_conversion() {
+        // This test only works if we can create an ort::Error
+        // We'll simulate it by testing the conversion logic
+        use ort::Error as OrtError;
+        
+        // Create a mock ORT error using the correct API
+        let mock_ort_err = OrtError::new("test ort error");
+        let sagitta_err: SagittaEmbedError = mock_ort_err.into();
+        assert!(matches!(sagitta_err, SagittaEmbedError::OnnxRuntime { .. }));
+        assert!(sagitta_err.to_string().contains("ORT error"));
+    }
+
+    #[test]
+    fn test_error_display_messages() {
+        assert_eq!(
+            SagittaEmbedError::configuration("config").to_string(),
+            "Configuration error: config"
+        );
+        assert_eq!(
+            SagittaEmbedError::model("model").to_string(),
+            "Model error: model"
+        );
+        assert_eq!(
+            SagittaEmbedError::provider("provider").to_string(),
+            "Provider error: provider"
+        );
+        assert_eq!(
+            SagittaEmbedError::onnx_runtime("onnx").to_string(),
+            "ONNX runtime error: onnx"
+        );
+        assert_eq!(
+            SagittaEmbedError::tokenization("token").to_string(),
+            "Tokenization error: token"
+        );
+        assert_eq!(
+            SagittaEmbedError::file_system("fs").to_string(),
+            "File system error: fs"
+        );
+        assert_eq!(
+            SagittaEmbedError::invalid_input("input").to_string(),
+            "Invalid input: input"
+        );
+        assert_eq!(
+            SagittaEmbedError::feature_not_enabled("feature").to_string(),
+            "Feature 'feature' is not enabled"
+        );
+        assert_eq!(
+            SagittaEmbedError::not_implemented("impl").to_string(),
+            "Not implemented: impl"
+        );
+        assert_eq!(
+            SagittaEmbedError::session_pool("session").to_string(),
+            "Session pool error: session"
+        );
+        assert_eq!(
+            SagittaEmbedError::embedding_generation("embed").to_string(),
+            "Embedding generation failed: embed"
+        );
+        assert_eq!(
+            SagittaEmbedError::thread_safety("thread").to_string(),
+            "Thread safety error: thread"
+        );
+        assert_eq!(
+            SagittaEmbedError::memory("memory").to_string(),
+            "Memory error: memory"
+        );
+    }
+
+    #[test]
+    fn test_pathbuf_conversions() {
+        let path_str = "/test/path/model.onnx";
+        let path_buf = PathBuf::from(path_str);
+        
+        let file_not_found = SagittaEmbedError::file_not_found(path_str);
+        assert!(file_not_found.to_string().contains(path_str));
+        
+        let invalid_model = SagittaEmbedError::invalid_model_path(&path_buf);
+        assert!(invalid_model.to_string().contains(path_str));
+        
+        let invalid_tokenizer = SagittaEmbedError::invalid_tokenizer_path(path_buf);
+        assert!(invalid_tokenizer.to_string().contains(path_str));
+    }
 } 

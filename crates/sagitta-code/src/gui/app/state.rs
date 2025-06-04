@@ -104,4 +104,423 @@ impl AppState {
             show_loop_inject_input: false,
         }
     }
+
+    /// Clear chat input buffer
+    pub fn clear_chat_input(&mut self) {
+        self.chat_input_buffer.clear();
+        self.chat_on_submit = false;
+    }
+
+    /// Set agent thinking state
+    pub fn set_thinking(&mut self, thinking: bool, message: Option<String>) {
+        self.is_thinking = thinking;
+        self.thinking_message = message;
+        if thinking {
+            self.thinking_start_time = Some(std::time::Instant::now());
+        } else {
+            self.thinking_start_time = None;
+        }
+    }
+
+    /// Update agent operational state
+    pub fn update_agent_operational_state(&mut self, responding: bool, streaming: bool, executing_tool: bool) {
+        self.is_responding = responding;
+        self.is_streaming_response = streaming;
+        self.is_executing_tool = executing_tool;
+        self.is_waiting_for_response = responding || streaming || executing_tool;
+    }
+
+    /// Set conversation loading state
+    pub fn set_conversation_loading(&mut self, loading: bool) {
+        self.conversation_data_loading = loading;
+        if !loading {
+            self.last_conversation_refresh = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Add a tool result
+    pub fn add_tool_result(&mut self, tool_id: String, result: String) {
+        self.tool_results.insert(tool_id, result);
+    }
+
+    /// Clear all tool results
+    pub fn clear_tool_results(&mut self) {
+        self.tool_results.clear();
+    }
+
+    /// Set loop state
+    pub fn set_loop_state(&mut self, in_loop: bool) {
+        self.is_in_loop = in_loop;
+        if !in_loop {
+            self.loop_break_requested = false;
+            self.loop_inject_message = None;
+            self.loop_inject_buffer.clear();
+            self.show_loop_inject_input = false;
+        }
+    }
+
+    /// Request loop break
+    pub fn request_loop_break(&mut self) {
+        self.loop_break_requested = true;
+    }
+
+    /// Toggle hotkeys modal
+    pub fn toggle_hotkeys_modal(&mut self) {
+        self.show_hotkeys_modal = !self.show_hotkeys_modal;
+    }
+
+    /// Check if any async operation is in progress
+    pub fn is_busy(&self) -> bool {
+        self.is_waiting_for_response || self.conversation_data_loading || self.is_in_loop
+    }
+
+    /// Get thinking duration if currently thinking
+    pub fn thinking_duration(&self) -> Option<std::time::Duration> {
+        if self.is_thinking {
+            self.thinking_start_time.map(|start| start.elapsed())
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use std::thread;
+
+    #[test]
+    fn test_app_state_initialization() {
+        let state = AppState::new();
+        
+        // Test initial chat state
+        assert!(state.chat_input_buffer.is_empty());
+        assert!(state.current_response_id.is_none());
+        assert!(!state.chat_on_submit);
+        assert!(!state.is_waiting_for_response);
+        
+        // Test initial UI state
+        assert_eq!(state.current_theme, AppTheme::default());
+        assert!(!state.show_hotkeys_modal);
+        assert!(state.clicked_tool_info.is_none());
+        
+        // Test initial agent state
+        assert!(!state.is_thinking);
+        assert!(!state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(!state.is_executing_tool);
+        assert!(state.thinking_message.is_none());
+        assert!(state.thinking_start_time.is_none());
+        
+        // Test initial conversation state
+        assert!(state.current_conversation_id.is_none());
+        assert!(state.current_conversation_title.is_none());
+        assert!(state.conversation_list.is_empty());
+        assert!(!state.conversation_data_loading);
+        assert!(state.last_conversation_refresh.is_none());
+        assert!(state.tool_results.is_empty());
+        assert!(state.messages.is_empty());
+        assert!(state.pending_tool_calls.is_empty());
+        assert!(state.active_tool_call_message_id.is_none());
+        
+        // Test initial loop state
+        assert!(!state.is_in_loop);
+        assert!(!state.loop_break_requested);
+        assert!(state.loop_inject_message.is_none());
+        assert!(state.loop_inject_buffer.is_empty());
+        assert!(!state.show_loop_inject_input);
+    }
+
+    #[test]
+    fn test_app_state_default() {
+        let state = AppState::default();
+        let new_state = AppState::new();
+        
+        assert_eq!(state.chat_input_buffer, new_state.chat_input_buffer);
+        assert_eq!(state.current_theme, new_state.current_theme);
+        assert_eq!(state.current_agent_mode, new_state.current_agent_mode);
+    }
+
+    #[test]
+    fn test_clear_chat_input() {
+        let mut state = AppState::new();
+        state.chat_input_buffer = "Hello world".to_string();
+        state.chat_on_submit = true;
+        
+        state.clear_chat_input();
+        
+        assert!(state.chat_input_buffer.is_empty());
+        assert!(!state.chat_on_submit);
+    }
+
+    #[test]
+    fn test_set_thinking() {
+        let mut state = AppState::new();
+        
+        // Start thinking
+        state.set_thinking(true, Some("Processing your request...".to_string()));
+        assert!(state.is_thinking);
+        assert_eq!(state.thinking_message, Some("Processing your request...".to_string()));
+        assert!(state.thinking_start_time.is_some());
+        
+        // Stop thinking
+        state.set_thinking(false, None);
+        assert!(!state.is_thinking);
+        assert!(state.thinking_message.is_none());
+        assert!(state.thinking_start_time.is_none());
+    }
+
+    #[test]
+    fn test_thinking_duration() {
+        let mut state = AppState::new();
+        
+        // Not thinking - should return None
+        assert!(state.thinking_duration().is_none());
+        
+        // Start thinking
+        state.set_thinking(true, Some("Thinking...".to_string()));
+        thread::sleep(Duration::from_millis(10));
+        
+        let duration = state.thinking_duration();
+        assert!(duration.is_some());
+        assert!(duration.unwrap() >= Duration::from_millis(10));
+        
+        // Stop thinking
+        state.set_thinking(false, None);
+        assert!(state.thinking_duration().is_none());
+    }
+
+    #[test]
+    fn test_update_agent_operational_state() {
+        let mut state = AppState::new();
+        
+        // Test all false
+        state.update_agent_operational_state(false, false, false);
+        assert!(!state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(!state.is_executing_tool);
+        assert!(!state.is_waiting_for_response);
+        
+        // Test responding
+        state.update_agent_operational_state(true, false, false);
+        assert!(state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(!state.is_executing_tool);
+        assert!(state.is_waiting_for_response);
+        
+        // Test streaming
+        state.update_agent_operational_state(false, true, false);
+        assert!(!state.is_responding);
+        assert!(state.is_streaming_response);
+        assert!(!state.is_executing_tool);
+        assert!(state.is_waiting_for_response);
+        
+        // Test executing tool
+        state.update_agent_operational_state(false, false, true);
+        assert!(!state.is_responding);
+        assert!(!state.is_streaming_response);
+        assert!(state.is_executing_tool);
+        assert!(state.is_waiting_for_response);
+        
+        // Test all active
+        state.update_agent_operational_state(true, true, true);
+        assert!(state.is_responding);
+        assert!(state.is_streaming_response);
+        assert!(state.is_executing_tool);
+        assert!(state.is_waiting_for_response);
+    }
+
+    #[test]
+    fn test_conversation_loading_state() {
+        let mut state = AppState::new();
+        
+        // Start loading
+        state.set_conversation_loading(true);
+        assert!(state.conversation_data_loading);
+        assert!(state.last_conversation_refresh.is_none());
+        
+        // Stop loading
+        state.set_conversation_loading(false);
+        assert!(!state.conversation_data_loading);
+        assert!(state.last_conversation_refresh.is_some());
+    }
+
+    #[test]
+    fn test_tool_results_management() {
+        let mut state = AppState::new();
+        
+        // Add tool results
+        state.add_tool_result("tool1".to_string(), "result1".to_string());
+        state.add_tool_result("tool2".to_string(), "result2".to_string());
+        
+        assert_eq!(state.tool_results.len(), 2);
+        assert_eq!(state.tool_results.get("tool1"), Some(&"result1".to_string()));
+        assert_eq!(state.tool_results.get("tool2"), Some(&"result2".to_string()));
+        
+        // Clear all results
+        state.clear_tool_results();
+        assert!(state.tool_results.is_empty());
+    }
+
+    #[test]
+    fn test_loop_state_management() {
+        let mut state = AppState::new();
+        
+        // Start loop
+        state.set_loop_state(true);
+        assert!(state.is_in_loop);
+        
+        // Add some loop-related state
+        state.loop_break_requested = true;
+        state.loop_inject_message = Some("Inject this".to_string());
+        state.loop_inject_buffer = "Buffer content".to_string();
+        state.show_loop_inject_input = true;
+        
+        // End loop - should clear all related state
+        state.set_loop_state(false);
+        assert!(!state.is_in_loop);
+        assert!(!state.loop_break_requested);
+        assert!(state.loop_inject_message.is_none());
+        assert!(state.loop_inject_buffer.is_empty());
+        assert!(!state.show_loop_inject_input);
+    }
+
+    #[test]
+    fn test_request_loop_break() {
+        let mut state = AppState::new();
+        
+        assert!(!state.loop_break_requested);
+        state.request_loop_break();
+        assert!(state.loop_break_requested);
+    }
+
+    #[test]
+    fn test_toggle_hotkeys_modal() {
+        let mut state = AppState::new();
+        
+        assert!(!state.show_hotkeys_modal);
+        state.toggle_hotkeys_modal();
+        assert!(state.show_hotkeys_modal);
+        state.toggle_hotkeys_modal();
+        assert!(!state.show_hotkeys_modal);
+    }
+
+    #[test]
+    fn test_is_busy() {
+        let mut state = AppState::new();
+        
+        // Initially not busy
+        assert!(!state.is_busy());
+        
+        // Waiting for response makes it busy
+        state.is_waiting_for_response = true;
+        assert!(state.is_busy());
+        state.is_waiting_for_response = false;
+        
+        // Loading conversation makes it busy
+        state.conversation_data_loading = true;
+        assert!(state.is_busy());
+        state.conversation_data_loading = false;
+        
+        // In loop makes it busy
+        state.is_in_loop = true;
+        assert!(state.is_busy());
+        state.is_in_loop = false;
+        
+        assert!(!state.is_busy());
+    }
+
+    #[test]
+    fn test_agent_mode_transitions() {
+        let mut state = AppState::new();
+        
+        // Test initial mode
+        assert_eq!(state.current_agent_mode, AgentMode::FullyAutonomous);
+        assert!(state.pending_agent_mode_change.is_none());
+        
+        // Test pending mode change
+        state.pending_agent_mode_change = Some(AgentMode::ChatOnly);
+        assert_eq!(state.pending_agent_mode_change, Some(AgentMode::ChatOnly));
+        
+        // Test mode change application
+        state.current_agent_mode = state.pending_agent_mode_change.take().unwrap();
+        assert_eq!(state.current_agent_mode, AgentMode::ChatOnly);
+        assert!(state.pending_agent_mode_change.is_none());
+    }
+
+    #[test]
+    fn test_conversation_state() {
+        let mut state = AppState::new();
+        let conversation_id = Uuid::new_v4();
+        
+        // Test setting conversation
+        state.current_conversation_id = Some(conversation_id);
+        state.current_conversation_title = Some("Test Conversation".to_string());
+        
+        assert_eq!(state.current_conversation_id, Some(conversation_id));
+        assert_eq!(state.current_conversation_title, Some("Test Conversation".to_string()));
+        
+        // Test clearing conversation
+        state.current_conversation_id = None;
+        state.current_conversation_title = None;
+        
+        assert!(state.current_conversation_id.is_none());
+        assert!(state.current_conversation_title.is_none());
+    }
+
+    #[test]
+    fn test_tool_call_state() {
+        let mut state = AppState::new();
+        let message_id = Uuid::new_v4();
+        
+        // Test tool call message tracking
+        state.active_tool_call_message_id = Some(message_id);
+        assert_eq!(state.active_tool_call_message_id, Some(message_id));
+        
+        // Test pending tool calls
+        assert!(state.pending_tool_calls.is_empty());
+        // Note: We can't easily create ToolCall instances without more dependencies
+        // so we just test the basic structure
+    }
+
+    #[test]
+    fn test_clicked_tool_info() {
+        let mut state = AppState::new();
+        
+        // Test setting tool info
+        state.clicked_tool_info = Some(("web_search".to_string(), "query: rust".to_string()));
+        
+        let (tool_name, tool_args) = state.clicked_tool_info.as_ref().unwrap();
+        assert_eq!(tool_name, "web_search");
+        assert_eq!(tool_args, "query: rust");
+        
+        // Test clearing tool info
+        state.clicked_tool_info = None;
+        assert!(state.clicked_tool_info.is_none());
+    }
+
+    #[test]
+    fn test_theme_management() {
+        let mut state = AppState::new();
+        
+        // Test initial theme
+        assert_eq!(state.current_theme, AppTheme::default());
+        
+        // Test theme changes
+        state.current_theme = AppTheme::Light;
+        assert_eq!(state.current_theme, AppTheme::Light);
+        
+        state.current_theme = AppTheme::Dark;
+        assert_eq!(state.current_theme, AppTheme::Dark);
+        
+        state.current_theme = AppTheme::Custom;
+        assert_eq!(state.current_theme, AppTheme::Custom);
+    }
 } 

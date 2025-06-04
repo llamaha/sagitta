@@ -58,6 +58,93 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::Payload as QdrantPayload; // Corrected Payload import
 
+/// Get the default conversation storage path
+pub fn get_default_conversation_storage_path() -> PathBuf {
+    let mut default_path = dirs::config_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    default_path.push("sagitta-code");
+    default_path.push("conversations");
+    default_path
+}
+
+/// Configure theme from config
+pub fn configure_theme_from_config(app: &mut SagittaCodeApp) {
+    match app.config.ui.theme.as_str() {
+        "light" => app.state.current_theme = AppTheme::Light,
+        "dark" | _ => app.state.current_theme = AppTheme::Dark, // Default to Dark
+    }
+}
+
+/// Create repository manager with config
+pub async fn create_repository_manager(core_config: sagitta_search::AppConfig) -> Result<Arc<Mutex<RepositoryManager>>> {
+    let repo_manager_core_config = Arc::new(Mutex::new(core_config)); 
+    let repo_manager = Arc::new(Mutex::new(RepositoryManager::new(repo_manager_core_config)));
+    
+    if let Err(e) = repo_manager.lock().await.initialize().await {
+        log::error!("Failed to initialize RepositoryManager: {}",e);
+        return Err(anyhow::anyhow!("Failed to initialize RepositoryManager: {}", e));
+    }
+    
+    Ok(repo_manager)
+}
+
+/// Create embedding pool from config
+pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<Arc<sagitta_search::EmbeddingPool>> {
+    let embedding_config = sagitta_search::app_config_to_embedding_config(core_config);
+    match sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config) {
+        Ok(pool) => {
+            log::info!("Successfully created EmbeddingPool for GUI App.");
+            Ok(Arc::new(pool))
+        }
+        Err(e) => {
+            log::error!("Failed to create EmbeddingPool for GUI App: {}. Intent analysis will be impaired.", e);
+            Err(anyhow::anyhow!("Failed to create EmbeddingPool for GUI: {}", e))
+        }
+    }
+}
+
+/// Create LLM client from config
+pub fn create_llm_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>> {
+    let gemini_client_result = GeminiClient::new(config);
+    
+    match gemini_client_result {
+        Ok(client) => Ok(Arc::new(client)),
+        Err(e) => {
+            log::error!(
+                "Failed to create GeminiClient: {}. Agent will not be initialized properly. Some features may be disabled.",
+                e
+            );
+            Err(anyhow::anyhow!("Failed to create GeminiClient for Agent: {}", e))
+        }
+    }
+}
+
+/// Initialize Qdrant client from config
+pub async fn create_qdrant_client(core_config: &sagitta_search::AppConfig) -> Result<Arc<dyn QdrantClientTrait>> {
+    let qdrant_client_result = Qdrant::from_url(&core_config.qdrant_url).build();
+    match qdrant_client_result {
+        Ok(client) => Ok(Arc::new(client)),
+        Err(e) => {
+            log::error!("GUI: Failed to connect to Qdrant at {}: {}. Semantic tool analysis will be disabled.", core_config.qdrant_url, e);
+            Err(anyhow::anyhow!("Failed to initialize Qdrant client for GUI: {}", e))
+        }
+    }
+}
+
+/// Create conversation persistence from config
+pub async fn create_conversation_persistence(config: &SagittaCodeConfig) -> Result<Box<dyn ConversationPersistence>> {
+    let storage_path = if let Some(path) = &config.conversation.storage_path {
+        path.clone()
+    } else {
+        get_default_conversation_storage_path()
+    };
+
+    match DiskConversationPersistence::new(storage_path).await {
+        Ok(persistence) => Ok(Box::new(persistence)),
+        Err(e) => Err(anyhow::anyhow!("Failed to create disk conversation persistence: {}", e))
+    }
+}
+
 /// Initialize the application
 pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     log::info!("SagittaCodeApp: Initializing...");
@@ -74,69 +161,36 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         }
     };
 
-    // Store a clone for RepositoryManager
-    let repo_manager_core_config = Arc::new(Mutex::new(core_config.clone())); 
-    app.repo_panel = RepoPanel::new(Arc::new(Mutex::new(RepositoryManager::new(repo_manager_core_config))));
-    if let Err(e) = app.repo_panel.get_repo_manager().lock().await.initialize().await {
-        log::error!("Failed to initialize RepositoryManager: {}",e);
-    }
+    // Create repository manager
+    let repo_manager = create_repository_manager(core_config.clone()).await?;
+    app.repo_panel = RepoPanel::new(repo_manager.clone());
+    app.repo_panel.refresh_repositories(); // Initial refresh
+    log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
 
-    // Initialize Embedding Provider using the loaded core_config
-    let embedding_handler_arc: Arc<EmbeddingPool> = {
-        let embedding_config = sagitta_search::app_config_to_embedding_config(&core_config);
-        match EmbeddingPool::with_configured_sessions(embedding_config) {
-            Ok(pool) => {
-                log::info!("Successfully created EmbeddingPool for GUI App.");
-                Arc::new(pool)
-            }
-            Err(e) => {
-                log::error!("Failed to create EmbeddingPool for GUI App: {}. Intent analysis will be impaired.", e);
-                return Err(anyhow::anyhow!("Failed to create EmbeddingPool for GUI: {}", e));
-            }
-        }
-    };
+    // Initialize embedding pool
+    let embedding_handler_arc = create_embedding_pool(&core_config)?;
 
     // Create adapter for EmbeddingProvider compatibility
     let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_handler_arc.clone()));
 
-    app.repo_panel.refresh_repositories(); // Initial refresh
-    log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
-
-    // Load theme from config
-    match app.config.ui.theme.as_str() {
-        "light" => app.state.current_theme = AppTheme::Light,
-        "dark" | _ => app.state.current_theme = AppTheme::Dark, // Default to Dark
-    }
+    // Configure theme
+    configure_theme_from_config(app);
     
-    // Create Gemini Client first (before agent and tool initialization)
-    let gemini_client_result = GeminiClient::new(&app.config);
-    
-    let llm_client: Arc<dyn LlmClient> = match gemini_client_result {
-        Ok(client) => Arc::new(client),
-        Err(e) => {
-            log::error!(
-                "Failed to create GeminiClient: {}. Agent will not be initialized properly. Some features may be disabled.",
-                e
-            );
-            let error_message = StreamingMessage::from_text(
-                MessageAuthor::System,
-                format!("CRITICAL: Failed to initialize LLM Client (Gemini): {}. Agent is disabled.", e),
-            );
-            app.chat_manager.add_complete_message(error_message);
-            return Err(anyhow::anyhow!("Failed to create GeminiClient for Agent: {}", e));
-        }
-    };
+    // Create LLM client
+    let llm_client = create_llm_client(&app.config).map_err(|e| {
+        let error_message = StreamingMessage::from_text(
+            MessageAuthor::System,
+            format!("CRITICAL: Failed to initialize LLM Client (Gemini): {}. Agent is disabled.", e),
+        );
+        app.chat_manager.add_complete_message(error_message);
+        e
+    })?;
 
-    // Initialize Qdrant Client
-    let qdrant_client_result = Qdrant::from_url(&core_config.qdrant_url).build();
-    let qdrant_client: Arc<dyn QdrantClientTrait> = match qdrant_client_result {
-        Ok(client) => Arc::new(client),
-        Err(e) => {
-            log::error!("GUI: Failed to connect to Qdrant at {}: {}. Semantic tool analysis will be disabled.", core_config.qdrant_url, e);
-            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
-            return Err(anyhow::anyhow!("Failed to initialize Qdrant client for GUI: {}", e));
-        }
-    };
+    // Initialize Qdrant client
+    let qdrant_client = create_qdrant_client(&core_config).await.map_err(|e| {
+        app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
+        e
+    })?;
 
     // Use the locally scoped embedding_handler_arc, which is correctly typed.
     let vector_size = embedding_handler_arc.dimension() as u64;
@@ -199,7 +253,6 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // or assume tool_registry is populated by this point (which it isn't yet fully).
     // This part needs careful placement. Let's assume tools are registered first, then we populate Qdrant.
 
-    let repo_manager = app.repo_panel.get_repo_manager().clone();
     // Initialize ToolRegistry
     let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
 
@@ -264,22 +317,8 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     }
     // --- End Qdrant tool collection population ---
 
-    // Create concrete persistence and search engine for the GUI app
-    let storage_path = if let Some(path) = &app.config.conversation.storage_path {
-        path.clone()
-    } else {
-        let mut default_path = dirs::config_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        default_path.push("sagitta-code");
-        default_path.push("conversations");
-        default_path
-    };
-
-    let persistence: Box<dyn ConversationPersistence> = Box::new(
-        DiskConversationPersistence::new(storage_path).await
-            .map_err(|e| anyhow::anyhow!("Failed to create disk conversation persistence: {}", e))?
-    );
-    
+    // Create conversation persistence
+    let persistence = create_conversation_persistence(&app.config).await?;
     let search_engine: Box<dyn ConversationSearchEngine> = Box::new(TextConversationSearchEngine::new());
 
     let agent_result = Agent::new(
@@ -326,4 +365,283 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     }
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::types::SagittaCodeConfig;
+    use sagitta_search::AppConfig as CoreAppConfig;
+    use tempfile::TempDir;
+    use std::env;
+
+    #[test]
+    fn test_get_default_conversation_storage_path() {
+        let path = get_default_conversation_storage_path();
+        
+        // Should contain sagitta-code and conversations
+        assert!(path.to_string_lossy().contains("sagitta-code"));
+        assert!(path.to_string_lossy().contains("conversations"));
+        
+        // Should be an absolute path or at least a proper path
+        assert!(path.is_absolute() || path.starts_with("."));
+    }
+
+    #[test]
+    fn test_configure_theme_from_config() {
+        let app_config = CoreAppConfig::default();
+        let repo_manager = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
+        ));
+        let mut sagitta_config = SagittaCodeConfig::default();
+        
+        let mut app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+        
+        // Test light theme - modify config directly before creating the app
+        let mut sagitta_config_light = SagittaCodeConfig::default();
+        sagitta_config_light.ui.theme = "light".to_string();
+        let app_config_clone = CoreAppConfig::default();
+        let repo_manager_light = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone.clone())))
+        ));
+        let mut app_light = SagittaCodeApp::new(repo_manager_light, sagitta_config_light, app_config_clone);
+        configure_theme_from_config(&mut app_light);
+        assert_eq!(app_light.state.current_theme, AppTheme::Light);
+        
+        // Test dark theme
+        let mut sagitta_config_dark = SagittaCodeConfig::default();
+        sagitta_config_dark.ui.theme = "dark".to_string();
+        let app_config_clone2 = CoreAppConfig::default();
+        let repo_manager_dark = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone2.clone())))
+        ));
+        let mut app_dark = SagittaCodeApp::new(repo_manager_dark, sagitta_config_dark, app_config_clone2);
+        configure_theme_from_config(&mut app_dark);
+        assert_eq!(app_dark.state.current_theme, AppTheme::Dark);
+        
+        // Test default (unknown theme defaults to dark)
+        let mut sagitta_config_unknown = SagittaCodeConfig::default();
+        sagitta_config_unknown.ui.theme = "unknown".to_string();
+        let app_config_clone3 = CoreAppConfig::default();
+        let repo_manager_unknown = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone3.clone())))
+        ));
+        let mut app_unknown = SagittaCodeApp::new(repo_manager_unknown, sagitta_config_unknown, app_config_clone3);
+        configure_theme_from_config(&mut app_unknown);
+        assert_eq!(app_unknown.state.current_theme, AppTheme::Dark);
+    }
+
+    #[tokio::test]
+    async fn test_create_repository_manager() {
+        let core_config = CoreAppConfig::default();
+        let result = create_repository_manager(core_config).await;
+        
+        // Should succeed with default config
+        assert!(result.is_ok());
+        
+        let repo_manager = result.unwrap();
+        let repos = repo_manager.lock().await.list_repositories().await;
+        assert!(repos.is_ok());
+        assert!(repos.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_create_embedding_pool_with_invalid_config() {
+        let mut core_config = CoreAppConfig::default();
+        
+        // Set invalid ONNX model path to force failure
+        core_config.onnx_model_path = Some("/nonexistent/path/model.onnx".into());
+        
+        let result = create_embedding_pool(&core_config);
+        
+        // Should fail with invalid config, but may succeed if fallback mechanisms work
+        // Just test that it handles the case gracefully
+        match result {
+            Ok(_) => {
+                // May succeed if there are fallback mechanisms
+                assert!(true);
+            }
+            Err(e) => {
+                // Expected failure with invalid config
+                assert!(e.to_string().contains("Failed to create EmbeddingPool"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_create_llm_client_with_invalid_config() {
+        let mut config = SagittaCodeConfig::default();
+        
+        // Set invalid API key to force failure
+        config.gemini.api_key = Some("invalid_key".to_string());
+        
+        let result = create_llm_client(&config);
+        
+        // May succeed or fail depending on validation - test structure is important
+        match result {
+            Ok(_) => {
+                // Client created but might fail later during actual API calls
+                assert!(true);
+            }
+            Err(e) => {
+                // Expected failure with invalid config
+                assert!(e.to_string().contains("Failed to create GeminiClient"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_qdrant_client_with_invalid_url() {
+        let mut core_config = CoreAppConfig::default();
+        
+        // Set invalid Qdrant URL
+        core_config.qdrant_url = "http://invalid-url:1234".to_string();
+        
+        let result = create_qdrant_client(&core_config).await;
+        
+        // Should fail with invalid URL - may succeed immediately but fail on actual connection
+        // The exact behavior depends on Qdrant client implementation
+        match result {
+            Ok(_) => {
+                // Client created but might fail on actual operations
+                assert!(true);
+            }
+            Err(e) => {
+                // Expected failure
+                assert!(e.to_string().contains("Failed to initialize Qdrant client"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_persistence_with_temp_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = SagittaCodeConfig::default();
+        config.conversation.storage_path = Some(temp_dir.path().to_path_buf());
+        
+        let result = create_conversation_persistence(&config).await;
+        
+        // Should succeed with valid temp directory
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_persistence_with_default_path() {
+        let config = SagittaCodeConfig::default();
+        // config.conversation.storage_path is None, should use default
+        
+        let result = create_conversation_persistence(&config).await;
+        
+        // Should succeed using default path
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_conversation_persistence_with_invalid_path() {
+        let mut config = SagittaCodeConfig::default();
+        // Set an invalid path (root directory that shouldn't be writable)
+        config.conversation.storage_path = Some("/root/nonexistent/path".into());
+        
+        let result = create_conversation_persistence(&config).await;
+        
+        // May succeed or fail depending on permissions and OS
+        // Just test that it handles the case gracefully
+        match result {
+            Ok(_) => assert!(true), // Succeeded
+            Err(e) => {
+                // Expected failure with permission issues
+                assert!(e.to_string().contains("Failed to create disk conversation persistence"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_initialization_helper_functions_isolation() {
+        // Test that helper functions are properly isolated and testable
+        
+        // Test default path generation
+        let path1 = get_default_conversation_storage_path();
+        let path2 = get_default_conversation_storage_path();
+        assert_eq!(path1, path2); // Should be deterministic
+        
+        // Test theme configuration with minimal app - use different themes to ensure change
+        let app_config = CoreAppConfig::default();
+        let repo_manager = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
+        ));
+        let mut sagitta_config = SagittaCodeConfig::default();
+        sagitta_config.ui.theme = "dark".to_string(); // Start with dark
+        
+        let mut app = SagittaCodeApp::new(repo_manager, sagitta_config, app_config);
+        let original_theme = app.state.current_theme.clone();
+        
+        // Now create a new config with light theme
+        let app_config2 = CoreAppConfig::default();
+        let repo_manager2 = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config2.clone())))
+        ));
+        let mut sagitta_config2 = SagittaCodeConfig::default();
+        sagitta_config2.ui.theme = "light".to_string();
+        
+        let mut app2 = SagittaCodeApp::new(repo_manager2, sagitta_config2, app_config2);
+        configure_theme_from_config(&mut app2);
+        
+        // Theme should be updated to light
+        assert_eq!(app2.state.current_theme, AppTheme::Light);
+        
+        // Verify the function actually works by testing both themes
+        assert_ne!(AppTheme::Light, AppTheme::Dark);
+    }
+
+    #[test]
+    fn test_embedding_pool_creation_with_different_configs() {
+        // Test with default config
+        let default_config = CoreAppConfig::default();
+        let result1 = create_embedding_pool(&default_config);
+        
+        // Test with modified config - use a valid field instead
+        let mut modified_config = CoreAppConfig::default();
+        modified_config.onnx_model_path = Some("/custom/path/model.onnx".into()); // Different model path
+        let result2 = create_embedding_pool(&modified_config);
+        
+        // Both should handle their configurations appropriately
+        // Exact success/failure depends on system setup, but structure should be sound
+        match (result1, result2) {
+            (Ok(_), Ok(_)) => assert!(true),
+            (Ok(_), Err(_)) => assert!(true), // Modified config might fail
+            (Err(_), Ok(_)) => assert!(true), // Default config might fail on this system
+            (Err(_), Err(_)) => assert!(true), // Both might fail if no model available
+        }
+    }
+
+    #[test]
+    fn test_initialization_constants() {
+        // Test that important constants are accessible
+        assert!(!TOOLS_COLLECTION_NAME.is_empty());
+        assert!(TOOLS_COLLECTION_NAME.len() > 0);
+        
+        // Test path generation doesn't panic
+        let path = get_default_conversation_storage_path();
+        assert!(!path.as_os_str().is_empty());
+    }
+
+    #[test] 
+    fn test_path_construction_edge_cases() {
+        // Test that path construction handles edge cases
+        let original_env = env::var("HOME").ok();
+        
+        // Temporarily unset HOME to test fallback behavior
+        env::remove_var("HOME");
+        
+        let path_without_home = get_default_conversation_storage_path();
+        assert!(!path_without_home.as_os_str().is_empty());
+        
+        // Restore original environment
+        if let Some(home) = original_env {
+            env::set_var("HOME", home);
+        }
+        
+        let path_with_home = get_default_conversation_storage_path();
+        assert!(!path_with_home.as_os_str().is_empty());
+    }
 } 

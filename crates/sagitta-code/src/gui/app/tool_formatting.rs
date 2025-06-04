@@ -504,4 +504,544 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{:.1} {}", size, UNITS[unit_index])
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::types::ToolResult;
+    use serde_json::json;
+
+    #[test]
+    fn test_formatter_creation() {
+        let formatter = ToolResultFormatter::new();
+        // Just ensure it can be created without panicking
+        assert!(true);
+    }
+
+    #[test]
+    fn test_format_tool_result_for_preview_success() {
+        let formatter = ToolResultFormatter::new();
+        let result = ToolResult::Success(json!({
+            "message": "Operation completed successfully"
+        }));
+        
+        let formatted = formatter.format_tool_result_for_preview("test_tool", &result);
+        assert!(formatted.contains("Operation completed successfully"));
+    }
+
+    #[test]
+    fn test_format_tool_result_for_preview_error() {
+        let formatter = ToolResultFormatter::new();
+        let result = ToolResult::Error {
+            error: "Something went wrong".to_string(),
+        };
+        
+        let formatted = formatter.format_tool_result_for_preview("test_tool", &result);
+        assert!(formatted.contains("ERROR"));
+        assert!(formatted.contains("Something went wrong"));
+    }
+
+    #[test]
+    fn test_format_web_search_result_with_formatted_summary() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "formatted_summary": "Here are the search results for Rust programming",
+            "extracted_info": {
+                "git_repositories": [
+                    {
+                        "url": "https://github.com/rust-lang/rust",
+                        "clone_url": "git@github.com:rust-lang/rust.git",
+                        "type": "official"
+                    }
+                ],
+                "default_branch": "master",
+                "documentation": [
+                    {
+                        "url": "https://doc.rust-lang.org/"
+                    }
+                ],
+                "installation_commands": ["curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"],
+                "versions": ["1.70.0", "1.69.0"]
+            }
+        });
+        
+        let formatted = formatter.format_web_search_result(&value);
+        assert!(formatted.contains("Here are the search results"));
+        assert!(formatted.contains("Git Repositories"));
+        assert!(formatted.contains("https://github.com/rust-lang/rust"));
+        assert!(formatted.contains("**Default Branch:** master"));
+        assert!(formatted.contains("Documentation"));
+        assert!(formatted.contains("Installation Commands"));
+        assert!(formatted.contains("Versions Found"));
+    }
+
+    #[test]
+    fn test_format_web_search_result_fallback() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "query": "rust programming",
+            "answer": "Rust is a systems programming language",
+            "sources": [
+                {
+                    "title": "Rust Programming Language",
+                    "url": "https://www.rust-lang.org/"
+                }
+            ],
+            "grounded": true
+        });
+        
+        let formatted = formatter.format_web_search_result(&value);
+        assert!(formatted.contains("🔍 **Web Search Results**"));
+        assert!(formatted.contains("**Query:** rust programming"));
+        assert!(formatted.contains("**Answer:**"));
+        assert!(formatted.contains("Rust is a systems programming language"));
+        assert!(formatted.contains("**Sources:**"));
+        assert!(formatted.contains("Rust Programming Language"));
+        assert!(formatted.contains("grounded with web results"));
+    }
+
+    #[test]
+    fn test_format_file_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "file_path": "src/main.rs",
+            "repository_name": "my-project",
+            "file_type": "rust",
+            "start_line": 1,
+            "end_line": 10,
+            "content": "fn main() {\n    println!(\"Hello, world!\");\n}"
+        });
+        
+        let formatted = formatter.format_file_result(&value);
+        assert!(formatted.contains("FILE: File Content"));
+        assert!(formatted.contains("**File:** src/main.rs"));
+        assert!(formatted.contains("**Repository:** my-project"));
+        assert!(formatted.contains("**Type:** rust"));
+        assert!(formatted.contains("**Lines:** 1 - 10"));
+        assert!(formatted.contains("**Content:**"));
+        assert!(formatted.contains("fn main()"));
+        assert!(formatted.contains("```"));
+    }
+
+    #[test]
+    fn test_format_code_search_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "query": "fn main",
+            "results": [
+                {
+                    "file_path": "src/main.rs",
+                    "repository": "my-project",
+                    "score": 0.95,
+                    "snippet": "fn main() {\n    println!(\"Hello, world!\");\n}"
+                },
+                {
+                    "file_path": "examples/hello.rs",
+                    "repository": "my-project",
+                    "score": 0.85,
+                    "snippet": "fn main() {\n    println!(\"Hello from example!\");\n}"
+                }
+            ]
+        });
+        
+        let formatted = formatter.format_code_search_result(&value);
+        assert!(formatted.contains("SEARCH: Code Search Results"));
+        assert!(formatted.contains("**Query:** fn main"));
+        assert!(formatted.contains("**Found 2 results:**"));
+        assert!(formatted.contains("1. **src/main.rs**"));
+        assert!(formatted.contains("2. **examples/hello.rs**"));
+        assert!(formatted.contains("Repository: my-project"));
+        assert!(formatted.contains("Relevance: 95.0%"));
+        assert!(formatted.contains("Relevance: 85.0%"));
+        assert!(formatted.contains("Preview:"));
+    }
+
+    #[test]
+    fn test_format_code_search_result_with_long_snippet() {
+        let formatter = ToolResultFormatter::new();
+        let long_snippet = "a".repeat(250); // Create a snippet longer than 200 chars
+        let value = json!({
+            "query": "test",
+            "results": [
+                {
+                    "file_path": "test.rs",
+                    "snippet": long_snippet
+                }
+            ]
+        });
+        
+        let formatted = formatter.format_code_search_result(&value);
+        assert!(formatted.contains("test.rs"));
+        assert!(formatted.contains("..."));
+        // Should be truncated to 200 chars + "..."
+        let lines: Vec<&str> = formatted.lines().collect();
+        let snippet_line = lines.iter().find(|line| line.contains("aaa")).unwrap();
+        assert!(snippet_line.len() < long_snippet.len() + 10); // Much shorter than original
+    }
+
+    #[test]
+    fn test_format_repository_list_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "summary": {
+                "existing_count": 5,
+                "needs_sync_count": 2,
+                "dirty_count": 1,
+                "total_files": 1000,
+                "total_size_bytes": 1048576
+            },
+            "repositories": [
+                {
+                    "name": "my-project",
+                    "url": "https://github.com/user/my-project",
+                    "local_path": "/home/user/projects/my-project",
+                    "active_branch": "main",
+                    "filesystem_status": {
+                        "exists": true,
+                        "is_git_repository": true,
+                        "total_files": 100,
+                        "size_bytes": 204800
+                    },
+                    "sync_status": {
+                        "state": "UpToDate",
+                        "branches_needing_sync": []
+                    },
+                    "git_status": {
+                        "current_commit": "abc123def456",
+                        "is_clean": true
+                    },
+                    "indexed_languages": ["rust", "toml"],
+                    "file_extensions": [
+                        {"extension": ".rs", "count": 50},
+                        {"extension": ".toml", "count": 5},
+                        {"extension": ".md", "count": 3}
+                    ]
+                }
+            ],
+            "active_repository": "my-project"
+        });
+        
+        let formatted = formatter.format_repository_list_result(&value);
+        assert!(formatted.contains("📚 Enhanced Repository List"));
+        assert!(formatted.contains("**Summary:**"));
+        assert!(formatted.contains("📁 Existing repositories: 5"));
+        assert!(formatted.contains("🔄 Need syncing: 2"));
+        assert!(formatted.contains("⚠️  With uncommitted changes: 1"));
+        assert!(formatted.contains("📊 Total files: 1000"));
+        assert!(formatted.contains("💾 Total size: 1.0 MB"));
+        assert!(formatted.contains("**Found 1 repositories:**"));
+        assert!(formatted.contains("1. **my-project**"));
+        assert!(formatted.contains("🔗 URL: https://github.com/user/my-project"));
+        assert!(formatted.contains("📁 Path: /home/user/projects/my-project"));
+        assert!(formatted.contains("🌿 Branch: main"));
+        assert!(formatted.contains("📍 Status: ✅ Git repository"));
+        assert!(formatted.contains("📊 Files: 100 (200.0 KB)"));
+        assert!(formatted.contains("🔄 Sync: ✅ Up to date"));
+        assert!(formatted.contains("📍 Commit: abc123de (clean)"));
+        assert!(formatted.contains("🔤 Languages: rust, toml"));
+        assert!(formatted.contains("📄 Extensions: .rs (50), .toml (5), .md (3)"));
+        assert!(formatted.contains("**Active Repository:** my-project"));
+    }
+
+    #[test]
+    fn test_format_repository_list_result_with_sync_needed() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "repositories": [
+                {
+                    "name": "outdated-project",
+                    "filesystem_status": {
+                        "exists": false,
+                        "is_git_repository": false
+                    },
+                    "sync_status": {
+                        "state": "NeedsSync",
+                        "branches_needing_sync": ["main", "develop"]
+                    },
+                    "git_status": {
+                        "current_commit": "xyz789abc123",
+                        "is_clean": false
+                    }
+                }
+            ]
+        });
+        
+        let formatted = formatter.format_repository_list_result(&value);
+        assert!(formatted.contains("1. **outdated-project**"));
+        assert!(formatted.contains("📍 Status: ❌ Missing from filesystem"));
+        assert!(formatted.contains("🔄 Sync: 🔄 Needs sync"));
+        assert!(formatted.contains("⚠️  Need sync: main, develop"));
+        assert!(formatted.contains("📍 Commit: xyz789ab (dirty)"));
+    }
+
+    #[test]
+    fn test_format_repository_operation_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "message": "Repository successfully added",
+            "repository_name": "new-project",
+            "details": "Cloned from GitHub and indexed 150 files"
+        });
+        
+        let formatted = formatter.format_repository_operation_result(&value);
+        assert!(formatted.contains("📦 Repository Operation"));
+        assert!(formatted.contains("**Result:** Repository successfully added"));
+        assert!(formatted.contains("**Repository:** new-project"));
+        assert!(formatted.contains("**Details:** Cloned from GitHub and indexed 150 files"));
+    }
+
+    #[test]
+    fn test_format_file_search_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "pattern": "*.rs",
+            "files": [
+                "src/main.rs",
+                "src/lib.rs",
+                "tests/integration_test.rs"
+            ]
+        });
+        
+        let formatted = formatter.format_file_search_result(&value);
+        assert!(formatted.contains("📁 File Search Results"));
+        assert!(formatted.contains("**Pattern:** *.rs"));
+        assert!(formatted.contains("**Found 3 files:**"));
+        assert!(formatted.contains("1. src/main.rs"));
+        assert!(formatted.contains("2. src/lib.rs"));
+        assert!(formatted.contains("3. tests/integration_test.rs"));
+    }
+
+    #[test]
+    fn test_format_edit_result() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "message": "File successfully edited",
+            "file_path": "src/main.rs",
+            "changes_made": "Added new function 'hello_world'"
+        });
+        
+        let formatted = formatter.format_edit_result(&value);
+        assert!(formatted.contains("✏️ Edit Operation"));
+        assert!(formatted.contains("**Result:** File successfully edited"));
+        assert!(formatted.contains("**File:** src/main.rs"));
+        assert!(formatted.contains("**Changes:** Added new function 'hello_world'"));
+    }
+
+    #[test]
+    fn test_format_generic_result_object() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "status": "success",
+            "count": 42,
+            "items": ["item1", "item2", "item3"],
+            "metadata": {
+                "timestamp": "2023-01-01T00:00:00Z",
+                "version": "1.0"
+            }
+        });
+        
+        let formatted = formatter.format_generic_result(&value);
+        assert!(formatted.contains("RESULT: Tool Result"));
+        assert!(formatted.contains("**status:** success"));
+        assert!(formatted.contains("**count:** 42"));
+        assert!(formatted.contains("**items:** Array with 3 items"));
+        assert!(formatted.contains("**metadata:** Object with 2 fields"));
+    }
+
+    #[test]
+    fn test_format_generic_result_long_string() {
+        let formatter = ToolResultFormatter::new();
+        let long_string = "a".repeat(250);
+        let value = json!({
+            "long_field": long_string
+        });
+        
+        let formatted = formatter.format_generic_result(&value);
+        assert!(formatted.contains("RESULT: Tool Result"));
+        assert!(formatted.contains("**long_field:**"));
+        assert!(formatted.contains("..."));
+        // Should be truncated
+        assert!(formatted.len() < long_string.len() + 100);
+    }
+
+    #[test]
+    fn test_format_generic_result_non_object() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!("Simple string result");
+        
+        let formatted = formatter.format_generic_result(&value);
+        assert!(formatted.contains("RESULT: Tool Result"));
+        assert!(formatted.contains("Simple string result"));
+    }
+
+    #[test]
+    fn test_format_generic_result_empty_object() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({});
+        
+        let formatted = formatter.format_generic_result(&value);
+        assert!(formatted.contains("RESULT: Tool Result"));
+        assert!(formatted.contains("No detailed information available"));
+    }
+
+    #[test]
+    fn test_format_generic_result_very_long_non_object() {
+        let formatter = ToolResultFormatter::new();
+        let very_long_string = "x".repeat(600);
+        let value = json!(very_long_string);
+        
+        let formatted = formatter.format_generic_result(&value);
+        assert!(formatted.contains("RESULT: Tool Result"));
+        assert!(formatted.contains("..."));
+        // Should be truncated to around 500 chars
+        assert!(formatted.len() < very_long_string.len() + 100);
+    }
+
+    #[test]
+    fn test_format_successful_tool_result_routing() {
+        let formatter = ToolResultFormatter::new();
+        
+        // Test different tool types get routed to correct formatters
+        let web_search_result = json!({"query": "test"});
+        let formatted = formatter.format_successful_tool_result("web_search", &web_search_result);
+        assert!(formatted.contains("🔍 **Web Search Results**"));
+        
+        let file_result = json!({"file_path": "test.rs"});
+        let formatted = formatter.format_successful_tool_result("view_file", &file_result);
+        assert!(formatted.contains("FILE: File Content"));
+        
+        let code_search_result = json!({"query": "test"});
+        let formatted = formatter.format_successful_tool_result("code_search", &code_search_result);
+        assert!(formatted.contains("SEARCH: Code Search Results"));
+        
+        let repo_list_result = json!({"repositories": []});
+        let formatted = formatter.format_successful_tool_result("list_repositories", &repo_list_result);
+        assert!(formatted.contains("📚 Enhanced Repository List"));
+        
+        let repo_op_result = json!({"message": "done"});
+        let formatted = formatter.format_successful_tool_result("add_repository", &repo_op_result);
+        assert!(formatted.contains("📦 Repository Operation"));
+        
+        let file_search_result = json!({"pattern": "*.rs"});
+        let formatted = formatter.format_successful_tool_result("search_file_in_repository", &file_search_result);
+        assert!(formatted.contains("📁 File Search Results"));
+        
+        let edit_result = json!({"message": "edited"});
+        let formatted = formatter.format_successful_tool_result("edit", &edit_result);
+        assert!(formatted.contains("✏️ Edit Operation"));
+        
+        // Test unknown tool falls back to generic
+        let unknown_result = json!({"data": "test"});
+        let formatted = formatter.format_successful_tool_result("unknown_tool", &unknown_result);
+        assert!(formatted.contains("RESULT: Tool Result"));
+    }
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1048576), "1.0 MB");
+        assert_eq!(format_bytes(1073741824), "1.0 GB");
+        assert_eq!(format_bytes(1099511627776), "1.0 TB");
+        assert_eq!(format_bytes(2560), "2.5 KB");
+        assert_eq!(format_bytes(5368709120), "5.0 GB");
+    }
+
+    #[test]
+    fn test_format_bytes_edge_cases() {
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1025), "1.0 KB");
+        
+        // For very large numbers, just check it doesn't panic and produces reasonable output
+        let very_large_result = format_bytes(u64::MAX);
+        assert!(very_large_result.contains("TB"));
+        assert!(very_large_result.len() > 5); // Should be some reasonable length
+        assert!(very_large_result.len() < 50); // But not absurdly long
+    }
+
+    #[test]
+    fn test_web_search_with_partial_data() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "query": "rust programming",
+            // Missing answer and sources
+        });
+        
+        let formatted = formatter.format_web_search_result(&value);
+        assert!(formatted.contains("🔍 **Web Search Results**"));
+        assert!(formatted.contains("**Query:** rust programming"));
+        // Should handle missing fields gracefully
+    }
+
+    #[test]
+    fn test_file_result_minimal() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "content": "Hello, world!"
+        });
+        
+        let formatted = formatter.format_file_result(&value);
+        assert!(formatted.contains("FILE: File Content"));
+        assert!(formatted.contains("**Content:**"));
+        assert!(formatted.contains("Hello, world!"));
+    }
+
+    #[test]
+    fn test_code_search_no_results() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "query": "nonexistent",
+            "results": []
+        });
+        
+        let formatted = formatter.format_code_search_result(&value);
+        assert!(formatted.contains("SEARCH: Code Search Results"));
+        assert!(formatted.contains("**Query:** nonexistent"));
+        assert!(formatted.contains("**Found 0 results:**"));
+    }
+
+    #[test]
+    fn test_repository_list_empty() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "repositories": []
+        });
+        
+        let formatted = formatter.format_repository_list_result(&value);
+        assert!(formatted.contains("📚 Enhanced Repository List"));
+        assert!(formatted.contains("**Found 0 repositories:**"));
+    }
+
+    #[test]
+    fn test_edit_result_minimal() {
+        let formatter = ToolResultFormatter::new();
+        let value = json!({
+            "message": "Success"
+        });
+        
+        let formatted = formatter.format_edit_result(&value);
+        assert!(formatted.contains("✏️ Edit Operation"));
+        assert!(formatted.contains("**Result:** Success"));
+    }
+
+    #[test]
+    fn test_all_tool_type_variants() {
+        let formatter = ToolResultFormatter::new();
+        let test_data = json!({"test": "data"});
+        
+        // Test all the specific tool types mentioned in format_successful_tool_result
+        let tool_types = vec![
+            "web_search", "view_file", "read_file", "code_search", "list_repositories",
+            "add_repository", "sync_repository", "remove_repository", "search_file_in_repository",
+            "edit", "semantic_edit", "validate"
+        ];
+        
+        for tool_type in tool_types {
+            let formatted = formatter.format_successful_tool_result(tool_type, &test_data);
+            assert!(!formatted.is_empty(), "Tool type {} should produce non-empty output", tool_type);
+        }
+    }
 } 

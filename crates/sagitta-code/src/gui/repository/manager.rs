@@ -841,6 +841,7 @@ impl RepositoryManager {
                 limit as u64,
                 search_filter,
                 &config_guard,
+                None, // Use default search configuration
             ).await {
                 Ok(result) => {
                     return Ok(result);

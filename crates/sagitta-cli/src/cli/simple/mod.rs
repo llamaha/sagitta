@@ -370,6 +370,7 @@ async fn handle_simple_query(
         args.limit,
         filter,
         config, // <-- Pass the loaded config
+        None, // Use default search configuration
     ).await;
 
     let duration = start_time.elapsed();
