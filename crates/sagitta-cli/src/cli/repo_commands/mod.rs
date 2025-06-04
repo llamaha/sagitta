@@ -116,7 +116,7 @@ where
             }
         },
         RepoCommand::List(list_args) => {
-            list::list_repositories(config, list_args)?;
+            list::list_repositories(config, list_args).await?;
             Ok(())
         },
         RepoCommand::Use(use_args) => {
@@ -680,13 +680,20 @@ mod tests {
 
      #[test]
      fn test_handle_repo_list() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path().join("list_config.toml");
         let config = create_test_config_data();
         save_config(&config, Some(&temp_path)).unwrap();
         
-        let list_args = list::ListArgs { json: false }; 
-        let result = list::list_repositories(&config, list_args);
+            let list_args = list::ListArgs { 
+                json: false, 
+                detailed: false,
+                summary: false
+            }; 
+            let result = list::list_repositories(&config, list_args).await;
         assert!(result.is_ok());
+        });
      }
 } 

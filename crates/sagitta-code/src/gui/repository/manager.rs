@@ -362,12 +362,54 @@ impl RepositoryManager {
         let config_guard = self.config.lock().await;
         let repos = config_guard.repositories.clone();
         
-        // Update the repository cache for sync status updates
-        let repo_infos: Vec<RepoInfo> = repos.iter().map(|config| RepoInfo::from(config.clone())).collect();
-        let mut repos_guard = self.repositories.lock().await;
-        *repos_guard = repo_infos;
+        // Update the repository cache for sync status updates using enhanced listing
+        match sagitta_search::get_enhanced_repository_list(&*config_guard).await {
+            Ok(enhanced_list) => {
+                let repo_infos: Vec<RepoInfo> = enhanced_list.repositories
+                    .into_iter()
+                    .map(|enhanced_repo| RepoInfo {
+                        name: enhanced_repo.name,
+                        remote: Some(enhanced_repo.url),
+                        branch: enhanced_repo.active_branch.or_else(|| Some(enhanced_repo.default_branch)),
+                        local_path: Some(enhanced_repo.local_path),
+                        is_syncing: enhanced_repo.sync_status.sync_in_progress,
+                    })
+                    .collect();
+                    
+                let mut repos_guard = self.repositories.lock().await;
+                *repos_guard = repo_infos;
+                log::info!("RepoManager: Successfully updated repository cache with enhanced information for {} repositories.", repos_guard.len());
+            }
+            Err(e) => {
+                log::warn!("RepoManager: Failed to get enhanced repository list, using basic conversion: {}", e);
+                let repo_infos: Vec<RepoInfo> = repos.iter().map(|config| RepoInfo::from(config.clone())).collect();
+                let mut repos_guard = self.repositories.lock().await;
+                *repos_guard = repo_infos;
+            }
+        }
         
         Ok(repos)
+    }
+
+    /// Get enhanced repository information
+    pub async fn get_enhanced_repository_list(&self) -> Result<sagitta_search::EnhancedRepositoryList> {
+        let config_guard = self.config.lock().await;
+        sagitta_search::get_enhanced_repository_list(&*config_guard).await
+            .map_err(|e| anyhow::anyhow!("Failed to get enhanced repository list: {}", e))
+    }
+
+    /// Get enhanced information for a specific repository
+    pub async fn get_enhanced_repository_info(&self, repo_name: &str) -> Result<sagitta_search::EnhancedRepositoryInfo> {
+        let config_guard = self.config.lock().await;
+        
+        // Find the repository configuration
+        let repo_config = config_guard.repositories
+            .iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        sagitta_search::get_enhanced_repository_info(repo_config).await
+            .map_err(|e| anyhow::anyhow!("Failed to get enhanced repository info for '{}': {}", repo_name, e))
     }
 
     // Helper to save the current AppConfig state to the dedicated path
@@ -399,6 +441,24 @@ impl RepositoryManager {
         
         result?;
         Ok(())
+    }
+
+    async fn initialize_sync_status_for_new_repo(&self, repo_name: &str) {
+        let mut ssm_guard = self.sync_status_map.lock().await;
+        ssm_guard.insert(repo_name.to_string(), SyncStatus::default());
+        drop(ssm_guard);
+
+        let mut simple_ssm_guard = self.simple_sync_status_map.lock().await;
+        simple_ssm_guard.insert(repo_name.to_string(), SimpleSyncStatus {
+            is_running: false,
+            is_complete: false,
+            is_success: false,
+            output_lines: vec!["Awaiting initial sync.".to_string()],
+            final_message: "Pending initial sync".to_string(),
+            started_at: None,
+        });
+        drop(simple_ssm_guard);
+        log::info!("[GUI RepoManager] Initialized sync status for new repo '{}'", repo_name);
     }
 
     pub async fn add_local_repository(&self, name: &str, path: &str) -> Result<()> {
@@ -457,19 +517,16 @@ impl RepositoryManager {
         
         match repo_config_result {
             Ok(new_repo_config) => {
-                // Acquire lock again to update config
                 let mut config_guard = self.config.lock().await;
-                
-                // Check if repo already exists
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
-                
-                // Add to config
-                config_guard.repositories.push(new_repo_config);
-                
-                // Save config
+                config_guard.repositories.push(new_repo_config.clone());
                 self.save_core_config_with_guard(&*config_guard).await?;
+                drop(config_guard); // Release lock before calling the helper
+
+                self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
+                log::info!("[GUI RepoManager] Local repository '{}' successfully added, saved, and status initialized.", new_repo_config.name);
                 
                 Ok(())
             },
@@ -537,22 +594,18 @@ impl RepositoryManager {
         match repo_config_result {
             Ok(new_repo_config) => {
                 log::info!("[GUI RepoManager] Repository addition successful, saving to config...");
-                // Acquire lock again to update config
                 let mut config_guard = self.config.lock().await;
-                
-                // Check if repo already exists
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
                     log::warn!("[GUI RepoManager] Repository '{}' already exists in configuration", name);
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
-                
-                // Add to config
                 config_guard.repositories.push(new_repo_config.clone());
                 log::info!("[GUI RepoManager] Repository added to config. Total repositories: {}", config_guard.repositories.len());
-                
-                // Save config
                 self.save_core_config_with_guard(&*config_guard).await?;
-                log::info!("[GUI RepoManager] Repository '{}' successfully added and saved", name);
+                drop(config_guard); // Release lock before calling the helper
+
+                self.initialize_sync_status_for_new_repo(&new_repo_config.name).await;
+                log::info!("[GUI RepoManager] Remote repository '{}' successfully added, saved, and status initialized.", new_repo_config.name);
                 
                 Ok(())
             },
@@ -1105,21 +1158,55 @@ mod tests {
     use sagitta_search::sync_progress::{SyncProgress as CoreSyncProgress, SyncStage as CoreSyncStage};
     use std::time::Duration;
 
-    /// Helper to create a test repository manager with a temporary config
+    /// Helper to create a RepositoryManager instance with a temporary AppConfig for testing
     async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let mut config = AppConfig::default();
+        let mut test_config = AppConfig::default();
         
+        // Setup paths that might be needed by the manager or its components
         let repo_base = temp_dir.path().join("repositories");
         fs::create_dir_all(&repo_base).unwrap();
-        config.repositories_base_path = Some(repo_base.to_string_lossy().to_string());
-        config.tenant_id = Some("test-tenant".to_string());
-        
-        let config_arc = Arc::new(Mutex::new(config));
-        // RepositoryManager::new now spawns a task. This is fine for tests.
-        let repo_manager = RepositoryManager::new(config_arc);
-        
-        (repo_manager, temp_dir)
+        test_config.repositories_base_path = Some(repo_base.to_string_lossy().to_string());
+        test_config.onnx_model_path = Some(temp_dir.path().join("model.onnx").to_string_lossy().to_string());
+        test_config.onnx_tokenizer_path = Some(temp_dir.path().join("tokenizer.json").to_string_lossy().to_string());
+        test_config.qdrant_url = "http://localhost:6334".to_string(); // Example URL for tests that might need it
+        test_config.tenant_id = Some("test-tenant".to_string()); // Often needed
+
+        let config_path = temp_dir.path().join("config.toml");
+        save_config(&test_config, Some(&config_path)).expect("Failed to save temp config");
+
+        let loaded_config = load_config(Some(&config_path)).expect("Failed to load temp config");
+        // Use RepositoryManager::new so the background task is spawned for tests that need it.
+        let manager = RepositoryManager::new(Arc::new(Mutex::new(loaded_config))); 
+        (manager, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn test_initialize_sync_status_for_new_repo() {
+        let (manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
+        let repo_name = "test_repo_for_status_init";
+
+        manager.initialize_sync_status_for_new_repo(repo_name).await;
+
+        // Check detailed sync_status_map
+        let ssm = manager.sync_status_map.lock().await;
+        assert!(ssm.contains_key(repo_name), "Detailed sync status map should contain the new repo");
+        let status = ssm.get(repo_name).unwrap();
+        assert_eq!(status.state, "Pending");
+        assert_eq!(status.progress, 0.0);
+        assert!(!status.success);
+        assert!(status.detailed_progress.is_none());
+
+        // Check simple_sync_status_map
+        let simple_ssm = manager.simple_sync_status_map.lock().await;
+        assert!(simple_ssm.contains_key(repo_name), "Simple sync status map should contain the new repo");
+        let simple_status = simple_ssm.get(repo_name).unwrap();
+        assert!(!simple_status.is_running);
+        assert!(!simple_status.is_complete);
+        assert!(!simple_status.is_success);
+        assert_eq!(simple_status.final_message, "Pending initial sync");
+        assert_eq!(simple_status.output_lines, vec!["Awaiting initial sync.".to_string()]);
+        assert!(simple_status.started_at.is_none());
     }
 
     #[tokio::test]

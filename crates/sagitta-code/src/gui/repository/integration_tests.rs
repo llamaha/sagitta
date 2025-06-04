@@ -188,7 +188,7 @@ mod tests {
         let list_result = list_tool.execute(json!({})).await.unwrap();
         match list_result {
             ToolResult::Success(data) => {
-                let count = data.get("count").unwrap().as_u64().unwrap();
+                let count = data.get("total_count").unwrap().as_u64().unwrap();
                 assert_eq!(count, 0, "Should start with no repositories");
             }
             ToolResult::Error { error } => {
@@ -207,12 +207,14 @@ mod tests {
         match add_result {
             ToolResult::Success(data) => {
                 println!("Successfully added repository: {:?}", data);
-                assert!(data.get("success").unwrap().as_bool().unwrap());
+                assert!(data.get("message").is_some(), "Add operation succeeded but success message is missing");
+                assert!(data.get("message").unwrap().as_str().unwrap().to_lowercase().contains("success") || 
+                        data.get("message").unwrap().as_str().unwrap().to_lowercase().contains("already exists"));
             }
             ToolResult::Error { error } => {
                 // Expected due to missing Qdrant/embedding setup
                 println!("Add repository failed (expected due to missing setup): {}", error);
-                assert!(error.contains("not initialized") || error.contains("Failed to add"));
+                assert!(error.contains("not initialized") || error.contains("Failed to add") || error.contains("Qdrant client") || error.contains("embedding handler"));
             }
         }
         

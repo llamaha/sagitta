@@ -173,3 +173,207 @@ impl QdrantClientTrait for ManualMockQdrantClient {
     async fn delete_points(&self, _request: DeletePoints) -> Result<PointsOperationResponse> { unimplemented!("delete_points not mocked in ManualMockQdrantClient") }
     async fn list_collections(&self) -> Result<Vec<String>> { unimplemented!("list_collections not mocked in ManualMockQdrantClient") }
 } 
+
+#[cfg(test)]
+mod enhanced_repository_tests {
+    use super::*;
+    use crate::{AppConfig, RepositoryConfig};
+    use crate::config::{IndexingConfig, PerformanceConfig};
+    use crate::{get_enhanced_repository_list, get_enhanced_repository_info, EnhancedRepositoryInfo, FilesystemStatus, SyncState};
+    use std::path::PathBuf;
+    use std::fs;
+    use tempfile::TempDir;
+    use tokio;
+
+    pub fn create_test_enhanced_repo_config(name: &str, temp_dir: &TempDir) -> RepositoryConfig {
+        let repo_path = temp_dir.path().join(name);
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        // Create some test files
+        fs::write(repo_path.join("test.rs"), "fn main() {}\n").unwrap();
+        fs::write(repo_path.join("readme.md"), "# Test Repo\n").unwrap();
+        fs::write(repo_path.join("config.json"), "{}").unwrap();
+        
+        // Initialize as git repo
+        let _ = git2::Repository::init(&repo_path);
+        
+        RepositoryConfig {
+            name: name.to_string(),
+            url: format!("https://github.com/test/{}.git", name),
+            local_path: repo_path,
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string(), "dev".to_string()],
+            active_branch: Some("main".to_string()),
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: std::collections::HashMap::from([
+                ("main".to_string(), "abc123".to_string()),
+            ]),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: Some(vec!["rust".to_string(), "markdown".to_string()]),
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_enhanced_repository_info() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_config = create_test_enhanced_repo_config("test-repo", &temp_dir);
+        
+        let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
+        
+        assert_eq!(enhanced_info.name, "test-repo");
+        assert_eq!(enhanced_info.url, "https://github.com/test/test-repo.git");
+        assert_eq!(enhanced_info.default_branch, "main");
+        assert_eq!(enhanced_info.active_branch, Some("main".to_string()));
+        assert_eq!(enhanced_info.tracked_branches, vec!["main", "dev"]);
+        
+        // Check filesystem status
+        assert!(enhanced_info.filesystem_status.exists);
+        assert!(enhanced_info.filesystem_status.accessible);
+        assert!(enhanced_info.filesystem_status.is_git_repository);
+        assert!(enhanced_info.filesystem_status.total_files.unwrap() >= 3);
+        
+        // Check file extensions
+        assert!(!enhanced_info.file_extensions.is_empty());
+        let rust_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "rs");
+        assert!(rust_ext.is_some());
+        assert_eq!(rust_ext.unwrap().count, 1);
+        
+        // Check sync status
+        assert_eq!(enhanced_info.sync_status.state, SyncState::Unknown); // Since git status might not match
+        assert!(enhanced_info.sync_status.last_synced_commits.contains_key("main"));
+        
+        // Check other fields
+        assert_eq!(enhanced_info.indexed_languages, Some(vec!["rust".to_string(), "markdown".to_string()]));
+        assert!(!enhanced_info.added_as_local_path);
+        assert_eq!(enhanced_info.tenant_id, Some("test-tenant".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_enhanced_repository_list() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo1 = create_test_enhanced_repo_config("repo1", &temp_dir);
+        let repo2 = create_test_enhanced_repo_config("repo2", &temp_dir);
+        
+        let config = AppConfig {
+            repositories: vec![repo1, repo2],
+            active_repository: Some("repo1".to_string()),
+            ..Default::default()
+        };
+        
+        let enhanced_list = get_enhanced_repository_list(&config).await.unwrap();
+        
+        assert_eq!(enhanced_list.total_count, 2);
+        assert_eq!(enhanced_list.active_repository, Some("repo1".to_string()));
+        assert_eq!(enhanced_list.repositories.len(), 2);
+        
+        // Check summary statistics
+        assert_eq!(enhanced_list.summary.existing_count, 2);
+        assert!(enhanced_list.summary.total_files >= 6); // 3 files per repo
+        assert!(!enhanced_list.summary.common_extensions.is_empty());
+        
+        // Check that repositories are properly enhanced
+        let repo1_info = enhanced_list.repositories.iter()
+            .find(|r| r.name == "repo1")
+            .unwrap();
+        assert!(repo1_info.filesystem_status.exists);
+        assert!(!repo1_info.file_extensions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_info_with_nonexistent_repo() {
+        let nonexistent_path = std::path::PathBuf::from("/nonexistent/path");
+        let repo_config = RepositoryConfig {
+            name: "nonexistent".to_string(),
+            url: "https://github.com/test/nonexistent.git".to_string(),
+            local_path: nonexistent_path,
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            active_branch: Some("main".to_string()),
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: std::collections::HashMap::new(),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        };
+        
+        let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
+        
+        assert_eq!(enhanced_info.name, "nonexistent");
+        assert!(!enhanced_info.filesystem_status.exists);
+        assert!(!enhanced_info.filesystem_status.accessible);
+        assert!(!enhanced_info.filesystem_status.is_git_repository);
+        assert_eq!(enhanced_info.filesystem_status.total_files, None);
+        assert_eq!(enhanced_info.git_status, None);
+        assert_eq!(enhanced_info.sync_status.state, SyncState::NeverSynced);
+        assert!(enhanced_info.file_extensions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_file_extension_statistics() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().join("test-extensions");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        // Create files with different extensions
+        fs::write(repo_path.join("file1.rs"), "fn main() {}").unwrap();
+        fs::write(repo_path.join("file2.rs"), "struct Test {}").unwrap();
+        fs::write(repo_path.join("file1.py"), "def main(): pass").unwrap();
+        fs::write(repo_path.join("README.md"), "# Test").unwrap();
+        fs::write(repo_path.join("config.json"), "{}").unwrap();
+        fs::write(repo_path.join("no_extension"), "content").unwrap();
+        
+        let repo_config = RepositoryConfig {
+            name: "test-extensions".to_string(),
+            url: "https://github.com/test/test-extensions.git".to_string(),
+            local_path: repo_path,
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            active_branch: Some("main".to_string()),
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: std::collections::HashMap::new(),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        };
+        
+        let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
+        
+        // Check file extension statistics
+        assert!(!enhanced_info.file_extensions.is_empty());
+        
+        // Find rust files (should be most common with 2 files)
+        let rust_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "rs")
+            .unwrap();
+        assert_eq!(rust_ext.count, 2);
+        
+        // Check other extensions exist
+        let py_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "py");
+        assert!(py_ext.is_some());
+        assert_eq!(py_ext.unwrap().count, 1);
+        
+        let md_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "md");
+        assert!(md_ext.is_some());
+        
+        let json_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "json");
+        assert!(json_ext.is_some());
+        
+        let no_ext = enhanced_info.file_extensions.iter()
+            .find(|ext| ext.extension == "no_extension");
+        assert!(no_ext.is_some());
+    }
+} 

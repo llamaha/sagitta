@@ -278,7 +278,7 @@ mod integration_tests {
         let list_result = list_tool.execute(json!({})).await.unwrap();
         match list_result {
             ToolResult::Success(data) => {
-                let count = data.get("count").unwrap().as_u64().unwrap();
+                let count = data.get("total_count").unwrap().as_u64().unwrap();
                 assert_eq!(count, 0, "Should start with no repositories");
             }
             ToolResult::Error { .. } => {
@@ -292,10 +292,31 @@ mod integration_tests {
             "local_path": fake_repo_path.to_string_lossy()
         });
         
-        let add_result = add_tool.execute(add_params).await.unwrap();
-        // Should fail due to uninitialized client, but that's expected in unit tests
+        let add_result = add_tool.execute(add_params).await;
+        match add_result {
+            Ok(ToolResult::Success(data)) => {
+                // This path might be hit if the test environment changes or if add succeeds unexpectedly
+                println!("Add repository unexpectedly succeeded: {:?}", data);
+                // Optionally, assert that the config was updated if success was not expected but happened
+                let config_guard = {
+                    let manager = repo_manager.lock().await;
+                    manager.get_config().lock().await.clone()
+                };
+                let repo_exists = config_guard.repositories.iter().any(|r| r.name == "lifecycle-test-repo");
+                assert!(repo_exists, "Repository should be added to config if add operation succeeded");
+            }
+            Ok(ToolResult::Error { error }) => {
+                // Expected path due to uninitialized client/embedding handler in this test setup
+                println!("Add repository failed as expected: {}", error);
+                assert!(error.contains("not initialized") || error.contains("Failed to add") || error.contains("Qdrant client") || error.contains("embedding handler"));
+            }
+            Err(e) => {
+                // Tool execution itself failed before producing a ToolResult
+                panic!("AddRepositoryTool execution failed: {}", e);
+            }
+        }
         
-        // Step 3: Try to remove the repository (should fail since it wasn't actually added)
+        // Step 3: Try to remove the repository (should fail since it wasn't actually added if the above error path was taken)
         let remove_params = json!({
             "name": "lifecycle-test-repo",
             "delete_local_files": false

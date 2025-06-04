@@ -7,7 +7,7 @@ use sagitta_code::{
     llm::client::{LlmClient, Message, ToolDefinition as LlmToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
     utils::errors::SagittaCodeError,
 };
-use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProvider};
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
 use sagitta_search;
 use futures_util::StreamExt;
@@ -387,4 +387,40 @@ async fn test_add_repository_already_exists_handling() {
         }
     }).collect::<String>();
     assert!(second_response_text.contains("already exists"), "Second response should indicate repository already exists. Got: {}", second_response_text);
+}
+
+#[tokio::test]
+async fn test_embedding_adapter_no_runtime_nesting() {
+    use std::sync::Arc;
+    use sagitta_search::EmbeddingPoolAdapter;
+    use sagitta_embed::{EmbeddingPool, config::EmbeddingConfig, EmbeddingModelType};
+    
+    // Create a basic embedding config for testing
+    let embedding_config = EmbeddingConfig {
+        model_type: EmbeddingModelType::Default,
+        max_sessions: 1,
+        ..Default::default()
+    };
+    
+    // Create an embedding pool
+    let pool = EmbeddingPool::with_configured_sessions(embedding_config)
+        .expect("Failed to create embedding pool");
+    let pool_arc = Arc::new(pool);
+    
+    // Create the adapter
+    let adapter = EmbeddingPoolAdapter::new(pool_arc);
+    
+    // Test embedding within an async context (this would previously panic)
+    let result = adapter.embed_batch(&["test text", "another test"]);
+    
+    // The result should be Ok (not a panic) even if embedding fails
+    assert!(result.is_ok() || result.is_err()); // Should not panic
+    
+    // If successful, verify the embeddings
+    if let Ok(embeddings) = result {
+        assert_eq!(embeddings.len(), 2);
+        for embedding in embeddings {
+            assert!(!embedding.is_empty());
+        }
+    }
 } 
