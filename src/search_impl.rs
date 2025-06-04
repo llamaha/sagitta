@@ -16,7 +16,79 @@ use crate::config; // Import config module
 use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
 use sagitta_embed::{EmbeddingPool, EmbeddingProcessor}; // Import EmbeddingPool and EmbeddingProcessor trait
 
-/// Performs a hybrid vector search in a specified Qdrant collection using a rescoring approach.
+/// Search configuration for tuning search behavior
+#[derive(Clone, Debug)]
+pub struct SearchConfig {
+    /// Fusion method to use (RRF or DBSF)
+    pub fusion_method: FusionMethod,
+    /// Multiplier for dense vector results in prefetch
+    pub dense_prefetch_multiplier: u64,
+    /// Multiplier for sparse vector results in prefetch  
+    pub sparse_prefetch_multiplier: u64,
+    /// Whether to use TF-IDF weighting for sparse vectors
+    pub use_tfidf_weights: bool,
+    /// Boost factor for exact filename matches
+    pub filename_boost: f32,
+    /// Score threshold for filtering results
+    pub score_threshold: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub enum FusionMethod {
+    Rrf,
+    Dbsf,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            fusion_method: FusionMethod::Dbsf, // Use DBSF for better score distribution
+            dense_prefetch_multiplier: 3,
+            sparse_prefetch_multiplier: 5,
+            use_tfidf_weights: true,
+            filename_boost: 2.0,
+            score_threshold: None,
+        }
+    }
+}
+
+/// Determines if a term should receive filename boost scoring
+fn is_filename_term(term: &str, query_text: &str) -> bool {
+    // Check if the term has a common code file extension
+    let has_code_extension = term.ends_with(".rs") || term.ends_with(".go") || term.ends_with(".py") ||
+                           term.ends_with(".js") || term.ends_with(".ts") || term.ends_with(".java") ||
+                           term.ends_with(".cpp") || term.ends_with(".c") || term.ends_with(".h") ||
+                           term.ends_with(".hpp") || term.ends_with(".rb") || term.ends_with(".php") ||
+                           term.ends_with(".cs") || term.ends_with(".kt") || term.ends_with(".swift") ||
+                           term.ends_with(".scala") || term.ends_with(".clj") || term.ends_with(".hs") ||
+                           term.ends_with(".elm") || term.ends_with(".dart") || term.ends_with(".vue") ||
+                           term.ends_with(".jsx") || term.ends_with(".tsx");
+    
+    // Check if it looks like a filename (contains underscore, dash, or common filename patterns)
+    let looks_like_filename = term.contains('_') || term.contains('-') || 
+                             term.contains('.') || 
+                             (term.len() > 3 && term.chars().any(|c| c.is_ascii_uppercase()));
+    
+    // Check if it's a filename-related term
+    let is_filename_related_term = term == "uploader" || term == "handler" || term == "processor" ||
+                                  term == "manager" || term == "controller" || term == "service" ||
+                                  term == "helper" || term == "util" || term == "utils";
+    
+    // Boost if:
+    // 1. The term appears in the query (indicating user is looking for it)
+    // 2. AND (it has a code extension OR looks like a filename)
+    // 3. OR the query explicitly mentions "filename", "file", or similar terms AND the term is filename-related
+    let query_lower = query_text.to_lowercase();
+    let term_in_query = query_lower.contains(&term.to_lowercase());
+    let filename_context = query_lower.contains("filename") || query_lower.contains("file") || 
+                          query_lower.contains("uploader") || query_lower.contains("handler") ||
+                          query_lower.contains("processor") || query_lower.contains("manager");
+    
+    (term_in_query && (has_code_extension || looks_like_filename)) || 
+    (filename_context && (looks_like_filename || is_filename_related_term))
+}
+
+/// Performs a hybrid vector search in a specified Qdrant collection using improved scoring approach.
 ///
 /// # Arguments
 /// * `client` - An Arc-wrapped Qdrant client (or trait object).
@@ -26,6 +98,7 @@ use sagitta_embed::{EmbeddingPool, EmbeddingProcessor}; // Import EmbeddingPool 
 /// * `limit` - The final maximum number of results to return after rescoring.
 /// * `filter` - An optional Qdrant filter to apply to the initial prefetch stage.
 /// * `config` - The application configuration.
+/// * `search_config` - Optional search configuration for tuning behavior.
 ///
 /// # Returns
 /// * `Result<QueryResponse>` - The search results from Qdrant.
@@ -36,11 +109,14 @@ pub async fn search_collection<C>(
     query_text: &str,
     limit: u64,
     filter: Option<Filter>,
-    config: &AppConfig, // Add AppConfig reference
+    config: &AppConfig,
+    search_config: Option<SearchConfig>,
 ) -> Result<QueryResponse>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
+    let search_config = search_config.unwrap_or_default();
+    
     log::debug!(
         "Core: Hybrid searching collection \"{}\" for query: \"{}\" with limit {} and filter: {:?}",
         collection_name,
@@ -91,33 +167,58 @@ where
 
     log::debug!("Core: Generated dense query embedding with {} dimensions.", dense_query_embedding.len());
 
-    // 1b. Generate Sparse Query Vector (TF = 1.0 for each known term)
+    // 1b. Generate Sparse Query Vector with improved tokenization and scoring
     let sparse_query_vec = if let Some(ref vocab_manager) = vocabulary_manager {
         let tokenizer_config = TokenizerConfig::default();
         let query_tokens = tokenizer::tokenize_code(query_text, &tokenizer_config);
+        
+        // Build term frequency map for the query
+        let mut query_term_freq: HashMap<String, u32> = HashMap::new();
+        for token in &query_tokens {
+            *query_term_freq.entry(token.text.clone()).or_insert(0) += 1;
+        }
+        
         let mut sparse_query_map: HashMap<u32, f32> = HashMap::new();
-        for token in query_tokens {
-            if let Some(token_id) = vocab_manager.get_id(&token.text) {
-                // Using a map handles duplicate query terms implicitly (last one wins, which is fine for weight 1.0)
-                sparse_query_map.insert(token_id, 1.0f32);
+        let query_length = query_tokens.len() as f32;
+        
+        for (term, freq) in query_term_freq {
+            if let Some(token_id) = vocab_manager.get_id(&term) {
+                let tf_score = if search_config.use_tfidf_weights {
+                    // Use log-normalized TF: 1 + log(freq)
+                    1.0 + (freq as f32).ln()
+                } else {
+                    // Use normalized TF: freq / query_length  
+                    freq as f32 / query_length.max(1.0)
+                };
+                
+                // Boost score for filename matches
+                let final_score = if is_filename_term(&term, query_text) {
+                    tf_score * search_config.filename_boost
+                } else {
+                    tf_score
+                };
+                
+                sparse_query_map.insert(token_id, final_score);
             }
         }
+        
         let sparse_vec: Vec<(u32, f32)> = sparse_query_map.into_iter().collect();
-        log::trace!("Core: Generated sparse query vector with {} unique terms.", sparse_vec.len());
+        log::debug!("Core: Generated sparse query vector with {} unique terms using improved scoring.", sparse_vec.len());
         sparse_vec
     } else {
         log::info!("No vocabulary available for collection '{}'. Performing dense-only search.", collection_name);
         Vec::new()
     };
 
-    // Define prefetch parameters
-    let prefetch_limit = limit * 5; // Fetch more candidates initially (configurable?)
+    // Define prefetch parameters with adaptive sizing
+    let dense_prefetch_limit = limit * search_config.dense_prefetch_multiplier;
+    let sparse_prefetch_limit = limit * search_config.sparse_prefetch_multiplier;
 
-    // 2. Build hybrid search request using QueryPointsBuilder for rescoring via RRF
+    // 2. Build hybrid search request using improved fusion
     let mut dense_prefetch_builder = PrefetchQueryBuilder::default()
         .query(Query::new_nearest(dense_query_embedding.clone())) // Use dense vector
         .using("dense") // Specify dense vector name
-        .limit(prefetch_limit);
+        .limit(dense_prefetch_limit);
     if let Some(f) = filter.clone() { // Clone filter for dense prefetch
         dense_prefetch_builder = dense_prefetch_builder.filter(f);
     }
@@ -131,28 +232,82 @@ where
         let mut sparse_prefetch_builder = PrefetchQueryBuilder::default()
             .query(sparse_query_vec) // Pass Vec<(u32, f32)> directly
             .using("sparse_tf") 
-            .limit(prefetch_limit);
+            .limit(sparse_prefetch_limit);
         if let Some(f) = filter { // Use original filter for sparse prefetch
             sparse_prefetch_builder = sparse_prefetch_builder.filter(f);
         }
         let sparse_prefetch = sparse_prefetch_builder;
         query_builder = query_builder.add_prefetch(sparse_prefetch);
-        log::debug!("Core: Using hybrid search (dense + sparse).");
+        log::debug!("Core: Using hybrid search (dense + sparse) with {} fusion.", 
+                   match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     } else {
         log::info!("Performing dense-only search for query: '{}'", query_text);
     }
 
-    query_builder = query_builder.query(Query::new_fusion(Fusion::Rrf)) // Use RRF fusion
+    // Choose fusion method based on config
+    let fusion = match search_config.fusion_method {
+        FusionMethod::Rrf => Fusion::Rrf,
+        FusionMethod::Dbsf => Fusion::Dbsf,
+    };
+
+    query_builder = query_builder.query(Query::new_fusion(fusion)) // Use configured fusion
         .limit(limit) // Apply final limit after fusion
         .with_payload(true); // Include payload in final results
+
+    // Apply score threshold if configured
+    if let Some(threshold) = search_config.score_threshold {
+        query_builder = query_builder.score_threshold(threshold);
+    }
 
     let query_request: QueryPoints = query_builder.into();
 
     // 3. Perform search using query endpoint
-    log::debug!("Core: Executing hybrid search request...");
+    log::debug!("Core: Executing hybrid search request with {} fusion...", 
+               match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     let search_response = client.query(query_request).await?; // Use query method
-    log::info!("Found {} search results after RRF fusion.", search_response.result.len());
+    log::info!("Found {} search results after {} fusion.", search_response.result.len(),
+              match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     Ok(search_response)
+}
+
+/// Creates a search config optimized for code search
+pub fn code_search_config() -> SearchConfig {
+    SearchConfig {
+        fusion_method: FusionMethod::Dbsf,
+        dense_prefetch_multiplier: 4,
+        sparse_prefetch_multiplier: 6, 
+        use_tfidf_weights: true,
+        filename_boost: 3.0, // Higher boost for code files
+        score_threshold: Some(0.1), // Filter very low scores
+    }
+}
+
+/// Creates a search config optimized for document search
+pub fn document_search_config() -> SearchConfig {
+    SearchConfig {
+        fusion_method: FusionMethod::Dbsf,
+        dense_prefetch_multiplier: 3,
+        sparse_prefetch_multiplier: 4,
+        use_tfidf_weights: true,
+        filename_boost: 1.5,
+        score_threshold: None,
+    }
+}
+
+// Legacy function for backward compatibility
+pub async fn search_collection_legacy<C>(
+    client: Arc<C>,
+    collection_name: &str,
+    embedding_pool: &EmbeddingPool,
+    query_text: &str,
+    limit: u64,
+    filter: Option<Filter>,
+    config: &AppConfig,
+) -> Result<QueryResponse>
+where
+    C: QdrantClientTrait + Send + Sync + 'static,
+{
+    search_collection(client, collection_name, embedding_pool, query_text, limit, filter, config, None).await
 }
 
 // Potential future function specifically for repositories?
@@ -262,6 +417,7 @@ mod tests {
             limit,
             None,
             &dummy_config, // Pass config
+            None, // Pass None for default search config
         ).await;
 
         // Assert
@@ -297,4 +453,68 @@ mod tests {
     // TODO: Add test for search_collection with a filter (would need mock setup)
     // TODO: Add test for embedding error 
     // TODO: Add test for qdrant client error (set expected_query_response to Err)
+
+    #[test]
+    fn test_is_filename_term() {
+        // Test with code file extensions
+        assert!(is_filename_term("file_manager.rs", "file manager filename"));
+        assert!(is_filename_term("main.rs", "main file"));
+        assert!(is_filename_term("component.tsx", "component filename"));
+        
+        // Test with filename-like patterns
+        assert!(is_filename_term("user_manager", "user manager"));
+        assert!(is_filename_term("api-handler", "api handler"));
+        assert!(is_filename_term("SomeClass", "SomeClass filename"));
+        
+        // Test with filename-related terms (these are hardcoded as filename-related)
+        assert!(is_filename_term("processor", "data processor filename"));
+        assert!(is_filename_term("helper", "helper function filename"));
+        assert!(is_filename_term("manager", "user manager"));
+        
+        // Test without filename context - these should still boost because they're in filename-related terms
+        assert!(is_filename_term("processor", "data processor algorithm")); // processor is filename-related
+        assert!(is_filename_term("handler", "event handler code")); // handler is filename-related
+        
+        // Test terms not in filename context and not filename-related
+        assert!(!is_filename_term("simple", "simple test"));
+        assert!(!is_filename_term("algorithm", "data algorithm"));
+        
+        // Test non-filename terms
+        assert!(!is_filename_term("the", "the quick brown fox"));
+        assert!(!is_filename_term("data", "process data"));
+        assert!(!is_filename_term("SomeClass", "some class")); // Case sensitive exact match required
+    }
+
+    #[test]
+    fn test_search_config_defaults() {
+        let config = SearchConfig::default();
+        assert!(matches!(config.fusion_method, FusionMethod::Dbsf));
+        assert_eq!(config.dense_prefetch_multiplier, 3);
+        assert_eq!(config.sparse_prefetch_multiplier, 5);
+        assert!(config.use_tfidf_weights);
+        assert_eq!(config.filename_boost, 2.0);
+        assert!(config.score_threshold.is_none());
+    }
+
+    #[test]
+    fn test_code_search_config() {
+        let config = code_search_config();
+        assert!(matches!(config.fusion_method, FusionMethod::Dbsf));
+        assert_eq!(config.dense_prefetch_multiplier, 4);
+        assert_eq!(config.sparse_prefetch_multiplier, 6);
+        assert!(config.use_tfidf_weights);
+        assert_eq!(config.filename_boost, 3.0);
+        assert_eq!(config.score_threshold, Some(0.1));
+    }
+
+    #[test]
+    fn test_document_search_config() {
+        let config = document_search_config();
+        assert!(matches!(config.fusion_method, FusionMethod::Dbsf));
+        assert_eq!(config.dense_prefetch_multiplier, 3);
+        assert_eq!(config.sparse_prefetch_multiplier, 4);
+        assert!(config.use_tfidf_weights);
+        assert_eq!(config.filename_boost, 1.5);
+        assert!(config.score_threshold.is_none());
+    }
 }

@@ -129,6 +129,7 @@ where
         args.limit,
         Some(search_filter),
         config,
+        None,
     ).await;
 
     let search_response = match search_response_result {

@@ -1794,4 +1794,311 @@ mod tests {
         assert!(config.monitoring_config.enable_metrics_export);
         assert_eq!(config.monitoring_config.metrics_export_endpoint, Some("http://localhost:9090".to_string()));
     }
+
+    #[test]
+    fn test_execution_provider_display_and_default() {
+        assert_eq!(ExecutionProvider::default(), ExecutionProvider::Auto);
+        
+        // Test enum values exist
+        let _cuda = ExecutionProvider::Cuda;
+        let _cpu = ExecutionProvider::Cpu;
+        let _directml = ExecutionProvider::DirectML;
+        let _coreml = ExecutionProvider::CoreML;
+        let _auto = ExecutionProvider::Auto;
+    }
+
+    #[test]
+    fn test_config_validation_edge_cases() {
+        // Test zero max_sessions
+        let mut config = EmbeddingConfig::default();
+        config.max_sessions = 0;
+        assert!(config.validate().is_err());
+
+        // Test zero max_sequence_length
+        config = EmbeddingConfig::default();
+        config.max_sequence_length = 0;
+        assert!(config.validate().is_err());
+
+        // Note: graph_optimization_level is automatically clamped to valid range [0-3]
+        // so validation won't fail for invalid levels - they're just corrected
+    }
+
+    #[test]
+    fn test_config_methods_comprehensive() {
+        let config = EmbeddingConfig::default();
+        
+        // Test getter methods
+        assert_eq!(config.get_embedding_batch_size(), 128); // Default batch size is 128
+        assert_eq!(config.get_embedding_dimension(), 384); // Default dimension
+        
+        // Test should_use_cuda - this checks compile-time feature, not runtime config
+        let cuda_enabled = cfg!(feature = "cuda");
+        assert_eq!(config.should_use_cuda(), cuda_enabled);
+    }
+
+    #[test]
+    fn test_memory_pool_config_methods() {
+        let config = EmbeddingConfig::default()
+            .with_memory_pool(true)
+            .with_max_pool_size(100)
+            .with_max_pool_memory(1024 * 1024)
+            .with_memory_pressure_detection(true)
+            .with_memory_pressure_threshold(0.8);
+        
+        assert!(config.memory_pool_config.enable_pool);
+        assert_eq!(config.memory_pool_config.max_pool_size, 100);
+        assert_eq!(config.memory_pool_config.max_pool_memory_bytes, 1024 * 1024);
+        assert!(config.memory_pool_config.enable_memory_pressure_detection);
+        assert_eq!(config.memory_pool_config.memory_pressure_threshold, 0.8);
+    }
+
+    #[test]
+    fn test_io_binding_config_methods() {
+        let config = EmbeddingConfig::default()
+            .with_io_binding(true)
+            .with_pre_allocated_buffers(true)
+            .with_zero_copy(true)
+            .with_batch_optimization(true)
+            .with_pre_allocated_input_buffers(10)
+            .with_pre_allocated_output_buffers(10);
+        
+        assert!(config.io_binding_config.enable_io_binding);
+        assert!(config.io_binding_config.enable_pre_allocated_buffers);
+        assert!(config.io_binding_config.enable_zero_copy);
+        assert!(config.io_binding_config.enable_batch_optimization);
+        assert_eq!(config.io_binding_config.pre_allocated_input_buffers, 10);
+        assert_eq!(config.io_binding_config.pre_allocated_output_buffers, 10);
+    }
+
+    #[test]
+    fn test_dynamic_batch_config_methods() {
+        let config = EmbeddingConfig::default()
+            .with_dynamic_batching(true)
+            .with_min_batch_size(1)
+            .with_max_batch_size(128)
+            .with_target_latency(50)
+            .with_memory_prediction(true)
+            .with_throughput_optimization(true);
+        
+        assert!(config.dynamic_batch_config.enable_dynamic_batching);
+        assert_eq!(config.dynamic_batch_config.min_batch_size, 1);
+        assert_eq!(config.dynamic_batch_config.max_batch_size, 128);
+        assert_eq!(config.dynamic_batch_config.target_latency_ms, 50);
+        assert!(config.dynamic_batch_config.enable_memory_prediction);
+        assert!(config.dynamic_batch_config.optimize_for_throughput);
+    }
+
+    #[test]
+    fn test_execution_provider_methods() {
+        let config = EmbeddingConfig::default()
+            .with_execution_providers(vec![ExecutionProvider::Cuda, ExecutionProvider::Cpu])
+            .add_execution_provider(ExecutionProvider::CoreML)
+            .with_provider_auto_selection(true);
+        
+        assert_eq!(config.execution_providers.len(), 3);
+        assert!(config.execution_providers.contains(&ExecutionProvider::Cuda));
+        assert!(config.execution_providers.contains(&ExecutionProvider::Cpu));
+        assert!(config.execution_providers.contains(&ExecutionProvider::CoreML));
+        assert!(config.enable_provider_auto_selection);
+    }
+
+    #[test]
+    fn test_hardware_optimization_methods() {
+        let config = EmbeddingConfig::default()
+            .with_cuda_memory_streams(true)
+            .with_hardware_detection(true);
+        
+        assert!(config.enable_cuda_memory_streams);
+        assert!(config.enable_hardware_detection);
+    }
+
+    #[test]
+    fn test_builder_alias_methods() {
+        let config = EmbeddingConfigBuilder::new()
+            .onnx_model("/path/to/model.onnx")
+            .onnx_tokenizer("/path/to/tokenizer.json")
+            .build_unchecked();
+        
+        assert_eq!(config.onnx_model_path, Some(PathBuf::from("/path/to/model.onnx")));
+        assert_eq!(config.onnx_tokenizer_path, Some(PathBuf::from("/path/to/tokenizer.json")));
+    }
+
+    #[test]
+    fn test_performance_threshold_modifications() {
+        let config = EmbeddingConfig::default()
+            .with_monitoring_enabled(25.0, 30.0);
+        
+        assert_eq!(config.monitoring_config.performance_thresholds.max_latency_ms, 25.0);
+        assert_eq!(config.monitoring_config.performance_thresholds.min_throughput_ops_per_sec, 30.0);
+        
+        // Verify other thresholds are still at defaults
+        assert_eq!(config.monitoring_config.performance_thresholds.max_memory_bytes, 1_000_000_000);
+        assert_eq!(config.monitoring_config.performance_thresholds.max_cpu_usage, 0.8);
+        assert_eq!(config.monitoring_config.performance_thresholds.max_gpu_memory_usage, 0.9);
+    }
+
+    #[test]
+    fn test_profiling_config_comprehensive() {
+        let config = EmbeddingConfig::default()
+            .with_profiling_enabled("/tmp/profile.json");
+        
+        assert!(config.profiling_config.enable_profiling);
+        assert_eq!(config.profiling_config.profile_file, Some(PathBuf::from("/tmp/profile.json")));
+        assert!(config.profiling_config.enable_custom_metrics);
+        assert!(config.profiling_config.enable_session_stats);
+        assert!(config.profiling_config.enable_memory_tracking);
+        assert!(config.profiling_config.enable_throughput_monitoring);
+        assert!(config.profiling_config.enable_latency_monitoring);
+        assert_eq!(config.profiling_config.sampling_rate, 1.0);
+        assert!(config.profiling_config.enable_operator_profiling);
+    }
+
+    #[test]
+    fn test_cuda_config_comprehensive() {
+        let config = EmbeddingConfig::default()
+            .with_cuda_optimized(1, Some(4.0));
+        
+        assert!(config.cuda_config.enable);
+        assert_eq!(config.cuda_config.device_id, 1);
+        assert_eq!(config.cuda_config.memory_limit, Some(4_000_000_000));
+        assert_eq!(config.cuda_config.arena_extend_strategy, CudaArenaExtendStrategy::NextPowerOfTwo);
+        assert!(config.cuda_config.enable_cuda_graph);
+        assert!(config.cuda_config.enable_tensorrt);
+        assert_eq!(config.cuda_config.cudnn_conv_algo_search, CudaConvAlgorithmSearch::Exhaustive);
+        assert!(config.cuda_config.enable_memory_pool);
+        assert!(config.cuda_config.enable_memory_optimization);
+    }
+
+    #[test]
+    fn test_config_struct_completeness() {
+        // Test that all struct fields are accessible
+        let config = EmbeddingConfig::default();
+        
+        // Basic fields
+        let _ = config.model_type;
+        let _ = config.onnx_model_path;
+        let _ = config.onnx_tokenizer_path;
+        let _ = config.max_sessions;
+        let _ = config.max_sequence_length;
+        let _ = config.expected_dimension;
+        let _ = config.session_timeout_seconds;
+        let _ = config.enable_session_cleanup;
+        let _ = config.tenant_id;
+        let _ = config.embedding_batch_size;
+        
+        // Performance fields
+        let _ = config.intra_op_num_threads;
+        let _ = config.inter_op_num_threads;
+        let _ = config.enable_parallel_execution;
+        let _ = config.graph_optimization_level;
+        let _ = config.enable_memory_pattern;
+        let _ = config.enable_deterministic_compute;
+        let _ = config.profiling_file_path;
+        let _ = config.cuda_memory_limit;
+        let _ = config.enable_cpu_arena;
+        
+        // Advanced fields
+        let _ = config.io_binding_config;
+        let _ = config.memory_pool_config;
+        let _ = config.execution_providers;
+        let _ = config.enable_provider_auto_selection;
+        let _ = config.dynamic_batch_config;
+        let _ = config.enable_cuda_memory_streams;
+        let _ = config.enable_hardware_detection;
+        
+        // Platform specific
+        let _ = config.cuda_config;
+        let _ = config.cpu_config;
+        
+        // Monitoring
+        let _ = config.profiling_config;
+        let _ = config.monitoring_config;
+    }
+
+    #[test]
+    fn test_enum_completeness() {
+        // Test all enum variants
+        let _exec_providers = [
+            ExecutionProvider::Cuda,
+            ExecutionProvider::Cpu,
+            ExecutionProvider::DirectML,
+            ExecutionProvider::CoreML,
+            ExecutionProvider::Auto,
+        ];
+        
+        let _cuda_arena_strategies = [
+            CudaArenaExtendStrategy::NextPowerOfTwo,
+            CudaArenaExtendStrategy::SameAsRequested,
+        ];
+        
+        let _cuda_conv_algorithms = [
+            CudaConvAlgorithmSearch::Exhaustive,
+            CudaConvAlgorithmSearch::Heuristic,
+            CudaConvAlgorithmSearch::Default,
+        ];
+        
+        let _cpu_optimization_levels = [
+            CpuOptimizationLevel::Basic,
+            CpuOptimizationLevel::Standard,
+            CpuOptimizationLevel::Aggressive,
+        ];
+    }
+
+    #[test]
+    fn test_config_builder_pattern_comprehensive() {
+        // Test builder pattern with all possible configurations
+        let config = EmbeddingConfigBuilder::new()
+            .model_type(EmbeddingModelType::Onnx)
+            .onnx_model_path("/path/to/model.onnx")
+            .onnx_tokenizer_path("/path/to/tokenizer.json")
+            .max_sessions(16)
+            .max_sequence_length(1024)
+            .expected_dimension(768)
+            .tenant_id("test-tenant")
+            .embedding_batch_size(64)
+            .with_intra_op_threads(8)
+            .with_inter_op_threads(4)
+            .with_parallel_execution(true)
+            .with_graph_optimization_level(2)
+            .with_memory_pattern(false)
+            .with_deterministic_compute(true)
+            .with_profiling("/tmp/profile.json")
+            .with_io_binding(true)
+            .with_cuda_memory_limit(1024 * 1024 * 1024)
+            .with_cpu_arena(true)
+            .build_unchecked();
+        
+        // Verify all settings were applied
+        assert_eq!(config.model_type, EmbeddingModelType::Onnx);
+        assert_eq!(config.max_sessions, 16);
+        assert_eq!(config.max_sequence_length, 1024);
+        assert_eq!(config.expected_dimension, Some(768));
+        assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
+        assert_eq!(config.embedding_batch_size, Some(64));
+        assert_eq!(config.intra_op_num_threads, Some(8));
+        assert_eq!(config.inter_op_num_threads, Some(4));
+        assert!(config.enable_parallel_execution);
+        assert_eq!(config.graph_optimization_level, 2);
+        assert!(!config.enable_memory_pattern);
+        assert!(config.enable_deterministic_compute);
+        assert_eq!(config.profiling_file_path, Some(PathBuf::from("/tmp/profile.json")));
+        assert!(config.io_binding_config.enable_io_binding);
+        assert_eq!(config.cuda_memory_limit, Some(1024 * 1024 * 1024));
+        assert!(config.enable_cpu_arena);
+    }
+
+    #[test]
+    fn test_default_impls_coverage() {
+        // Test all Default implementations
+        let _memory_pool = MemoryPoolConfig::default();
+        let _io_binding = IOBindingConfig::default();
+        let _dynamic_batch = DynamicBatchConfig::default();
+        let _embedding_config = EmbeddingConfig::default();
+        let _cuda_config = CudaExecutionProviderConfig::default();
+        let _cpu_config = CpuExecutionProviderConfig::default();
+        let _profiling_config = ProfilingConfig::default();
+        let _monitoring_config = MonitoringConfig::default();
+        let _performance_thresholds = PerformanceThresholds::default();
+        let _execution_provider = ExecutionProvider::default();
+    }
 } 

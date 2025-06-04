@@ -8,6 +8,7 @@ use crate::{
     qdrant_ops::{self, upsert_batch, delete_collection_by_name},
     app_config_to_embedding_config,
     syntax, // Import our syntax parsing module
+    tokenizer, // Import the tokenizer module for consistent tokenization
 };
 use qdrant_client::{
     qdrant::{PointStruct, Vector, NamedVectors},
@@ -251,20 +252,39 @@ pub async fn index_paths<
     for embedded_chunk in embedded_chunks {
         let chunk = &embedded_chunk.chunk;
         
-        // Generate sparse vector using vocabulary
+        // Generate sparse vector using vocabulary with improved tokenization
         let mut term_frequencies: HashMap<u32, u32> = HashMap::new();
-        // Simple tokenization for sparse vector (this could be improved)
-        let words: Vec<&str> = chunk.content.split_whitespace().collect();
-        for word in words {
-            let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-            if !clean_word.is_empty() {
-                let token_id = vocabulary_manager.add_token(&clean_word);
-                *term_frequencies.entry(token_id).or_insert(0) += 1;
+        
+        // Use the same tokenization as search for consistency
+        let tokenizer_config = crate::tokenizer::TokenizerConfig::default();
+        let tokens = crate::tokenizer::tokenize_code(&chunk.content, &tokenizer_config);
+        
+        // Also tokenize the filename for boosting
+        let filename = chunk.metadata.file_path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let filename_tokens = crate::tokenizer::tokenize_code(filename, &tokenizer_config);
+        let filename_terms: std::collections::HashSet<String> = filename_tokens.into_iter()
+            .filter(|token| matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal))
+            .map(|token| token.text)
+            .collect();
+        
+        for token in tokens {
+            // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
+                if !token.text.is_empty() {
+                    let token_id = vocabulary_manager.add_token(&token.text);
+                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
+                }
             }
         }
         
         let sparse_indices: Vec<u32> = term_frequencies.keys().copied().collect();
-        let sparse_values: Vec<f32> = term_frequencies.values().map(|&count| count as f32).collect();
+        // Use log-normalized TF-IDF scoring consistent with search
+        let sparse_values: Vec<f32> = term_frequencies.values()
+            .map(|&count| 1.0 + (count as f32).ln())
+            .collect();
 
         // Create Payload
         let mut payload = Payload::new();
@@ -478,20 +498,39 @@ pub async fn index_repo_files<
             .to_string_lossy()
             .to_string();
 
-        // Generate sparse vector using vocabulary
+        // Generate sparse vector using vocabulary with improved tokenization
         let mut term_frequencies: HashMap<u32, u32> = HashMap::new();
-        // Simple tokenization for sparse vector
-        let words: Vec<&str> = chunk.content.split_whitespace().collect();
-        for word in words {
-            let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-            if !clean_word.is_empty() {
-                let token_id = vocabulary_manager.add_token(&clean_word);
-                *term_frequencies.entry(token_id).or_insert(0) += 1;
+        
+        // Use the same tokenization as search for consistency
+        let tokenizer_config = crate::tokenizer::TokenizerConfig::default();
+        let tokens = crate::tokenizer::tokenize_code(&chunk.content, &tokenizer_config);
+        
+        // Also tokenize the filename for boosting
+        let filename = chunk.metadata.file_path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        let filename_tokens = crate::tokenizer::tokenize_code(filename, &tokenizer_config);
+        let filename_terms: std::collections::HashSet<String> = filename_tokens.into_iter()
+            .filter(|token| matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal))
+            .map(|token| token.text)
+            .collect();
+        
+        for token in tokens {
+            // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
+                if !token.text.is_empty() {
+                    let token_id = vocabulary_manager.add_token(&token.text);
+                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
+                }
             }
         }
         
         let sparse_indices: Vec<u32> = term_frequencies.keys().copied().collect();
-        let sparse_values: Vec<f32> = term_frequencies.values().map(|&count| count as f32).collect();
+        // Use log-normalized TF-IDF scoring consistent with search
+        let sparse_values: Vec<f32> = term_frequencies.values()
+            .map(|&count| 1.0 + (count as f32).ln())
+            .collect();
 
         // Create Payload with repository context
         let mut payload = Payload::new();

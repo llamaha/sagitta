@@ -153,6 +153,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         limit,
         filter,
         &config_read_guard,
+        None,
     )
     .await
     .map_err(|e| {
