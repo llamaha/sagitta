@@ -239,29 +239,140 @@ impl ToolResultFormatter {
     /// Format repository list results
     fn format_repository_list_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
-        result.push_str("📚 Repository List\n\n");
+        result.push_str("📚 Enhanced Repository List\n\n");
         
         if let Some(repos) = value.get("repositories").and_then(|v| v.as_array()) {
+            // Add summary information if available
+            if let Some(summary) = value.get("summary") {
+                result.push_str("**Summary:**\n");
+                if let Some(existing_count) = summary.get("existing_count").and_then(|v| v.as_u64()) {
+                    result.push_str(&format!("   📁 Existing repositories: {}\n", existing_count));
+                }
+                if let Some(needs_sync) = summary.get("needs_sync_count").and_then(|v| v.as_u64()) {
+                    result.push_str(&format!("   🔄 Need syncing: {}\n", needs_sync));
+                }
+                if let Some(dirty_count) = summary.get("dirty_count").and_then(|v| v.as_u64()) {
+                    result.push_str(&format!("   ⚠️  With uncommitted changes: {}\n", dirty_count));
+                }
+                if let Some(total_files) = summary.get("total_files").and_then(|v| v.as_u64()) {
+                    result.push_str(&format!("   📊 Total files: {}\n", total_files));
+                }
+                if let Some(total_size) = summary.get("total_size_bytes").and_then(|v| v.as_u64()) {
+                    result.push_str(&format!("   💾 Total size: {}\n", format_bytes(total_size)));
+                }
+                result.push_str("\n");
+            }
+            
             result.push_str(&format!("**Found {} repositories:**\n\n", repos.len()));
             
             for (i, repo) in repos.iter().enumerate() {
                 if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
                     result.push_str(&format!("{}. **{}**\n", i + 1, name));
                     
+                    // Basic information
                     if let Some(url) = repo.get("url").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   URL: {}\n", url));
+                        result.push_str(&format!("   🔗 URL: {}\n", url));
                     }
                     
-                    if let Some(branch) = repo.get("branch").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   Branch: {}\n", branch));
+                    if let Some(path) = repo.get("local_path").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("   📁 Path: {}\n", path));
                     }
                     
-                    if let Some(status) = repo.get("status").and_then(|v| v.as_str()) {
-                        result.push_str(&format!("   Status: {}\n", status));
+                    // Branch information
+                    if let Some(branch) = repo.get("active_branch").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("   🌿 Branch: {}\n", branch));
+                    }
+                    
+                    // Filesystem status
+                    if let Some(fs_status) = repo.get("filesystem_status") {
+                        let exists = fs_status.get("exists").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let is_git = fs_status.get("is_git_repository").and_then(|v| v.as_bool()).unwrap_or(false);
+                        
+                        let status_text = match (exists, is_git) {
+                            (true, true) => "✅ Git repository",
+                            (true, false) => "📂 Directory (no git)",
+                            (false, _) => "❌ Missing from filesystem",
+                        };
+                        result.push_str(&format!("   📍 Status: {}\n", status_text));
+                        
+                        if let Some(file_count) = fs_status.get("total_files").and_then(|v| v.as_u64()) {
+                            if let Some(size) = fs_status.get("size_bytes").and_then(|v| v.as_u64()) {
+                                result.push_str(&format!("   📊 Files: {} ({})\n", file_count, format_bytes(size)));
+                            } else {
+                                result.push_str(&format!("   📊 Files: {}\n", file_count));
+                            }
+                        }
+                    }
+                    
+                    // Sync status
+                    if let Some(sync_status) = repo.get("sync_status") {
+                        if let Some(state) = sync_status.get("state").and_then(|v| v.as_str()) {
+                            let sync_text = match state {
+                                "UpToDate" => "✅ Up to date",
+                                "NeedsSync" => "🔄 Needs sync",
+                                "NeverSynced" => "❌ Never synced",
+                                _ => "❓ Unknown",
+                            };
+                            result.push_str(&format!("   🔄 Sync: {}\n", sync_text));
+                        }
+                        
+                        if let Some(branches_needing_sync) = sync_status.get("branches_needing_sync").and_then(|v| v.as_array()) {
+                            if !branches_needing_sync.is_empty() {
+                                let branch_names: Vec<String> = branches_needing_sync
+                                    .iter()
+                                    .filter_map(|b| b.as_str().map(|s| s.to_string()))
+                                    .collect();
+                                result.push_str(&format!("   ⚠️  Need sync: {}\n", branch_names.join(", ")));
+                            }
+                        }
+                    }
+                    
+                    // Git status
+                    if let Some(git_status) = repo.get("git_status") {
+                        if let Some(commit) = git_status.get("current_commit").and_then(|v| v.as_str()) {
+                            let short_commit = if commit.len() >= 8 { &commit[..8] } else { commit };
+                            let is_clean = git_status.get("is_clean").and_then(|v| v.as_bool()).unwrap_or(true);
+                            let clean_text = if is_clean { "clean" } else { "dirty" };
+                            result.push_str(&format!("   📍 Commit: {} ({})\n", short_commit, clean_text));
+                        }
+                    }
+                    
+                    // Languages
+                    if let Some(languages) = repo.get("indexed_languages").and_then(|v| v.as_array()) {
+                        if !languages.is_empty() {
+                            let lang_names: Vec<String> = languages
+                                .iter()
+                                .filter_map(|l| l.as_str().map(|s| s.to_string()))
+                                .collect();
+                            result.push_str(&format!("   🔤 Languages: {}\n", lang_names.join(", ")));
+                        }
+                    }
+                    
+                    // File extensions (top 3)
+                    if let Some(extensions) = repo.get("file_extensions").and_then(|v| v.as_array()) {
+                        if !extensions.is_empty() {
+                            let ext_strs: Vec<String> = extensions
+                                .iter()
+                                .take(3)
+                                .filter_map(|ext| {
+                                    let name = ext.get("extension").and_then(|v| v.as_str())?;
+                                    let count = ext.get("count").and_then(|v| v.as_u64())?;
+                                    Some(format!("{} ({})", name, count))
+                                })
+                                .collect();
+                            if !ext_strs.is_empty() {
+                                result.push_str(&format!("   📄 Extensions: {}\n", ext_strs.join(", ")));
+                            }
+                        }
                     }
                     
                     result.push('\n');
                 }
+            }
+            
+            // Active repository
+            if let Some(active) = value.get("active_repository").and_then(|v| v.as_str()) {
+                result.push_str(&format!("**Active Repository:** {}\n", active));
             }
         }
         
@@ -374,5 +485,23 @@ impl ToolResultFormatter {
         }
         
         result
+    }
+}
+
+// Helper function to format bytes
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit_index = 0;
+    
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+    
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
     }
 } 

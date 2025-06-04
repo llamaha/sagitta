@@ -36,18 +36,37 @@ impl RepoPanel {
         let repo_manager_clone = Arc::clone(&self.repo_manager);
 
         tokio::spawn(async move {
-            log::debug!("RepoPanel: Starting background repository refresh...");
-            match repo_manager_clone.lock().await.list_repositories().await {
-                Ok(repositories) => {
+            log::debug!("RepoPanel: Starting background enhanced repository refresh...");
+            
+            // Try to get enhanced repository information first
+            match repo_manager_clone.lock().await.get_enhanced_repository_list().await {
+                Ok(enhanced_list) => {
                     let mut state_guard = state_clone.lock().await;
-                    state_guard.repositories = repositories
+                    state_guard.enhanced_repositories = enhanced_list.repositories
                         .into_iter()
-                        .map(|config| config.into())
+                        .map(|enhanced| enhanced.into())
                         .collect();
-                    log::info!("RepoPanel: Successfully refreshed {} repositories.", state_guard.repositories.len());
+                    state_guard.use_enhanced_repos = true;
+                    log::info!("RepoPanel: Successfully refreshed {} enhanced repositories.", state_guard.enhanced_repositories.len());
                 }
                 Err(e) => {
-                    log::error!("RepoPanel: Failed to refresh repositories: {}", e);
+                    log::warn!("RepoPanel: Failed to get enhanced repository list: {}, falling back to basic list", e);
+                    
+                    // Fallback to basic repository listing
+                    match repo_manager_clone.lock().await.list_repositories().await {
+                        Ok(repositories) => {
+                            let mut state_guard = state_clone.lock().await;
+                            state_guard.repositories = repositories
+                                .into_iter()
+                                .map(|config| config.into())
+                                .collect();
+                            state_guard.use_enhanced_repos = false;
+                            log::info!("RepoPanel: Successfully refreshed {} basic repositories.", state_guard.repositories.len());
+                        }
+                        Err(e) => {
+                            log::error!("RepoPanel: Failed to refresh repositories: {}", e);
+                        }
+                    }
                 }
             }
         });
@@ -104,6 +123,25 @@ impl RepoPanel {
                     
                     // Reset loading flag
                     state_guard.is_loading_repos = false;
+                }
+
+                // Check if we need to load enhanced repositories for the first time
+                if !state_guard.use_enhanced_repos && state_guard.enhanced_repositories.is_empty() && !state_guard.is_loading_repos && !state_guard.initial_load_attempted {
+                    // Mark that we've attempted initial load to prevent infinite loops
+                    state_guard.initial_load_attempted = true;
+                    
+                    // Start initial enhanced repository load
+                    drop(state_guard); // Drop lock before spawning refresh task
+                    let _ = self.refresh_repositories();
+                    
+                    // Re-acquire lock after starting refresh
+                    state_guard = match state_clone.try_lock() {
+                        Ok(guard) => guard,
+                        Err(_) => {
+                            ui.label("State lock contention during initial load...");
+                            return;
+                        }
+                    };
                 }
 
                 self.render_header(ui);

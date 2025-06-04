@@ -235,36 +235,145 @@ pub async fn handle_repository_list(
 
     info!(acting_tenant_id = ?acting_tenant_id, "Determined acting tenant ID for repository list.");
 
-    let repo_infos: Vec<RepositoryInfo> = config_guard
-        .repositories
-        .iter()
-        .filter(|repo_config| {
-            // Repositories MUST have a tenant_id to be listed by a tenanted context.
-            // If acting_tenant_id is None (server not configured with a default + no auth user),
-            // then no tenanted repositories should be listed.
-            match (&acting_tenant_id, &repo_config.tenant_id) {
-                (Some(act_tid), Some(repo_tid)) => act_tid == repo_tid,
-                _ => false, // Deny if acting tenant is None, or repo tenant is None, or they don't match.
+    // Filter repositories by tenant ID first
+    let filtered_config = AppConfig {
+        repositories: config_guard
+            .repositories
+            .iter()
+            .filter(|repo_config| {
+                // Repositories MUST have a tenant_id to be listed by a tenanted context.
+                // If acting_tenant_id is None (server not configured with a default + no auth user),
+                // then no tenanted repositories should be listed.
+                match (&acting_tenant_id, &repo_config.tenant_id) {
+                    (Some(act_tid), Some(repo_tid)) => act_tid == repo_tid,
+                    _ => false, // Deny if acting tenant is None, or repo tenant is None, or they don't match.
+                }
+            })
+            .cloned()
+            .collect(),
+        active_repository: config_guard.active_repository.clone(),
+        ..config_guard.clone()
+    };
+
+    // Drop the read lock before calling async function
+    drop(config_guard);
+
+    // Get enhanced repository listing
+    let enhanced_list = sagitta_search::get_enhanced_repository_list(&filtered_config)
+        .await
+        .map_err(|e| {
+            error!("Failed to get enhanced repository list: {}", e);
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: format!("Failed to get repository list: {}", e),
+                data: None,
             }
-        })
-        .map(|r| RepositoryInfo {
-            name: r.name.clone(),
-            remote: r.url.clone(),
-            description: None, // Consider if description should be part of RepositoryConfig
-            branch: r.active_branch.clone(), // Or target_ref?
-            last_updated: None, // Placeholder, actual update timestamp not tracked here
+        })?;
+
+    // Convert enhanced repositories to RepositoryInfo format for compatibility
+    let repo_infos: Vec<RepositoryInfo> = enhanced_list
+        .repositories
+        .into_iter()
+        .map(|enhanced_repo| {
+            // Determine branch information
+            let branch = enhanced_repo.active_branch
+                .or_else(|| Some(enhanced_repo.default_branch));
+
+            // Create description with enhanced information
+            let mut description_parts = Vec::new();
+            
+            // Add filesystem status
+            if enhanced_repo.filesystem_status.exists {
+                if enhanced_repo.filesystem_status.is_git_repository {
+                    description_parts.push("Git repository".to_string());
+                } else {
+                    description_parts.push("Directory (no git)".to_string());
+                }
+            } else {
+                description_parts.push("Missing from filesystem".to_string());
+            }
+
+            // Add sync status
+            match enhanced_repo.sync_status.state {
+                sagitta_search::SyncState::UpToDate => description_parts.push("synced".to_string()),
+                sagitta_search::SyncState::NeedsSync => description_parts.push("needs sync".to_string()),
+                sagitta_search::SyncState::NeverSynced => description_parts.push("never synced".to_string()),
+                sagitta_search::SyncState::Unknown => description_parts.push("sync status unknown".to_string()),
+            }
+
+            // Add file information
+            if let Some(file_count) = enhanced_repo.filesystem_status.total_files {
+                if let Some(size) = enhanced_repo.filesystem_status.size_bytes {
+                    description_parts.push(format!("{} files ({})", file_count, format_bytes(size)));
+                } else {
+                    description_parts.push(format!("{} files", file_count));
+                }
+            }
+
+            // Add languages
+            if let Some(languages) = &enhanced_repo.indexed_languages {
+                if !languages.is_empty() {
+                    description_parts.push(format!("Languages: {}", languages.join(", ")));
+                }
+            }
+
+            // Add file extensions (top 3)
+            if !enhanced_repo.file_extensions.is_empty() {
+                let top_exts: Vec<String> = enhanced_repo.file_extensions
+                    .iter()
+                    .take(3)
+                    .map(|ext| format!("{} ({})", ext.extension, ext.count))
+                    .collect();
+                description_parts.push(format!("Extensions: {}", top_exts.join(", ")));
+            }
+
+            let description = if description_parts.is_empty() {
+                None
+            } else {
+                Some(description_parts.join(" | "))
+            };
+
+            // TODO: Add last_updated timestamp from enhanced info when available
+            let last_updated = enhanced_repo.last_sync_time
+                .map(|dt| dt.to_rfc3339());
+
+            RepositoryInfo {
+                name: enhanced_repo.name,
+                remote: enhanced_repo.url, // Corrected: enhanced_repo.url is already a String
+                description,
+                branch,
+                last_updated,
+            }
         })
         .collect();
 
     info!(
         user_tenant_id = ?acting_tenant_id,
         listed_repo_count = repo_infos.len(),
-        "Filtered repository list based on tenant ID."
+        "Enhanced repository list generated with comprehensive information."
     );
 
     Ok(RepositoryListResult {
         repositories: repo_infos,
     })
+}
+
+// Helper function to format bytes
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit_index = 0;
+    
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+    
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
+    }
 }
 
 #[instrument(skip(config, qdrant_client), fields(repo_name = %params.name))]

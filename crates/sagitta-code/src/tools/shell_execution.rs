@@ -409,7 +409,23 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use std::fs;
-    
+    use serde_json::json;
+    use tempfile::tempdir;
+    use std::fs::File;
+    use std::io::Write;
+
+    // Helper function to create a ShellExecutionParams for testing
+    fn create_test_params(command: &str) -> ShellExecutionParams {
+        ShellExecutionParams {
+            command: command.to_string(),
+            language: None,
+            working_directory: None,
+            allow_network: None,
+            env_vars: None,
+            timeout_seconds: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_shell_execution_tool_definition() {
         let temp_dir = TempDir::new().unwrap();
@@ -419,20 +435,39 @@ mod tests {
         assert_eq!(definition.name, "shell_execution");
         assert!(!definition.description.is_empty());
         
-        // Check parameters structure
-        let params = &definition.parameters;
-        assert!(params.get("type").is_some());
-        assert!(params.get("properties").is_some());
-        assert!(params.get("required").is_some());
+        let params_schema = &definition.parameters;
+        assert_eq!(params_schema["type"], "object");
         
-        // Check required parameters
-        let required = params.get("required").unwrap().as_array().unwrap();
-        assert!(required.contains(&serde_json::Value::String("command".to_string())));
+        let props = params_schema["properties"].as_object().expect("Properties should be an object");
         
-        // Check properties
-        let properties = params.get("properties").unwrap().as_object().unwrap();
-        assert!(properties.contains_key("command"));
-        assert!(properties.contains_key("language"));
+        assert!(props.contains_key("command"));
+        assert_eq!(props["command"]["type"], "string");
+        assert!(props["command"]["description"].is_string());
+
+        assert!(props.contains_key("language"));
+        assert_eq!(props["language"]["type"], "string");
+        assert!(props["language"]["description"].is_string());
+        assert_eq!(props["language"]["default"], "default");
+
+        assert!(props.contains_key("working_directory"));
+        assert_eq!(props["working_directory"]["type"], "string");
+        assert!(props["working_directory"]["description"].is_string());
+
+        assert!(props.contains_key("allow_network"));
+        assert_eq!(props["allow_network"]["type"], "boolean");
+        assert!(props["allow_network"]["description"].is_string());
+        assert_eq!(props["allow_network"]["default"], false);
+
+        assert!(props.contains_key("env_vars"));
+        assert_eq!(props["env_vars"]["type"], "object");
+        assert!(props["env_vars"]["description"].is_string());
+
+        assert!(props.contains_key("timeout_seconds"));
+        assert_eq!(props["timeout_seconds"]["type"], "number");
+        assert!(props["timeout_seconds"]["description"].is_string());
+        
+        let required = params_schema["required"].as_array().expect("Required should be an array");
+        assert!(required.contains(&json!("command")));
     }
     
     #[tokio::test]
@@ -465,6 +500,76 @@ mod tests {
         assert_eq!(unknown_config.image, "megabytelabs/devcontainer:latest");
     }
     
+    #[test]
+    fn test_language_containers_get_config_specific_language() {
+        let lc = LanguageContainers::default();
+        let rust_config = lc.get_config("rust");
+        assert_eq!(rust_config.image, "rust:1.75");
+        assert!(lc.configs.contains_key("python")); // Check python is present
+        let python_config = lc.get_config("python");
+        assert_eq!(python_config.image, "python:3.11");
+    }
+
+    #[test]
+    fn test_language_containers_get_config_unknown_language_returns_default() {
+        let lc = LanguageContainers::default();
+        let default_config = lc.get_config("default");
+        let unknown_lang_config = lc.get_config("nonexistentlanguage");
+        assert_eq!(unknown_lang_config.image, default_config.image);
+        assert_eq!(unknown_lang_config.workdir, default_config.workdir);
+    }
+
+    #[test]
+    fn test_language_containers_add_config_new_language() {
+        let mut lc = LanguageContainers::default();
+        let new_lang = "swift";
+        let swift_config = ContainerConfig {
+            image: "swift:5.5".to_string(),
+            workdir: "/app".to_string(),
+            ..ContainerConfig::default()
+        };
+        lc.add_config(new_lang.to_string(), swift_config.clone());
+        
+        let retrieved_config = lc.get_config(new_lang);
+        assert_eq!(retrieved_config.image, swift_config.image);
+        assert_eq!(retrieved_config.workdir, swift_config.workdir);
+    }
+
+    #[test]
+    fn test_language_containers_add_config_overwrite_existing() {
+        let mut lc = LanguageContainers::default();
+        let rust_lang = "rust";
+        let original_rust_config = lc.get_config(rust_lang);
+        assert_eq!(original_rust_config.image, "rust:1.75"); // Make sure it's the original
+
+        let new_rust_config = ContainerConfig {
+            image: "rust:latest".to_string(),
+            workdir: "/src".to_string(),
+            ..ContainerConfig::default()
+        };
+        lc.add_config(rust_lang.to_string(), new_rust_config.clone());
+
+        let retrieved_config = lc.get_config(rust_lang);
+        assert_eq!(retrieved_config.image, new_rust_config.image);
+        assert_eq!(retrieved_config.workdir, new_rust_config.workdir);
+    }
+    
+    #[test]
+    fn test_language_containers_default_has_common_languages() {
+        let lc = LanguageContainers::default();
+        assert!(lc.configs.contains_key("default"));
+        assert!(lc.configs.contains_key("rust"));
+        assert!(lc.configs.contains_key("python"));
+        assert!(lc.configs.contains_key("javascript"));
+        assert!(lc.configs.contains_key("go"));
+        assert!(lc.configs.contains_key("ruby"));
+
+        let go_config = lc.get_config("go");
+        assert_eq!(go_config.image, "golang:1.21");
+        let ruby_config = lc.get_config("ruby");
+        assert_eq!(ruby_config.image, "ruby:3.1");
+    }
+
     #[tokio::test]
     async fn test_shell_execution_params_serialization() {
         let params = ShellExecutionParams {
@@ -621,5 +726,77 @@ mod tests {
         } else {
             panic!("Expected successful execution");
         }
+    }
+
+    #[test]
+    fn test_container_config_serialization_deserialization() {
+        let original_config = ContainerConfig {
+            image: "test_image:latest".to_string(),
+            workdir: "/test_workdir".to_string(),
+            env_vars: [("KEY".to_string(), "VALUE".to_string())].iter().cloned().collect(),
+            volumes: [("/host".to_string(), "/container".to_string())].iter().cloned().collect(),
+            network_mode: Some("host".to_string()),
+            memory_limit: Some("2g".to_string()),
+            cpu_limit: Some("1.5".to_string()),
+            timeout_seconds: 120,
+        };
+
+        let serialized = serde_json::to_string(&original_config).unwrap();
+        let deserialized: ContainerConfig = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(original_config.image, deserialized.image);
+        assert_eq!(original_config.workdir, deserialized.workdir);
+        assert_eq!(original_config.env_vars, deserialized.env_vars);
+        assert_eq!(original_config.volumes, deserialized.volumes);
+        assert_eq!(original_config.network_mode, deserialized.network_mode);
+        assert_eq!(original_config.memory_limit, deserialized.memory_limit);
+        assert_eq!(original_config.cpu_limit, deserialized.cpu_limit);
+        assert_eq!(original_config.timeout_seconds, deserialized.timeout_seconds);
+    }
+
+    #[test]
+    fn test_shell_execution_result_serialization_deserialization() {
+        let original_result = ShellExecutionResult {
+            exit_code: 0,
+            stdout: "Success".to_string(),
+            stderr: String::new(),
+            execution_time_ms: 1234,
+            container_image: "test_image:latest".to_string(),
+            timed_out: false,
+        };
+
+        let serialized = serde_json::to_string(&original_result).unwrap();
+        let deserialized: ShellExecutionResult = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(original_result.exit_code, deserialized.exit_code);
+        assert_eq!(original_result.stdout, deserialized.stdout);
+        assert_eq!(original_result.stderr, deserialized.stderr);
+        assert_eq!(original_result.execution_time_ms, deserialized.execution_time_ms);
+        assert_eq!(original_result.container_image, deserialized.container_image);
+        assert_eq!(original_result.timed_out, deserialized.timed_out);
+    }
+
+    #[test]
+    fn test_shell_execution_tool_new_with_default_containers() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        assert_eq!(tool.language_containers.get_config("default").image, ContainerConfig::default().image);
+        assert!(tool.language_containers.configs.contains_key("rust")); // Check a specific default language
+    }
+
+    #[test]
+    fn test_shell_execution_tool_with_custom_language_containers() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut custom_containers = LanguageContainers::default();
+        custom_containers.add_config("custom_lang".to_string(), ContainerConfig {
+            image: "custom_image:1.0".to_string(),
+            ..Default::default()
+        });
+
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf())
+            .with_language_containers(custom_containers.clone());
+        
+        assert_eq!(tool.language_containers.get_config("custom_lang").image, "custom_image:1.0");
+        assert_eq!(tool.language_containers.configs.len(), custom_containers.configs.len());
     }
 } 

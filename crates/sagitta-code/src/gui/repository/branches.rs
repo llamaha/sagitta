@@ -610,26 +610,30 @@ fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 
                 if let Some(sender) = sender {
                     let current_branch = branches.first().cloned();
-                    sender.send(BranchOperationResult {
+                    if let Err(e) = sender.send(BranchOperationResult {
                         repo_name,
                         success: true,
                         branches,
                         current_branch,
                         error_message: None,
-                    }).unwrap();
+                    }) {
+                        warn!("Failed to send branch loading result: receiver dropped");
+                    }
                 }
             }
             Err(e) => {
                 error!("Failed to load branches for repository '{}': {}", repo_name, e);
                 
                 if let Some(sender) = sender {
-                    sender.send(BranchOperationResult {
+                    if let Err(_) = sender.send(BranchOperationResult {
                         repo_name,
                         success: false,
                         branches: Vec::new(),
                         current_branch: None,
                         error_message: Some(e.to_string()),
-                    }).unwrap();
+                    }) {
+                        warn!("Failed to send branch loading error: receiver dropped");
+                    }
                 }
             }
         }
@@ -646,24 +650,28 @@ fn load_tags(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String, sen
                 // TODO: Update UI state with tags
                 // This would require a channel or callback mechanism to update the UI state
                 if let Some(sender) = sender {
-                    sender.send(TagOperationResult {
+                    if let Err(_) = sender.send(TagOperationResult {
                         repo_name,
                         success: true,
                         tags,
                         error_message: None,
-                    }).unwrap();
+                    }) {
+                        warn!("Failed to send tag loading result: receiver dropped");
+                    }
                 }
             }
             Err(e) => {
                 error!("Failed to load tags for repository '{}': {}", repo_name, e);
                 // TODO: Update UI state with error
                 if let Some(sender) = sender {
-                    sender.send(TagOperationResult {
+                    if let Err(_) = sender.send(TagOperationResult {
                         repo_name,
                         success: false,
                         tags: Vec::new(),
                         error_message: Some(e.to_string()),
-                    }).unwrap();
+                    }) {
+                        warn!("Failed to send tag loading error: receiver dropped");
+                    }
                 }
             }
         }

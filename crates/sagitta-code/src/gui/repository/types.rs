@@ -196,6 +196,114 @@ impl From<RepositoryConfig> for RepoInfo {
     }
 }
 
+/// Enhanced repository information with status details for UI display
+#[derive(Debug, Clone)]
+pub struct EnhancedRepoInfo {
+    pub name: String,
+    pub remote: Option<String>,
+    pub branch: Option<String>,
+    pub local_path: Option<PathBuf>,
+    pub is_syncing: bool,
+    // Enhanced status information
+    pub filesystem_status: FilesystemStatus,
+    pub git_status: Option<GitRepositoryStatus>,
+    pub sync_status: RepoSyncStatus,
+    pub indexed_languages: Option<Vec<String>>,
+    pub file_extensions: Vec<FileExtensionInfo>,
+    pub total_files: Option<usize>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Filesystem status of the repository
+#[derive(Debug, Clone)]
+pub struct FilesystemStatus {
+    pub exists: bool,
+    pub accessible: bool,
+    pub is_git_repository: bool,
+}
+
+/// Git repository status information
+#[derive(Debug, Clone)]
+pub struct GitRepositoryStatus {
+    pub current_commit: String,
+    pub is_clean: bool,
+    pub remote_url: Option<String>,
+    pub is_detached_head: bool,
+}
+
+/// Repository sync status
+#[derive(Debug, Clone)]
+pub struct RepoSyncStatus {
+    pub state: SyncState,
+    pub needs_sync: bool,
+    pub last_synced_commit: Option<String>,
+}
+
+/// Sync state enumeration
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncState {
+    NeverSynced,
+    UpToDate,
+    NeedsSync,
+    Unknown,
+}
+
+/// File extension information
+#[derive(Debug, Clone)]
+pub struct FileExtensionInfo {
+    pub extension: String,
+    pub count: usize,
+    pub size_bytes: u64,
+}
+
+impl From<sagitta_search::EnhancedRepositoryInfo> for EnhancedRepoInfo {
+    fn from(enhanced: sagitta_search::EnhancedRepositoryInfo) -> Self {
+        Self {
+            name: enhanced.name,
+            remote: Some(enhanced.url),
+            branch: enhanced.active_branch.clone(),
+            local_path: Some(enhanced.local_path),
+            is_syncing: false,
+            filesystem_status: FilesystemStatus {
+                exists: enhanced.filesystem_status.exists,
+                accessible: enhanced.filesystem_status.accessible,
+                is_git_repository: enhanced.filesystem_status.is_git_repository,
+            },
+            git_status: enhanced.git_status.map(|git| GitRepositoryStatus {
+                current_commit: git.current_commit,
+                is_clean: git.is_clean,
+                remote_url: git.remote_url,
+                is_detached_head: git.is_detached_head,
+            }),
+            sync_status: RepoSyncStatus {
+                state: match enhanced.sync_status.state {
+                    sagitta_search::SyncState::NeverSynced => SyncState::NeverSynced,
+                    sagitta_search::SyncState::UpToDate => SyncState::UpToDate,
+                    sagitta_search::SyncState::NeedsSync => SyncState::NeedsSync,
+                    sagitta_search::SyncState::Unknown => SyncState::Unknown,
+                },
+                needs_sync: !enhanced.sync_status.branches_needing_sync.is_empty(),
+                last_synced_commit: {
+                    let branch_to_check = enhanced.active_branch
+                        .as_ref()
+                        .unwrap_or(&enhanced.default_branch);
+                    enhanced.sync_status.last_synced_commits
+                        .get(branch_to_check)
+                        .cloned()
+                },
+            },
+            indexed_languages: enhanced.indexed_languages,
+            file_extensions: enhanced.file_extensions.into_iter().map(|ext| FileExtensionInfo {
+                extension: ext.extension,
+                count: ext.count,
+                size_bytes: ext.size_bytes,
+            }).collect(),
+            total_files: enhanced.filesystem_status.total_files,
+            size_bytes: enhanced.filesystem_status.size_bytes,
+        }
+    }
+}
+
 /// Simplified sync status for displaying indicatif output
 #[derive(Debug, Clone, Default)]
 pub struct SimpleSyncStatus {
@@ -212,6 +320,9 @@ pub struct SimpleSyncStatus {
 pub struct RepoPanelState {
     pub active_tab: RepoPanelTab,
     pub repositories: Vec<RepoInfo>,
+    pub enhanced_repositories: Vec<EnhancedRepoInfo>,
+    pub use_enhanced_repos: bool,
+    pub initial_load_attempted: bool,
     pub repository_filter: RepoFilterOptions,
     pub add_repo_form: AddRepoForm,
     pub selected_repo: Option<String>,
