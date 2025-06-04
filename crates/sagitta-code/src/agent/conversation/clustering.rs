@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, SearchPoints}};
-use sagitta_search::{EmbeddingHandler, config::AppConfig};
+use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
 use crate::agent::conversation::types::ProjectType;
 
 use super::types::{Conversation, ConversationSummary};
@@ -17,7 +17,7 @@ pub struct ConversationClusteringManager {
     qdrant_client: Arc<Qdrant>,
     
     /// Embedding handler for generating vectors
-    embedding_handler: EmbeddingHandler,
+    embedding_handler: EmbeddingPool,
     
     /// Collection name for clustering
     collection_name: String,
@@ -118,7 +118,7 @@ impl ConversationClusteringManager {
     /// Create a new clustering manager
     pub async fn new(
         qdrant_client: Arc<Qdrant>,
-        embedding_handler: EmbeddingHandler,
+        embedding_handler: EmbeddingPool,
         collection_name: String,
         config: ClusteringConfig,
     ) -> Result<Self> {
@@ -174,7 +174,7 @@ impl ConversationClusteringManager {
     /// Create clustering manager with default config
     pub async fn with_default_config(
         qdrant_client: Arc<Qdrant>,
-        embedding_handler: EmbeddingHandler,
+        embedding_handler: EmbeddingPool,
         collection_name: String,
     ) -> Result<Self> {
         Self::new(qdrant_client, embedding_handler, collection_name, ClusteringConfig::default()).await
@@ -226,10 +226,7 @@ impl ConversationClusteringManager {
         // Index each conversation
         for conversation in conversations {
             let features = Self::extract_clustering_features(conversation);
-            let embedding = self.embedding_handler.embed(&[&features])?
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("Failed to generate embedding"))?;
+            let embedding = sagitta_search::embed_single_text_with_pool(&self.embedding_handler, &features).await?;
             
             let point = PointStruct::new(
                 qdrant_client::qdrant::PointId::from(conversation.id.to_string()),
@@ -351,10 +348,7 @@ impl ConversationClusteringManager {
         conv2: &ConversationSummary,
     ) -> Result<f32> {
         // Generate embedding for conv1 title
-        let conv1_embedding = self.embedding_handler.embed(&[&conv1.title])?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to generate embedding for conv1"))?;
+        let conv1_embedding = sagitta_search::embed_single_text_with_pool(&self.embedding_handler, &conv1.title).await?;
         
         // Search for conv2 using conv1's embedding
         let search_points = SearchPoints {
@@ -623,15 +617,14 @@ mod tests {
     use crate::agent::state::types::ConversationStatus;
     use tempfile::TempDir;
 
-    async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingHandler) {
-        let qdrant_url = "http://localhost:6334"; // Assume Qdrant is running for tests
-        let qdrant_client = Arc::new(Qdrant::from_url(qdrant_url).build().unwrap());
-        
-        // Create a minimal config for embedding handler
+    async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingPool) {
         let config = AppConfig::default();
-        let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config)).unwrap();
+        let client = Arc::new(Qdrant::from_url("http://localhost:6333").build().unwrap());
         
-        (qdrant_client, embedding_handler)
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&config);
+        let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config).unwrap();
+        
+        (client, embedding_pool)
     }
 
     #[tokio::test]

@@ -25,7 +25,8 @@ mod tests {
     use std::path::Path;
     use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
     use sagitta_embed::provider::EmbeddingProvider;
-    use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+    use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
+    use sagitta_search;
     
     // Mock tool for testing
     #[derive(Debug)]
@@ -214,8 +215,8 @@ mod tests {
         
         let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
         let embedding_provider_for_agent = Arc::new(
-            EmbeddingHandler::new(&embedding_config)
-                .expect("Failed to create embedding handler for autonomous_reasoning test")
+            EmbeddingPool::with_configured_sessions(embedding_config)
+                .expect("Failed to create embedding pool for autonomous_reasoning test")
         );
         let agent = Agent::new(config, tool_registry, embedding_provider_for_agent).await.unwrap();
         
@@ -400,11 +401,12 @@ mod tests {
         let model_path_real = Path::new("/tmp/sagitta_code_test_onnx/model.onnx");
         let tokenizer_path_real = Path::new("/tmp/sagitta_code_test_onnx/tokenizer.json");
         
-        let embedding_config = EmbeddingConfig::new_onnx(model_path_real, tokenizer_path_real);
-        let embedding_provider_for_real_agent = Arc::new(
-            EmbeddingHandler::new(&embedding_config)
-                .expect("Failed to create embedding handler for real_gemini test")
-        );
+        let embedding_config = EmbeddingConfig::new_onnx(model_path_real.to_path_buf(), tokenizer_path_real.to_path_buf());
+        let embedding_pool = Arc::new(EmbeddingPool::with_configured_sessions(embedding_config)
+            .expect("Failed to create embedding pool for autonomous_reasoning test"));
+        
+        // Create adapter for EmbeddingProvider compatibility
+        let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_pool));
         
         // Create persistence and search engine
         let persistence: Box<dyn crate::agent::conversation::persistence::ConversationPersistence> = Box::new(
@@ -422,7 +424,7 @@ mod tests {
         let llm_client = Arc::new(GeminiClient::new(&config)
             .expect("Failed to create GeminiClient for test"));
         
-        let agent = Agent::new(config, tool_registry, embedding_provider_for_real_agent, persistence, search_engine, llm_client).await.unwrap();
+        let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, llm_client).await.unwrap();
         
         // Verify agent is in autonomous mode
         assert_eq!(agent.get_mode().await, AgentMode::FullyAutonomous);

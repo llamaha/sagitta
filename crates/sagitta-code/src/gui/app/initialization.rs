@@ -41,7 +41,7 @@ use crate::agent::conversation::search::{
     text::TextConversationSearchEngine
 };
 use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
-use sagitta_search::EmbeddingHandler;
+use sagitta_search::{EmbeddingPool, EmbeddingProcessor};
 use std::path::PathBuf;
 
 // Imports for sagitta-search components for embedding provider
@@ -82,16 +82,22 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     }
 
     // Initialize Embedding Provider using the loaded core_config
-    let embedding_handler_arc = {
+    let embedding_handler_arc: Arc<EmbeddingPool> = {
         let embedding_config = sagitta_search::app_config_to_embedding_config(&core_config);
-        match sagitta_search::EmbeddingHandler::new(&embedding_config) {
-            Ok(handler) => Arc::new(handler),
+        match EmbeddingPool::with_configured_sessions(embedding_config) {
+            Ok(pool) => {
+                log::info!("Successfully created EmbeddingPool for GUI App.");
+                Arc::new(pool)
+            }
             Err(e) => {
-                log::error!("Failed to create EmbeddingHandler for GUI App: {}. Intent analysis will be impaired.", e);
-                return Err(anyhow::anyhow!("Failed to create EmbeddingHandler for GUI: {}", e));
+                log::error!("Failed to create EmbeddingPool for GUI App: {}. Intent analysis will be impaired.", e);
+                return Err(anyhow::anyhow!("Failed to create EmbeddingPool for GUI: {}", e));
             }
         }
     };
+
+    // Create adapter for EmbeddingProvider compatibility
+    let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_handler_arc.clone()));
 
     app.repo_panel.refresh_repositories(); // Initial refresh
     log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
@@ -133,9 +139,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     };
 
     // Use the locally scoped embedding_handler_arc, which is correctly typed.
-    let vector_size = embedding_handler_arc.dimension().map_err(|e| {
-        anyhow::anyhow!("Failed to get embedding dimension: {}", e)
-    })? as u64;
+    let vector_size = embedding_handler_arc.dimension() as u64;
 
     // Ensure Qdrant "tools" collection exists
     match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
@@ -200,7 +204,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
 
     // Register tools first
-    tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_handler_arc.clone(), qdrant_client.clone()))).await?;
+    tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
     tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
@@ -223,7 +227,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let mut points_to_upsert_gui = Vec::new();
     for (idx, tool_def) in all_tool_defs_for_qdrant.iter().enumerate() {
         let tool_desc_text = format!("{}: {}", tool_def.name, tool_def.description);
-        match embedding_handler_arc.embed_batch(&[&tool_desc_text]) {
+        match sagitta_search::embed_text_with_pool(&embedding_handler_arc, &[&tool_desc_text]).await {
             Ok(mut embeddings) => {
                 if let Some(embedding) = embeddings.pop() {
                     let mut payload_map: std::collections::HashMap<String, qdrant_client::qdrant::Value> = std::collections::HashMap::new();
@@ -281,7 +285,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let agent_result = Agent::new(
         app.config.as_ref().clone(), 
         tool_registry.clone(), // tool_registry is now defined
-        embedding_handler_arc.clone(), // embedding_handler_arc is already passed
+        embedding_provider_adapter.clone(), // Use the adapter instead of raw pool
         persistence, // Pass concrete persistence
         search_engine, // Pass concrete search engine
         llm_client.clone() // Add the llm_client argument here

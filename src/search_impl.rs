@@ -1,5 +1,4 @@
 use crate::{
-    EmbeddingHandler, // Use re-export from main crate
     error::{Result, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
 };
@@ -14,13 +13,15 @@ use std::collections::HashMap; // Add HashMap
 use log;
 use crate::config::AppConfig; // Import AppConfig
 use crate::config; // Import config module
+use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
+use sagitta_embed::{EmbeddingPool, EmbeddingProcessor}; // Import EmbeddingPool and EmbeddingProcessor trait
 
 /// Performs a hybrid vector search in a specified Qdrant collection using a rescoring approach.
 ///
 /// # Arguments
 /// * `client` - An Arc-wrapped Qdrant client (or trait object).
 /// * `collection_name` - The name of the collection to search.
-/// * `embedding_handler` - Handler to generate the query embedding.
+/// * `embedding_pool` - Handler to generate the query embedding.
 /// * `query_text` - The text to search for.
 /// * `limit` - The final maximum number of results to return after rescoring.
 /// * `filter` - An optional Qdrant filter to apply to the initial prefetch stage.
@@ -31,7 +32,7 @@ use crate::config; // Import config module
 pub async fn search_collection<C>(
     client: Arc<C>,
     collection_name: &str,
-    embedding_handler: &EmbeddingHandler,
+    embedding_pool: &EmbeddingPool,
     query_text: &str,
     limit: u64,
     filter: Option<Filter>,
@@ -66,15 +67,29 @@ where
     };
     // --- End Load Vocabulary ---
 
-    // 1a. Generate Dense Query Embedding
-    let dense_query_embedding = embedding_handler
-        .embed(&[query_text])?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            SagittaError::EmbeddingError("Failed to generate dense embedding for the query ".to_string())
-        })?;
-    log::trace!("Core: Generated dense query embedding.");
+    // 1. Generate dense embedding for the query using EmbeddingPool
+    let query_chunk = ProcessedChunk {
+        content: query_text.to_string(),
+        metadata: ChunkMetadata {
+            file_path: std::path::PathBuf::from("query"),
+            start_line: 0,
+            end_line: 0,
+            language: "text".to_string(),
+            file_extension: "txt".to_string(),
+            element_type: "query".to_string(),
+            context: None,
+        },
+        id: "query".to_string(),
+    };
+    
+    let embedded_chunks = embedding_pool.process_chunks(vec![query_chunk]).await
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
+    
+    let dense_query_embedding = embedded_chunks.into_iter().next()
+        .ok_or_else(|| SagittaError::EmbeddingError("No embedding generated for query".to_string()))?
+        .embedding;
+
+    log::debug!("Core: Generated dense query embedding with {} dimensions.", dense_query_embedding.len());
 
     // 1b. Generate Sparse Query Vector (TF = 1.0 for each known term)
     let sparse_query_vec = if let Some(ref vocab_manager) = vocabulary_manager {
@@ -151,10 +166,10 @@ mod tests {
     use super::*; // Import items from parent module
     use crate::config::{self, AppConfig}; // Removed TokenizerConfig from here
      // Added direct import for TokenizerConfig
-    use crate::EmbeddingHandler; // Use re-export from main crate
+    use crate::EmbeddingPool; // Use re-export from main crate
      
      
-    use crate::vocabulary::VocabularyManager; 
+    use crate::vocabulary::VocabularyManager;
     use qdrant_client::qdrant::{
         PointId, QueryResponse, ScoredPoint
     }; 
@@ -204,17 +219,17 @@ mod tests {
         dummy_vocab.add_token("test"); // Add at least one token the query might match
         dummy_vocab.save(&vocab_path).expect("Failed to save dummy vocab");
 
-        let embedder_handler_result = EmbeddingHandler::new(&crate::app_config_to_embedding_config(&dummy_config));
+        let embedder_handler_result = EmbeddingPool::with_configured_sessions(crate::app_config_to_embedding_config(&dummy_config));
 
         if let Err(e) = &embedder_handler_result {
-            warn!("Skipping search_collection test: Failed to create dummy EmbeddingHandler as expected due to dummy model setup: {:?}", e);
-            // If handler creation fails (e.g. due to dummy ONNX model),
+            warn!("Skipping search_collection test: Failed to create dummy EmbeddingPool as expected due to dummy model setup: {:?}", e);
+            // If pool creation fails (e.g. due to dummy ONNX model),
             // we can't proceed with the rest of the test that uses it.
             // Consider this path as 'passing' for this specific test's scope if
             // the failure is related to the dummy model.
             return;
         }
-        let embedder_handler = embedder_handler_result.unwrap();
+        let embedder_pool = embedder_handler_result.unwrap();
 
         let query_text = "test query";
         let limit = 10u64;
@@ -242,7 +257,7 @@ mod tests {
         let result = search_collection(
             client_arc,
             collection_name,
-            &embedder_handler, 
+            &embedder_pool, // Changed from embedder_handler to embedder_pool
             query_text,
             limit,
             None,
@@ -260,7 +275,7 @@ mod tests {
                 err_string.contains("Protobuf parsing failed") ||
                 err_string.contains("No such file or directory") || // If dummy paths failed somehow
                 err_string.contains("runtime error") || // General ORT errors
-                err_string.contains("Failed to create dummy EmbeddingHandler"), // If handler creation failed
+                err_string.contains("Failed to create dummy EmbeddingPool"), // If pool creation failed
                 "search_collection failed with unexpected error: {:?}", e
             );
             warn!("Note: search_collection test returned an expected setup error (ONNX/IO/Qdrant): {}", err_string);

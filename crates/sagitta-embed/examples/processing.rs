@@ -34,12 +34,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         onnx_model_path: Some(model_path.into()),
         onnx_tokenizer_path: Some(tokenizer_path.into()),
         max_sessions: 2,                  // ⭐ This controls GPU memory usage (configurable in config.toml)
-        enable_cuda: false,              // Set to true if you have CUDA support
         max_sequence_length: 512,
         expected_dimension: Some(384),
         session_timeout_seconds: 300,
         enable_session_cleanup: true,
         tenant_id: None,
+        embedding_batch_size: Some(128), // Add the new field
     };
 
     // Create processing config that respects the embedding config's max_sessions

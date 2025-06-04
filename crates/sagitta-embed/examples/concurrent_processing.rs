@@ -1,6 +1,8 @@
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig, EmbeddingProvider, EmbeddingModelType};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProcessor, EmbeddingModelType};
+use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
 use std::sync::Arc;
 use std::time::Instant;
+use std::path::PathBuf;
 use tokio::task;
 
 #[tokio::main]
@@ -31,16 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         onnx_model_path: Some(model_path.into()),
         onnx_tokenizer_path: Some(tokenizer_path.into()),
         max_sessions: 4, // Allow up to 4 concurrent sessions
-        enable_cuda: false, // Set to true if you have CUDA support
         max_sequence_length: 512,
         expected_dimension: Some(384), // Adjust based on your model
         session_timeout_seconds: 300,
         enable_session_cleanup: true,
         tenant_id: None,
+        embedding_batch_size: Some(128), // Add the new field
     };
     
-    println!("Creating embedding handler with {} max sessions...", config.max_sessions);
-    let handler = Arc::new(EmbeddingHandler::new(&config)?);
+    println!("Creating embedding pool with {} max sessions...", config.max_sessions);
+    let pool = Arc::new(EmbeddingPool::with_configured_sessions(config)?);
     
     // Generate sample data for concurrent processing
     let batch_count = 10;
@@ -53,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Spawn concurrent tasks
     for batch_id in 0..batch_count {
-        let handler_clone = handler.clone();
+        let pool_clone = pool.clone();
         
         let handle = task::spawn(async move {
             let batch_start = Instant::now();
@@ -63,19 +65,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|i| format!("Batch {} text {}: This is sample text for concurrent embedding generation.", batch_id, i))
                 .collect();
             
-            // Convert to string slices for the API
-            let text_refs: Vec<&str> = texts.iter().map(|s| s.as_ref()).collect();
+            // Convert texts to ProcessedChunks
+            let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
+                ProcessedChunk {
+                    content: text.clone(),
+                    metadata: ChunkMetadata {
+                        file_path: PathBuf::from(format!("batch_{}.txt", batch_id)),
+                        start_line: i,
+                        end_line: i,
+                        language: "text".to_string(),
+                        file_extension: "txt".to_string(),
+                        element_type: "text".to_string(),
+                        context: Some(format!("batch_{}", batch_id)),
+                    },
+                    id: format!("batch_{}_{}", batch_id, i),
+                }
+            }).collect();
             
-            // Generate embeddings using the embed method
-            let result = handler_clone.embed(&text_refs);
+            // Generate embeddings using the process_chunks method
+            let result = pool_clone.process_chunks(chunks).await;
             
             let batch_duration = batch_start.elapsed();
             
             match result {
-                Ok(embeddings) => {
+                Ok(embedded_chunks) => {
                     println!("✅ Batch {} completed in {:?} - {} embeddings generated", 
-                            batch_id, batch_duration, embeddings.len());
-                    Ok((batch_id, embeddings.len(), batch_duration))
+                            batch_id, batch_duration, embedded_chunks.len());
+                    Ok((batch_id, embedded_chunks.len(), batch_duration))
                 },
                 Err(e) => {
                     println!("❌ Batch {} failed: {}", batch_id, e);
@@ -145,9 +161,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|i| format!("Sequential batch {} text {}: Sample text for comparison.", batch_id, i))
             .collect();
         
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_ref()).collect();
-        let embeddings = handler.embed(&text_refs)?;
-        sequential_embeddings += embeddings.len();
+        let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
+            ProcessedChunk {
+                content: text.clone(),
+                metadata: ChunkMetadata {
+                    file_path: PathBuf::from(format!("sequential_{}.txt", batch_id)),
+                    start_line: i,
+                    end_line: i,
+                    language: "text".to_string(),
+                    file_extension: "txt".to_string(),
+                    element_type: "text".to_string(),
+                    context: Some(format!("sequential_{}", batch_id)),
+                },
+                id: format!("sequential_{}_{}", batch_id, i),
+            }
+        }).collect();
+        
+        let embedded_chunks = pool.process_chunks(chunks).await?;
+        sequential_embeddings += embedded_chunks.len();
     }
     
     let sequential_duration = sequential_start.elapsed();

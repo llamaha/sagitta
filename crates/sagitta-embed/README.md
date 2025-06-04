@@ -106,14 +106,16 @@ let config = EmbeddingConfig {
     onnx_model_path: Some("model.onnx".into()),
     onnx_tokenizer_path: Some("tokenizer.json".into()),
     max_sessions: 4,
-    enable_cuda: true,
     max_sequence_length: 512,
     expected_dimension: Some(384),
     session_timeout_seconds: 300,
     enable_session_cleanup: true,
     tenant_id: None,
+    embedding_batch_size: Some(128), // Configurable batch size
 };
 ```
+
+**Note**: CUDA acceleration is automatically enabled if the crate was compiled with CUDA support and compatible hardware is available. No runtime configuration needed.
 
 ## Performance Tuning
 
@@ -125,11 +127,17 @@ The architecture allows you to tune CPU and GPU usage independently:
 - **Balanced**: Use defaults (CPU cores for processing, 4 embedding sessions)  
 - **GPU Heavy**: Increase `max_embedding_sessions` if you have abundant GPU memory
 
+### Embedding Performance Settings
+
+- **`max_sessions`**: Controls the number of parallel ONNX model instances and GPU memory usage. Higher values allow more parallel processing but use more GPU memory.
+- **`embedding_batch_size`**: Controls the number of texts processed together by a single model instance. Higher values improve throughput per model but use more VRAM per model.
+- **Interaction**: A single large operation will use up to `max_sessions` model instances in parallel, each processing `embedding_batch_size` texts at once.
+
 ### Batch Size Optimization
 
-- **Small batches**: Lower memory usage, higher overhead
-- **Large batches**: Better GPU utilization, higher memory usage
-- **Recommended**: Start with 64-128, adjust based on your model and memory
+- **Small batches (32-64)**: Lower memory usage per model, higher overhead
+- **Large batches (128-256)**: Better GPU utilization per model, higher memory usage per model
+- **Recommended**: Start with 128, adjust based on your model and available VRAM
 
 ### File Processing Concurrency
 

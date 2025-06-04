@@ -14,13 +14,13 @@ use tokio::sync::RwLock;
 use tracing::{error, info, instrument, warn};
 use sagitta_search::{
     config::{self, get_repo_base_path, save_config, AppConfig, RepositoryConfig},
-    EmbeddingHandler, // Use re-export
+    EmbeddingPool, EmbeddingProcessor, // Use re-export
     indexing::{self, gather_files, index_repo_files},
     qdrant_client_trait::QdrantClientTrait,
     repo_add::{handle_repo_add, AddRepoArgs, AddRepoError},
     repo_helpers::{delete_repository_data, get_collection_name, get_branch_aware_collection_name},
     error::SagittaError,
-    sync::{sync_repository, SyncOptions},
+    sync::{sync_repository, SyncOptions, SyncResult},
     sync_progress::{SyncProgressReporter, SyncProgress},
     fs_utils::{find_files_matching_pattern, read_file_range},
 };
@@ -105,18 +105,19 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
 
     let config_read_guard = config.read().await; // Re-read for embedding handler, or pass config_guard if appropriate
 
-    // Create EmbeddingHandler instance locally for this operation
-    let local_embedding_handler = Arc::new(
-        EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_guard)).map_err(|e| {
-            error!(error = %e, "Failed to create embedding handler for repo_add");
-            ErrorObject {
-                code: error_codes::INTERNAL_ERROR,
-                message: format!("Failed to initialize embedding handler: {}", e),
-                data: None,
-            }
-        })?,
-    );
-    info!("Local embedding handler created for repository_add: {}", params.name);
+    // Create EmbeddingPool instance locally for this operation
+    let embedding_config = sagitta_search::app_config_to_embedding_config(&config_read_guard);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config).map_err(|e| {
+        error!(error = %e, "Failed to create embedding pool for repo_add");
+        ErrorObject {
+            code: error_codes::INTERNAL_ERROR,
+            message: format!("Failed to initialize embedding pool: {}", e),
+            data: None,
+        }
+    })?;
+    let embedding_dim = embedding_pool.dimension();
+
+    info!("Local embedding pool created for repository_add: {}", params.name);
     drop(config_read_guard); // Release read lock before potentially long operations or acquiring write lock
 
     let initial_base_path = get_repo_base_path(Some(&*config.read().await)).map_err(|e| ErrorObject {
@@ -133,13 +134,6 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         ),
         data: None,
     })?;
-
-    // Use the local_embedding_handler here
-    let embedding_dim = local_embedding_handler.dimension().map_err(|e| ErrorObject {
-        code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to get embedding dimension: {}", e),
-        data: None,
-    })? as u64;
 
     // Map MCP params (String paths) to core AddRepoArgs (PathBuf paths)
     let args = AddRepoArgs {
@@ -163,7 +157,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
     let new_repo_config_result = handle_repo_add(
         args, // Use the mapped args
         initial_base_path,
-        embedding_dim,
+        embedding_dim as u64,
         qdrant_client.clone(),
         &config_clone, // Use the cloned config instead of the guard
         &tenant_id_for_core,    // Pass resolved tenant_id string
@@ -204,9 +198,9 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
             }
             info!(repo_name=%repo_config.name, "Successfully added repository and saved config.");
 
-            // Explicitly drop the local embedding handler before returning from success path
-            drop(local_embedding_handler);
-            info!("Explicitly dropped local_embedding_handler in handle_repository_add for repo: {}", repo_config.name);
+            // Explicitly drop the local embedding pool before returning from success path
+            drop(embedding_pool);
+            info!("Explicitly dropped local_embedding_pool in handle_repository_add for repo: {}", repo_config.name);
 
             Ok(RepositoryAddResult {
                 name: repo_config.name,
@@ -219,7 +213,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         Err(e) => {
             error!(error = %e, "Core handle_repo_add failed");
             // Explicitly drop here too in case of early error after its creation, though it should also go out of scope
-            drop(local_embedding_handler); 
+            drop(embedding_pool); 
             Err(map_add_repo_error(e)) // Use imported helper
         }
     }
@@ -535,20 +529,18 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     if !should_index {
         info!(repo_name = %repo_name, commit = ?actual_synced_commit, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
     } else {
-        // >>>>>>>>>> Moved EmbeddingHandler creation here <<<<<<<<<<
-        let config_read_for_embedding = config.read().await; // Re-acquire read lock briefly
-        let local_embedding_handler = Arc::new(
-            EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_for_embedding)).map_err(|e| {
-                error!(error = %e, "Failed to create embedding handler for indexing stage");
-                ErrorObject {
-                    code: error_codes::INTERNAL_ERROR,
-                    message: format!("Failed to create embedding handler for indexing: {}", e),
-                    data: None,
-                }
-            })?,
-        );
-        drop(config_read_for_embedding);
-        info!("Created local_embedding_handler for indexing stage for repo: {}", repo_name);
+        // >>>>>>>>>> Moved EmbeddingPool creation here <<<<<<<<<<
+        let config_read_for_embedding = config.read().await;
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&config_read_for_embedding);
+        let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config).map_err(|e| {
+            error!(error = %e, "Failed to create embedding pool for indexing stage");
+            ErrorObject {
+                code: error_codes::INTERNAL_ERROR,
+                message: format!("Failed to create embedding pool for indexing: {}", e),
+                data: None,
+            }
+        })?;
+        let embedding_dim = embedding_pool.dimension();
         // >>>>>>>>>> End moved block <<<<<<<<<<
 
         let repo_root = &repo_config.local_path; // Use the initially cloned repo_config
@@ -620,7 +612,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                 context_identifier, 
                 &indexing_commit_hash, // Use the potentially derived commit hash
                 qdrant_client.clone(),
-                local_embedding_handler.clone(),
+                Arc::new(embedding_pool),
                 None,
                 app_config_clone.indexing.max_concurrent_upserts,
             )
@@ -642,7 +634,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         }
     } // End of indexing stage
 
-    // Explicitly drop local_embedding_handler if it was created
+    // Explicitly drop local_embedding_pool if it was created
     // This is tricky now, it's only created in the `else` block. 
     // It will be dropped automatically when it goes out of scope if `should_index` was true.
     // Consider if manual drop is still needed or how to structure.

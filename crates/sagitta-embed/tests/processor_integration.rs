@@ -283,14 +283,18 @@ fn test_processing_config_customization() {
     let config = ProcessingConfig {
         file_processing_concurrency: 8,
         max_embedding_sessions: 2,
+        cpu_worker_threads: 4,
         processing_queue_size: 500,
         embedding_batch_size: 64,
         max_file_size_bytes: 1024 * 1024,
+        file_batch_size: 1,
     };
     
     assert_eq!(config.file_processing_concurrency, 8);
     assert_eq!(config.max_embedding_sessions, 2);
+    assert_eq!(config.cpu_worker_threads, 4);
     assert_eq!(config.processing_queue_size, 500);
     assert_eq!(config.embedding_batch_size, 64);
     assert_eq!(config.max_file_size_bytes, 1024 * 1024);
+    assert_eq!(config.file_batch_size, 1);
 } 

@@ -8,7 +8,8 @@ use sagitta_code::{
     utils::errors::SagittaCodeError,
 };
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
+use sagitta_search;
 use futures_util::StreamExt;
 use std::path::Path;
 use sagitta_code::agent::state::types::AgentMode;
@@ -170,11 +171,12 @@ async fn test_conversation_flow_context_continuity() {
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
     
-    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
-    let embedding_provider = Arc::new(
-        EmbeddingHandler::new(&embedding_config)
-            .expect("Failed to create embedding handler")
-    );
+    let embedding_config = EmbeddingConfig::new_onnx(model_path.to_path_buf(), tokenizer_path.to_path_buf());
+    let embedding_pool = Arc::new(EmbeddingPool::with_configured_sessions(embedding_config)
+        .expect("Failed to create embedding pool"));
+    
+    // Create adapter for EmbeddingProvider compatibility
+    let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_pool));
     
     let tool_registry = Arc::new(ToolRegistry::new());
     
@@ -201,7 +203,7 @@ async fn test_conversation_flow_context_continuity() {
         },
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider, persistence, search_engine, mock_llm_client)
+    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client)
         .await
         .expect("Failed to create agent");
     
@@ -307,11 +309,12 @@ async fn test_reasoning_session_continuity() {
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
     
-    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
-    let embedding_provider = Arc::new(
-        EmbeddingHandler::new(&embedding_config)
-            .expect("Failed to create embedding handler")
-    );
+    let embedding_config = EmbeddingConfig::new_onnx(model_path.to_path_buf(), tokenizer_path.to_path_buf());
+    let embedding_pool = Arc::new(EmbeddingPool::with_configured_sessions(embedding_config)
+        .expect("Failed to create embedding pool"));
+    
+    // Create adapter for EmbeddingProvider compatibility
+    let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_pool));
     
     let tool_registry = Arc::new(ToolRegistry::new());
     
@@ -332,7 +335,7 @@ async fn test_reasoning_session_continuity() {
         MockResponse { text: "Is there anything else on Sidekiq?".to_string(), tool_calls: vec![], should_error: false, error_message: None }, 
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider, persistence, search_engine, mock_llm_client_session)
+    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client_session)
         .await
         .expect("Failed to create agent");
     

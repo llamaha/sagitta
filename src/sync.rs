@@ -33,6 +33,7 @@ use git_manager::{VectorSyncTrait, VectorSyncResult};
 use async_trait::async_trait;
 use std::sync::Mutex; // Added for Mock
 use qdrant_client::qdrant::Distance;
+use sagitta_embed::{EmbeddingPool, EmbeddingProcessor}; // Added EmbeddingProcessor trait
 
 /// Contains the results of a repository synchronization operation.
 #[derive(Debug, Clone)]
@@ -464,10 +465,10 @@ where
     
     // Ensure collection exists (might need embedding dimension)
     // Get dimension from AppConfig or model - requires AppConfig here
-    let embedding_handler = crate::EmbeddingHandler::new(&crate::app_config_to_embedding_config(app_config))
+    let embedding_config = crate::app_config_to_embedding_config(app_config);
+    let embedding_pool = crate::EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
-    let embedding_dim = embedding_handler.dimension()
-        .context("Failed to get embedding dimension for sync")?;
+    let embedding_dim = embedding_pool.dimension();
     
     reporter.report(SyncProgress { // Added
         stage: SyncStage::VerifyingCollection {

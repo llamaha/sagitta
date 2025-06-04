@@ -3,16 +3,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::collections::{HashSet, HashMap};
-use crate::config::RepositoryConfig;
+use crate::config::{AppConfig, RepositoryConfig};
 use anyhow::{Context, Result};
 use tracing::{info, warn, error, debug};
 use qdrant_client::qdrant::{Filter, Condition, ScrollPointsBuilder, ScrollResponse, PayloadIncludeSelector, PointId};
 use crate::constants::{FIELD_BRANCH, FIELD_LANGUAGE};
-use crate::config::AppConfig;
-use crate::EmbeddingHandler;
+use crate::error::SagittaError;
 use crate::QdrantClientTrait;
 use crate::indexing::{index_repo_files, ensure_collection_exists, is_hidden, is_target_dir};
-use crate::error::SagittaError as Error;
 use crate::repo_helpers::qdrant_utils::get_collection_name;
 use crate::repo_helpers::qdrant_utils::get_branch_aware_collection_name;
 use anyhow::anyhow;
@@ -24,6 +22,7 @@ use git2::Repository;
 use std::os::unix::fs::PermissionsExt;
 use tokio;
 use crate::sync_progress::{SyncProgressReporter, SyncStage};
+use sagitta_embed::{EmbeddingPool, EmbeddingProcessor};
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
 /// list of indexed languages for that branch by querying Qdrant.
@@ -36,9 +35,9 @@ pub async fn update_sync_status_and_languages<
     commit_oid_str: &str,
     client: &C,
     collection_name: &str,
-) -> Result<(), Error> {
+) -> Result<(), SagittaError> {
     let repo_config = config.repositories.get_mut(repo_config_index)
-        .ok_or_else(|| Error::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
+        .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
     log::debug!("Updating last synced commit for branch '{}' to {}", branch_name, commit_oid_str);
     repo_config.last_synced_commits.insert(branch_name.to_string(), commit_oid_str.to_string());
     log::debug!("Querying Qdrant for distinct languages in collection '{}' for branch '{}'", collection_name, branch_name);
@@ -105,18 +104,19 @@ pub async fn index_files<
     branch_name: &str,
     commit_hash: &str,
     progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
-) -> Result<usize, Error>
+) -> Result<usize, SagittaError>
 {
     if relative_paths.is_empty() {
         info!("No files provided for indexing.");
         return Ok(0);
     }
 
-    let embedding_handler = EmbeddingHandler::new(&crate::app_config_to_embedding_config(config))
-        .context("Failed to initialize embedding handler for repo indexing")?;
-    info!("Embedding dimension for repo: {}", embedding_handler.dimension()?);
+    let embedding_config = crate::app_config_to_embedding_config(config);
+    let embedding_pool = crate::EmbeddingPool::with_configured_sessions(embedding_config)
+        .context("Failed to initialize embedding pool for repo indexing")?;
+    info!("Embedding dimension for repo: {}", embedding_pool.dimension());
 
-    let embedding_handler_arc = Arc::new(embedding_handler);
+    let embedding_pool_arc = Arc::new(embedding_pool);
 
     index_repo_files(
         config,
@@ -126,7 +126,7 @@ pub async fn index_files<
         branch_name,
         commit_hash,
         client.clone(),
-        embedding_handler_arc,
+        embedding_pool_arc,
         progress_reporter,
         config.indexing.max_concurrent_upserts,
     ).await
@@ -150,12 +150,12 @@ pub async fn prepare_repository<C>(
     embedding_dim: u64,
     config: &AppConfig,
     tenant_id: &str,
-) -> Result<RepositoryConfig, Error>
+) -> Result<RepositoryConfig, SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     if url.is_empty() && (local_path_opt.is_none() || !local_path_opt.unwrap().exists()) {
-        return Err(Error::Other("Either URL or existing local repository path must be provided".to_string()));
+        return Err(SagittaError::Other("Either URL or existing local repository path must be provided".to_string()));
     }
 
     let repo_name = name_opt.unwrap_or_else(|| {
@@ -251,7 +251,7 @@ where
             Ok(output) => output,
             Err(e) => {
                 error!("Failed to clone repository: {}", e);
-                return Err(Error::GitMessageError(format!("Git clone failed: {}", e)));
+                return Err(SagittaError::GitMessageError(format!("Git clone failed: {}", e)));
             }
         };
 
@@ -313,7 +313,7 @@ where
                     error!("Failed to remove directory {path_str} after failed clone: {error_str}");
                 }
             }
-            return Err(Error::GitMessageError(format!("Git clone command failed: {}", stderr)));
+            return Err(SagittaError::GitMessageError(format!("Git clone command failed: {}", stderr)));
         }
     } else {
         let path_str = final_local_path.display().to_string();
@@ -382,7 +382,7 @@ where
                      error!("Failed to remove directory {} after failed checkout: {}", final_local_path.display(), e);
                 }
             }
-            return Err(Error::GitMessageError(format!(
+            return Err(SagittaError::GitMessageError(format!(
                 "Failed to checkout target ref '{}': {}",
                 target_ref,
                 stderr
@@ -447,13 +447,13 @@ pub async fn delete_repository_data<C>(
     repo_config: &RepositoryConfig,
     client: Arc<C>,
     config: &AppConfig,
-) -> Result<(), Error>
+) -> Result<(), SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let repo_name = &repo_config.name;
     let tenant_id = repo_config.tenant_id.as_deref()
-        .ok_or_else(|| Error::Other(format!("Tenant ID missing in RepositoryConfig for repository '{}' during delete operation", repo_name)))?;
+        .ok_or_else(|| SagittaError::Other(format!("Tenant ID missing in RepositoryConfig for repository '{}' during delete operation", repo_name)))?;
     
     // With branch-aware collections, we need to delete all collections for this repository
     // For now, we'll try to delete the legacy collection and the current branch collection
@@ -645,7 +645,7 @@ where
         Ok(())
     } else {
         error!("Failed to delete repository directory after all attempts");
-        Err(Error::Other(format!("Failed to delete repository directory")))
+        Err(SagittaError::Other(format!("Failed to delete repository directory")))
     }
 }
 
@@ -999,12 +999,12 @@ mod tests {
     use crate::qdrant_client_trait::MockQdrantClientTrait; // For a mock client
 
     #[tokio::test]
-    async fn test_delete_repository_data_simple() -> Result<(), Error> {
-        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+    async fn test_delete_repository_data_simple() -> Result<(), SagittaError> {
+        let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
         let repo_path = temp_dir.path().join("my_test_repo");
-        fs::create_dir_all(&repo_path).map_err(|e| Error::Other(format!("Failed to create repo_path: {}", e)))?;
-        fs::create_dir(repo_path.join(".git")).map_err(|e| Error::Other(format!("Failed to create .git dir: {}", e)))?;
-        fs::write(repo_path.join("file.txt"), "hello").map_err(|e| Error::Other(format!("Failed to write file: {}", e)))?;
+        fs::create_dir_all(&repo_path).map_err(|e| SagittaError::Other(format!("Failed to create repo_path: {}", e)))?;
+        fs::create_dir(repo_path.join(".git")).map_err(|e| SagittaError::Other(format!("Failed to create .git dir: {}", e)))?;
+        fs::write(repo_path.join("file.txt"), "hello").map_err(|e| SagittaError::Other(format!("Failed to write file: {}", e)))?;
 
         assert!(repo_path.exists());
         assert!(repo_path.join(".git").exists());
@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_status_update_with_languages() -> Result<(), Error> {
+    async fn test_sync_status_update_with_languages() -> Result<(), SagittaError> {
         let mut config = AppConfig::default();
         
         // Add a test repository
@@ -1131,11 +1131,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_prepare_repository_timeout_simulation() -> Result<(), Error> {
+    async fn test_prepare_repository_timeout_simulation() -> Result<(), SagittaError> {
         // This test simulates timeout behavior without actually timing out
         // since we can't easily test actual 30-minute timeouts in unit tests
         
-        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+        let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
         let base_path = temp_dir.path();
         
         // Mock client for collection operations
@@ -1177,14 +1177,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_prepare_repository_with_existing_local_path() -> Result<(), Error> {
-        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+    async fn test_prepare_repository_with_existing_local_path() -> Result<(), SagittaError> {
+        let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
         let base_path = temp_dir.path();
         let existing_repo_path = base_path.join("existing_repo");
         
         // Create a fake existing repository
-        fs::create_dir_all(&existing_repo_path).map_err(|e| Error::Other(format!("Failed to create existing repo: {}", e)))?;
-        fs::create_dir_all(&existing_repo_path.join(".git")).map_err(|e| Error::Other(format!("Failed to create .git: {}", e)))?;
+        fs::create_dir_all(&existing_repo_path).map_err(|e| SagittaError::Other(format!("Failed to create existing repo: {}", e)))?;
+        fs::create_dir_all(&existing_repo_path.join(".git")).map_err(|e| SagittaError::Other(format!("Failed to create .git: {}", e)))?;
         
         // Mock client
         let mut mock_client = MockQdrantClientTrait::new();
@@ -1223,8 +1223,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_index_files_empty_list() -> Result<(), Error> {
-        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+    async fn test_index_files_empty_list() -> Result<(), SagittaError> {
+        let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
         let repo_root = temp_dir.path().to_path_buf();
         
         // Mock client
@@ -1270,8 +1270,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cleanup_operations_safety_checks() -> Result<(), Error> {
-        let temp_dir = tempdir().map_err(|e| Error::Other(format!("Failed to create temp dir: {}", e)))?;
+    async fn test_cleanup_operations_safety_checks() -> Result<(), SagittaError> {
+        let temp_dir = tempdir().map_err(|e| SagittaError::Other(format!("Failed to create temp dir: {}", e)))?;
         
         // Test that dangerous paths are rejected
         let dangerous_paths = vec![

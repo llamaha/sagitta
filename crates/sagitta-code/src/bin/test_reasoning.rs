@@ -107,10 +107,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(sagitta_config) => {
                 println!("✓ Using sagitta-search embedding configuration");
                 let embedding_config = sagitta_search::app_config_to_embedding_config(&sagitta_config);
-                match sagitta_search::EmbeddingHandler::new(&embedding_config) {
-                    Ok(handler) => Arc::new(handler) as Arc<dyn EmbeddingProvider>,
+                match sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config) {
+                    Ok(pool) => {
+                        println!("✓ Embedding pool created successfully");
+                        Arc::new(sagitta_search::EmbeddingPoolAdapter::new(Arc::new(pool))) as Arc<dyn EmbeddingProvider>
+                    }
                     Err(e) => {
-                        println!("⚠️  Failed to create embedding handler: {}, using mock provider", e);
+                        println!("⚠️  Failed to create embedding pool: {}, using mock provider", e);
                         Arc::new(MockEmbeddingProvider::new()) as Arc<dyn EmbeddingProvider>
                     }
                 }

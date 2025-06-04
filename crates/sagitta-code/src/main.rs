@@ -185,9 +185,9 @@ mod cli_app {
 
         // Initialize Embedding Provider
         let embedding_config = sagitta_search::app_config_to_embedding_config(&sagitta_app_config);
-        let embedding_handler = sagitta_search::EmbeddingHandler::new(&embedding_config)
-            .context("Failed to create embedding handler")?;
-        let embedding_provider = Arc::new(embedding_handler);
+        let embedding_pool = sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config)
+            .context("Failed to create embedding pool")?;
+        let embedding_provider = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(Arc::new(embedding_pool)));
         
         // Initialize Qdrant Client
         let qdrant_client_result = Qdrant::from_url(&sagitta_app_config.qdrant_url).build();
@@ -220,9 +220,7 @@ mod cli_app {
         
         // --- Populate Qdrant tool collection (run once or ensure exists) ---
         // This logic is NOW MOVED to after all tools are registered.
-        let vector_size = embedding_provider.dimension().map_err(|e| {
-            anyhow!("Failed to get embedding dimension: {}", e)
-        })? as u64;
+        let vector_size = embedding_provider.dimension() as u64;
         match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
             Ok(exists) => {
                 if !exists {

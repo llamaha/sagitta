@@ -17,7 +17,7 @@ use sagitta_code::agent::conversation::persistence::disk::DiskConversationPersis
 use sagitta_code::agent::conversation::persistence::ConversationPersistence;
 use sagitta_code::agent::conversation::search::text::TextConversationSearchEngine;
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use sagitta_code::llm::gemini::client::GeminiClient;
 use std::path::Path;
 use uuid::Uuid;

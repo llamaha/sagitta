@@ -20,8 +20,13 @@ use anyhow::{anyhow, Context, Result};
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
-use sagitta_search::config::{AppConfig, save_config};
-use sagitta_search::EmbeddingHandler;
+use sagitta_search::{
+    config::{AppConfig, save_config}, 
+    EmbeddingPool, EmbeddingProcessor,
+    app_config_to_embedding_config,
+    repo_helpers::get_collection_name,
+    error::SagittaError,
+};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_search::config::get_repo_base_path;
 use crate::cli::CliArgs;
@@ -82,10 +87,10 @@ where
                 }
             };
 
-            let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
-                .context("Failed to initialize embedding handler")?;
-            let embedding_dim = embedding_handler.dimension()
-                 .context("Failed to get embedding dimension")?;
+            let embedding_config = sagitta_search::app_config_to_embedding_config(config);
+            let embedding_pool = sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config)
+                .map_err(|e| anyhow!("Failed to initialize embedding pool: {}", e))?;
+            let embedding_dim = embedding_pool.dimension() as u64;
             let repo_base_path = match &add_args.repositories_base_path {
                 Some(path) => path.clone(),
                 None => get_repo_base_path(Some(config))
@@ -96,7 +101,7 @@ where
             let repo_config_result = sagitta_search::repo_add::handle_repo_add(
                 add_args, 
                 repo_base_path, 
-                embedding_dim as u64, 
+                embedding_dim, 
                 Arc::clone(&client),
                 config,
                 &tenant_id,

@@ -10,10 +10,11 @@ use sagitta_search::{
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    EmbeddingHandler,
+    EmbeddingPool, EmbeddingProcessor,
+    app_config_to_embedding_config,
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::get_collection_name,
+    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
     search_impl::search_collection,
 };
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
@@ -129,23 +130,21 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     }
     let filter = Some(Filter::must(filter_conditions));
     
-    // Create EmbeddingHandler instance locally for this operation
-    let local_embedding_handler = Arc::new(
-        EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_read_guard)).map_err(|e| {
-            error!(error = %e, "Failed to create embedding handler for query");
-            ErrorObject {
-                code: error_codes::INTERNAL_ERROR,
-                message: format!("Failed to initialize embedding handler: {}", e),
-                data: None,
-            }
-        })?,
-    );
-    info!("Local embedding handler created for query on repo: {}", params.repository_name);
+    // Create EmbeddingPool instance locally for this operation
+    let embedding_config = sagitta_search::app_config_to_embedding_config(&config_read_guard);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config).map_err(|e| {
+        error!(error = %e, "Failed to create embedding pool for query");
+        ErrorObject {
+            code: error_codes::INTERNAL_ERROR,
+            message: format!("Failed to initialize embedding pool: {}", e),
+            data: None,
+        }
+    })?;
 
     let search_response = search_collection(
         qdrant_client,
         &collection_name,
-        &local_embedding_handler,
+        &embedding_pool,
         &query_text,
         limit,
         filter,
@@ -202,10 +201,6 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     }
 
     info!(count = results.len(), "Returning query results");
-
-    // Explicitly drop the local embedding handler before returning
-    drop(local_embedding_handler);
-    info!("Explicitly dropped local_embedding_handler in handle_query for repo: {}", params.repository_name);
 
     Ok(QueryResult { results })
 } 
