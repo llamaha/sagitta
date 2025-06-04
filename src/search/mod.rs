@@ -12,7 +12,7 @@ use log::{debug, warn};
 use qdrant_client::qdrant::{SearchPointsBuilder, Filter};
 use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
-use crate::EmbeddingHandler;
+use crate::{EmbeddingPool, app_config_to_embedding_config};
 use crate::repo_helpers::get_collection_name;
 use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;
@@ -35,13 +35,33 @@ where
 {
     debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
 
-    // 1. Get Query Embedding
-    let embedding_handler = EmbeddingHandler::new(&*config)
+    // 1. Get Query Embedding using EmbeddingPool (respects max_sessions)
+    let embedding_config = app_config_to_embedding_config(&**config);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
-    let embeddings = embedding_handler.embed(&[query])
+    
+    // Create a dummy ProcessedChunk for the query
+    use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
+    let query_chunk = ProcessedChunk {
+        content: query.to_string(),
+        metadata: ChunkMetadata {
+            file_path: PathBuf::from("query"),
+            start_line: 0,
+            end_line: 0,
+            language: "text".to_string(),
+            file_extension: "txt".to_string(),
+            element_type: "query".to_string(),
+            context: None,
+        },
+        id: "query".to_string(),
+    };
+    
+    let embedded_chunks = embedding_pool.process_chunks(vec![query_chunk]).await
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
-    let query_embedding = embeddings.into_iter().next()
-        .ok_or_else(|| SagittaError::EmbeddingError("Embedding handler returned no embedding for query".to_string()))?;
+    
+    let query_embedding = embedded_chunks.into_iter().next()
+        .ok_or_else(|| SagittaError::EmbeddingError("Embedding pool returned no embedding for query".to_string()))?
+        .embedding;
 
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 

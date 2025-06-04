@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, ScoredPoint, SearchPoints, PointId, Value as QdrantValue, point_id::PointIdOptions}};
-use sagitta_search::{EmbeddingHandler, config::AppConfig};
+use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
 
 use super::ConversationSearchEngine;
 use crate::agent::conversation::types::{
@@ -21,7 +21,7 @@ pub struct SemanticConversationSearchEngine {
     qdrant_client: Arc<Qdrant>,
     
     /// Embedding handler for generating vectors
-    embedding_handler: EmbeddingHandler,
+    embedding_handler: EmbeddingPool,
     
     /// Conversation summaries for quick access
     conversations: Arc<RwLock<HashMap<Uuid, ConversationSummary>>>,
@@ -34,7 +34,7 @@ impl SemanticConversationSearchEngine {
     /// Create a new semantic search engine
     pub async fn new(
         qdrant_client: Arc<Qdrant>,
-        embedding_handler: EmbeddingHandler,
+        embedding_handler: EmbeddingPool,
         collection_name: String,
     ) -> Result<Self> {
         // Ensure collection exists
@@ -137,7 +137,7 @@ impl SemanticConversationSearchEngine {
         
         // Generate embeddings for all chunks
         let chunk_texts: Vec<&str> = content_chunks.iter().map(|s| s.as_str()).collect();
-        let embeddings = self.embedding_handler.embed(&chunk_texts)?;
+        let embeddings = sagitta_search::embed_text_with_pool(&self.embedding_handler, &chunk_texts).await?;
         
         for (i, (content, embedding)) in content_chunks.iter().zip(embeddings.iter()).enumerate() {
             let point_id_str = format!("{}_{}", conversation.id, i);
@@ -373,10 +373,7 @@ impl ConversationSearchEngine for SemanticConversationSearchEngine {
         }
         let query_text = query.text.as_ref().unwrap();
 
-        let embedding = self.embedding_handler.embed(&[query_text])?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to generate query embedding"))?;
+        let embedding = sagitta_search::embed_single_text_with_pool(&self.embedding_handler, query_text).await?;
 
         let mut filter_conditions = Vec::new(); 
         if let Some(status) = &query.status {
@@ -487,26 +484,23 @@ mod tests {
     use tempfile::TempDir;
     use sagitta_search::config::AppConfig;
 
-    async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingHandler) {
-        let temp_dir = TempDir::new().unwrap();
-        let qdrant_url = "http://localhost:6334"; // Assume Qdrant is running for tests
-        
-        let qdrant_client = Arc::new(Qdrant::from_url(qdrant_url).build().unwrap());
-        
-        // Create a minimal config for embedding handler
+    async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingPool) {
         let config = AppConfig::default();
-        let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config)).unwrap();
+        let client = Arc::new(Qdrant::from_url("http://localhost:6333").build().unwrap());
         
-        (qdrant_client, embedding_handler)
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&config);
+        let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config).unwrap();
+        
+        (client, embedding_pool)
     }
 
     #[tokio::test]
     #[ignore] // Requires running Qdrant instance
     async fn test_semantic_search_engine_creation() {
-        let (qdrant_client, embedding_handler) = create_test_setup().await;
+        let (qdrant_client, embedding_pool) = create_test_setup().await;
         let engine = SemanticConversationSearchEngine::new(
             qdrant_client,
-            embedding_handler,
+            embedding_pool,
             "test_conversations".to_string()
         ).await.unwrap();
         
@@ -519,10 +513,10 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires running Qdrant instance
     async fn test_index_and_semantic_search() {
-        let (qdrant_client, embedding_handler) = create_test_setup().await;
+        let (qdrant_client, embedding_pool) = create_test_setup().await;
         let engine = SemanticConversationSearchEngine::new(
             qdrant_client,
-            embedding_handler,
+            embedding_pool,
             "test_conversations".to_string()
         ).await.unwrap();
         

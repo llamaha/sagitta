@@ -27,15 +27,17 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use sagitta_search::{AppConfig, EmbeddingHandler, app_config_to_embedding_config};
+//! use sagitta_search::{AppConfig, EmbeddingPool, app_config_to_embedding_config};
 //!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load configuration
 //! let config = AppConfig::default();
 //!
-//! // Convert to embedding config and initialize embedding handler
+//! // Convert to embedding config and initialize embedding pool
 //! let embedding_config = app_config_to_embedding_config(&config);
-//! let embedding_handler = EmbeddingHandler::new(&embedding_config)?;
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Note on ONNX Runtime
@@ -93,7 +95,7 @@ pub mod test_utils;
 
 pub use config::{AppConfig, IndexingConfig, RepositoryConfig, EmbeddingEngineConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 // Re-export from sagitta-embed crate
-pub use sagitta_embed::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
+pub use sagitta_embed::{EmbeddingModel, EmbeddingModelType, EmbeddingPool, EmbeddingProcessor};
 // Re-export EmbeddingConfig for convenience
 pub use sagitta_embed::config::EmbeddingConfig;
 pub use error::{SagittaError, Result};
@@ -115,6 +117,9 @@ pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-expor
 
 // Re-export qdrant types needed by mcp or other crates
 pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
+
+use std::sync::Arc;
+use async_trait::async_trait;
 
 /// Basic addition function (example/placeholder).
 pub fn add(left: u64, right: u64) -> u64 {
@@ -145,10 +150,10 @@ mod tests {
         // Set custom embedding configuration
         app_config.embedding = EmbeddingEngineConfig {
             max_sessions: 8,
-            enable_cuda: true,
             max_sequence_length: 256,
             session_timeout_seconds: 600,
             enable_session_cleanup: false,
+            embedding_batch_size: 64,
         };
         
         // Convert to EmbeddingConfig
@@ -159,12 +164,12 @@ mod tests {
         assert_eq!(embedding_config.onnx_model_path, Some("/path/to/model.onnx".into()));
         assert_eq!(embedding_config.onnx_tokenizer_path, Some("/path/to/tokenizer.json".into()));
         assert_eq!(embedding_config.max_sessions, 8);
-        assert_eq!(embedding_config.enable_cuda, true);
         assert_eq!(embedding_config.max_sequence_length, 256);
         assert_eq!(embedding_config.session_timeout_seconds, 600);
         assert_eq!(embedding_config.enable_session_cleanup, false);
         assert_eq!(embedding_config.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(embedding_config.expected_dimension, Some(512));
+        assert_eq!(embedding_config.embedding_batch_size, Some(64));
     }
 
     #[test]
@@ -178,12 +183,12 @@ mod tests {
         assert_eq!(embedding_config.onnx_model_path, None);
         assert_eq!(embedding_config.onnx_tokenizer_path, None);
         assert_eq!(embedding_config.max_sessions, 4); // Default from EmbeddingEngineConfig
-        assert_eq!(embedding_config.enable_cuda, false);
         assert_eq!(embedding_config.max_sequence_length, 128);
         assert_eq!(embedding_config.session_timeout_seconds, 300);
         assert_eq!(embedding_config.enable_session_cleanup, true);
         assert_eq!(embedding_config.tenant_id, None);
         assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
+        assert_eq!(embedding_config.embedding_batch_size, Some(128)); // Default batch size
     }
 
     #[test]
@@ -236,10 +241,10 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
     
     // Map embedding engine configuration
     embedding_config.max_sessions = app_config.embedding.max_sessions;
-    embedding_config.enable_cuda = app_config.embedding.enable_cuda;
     embedding_config.max_sequence_length = app_config.embedding.max_sequence_length;
     embedding_config.session_timeout_seconds = app_config.embedding.session_timeout_seconds;
     embedding_config.enable_session_cleanup = app_config.embedding.enable_session_cleanup;
+    embedding_config.embedding_batch_size = Some(app_config.embedding.embedding_batch_size);
     
     // Map tenant ID if available
     if let Some(ref tenant_id) = app_config.tenant_id {
@@ -250,4 +255,119 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
     embedding_config.expected_dimension = Some(app_config.performance.vector_dimension as usize);
     
     embedding_config
+}
+
+/// Creates an EmbeddingPool that properly respects the max_sessions configuration.
+/// This provides GPU memory control through session pooling.
+/// 
+/// # Arguments
+/// * `app_config` - The application configuration containing embedding settings
+/// 
+/// # Returns
+/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool that respects max_sessions
+/// 
+/// # Example
+/// ```rust,no_run
+/// use sagitta_search::{create_embedding_pool, embed_text_with_pool, AppConfig};
+/// 
+/// # async fn example(config: &AppConfig) -> Result<(), Box<dyn std::error::Error>> {
+/// let pool = create_embedding_pool(config).await?;
+/// let embeddings = embed_text_with_pool(&pool, &["Hello world"]).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn create_embedding_pool(app_config: &AppConfig) -> std::result::Result<Arc<EmbeddingPool>, SagittaError> {
+    let embedding_config = app_config_to_embedding_config(app_config);
+    let pool = EmbeddingPool::with_configured_sessions(embedding_config)
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
+    Ok(Arc::new(pool))
+}
+
+/// Creates an EmbeddingPool from an EmbeddingConfig that properly respects max_sessions.
+/// This is a convenience function for cases where you already have an EmbeddingConfig.
+/// 
+/// # Arguments
+/// * `embedding_config` - The embedding configuration
+/// 
+/// # Returns
+/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool that respects max_sessions
+pub async fn create_embedding_pool_from_config(embedding_config: EmbeddingConfig) -> std::result::Result<Arc<EmbeddingPool>, SagittaError> {
+    let pool = EmbeddingPool::with_configured_sessions(embedding_config)
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
+    Ok(Arc::new(pool))
+}
+
+/// Helper function to embed text using EmbeddingPool with the same interface as EmbeddingHandler.
+/// This bridges the gap between the old EmbeddingHandler::embed() and new EmbeddingPool::process_chunks().
+pub async fn embed_text_with_pool(pool: &EmbeddingPool, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+    use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
+    use std::path::PathBuf;
+    
+    // Convert texts to ProcessedChunks
+    let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
+        ProcessedChunk {
+            content: text.to_string(),
+            metadata: ChunkMetadata {
+                file_path: PathBuf::from("text"),
+                start_line: 0,
+                end_line: 0,
+                language: "text".to_string(),
+                file_extension: "txt".to_string(),
+                element_type: "text".to_string(),
+                context: None,
+            },
+            id: format!("text_{}", i),
+        }
+    }).collect();
+    
+    // Process chunks
+    let embedded_chunks = pool.process_chunks(chunks).await
+        .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
+    
+    // Extract embeddings
+    let embeddings = embedded_chunks.into_iter()
+        .map(|chunk| chunk.embedding)
+        .collect();
+    
+    Ok(embeddings)
+}
+
+/// Helper function to embed a single text using EmbeddingPool.
+pub async fn embed_single_text_with_pool(pool: &EmbeddingPool, text: &str) -> Result<Vec<f32>> {
+    let embeddings = embed_text_with_pool(pool, &[text]).await?;
+    embeddings.into_iter().next()
+        .ok_or_else(|| SagittaError::EmbeddingError("No embedding generated".to_string()))
+}
+
+/// Adapter that implements EmbeddingProvider for EmbeddingPool.
+/// This bridges the interface gap between the old EmbeddingHandler and new EmbeddingPool.
+#[derive(Debug)]
+pub struct EmbeddingPoolAdapter {
+    pool: Arc<EmbeddingPool>,
+}
+
+impl EmbeddingPoolAdapter {
+    pub fn new(pool: Arc<EmbeddingPool>) -> Self {
+        Self { pool }
+    }
+}
+
+impl sagitta_embed::provider::EmbeddingProvider for EmbeddingPoolAdapter {
+    fn dimension(&self) -> usize {
+        self.pool.dimension()
+    }
+
+    fn model_type(&self) -> sagitta_embed::EmbeddingModelType {
+        sagitta_embed::EmbeddingModelType::Onnx // EmbeddingPool is ONNX-based
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, sagitta_embed::SagittaEmbedError> {
+        // This is a blocking call, but EmbeddingPool is async
+        // We need to use a runtime to handle this
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            embed_text_with_pool(&self.pool, texts).await
+                .map_err(|e| sagitta_embed::SagittaEmbedError::provider(e.to_string()))
+        })
+    }
 }

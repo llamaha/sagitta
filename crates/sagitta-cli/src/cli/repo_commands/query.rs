@@ -1,29 +1,30 @@
-use sagitta_search::repo_helpers;
-use sagitta_search::qdrant_client_trait::QdrantClientTrait;
+use clap::Args;
+use anyhow::{anyhow, Context, Result, bail};
+use std::sync::Arc;
+use sagitta_search::{
+    config::AppConfig,
+    qdrant_client_trait::QdrantClientTrait,
+    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
+    error::SagittaError,
+    search_impl::search_collection,
+    EmbeddingPool, EmbeddingProcessor,
+    app_config_to_embedding_config,
+    constants::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
+};
+use qdrant_client::qdrant::{Filter, QueryResponse, Condition};
 
 // Use config types from sagitta_search
-use sagitta_search::AppConfig;
 
-use anyhow::{anyhow, Context, Result, bail};
-use clap::Args;
-use std::sync::Arc;
 use colored::*;
 use std::fmt::Debug;
 
-use qdrant_client::qdrant::{Filter, Condition, SearchResponse, QueryResponse};
-
 use crate::{
-    cli::{
-        self as cli, // Alias cli for clarity
-        commands::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE}, // Import re-exported constants
-        formatters::print_search_results, // Correct path for formatters
+    cli::commands::{
+        LEGACY_INDEX_COLLECTION,
     },
+    cli::repo_commands::RepoCommand,
+    cli::formatters::print_search_results,
 };
-
-// Core imports
-use sagitta_search::EmbeddingHandler;
-use sagitta_search::error::SagittaError;
-use sagitta_search::search_collection;
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoQueryArgs {
@@ -85,7 +86,7 @@ where
         .or_else(|| repo_config.active_branch.clone())
         .unwrap_or_else(|| repo_config.default_branch.clone());
 
-    let collection_name = repo_helpers::get_branch_aware_collection_name(cli_tenant_id, &repo_name, &branch_name, config);
+    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name, &branch_name, config);
 
     let model_env_var = std::env::var("SAGITTA_ONNX_MODEL").ok();
     let tokenizer_env_var = std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").ok();
@@ -100,7 +101,8 @@ where
         .or(config.onnx_tokenizer_path.as_deref())
         .ok_or_else(|| anyhow!("ONNX tokenizer dir not found. Provide via --onnx-tokenizer-dir, env var, or config."))?;
 
-    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))?;
+    let embedding_config = app_config_to_embedding_config(config);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
 
     println!(
         "Querying repository '{}' (collection: '{}', branch: '{}')...",
@@ -120,9 +122,9 @@ where
 
     log::debug!("Calling core search_collection...");
     let search_response_result: Result<QueryResponse, SagittaError> = search_collection(
-        client.clone(),
+        client,
         &collection_name,
-        &embedding_handler,
+        &embedding_pool,
         &args.query,
         args.limit,
         Some(search_filter),

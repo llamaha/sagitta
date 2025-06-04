@@ -7,8 +7,9 @@ use sagitta_code::{
     llm::client::{LlmClient, Message, ToolDefinition as LlmToolDefinition, LlmResponse, StreamChunk, MessagePart, Role, ThinkingConfig, GroundingConfig},
     utils::errors::SagittaCodeError,
 };
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+use sagitta_search;
 use futures_util::StreamExt;
 use std::path::Path;
 use serde_json::Value;
@@ -169,11 +170,12 @@ async fn test_sidekiq_bug_investigation() {
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
     
-    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
-    let embedding_provider = Arc::new(
-        EmbeddingHandler::new(&embedding_config)
-            .expect("Failed to create embedding handler")
-    );
+    let embedding_config = EmbeddingConfig::new_onnx(model_path.to_path_buf(), tokenizer_path.to_path_buf());
+    let embedding_pool = Arc::new(EmbeddingPool::with_configured_sessions(embedding_config)
+        .expect("Failed to create embedding pool"));
+    
+    // Create adapter for EmbeddingProvider compatibility
+    let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_pool));
     
     let tool_registry = Arc::new(ToolRegistry::new());
     
@@ -205,7 +207,7 @@ async fn test_sidekiq_bug_investigation() {
         }
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider, persistence, search_engine, mock_llm_client)
+    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client)
         .await
         .expect("Failed to create agent");
     
@@ -274,11 +276,12 @@ async fn test_add_repository_already_exists_handling() {
     let onnx_model = OnnxEmbeddingModel::new(model_path, tokenizer_path)
         .expect("Failed to create ONNX model");
     
-    let embedding_config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
-    let embedding_provider = Arc::new(
-        EmbeddingHandler::new(&embedding_config)
-            .expect("Failed to create embedding handler")
-    );
+    let embedding_config = EmbeddingConfig::new_onnx(model_path.to_path_buf(), tokenizer_path.to_path_buf());
+    let embedding_pool = Arc::new(EmbeddingPool::with_configured_sessions(embedding_config)
+        .expect("Failed to create embedding pool"));
+    
+    // Create adapter for EmbeddingProvider compatibility
+    let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_pool));
     
     let tool_registry = Arc::new(ToolRegistry::new());
     
@@ -315,7 +318,7 @@ async fn test_add_repository_already_exists_handling() {
         }
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider, persistence, search_engine, mock_llm_client_add_repo)
+    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client_add_repo)
         .await
         .expect("Failed to create agent");
     

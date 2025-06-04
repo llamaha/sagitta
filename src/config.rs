@@ -127,9 +127,6 @@ pub struct EmbeddingEngineConfig {
     /// Maximum number of concurrent sessions for session pooling
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
-    /// Enable CUDA acceleration (requires CUDA feature)
-    #[serde(default = "default_enable_cuda")]
-    pub enable_cuda: bool,
     /// Maximum sequence length for tokenization
     #[serde(default = "default_max_sequence_length")]
     pub max_sequence_length: usize,
@@ -139,26 +136,25 @@ pub struct EmbeddingEngineConfig {
     /// Enable session cleanup on idle
     #[serde(default = "default_enable_session_cleanup")]
     pub enable_session_cleanup: bool,
+    /// Batch size for embedding operations (number of texts processed together)
+    #[serde(default = "default_embedding_batch_size")]
+    pub embedding_batch_size: usize,
 }
 
 impl Default for EmbeddingEngineConfig {
     fn default() -> Self {
         Self {
             max_sessions: default_max_sessions(),
-            enable_cuda: default_enable_cuda(),
             max_sequence_length: default_max_sequence_length(),
             session_timeout_seconds: default_session_timeout_seconds(),
             enable_session_cleanup: default_enable_session_cleanup(),
+            embedding_batch_size: default_embedding_batch_size(),
         }
     }
 }
 
 fn default_max_sessions() -> usize {
     4 // Match sagitta-embed default
-}
-
-fn default_enable_cuda() -> bool {
-    false
 }
 
 fn default_max_sequence_length() -> usize {
@@ -171,6 +167,10 @@ fn default_session_timeout_seconds() -> u64 {
 
 fn default_enable_session_cleanup() -> bool {
     true
+}
+
+fn default_embedding_batch_size() -> usize {
+    128 // Match sagitta-embed default
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

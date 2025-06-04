@@ -69,16 +69,17 @@ def quantize_onnx_model(model_path, quantized_model_path):
         print(f"Error during quantization: {e}", file=sys.stderr)
         return None
 
-def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_name=DEFAULT_MODEL_NAME):
+def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_name=DEFAULT_MODEL_NAME, quantized=False):
     """
-    Downloads a Sentence Transformer model and converts it to quantized ONNX format
+    Downloads a Sentence Transformer model and converts it to ONNX format
 
     Args:
         output_dir (str): Directory to save the ONNX model and tokenizer
         model_name (str): Name of the Sentence Transformer model to download
+        quantized (bool): Whether to quantize the model
 
     Returns:
-        Path to the saved quantized ONNX model
+        Path to the saved ONNX model
     """
     print(f"Downloading and loading {model_name} model...")
 
@@ -118,8 +119,12 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
     }
 
     # Define output paths
-    temp_onnx_path = os.path.join(output_dir, "model_fp32.onnx") # Temporary full precision
-    final_onnx_path = os.path.join(output_dir, "model.onnx") # Final quantized model
+    if quantized:
+        temp_onnx_path = os.path.join(output_dir, "model_fp32.onnx") # Temporary full precision
+        final_onnx_path = os.path.join(output_dir, "model.onnx") # Final quantized model
+    else:
+        final_onnx_path = os.path.join(output_dir, "model.onnx") # Final model
+        temp_onnx_path = final_onnx_path
 
     print(f"Converting model to ONNX format with modern opset...")
 
@@ -142,24 +147,27 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
          print("This might be due to unsupported operations in the model or opset version.", file=sys.stderr)
          sys.exit(1)
 
-    print(f"Full precision model exported to: {temp_onnx_path}")
-
-    # Quantize the model
-    quantized_path = quantize_onnx_model(temp_onnx_path, final_onnx_path)
-    
-    if quantized_path:
-        # Remove the temporary full precision model
-        try:
-            os.remove(temp_onnx_path)
-            print("✓ Temporary full precision model removed")
-        except:
-            pass
+    if quantized:
+        print(f"Full precision model exported to: {temp_onnx_path}")
         
-        print(f"✓ Quantized model saved to: {final_onnx_path}")
+        # Quantize the model
+        quantized_path = quantize_onnx_model(temp_onnx_path, final_onnx_path)
+        
+        if quantized_path:
+            # Remove the temporary full precision model
+            try:
+                os.remove(temp_onnx_path)
+                print("✓ Temporary full precision model removed")
+            except:
+                pass
+            
+            print(f"✓ Quantized model saved to: {final_onnx_path}")
+        else:
+            # If quantization failed, use the full precision model
+            print("⚠ Quantization failed, using full precision model")
+            os.rename(temp_onnx_path, final_onnx_path)
     else:
-        # If quantization failed, use the full precision model
-        print("⚠ Quantization failed, using full precision model")
-        os.rename(temp_onnx_path, final_onnx_path)
+        print(f"Model successfully converted and saved to: {final_onnx_path}")
 
     # Save tokenizer using save_pretrained - this saves necessary files
     # like tokenizer.json, vocab.txt/merges.txt etc.
@@ -169,7 +177,7 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
 
     return final_onnx_path
 
-def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
+def verify_onnx_model(onnx_path, tokenizer_dir, model_name, quantized=False):
     """
     Verify the ONNX model is valid and performs basic inference.
 
@@ -177,8 +185,9 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
         onnx_path (str): Path to the ONNX model
         tokenizer_dir (str): Path to the tokenizer directory
         model_name (str): Original model name for loading reference HF model
+        quantized (bool): Whether the model is quantized
     """
-    print("\n--- Verifying Quantized ONNX Model ---")
+    print(f"\n--- Verifying {'Quantized ' if quantized else ''}ONNX Model ---")
     try:
         import onnx
         import onnxruntime as ort
@@ -238,7 +247,7 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
         else:
             print("⚠ Warning: Embeddings may be invalid (uniform values)", file=sys.stderr)
 
-        print("✓ Quantized model verification successful!")
+        print(f"✓ {'Quantized ' if quantized else ''}model verification successful!")
 
     except ImportError:
         print("Please install required packages to verify the model:", file=sys.stderr)
@@ -247,7 +256,7 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name):
         print(f"Error verifying ONNX model: {e}", file=sys.stderr)
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert BAAI/bge-small-en-v1.5 model to quantized ONNX with modern opset.")
+    parser = argparse.ArgumentParser(description="Convert BAAI/bge-small-en-v1.5 model to ONNX with optional quantization.")
     parser.add_argument(
         "--model_name",
         type=str,
@@ -261,6 +270,11 @@ def main():
         help=f"Directory to save the ONNX model and tokenizer files (default: {DEFAULT_OUTPUT_DIR})"
     )
     parser.add_argument(
+        "--quantized",
+        action="store_true",
+        help="Enable INT8 quantization for optimal CPU performance (recommended for CPU-only deployments)"
+    )
+    parser.add_argument(
         "--skip_verification",
         action="store_true",
         help="Skip the ONNX model verification step."
@@ -271,36 +285,47 @@ def main():
     # Use arguments passed or defaults
     model_to_convert = args.model_name
     output_directory_name = args.output_dir
+    use_quantization = args.quantized
 
-    print(f"--- Starting Quantized ONNX Conversion for {model_to_convert} ---")
-    print("Converting with modern ONNX opset + INT8 quantization for optimal CPU performance")
+    print(f"--- Starting ONNX Conversion for {model_to_convert} ---")
+    if use_quantization:
+        print("Converting with modern ONNX opset + INT8 quantization for optimal CPU performance")
+    else:
+        print("Converting with modern ONNX opset (full precision)")
 
     # Download and convert the model to quantized ONNX
     onnx_path = download_and_convert_st_model_to_onnx(
         output_dir=output_directory_name,
-        model_name=model_to_convert
+        model_name=model_to_convert,
+        quantized=use_quantization
     )
 
     # Verify the ONNX model unless skipped
     if not args.skip_verification:
-        verify_onnx_model(onnx_path, output_directory_name, model_to_convert)
+        verify_onnx_model(onnx_path, output_directory_name, model_to_convert, quantized=use_quantization)
     else:
-        print("\n--- Skipping ONNX Model Verification ---")
+        print(f"\n--- Skipping {'Quantized ' if use_quantization else ''}ONNX Model Verification ---")
 
-    print("\n--- Quantized Model Conversion Complete ---")
+    print(f"\n--- {'Quantized ' if use_quantization else ''}Model Conversion Complete ---")
     print("=" * 60)
-    print(f"The quantized ONNX model and tokenizer files have been saved to the '{output_directory_name}' directory.")
+    print(f"The {'quantized ' if use_quantization else ''}ONNX model and tokenizer files have been saved to the '{output_directory_name}' directory.")
     print("The primary files are:")
     model_file = os.path.join(output_directory_name, 'model.onnx')
     print(f"  • Model: {model_file}")
     print(f"  • Tokenizer Config: {os.path.join(output_directory_name, 'tokenizer.json')}")
     print(f"  • Other tokenizer files (vocab.txt, merges.txt etc. depending on model type)")
     
-    print("\n🚀 Performance Benefits:")
-    print("  • INT8 quantization for 3-4X faster CPU inference")
-    print("  • ~75% smaller model size compared to full precision")
-    print("  • Modern ONNX opset (17) for better compatibility")
-    print("  • Optimized for CPU inference with minimal accuracy loss")
+    if use_quantization:
+        print("\n🚀 Performance Benefits:")
+        print("  • INT8 quantization for 3-4X faster CPU inference")
+        print("  • ~75% smaller model size compared to full precision")
+        print("  • Modern ONNX opset (17) for better compatibility")
+        print("  • Optimized for CPU inference with minimal accuracy loss")
+    else:
+        print("\n📋 Model Information:")
+        print("  • Full precision ONNX model")
+        print("  • Modern ONNX opset (17) for better compatibility")
+        print("  • Add --quantized flag for CPU-optimized quantization")
     
     print("\n📋 Usage with sagitta-cli:")
     print("Method 1: Command Line Arguments")
@@ -321,16 +346,22 @@ def main():
     print(f"    onnx_tokenizer_path = \"{abs_tokenizer_path}\"")
     
     print("\n⚠️  Important Notes:")
-    print("  • This model uses INT8 quantization for optimal CPU performance")
-    print("  • Modern ONNX opset 17 ensures compatibility")
-    print("  • When switching models, rebuild your vector index")
-    print("  • Use './target/release/sagitta-cli clear' if needed")
-    
-    print("\n💡 For CPU builds:")
-    print("  • INT8 quantization provides significant speedup on CPU")
-    print("  • No GPU/CUDA dependencies required")
-    print("  • Optimized for production CPU inference")
-    print("  • Minimal accuracy loss (~1-2% typical)")
+    if use_quantization:
+        print("  • This model uses INT8 quantization for optimal CPU performance")
+        print("  • Modern ONNX opset 17 ensures compatibility")
+        print("  • When switching models, rebuild your vector index")
+        print("  • Use './target/release/sagitta-cli clear' if needed")
+        
+        print("\n💡 For CPU builds:")
+        print("  • INT8 quantization provides significant speedup on CPU")
+        print("  • No GPU/CUDA dependencies required")
+        print("  • Optimized for production CPU inference")
+        print("  • Minimal accuracy loss (~1-2% typical)")
+    else:
+        print("  • Full precision model for maximum accuracy")
+        print("  • Use --quantized flag for CPU-optimized performance")
+        print("  • When switching models, rebuild your vector index")
+        print("  • Use './target/release/sagitta-cli clear' if needed")
     print("=" * 60)
 
 if __name__ == "__main__":

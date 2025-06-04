@@ -14,7 +14,7 @@ use sagitta_code::{
     utils::errors::SagittaCodeError,
 };
 use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use futures_util::StreamExt;
 use std::path::Path;
 use sagitta_code::agent::state::types::AgentMode;

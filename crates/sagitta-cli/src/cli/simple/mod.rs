@@ -19,7 +19,8 @@ use std::{
 
 use sagitta_search::config::AppConfig;
 use crate::cli::CliArgs;
-use sagitta_search::EmbeddingHandler; // Use re-export from main crate
+use sagitta_search::EmbeddingPool; // Use re-export from main crate
+use sagitta_search::EmbeddingProcessor; // For dimension() method
 use crate::cli::commands::{ // Only import necessary items from commands
     LEGACY_INDEX_COLLECTION, 
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
@@ -243,9 +244,9 @@ async fn handle_simple_index(
     }
     log::debug!("Input paths: {:?}", cmd_args.paths);
 
-    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
-        .context("Failed to initialize embedding handler")?;
-    log::info!("Embedding dimension (from handler): {}", embedding_handler.dimension()?);
+    let embedding_config = sagitta_search::app_config_to_embedding_config(config);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
+        .context("Failed to initialize embedding pool")?;
 
     // --- Prepare Filters ---
     let file_extensions_set: Option<HashSet<String>> = cmd_args
@@ -274,7 +275,7 @@ async fn handle_simple_index(
         file_extensions_set,
         collection_name,
         client.clone(),
-        &embedding_handler,
+        &embedding_pool,
         Some(Arc::new(IndicatifCliReporter::new(pb.clone()))),
         config, // Use the passed config instead of reloading
     ).await;
@@ -356,14 +357,15 @@ async fn handle_simple_query(
 
     // 5. Perform Search
     // Use the already loaded config from the parameter
-    let embedding_handler = EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(config))
-        .context("Failed to initialize embedding handler")?;
+    let embedding_config = sagitta_search::app_config_to_embedding_config(config);
+    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
+        .context("Failed to initialize embedding pool")?;
     
     let start_time = std::time::Instant::now(); // Define start_time here
     let search_response_result: Result<QueryResponse, SagittaError> = search_collection(
         client.clone(),
         collection_name,
-        &embedding_handler,
+        &embedding_pool,
         &args.query,
         args.limit,
         filter,

@@ -27,10 +27,10 @@ vocabulary_base_path = "/absolute/path/to/vocab"
 # Embedding engine configuration
 [embedding]
 max_sessions = 4                    # Maximum number of concurrent ONNX sessions
-enable_cuda = false                 # Enable CUDA acceleration
 max_sequence_length = 128           # Maximum sequence length for tokenization
 session_timeout_seconds = 300       # Session timeout in seconds (0 = no timeout)
 enable_session_cleanup = true       # Enable session cleanup on idle
+embedding_batch_size = 128
 
 # TLS/HTTPS settings (for sagitta-mcp)
 tls_enable = false
@@ -103,16 +103,23 @@ Embedding engine configuration. Example:
 ```toml
 [embedding]
 max_sessions = 4
-enable_cuda = false
 max_sequence_length = 128
 session_timeout_seconds = 300
 enable_session_cleanup = true
+embedding_batch_size = 128
 ```
-- `max_sessions` (integer, default: 4): Maximum number of concurrent ONNX sessions for session pooling. Higher values allow more parallel embedding generation but use more GPU memory. In the decoupled processing architecture, this directly controls the number of embedding model instances and GPU memory usage regardless of file processing concurrency.
-- `enable_cuda` (bool, default: false): Enable CUDA acceleration for embedding generation. Requires CUDA-compatible hardware and drivers.
+- `max_sessions` (integer, default: 4): Maximum number of concurrent ONNX model instances for parallel embedding generation. Higher values allow more parallel processing but use more GPU memory. This directly controls GPU memory usage and the number of models that can run simultaneously.
 - `max_sequence_length` (integer, default: 128): Maximum sequence length for tokenization. Longer sequences use more memory and processing time.
 - `session_timeout_seconds` (integer, default: 300): Session timeout in seconds. Set to 0 for no timeout.
 - `enable_session_cleanup` (bool, default: true): Enable automatic cleanup of idle sessions to free memory.
+- `embedding_batch_size` (integer, default: 128): Number of texts processed together by a single model instance. Higher values improve throughput per model but use more VRAM per model. This setting controls the batch size for individual model instances, while `max_sessions` controls how many models run in parallel.
+
+**Performance Tuning:**
+- **`max_sessions`**: Controls parallelism and GPU memory usage. Increase for more parallel processing (uses more GPU memory). Decrease to reduce memory usage.
+- **`embedding_batch_size`**: Controls throughput per model instance and VRAM per model. Increase for better throughput (uses more VRAM per model). Decrease to reduce memory usage per model.
+- **Interaction**: A single large operation (like `repo add`) will use up to `max_sessions` model instances in parallel, each processing `embedding_batch_size` texts at once.
+
+**CUDA Support**: CUDA acceleration is automatically enabled if the application was compiled with CUDA support and compatible hardware is available. No configuration needed.
 
 ### `oauth` (table, optional, advanced)
 OAuth2 configuration for MCP server. Example:
@@ -170,9 +177,9 @@ The embedding generation is now handled by the `sagitta-embed` crate which has i
 ### Embedding Engine Settings
 The embedding engine configuration in the `[embedding]` section is handled by the `sagitta-embed` crate:
 - `max_sessions`: Controls session pooling for parallel embedding generation
-- `enable_cuda`: Enables GPU acceleration if available
 - `max_sequence_length`: Controls tokenization limits
 - `session_timeout_seconds` and `enable_session_cleanup`: Control session lifecycle
+- `embedding_batch_size`: Controls batch size for individual model instances
 
 For detailed embedding performance tuning, refer to the `sagitta-embed` documentation.
 

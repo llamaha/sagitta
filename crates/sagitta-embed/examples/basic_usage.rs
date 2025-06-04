@@ -3,8 +3,9 @@
 //! This example demonstrates how to use the embedding engine with ONNX models.
 //! Note: This example requires actual ONNX model files to run successfully.
 
-use sagitta_embed::{EmbeddingHandler, EmbeddingConfig, EmbeddingProvider};
-use std::path::Path;
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProcessor};
+use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
+use std::path::{Path, PathBuf};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,10 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     // Configure for ONNX model
-    let config = EmbeddingConfig::new_onnx(model_path, tokenizer_path);
+    let config = EmbeddingConfig::new_onnx(model_path.to_path_buf(), tokenizer_path.to_path_buf());
     
-    println!("Creating embedding handler...");
-    let handler = EmbeddingHandler::new(&config)?;
+    println!("Creating embedding pool...");
+    let pool = EmbeddingPool::with_configured_sessions(config)?;
     
     // Sample texts to embed
     let texts = vec![
@@ -45,31 +46,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     println!("Generating embeddings for {} texts...", texts.len());
     
-    // Convert to string slices for the API
-    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_ref()).collect();
+    // Convert texts to ProcessedChunks
+    let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
+        ProcessedChunk {
+            content: text.to_string(),
+            metadata: ChunkMetadata {
+                file_path: PathBuf::from("example.txt"),
+                start_line: i,
+                end_line: i,
+                language: "text".to_string(),
+                file_extension: "txt".to_string(),
+                element_type: "text".to_string(),
+                context: None,
+            },
+            id: format!("text_{}", i),
+        }
+    }).collect();
     
-    // Generate embeddings using the embed method
-    let embeddings = handler.embed(&text_refs)?;
+    // Generate embeddings using the process_chunks method
+    let embedded_chunks = pool.process_chunks(chunks).await?;
     
-    println!("✅ Successfully generated {} embeddings!", embeddings.len());
+    println!("✅ Successfully generated {} embeddings!", embedded_chunks.len());
     println!();
     
     // Display results
-    for (i, (text, embedding)) in texts.iter().zip(embeddings.iter()).enumerate() {
-        println!("Text {}: \"{}\"", i + 1, text);
-        println!("  Embedding dimension: {}", embedding.len());
-        println!("  First 5 values: {:?}", &embedding[..5.min(embedding.len())]);
+    for (i, embedded_chunk) in embedded_chunks.iter().enumerate() {
+        println!("Text {}: \"{}\"", i + 1, embedded_chunk.chunk.content);
+        println!("  Embedding dimension: {}", embedded_chunk.embedding.len());
+        println!("  First 5 values: {:?}", &embedded_chunk.embedding[..5.min(embedded_chunk.embedding.len())]);
         println!();
     }
     
     // Demonstrate single text embedding
     println!("Generating embedding for single text...");
     let single_text = "Single text embedding example";
-    let single_embedding = handler.embed(&[single_text])?;
+    let single_chunk = ProcessedChunk {
+        content: single_text.to_string(),
+        metadata: ChunkMetadata {
+            file_path: PathBuf::from("single.txt"),
+            start_line: 0,
+            end_line: 0,
+            language: "text".to_string(),
+            file_extension: "txt".to_string(),
+            element_type: "text".to_string(),
+            context: None,
+        },
+        id: "single_0".to_string(),
+    };
+    
+    let single_embedded = pool.process_chunks(vec![single_chunk]).await?;
     
     println!("✅ Single embedding generated!");
-    println!("Text: \"{}\"", single_text);
-    println!("Dimension: {}", single_embedding[0].len());
+    println!("Text: \"{}\"", single_embedded[0].chunk.content);
+    println!("Dimension: {}", single_embedded[0].embedding.len());
     
     Ok(())
 } 

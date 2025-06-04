@@ -53,29 +53,36 @@ pub struct EmbeddedChunk {
     pub processed_at: std::time::Instant,
 }
 
-/// Configuration for the processing pipeline.
+/// Configuration for the processing pipeline with optimized threading support.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessingConfig {
     /// Number of concurrent file processing workers (defaults to CPU core count)
     pub file_processing_concurrency: usize,
     /// Maximum number of embedding model instances (defaults to 4)
     pub max_embedding_sessions: usize,
+    /// Number of CPU worker threads for GPU coordination (auto-calculated if 0)
+    pub cpu_worker_threads: usize,
     /// Size of the processing queue buffer
     pub processing_queue_size: usize,
     /// Maximum batch size for embedding processing
     pub embedding_batch_size: usize,
     /// Maximum file size to process (in bytes)
     pub max_file_size_bytes: u64,
+    /// File processing batch size for reducing coordination overhead
+    pub file_batch_size: usize,
 }
 
 impl Default for ProcessingConfig {
     fn default() -> Self {
+        let cpu_cores = num_cpus::get();
         Self {
-            file_processing_concurrency: num_cpus::get(),
+            file_processing_concurrency: cpu_cores,
             max_embedding_sessions: 4,
+            cpu_worker_threads: 0, // Auto-calculate
             processing_queue_size: 1000,
             embedding_batch_size: 128,
             max_file_size_bytes: 5 * 1024 * 1024, // 5MB
+            file_batch_size: std::cmp::max(1, cpu_cores / 4), // Reduce coordination overhead
         }
     }
 }
@@ -85,13 +92,112 @@ impl ProcessingConfig {
     /// This ensures that the GPU memory control (max_embedding_sessions) respects the user's
     /// configuration in config.toml rather than using a hardcoded default.
     pub fn from_embedding_config(embedding_config: &crate::config::EmbeddingConfig) -> Self {
+        let cpu_cores = num_cpus::get();
+        let max_sessions = embedding_config.max_sessions;
+        
         Self {
-            file_processing_concurrency: num_cpus::get(),
-            max_embedding_sessions: embedding_config.max_sessions, // Use configured value, not default
+            file_processing_concurrency: cpu_cores,
+            max_embedding_sessions: max_sessions, // Use configured value, not default
+            cpu_worker_threads: Self::calculate_optimal_cpu_workers(max_sessions, cpu_cores),
             processing_queue_size: 1000,
-            embedding_batch_size: 128,
+            embedding_batch_size: embedding_config.get_embedding_batch_size(), // Use configured or default batch size
             max_file_size_bytes: 5 * 1024 * 1024, // 5MB
+            file_batch_size: std::cmp::max(1, cpu_cores / 4),
         }
+    }
+
+    /// Calculate optimal number of CPU worker threads for GPU coordination.
+    /// This balances CPU utilization with memory bandwidth and coordination overhead.
+    pub fn calculate_optimal_cpu_workers(max_gpu_sessions: usize, cpu_cores: usize) -> usize {
+        // Use more CPU threads than GPU sessions to handle coordination overhead
+        // but don't exceed available CPU cores
+        let optimal = std::cmp::max(
+            max_gpu_sessions * 2, // At least 2 CPU threads per GPU session
+            cpu_cores / 2 // But use at least half the CPU cores
+        );
+        
+        // Cap at total CPU cores to avoid oversubscription
+        std::cmp::min(optimal, cpu_cores)
+    }
+
+    /// Get the effective number of CPU worker threads, calculating if needed.
+    pub fn effective_cpu_worker_threads(&self) -> usize {
+        if self.cpu_worker_threads == 0 {
+            Self::calculate_optimal_cpu_workers(self.max_embedding_sessions, num_cpus::get())
+        } else {
+            self.cpu_worker_threads
+        }
+    }
+
+    /// Create a configuration optimized for high-throughput processing.
+    pub fn high_throughput() -> Self {
+        let cpu_cores = num_cpus::get();
+        Self {
+            file_processing_concurrency: cpu_cores,
+            max_embedding_sessions: std::cmp::max(4, cpu_cores / 2), // More GPU sessions
+            cpu_worker_threads: cpu_cores, // Use all CPU cores for coordination
+            processing_queue_size: 2000, // Larger queue
+            embedding_batch_size: 256, // Larger batches
+            max_file_size_bytes: 10 * 1024 * 1024, // 10MB
+            file_batch_size: std::cmp::max(1, cpu_cores / 2), // Larger file batches
+        }
+    }
+
+    /// Create a configuration optimized for low-memory usage.
+    pub fn low_memory() -> Self {
+        Self {
+            file_processing_concurrency: std::cmp::max(1, num_cpus::get() / 2),
+            max_embedding_sessions: 2, // Fewer GPU sessions
+            cpu_worker_threads: 4, // Fewer CPU workers
+            processing_queue_size: 500, // Smaller queue
+            embedding_batch_size: 64, // Smaller batches
+            max_file_size_bytes: 2 * 1024 * 1024, // 2MB
+            file_batch_size: 1, // Process files individually
+        }
+    }
+
+    /// Validate the configuration and adjust if necessary.
+    pub fn validate_and_adjust(&mut self) {
+        let cpu_cores = num_cpus::get();
+        
+        // Ensure file processing concurrency doesn't exceed CPU cores
+        if self.file_processing_concurrency > cpu_cores {
+            log::warn!("File processing concurrency ({}) exceeds CPU cores ({}), adjusting", 
+                       self.file_processing_concurrency, cpu_cores);
+            self.file_processing_concurrency = cpu_cores;
+        }
+
+        // Ensure at least 1 embedding session
+        if self.max_embedding_sessions == 0 {
+            log::warn!("Max embedding sessions is 0, setting to 1");
+            self.max_embedding_sessions = 1;
+        }
+
+        // Calculate CPU worker threads if not set
+        if self.cpu_worker_threads == 0 {
+            self.cpu_worker_threads = Self::calculate_optimal_cpu_workers(
+                self.max_embedding_sessions, 
+                cpu_cores
+            );
+        }
+
+        // Ensure CPU worker threads don't exceed CPU cores
+        if self.cpu_worker_threads > cpu_cores {
+            log::warn!("CPU worker threads ({}) exceeds CPU cores ({}), adjusting", 
+                       self.cpu_worker_threads, cpu_cores);
+            self.cpu_worker_threads = cpu_cores;
+        }
+
+        // Ensure reasonable batch sizes
+        if self.embedding_batch_size == 0 {
+            self.embedding_batch_size = 128;
+        }
+        if self.file_batch_size == 0 {
+            self.file_batch_size = 1;
+        }
+
+        log::info!("ProcessingConfig validated: {} CPU cores, {} file workers, {} GPU sessions, {} CPU workers",
+                   cpu_cores, self.file_processing_concurrency, self.max_embedding_sessions, self.cpu_worker_threads);
     }
 }
 
@@ -155,7 +261,7 @@ pub struct ProcessingProgress {
 }
 
 /// Different stages of the processing pipeline
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProcessingStage {
     /// Starting the processing operation
     Starting,

@@ -1,4 +1,4 @@
-//! File processing implementation for CPU-intensive tasks.
+//! File processing implementation for CPU-intensive tasks with optimized threading.
 
 use crate::error::{Result, SagittaEmbedError};
 use crate::processor::{
@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 /// Default implementation of FileProcessor that handles file I/O, parsing, and chunking.
 /// This is designed to scale to maximum CPU cores without GPU memory concerns.
+/// Optimized for coordination with the embedding pool.
 pub struct DefaultFileProcessor {
     config: ProcessingConfig,
     /// Optional syntax parser integration for more sophisticated element type detection
@@ -61,6 +62,7 @@ impl DefaultFileProcessor {
     }
 
     /// Process a single file synchronously (internal helper).
+    /// Optimized for minimal memory allocation and CPU overhead.
     fn process_file_sync(&self, file_path: &PathBuf) -> Result<Vec<ProcessedChunk>> {
         // Check file size first
         let metadata = std::fs::metadata(file_path).map_err(|e| {
@@ -117,7 +119,7 @@ impl DefaultFileProcessor {
             parse_content_into_chunks(&content, &language)?
         };
 
-        // Convert to ProcessedChunk instances
+        // Convert to ProcessedChunk instances with optimized memory usage
         let processed_chunks: Vec<ProcessedChunk> = chunks
             .into_iter()
             .enumerate()
@@ -141,6 +143,137 @@ impl DefaultFileProcessor {
             .collect();
 
         Ok(processed_chunks)
+    }
+
+    /// Process files in optimized batches to reduce coordination overhead.
+    async fn process_files_batched(
+        &self,
+        file_paths: &[PathBuf],
+        progress_reporter: Arc<dyn ProgressReporter>
+    ) -> Result<Vec<ProcessedChunk>> {
+        if file_paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let start_time = Instant::now();
+        let total_files = file_paths.len();
+        
+        // Report starting
+        progress_reporter.report(ProcessingProgress {
+            stage: ProcessingStage::Starting,
+            current_file: None,
+            files_completed: 0,
+            total_files,
+            files_per_second: None,
+            message: Some(format!("Starting optimized file processing for {} files using {} CPU cores", 
+                                  total_files, self.config.file_processing_concurrency)),
+        }).await;
+
+        // Calculate optimal batch size to reduce coordination overhead
+        // Larger batches reduce task spawning overhead but may increase memory usage
+        let optimal_batch_size = std::cmp::max(
+            1,
+            std::cmp::min(
+                total_files / self.config.file_processing_concurrency,
+                32 // Cap batch size to prevent excessive memory usage
+            )
+        );
+
+        log::debug!("Using batch size {} for {} files with {} CPU cores", 
+                    optimal_batch_size, total_files, self.config.file_processing_concurrency);
+
+        // Create batches of files
+        let file_batches: Vec<Vec<PathBuf>> = file_paths
+            .chunks(optimal_batch_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
+        // Create semaphore to limit concurrent file processing
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.file_processing_concurrency));
+        let files_completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        
+        // Process file batches concurrently
+        let tasks: Vec<_> = file_batches
+            .into_iter()
+            .enumerate()
+            .map(|(batch_idx, file_batch)| {
+                let config = self.config.clone();
+                let syntax_parser_fn = self.syntax_parser_fn.clone();
+                let semaphore = semaphore.clone();
+                let progress_reporter = progress_reporter.clone();
+                let files_completed = files_completed.clone();
+                let batch_size = file_batch.len();
+                
+                async move {
+                    let _permit = semaphore.acquire().await.map_err(|e| {
+                        SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e))
+                    })?;
+                    
+                    // Process entire batch in a single blocking task to reduce task overhead
+                    let result = task::spawn_blocking(move || {
+                        let mut processor = DefaultFileProcessor::new(config);
+                        processor.syntax_parser_fn = syntax_parser_fn;
+                        
+                        let mut batch_chunks = Vec::new();
+                        for file_path in file_batch {
+                            match processor.process_file_sync(&file_path) {
+                                Ok(mut chunks) => batch_chunks.append(&mut chunks),
+                                Err(e) => {
+                                    log::warn!("Failed to process file {}: {}", file_path.display(), e);
+                                    // Continue processing other files in the batch
+                                }
+                            }
+                        }
+                        batch_chunks
+                    })
+                    .await
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing batch task failed: {}", e)))?;
+                    
+                    // Update completed count and report progress
+                    let completed = files_completed.fetch_add(batch_size, std::sync::atomic::Ordering::Relaxed) + batch_size;
+                    let elapsed_secs = start_time.elapsed().as_secs_f64();
+                    let files_per_second = if elapsed_secs > 0.0 { Some(completed as f64 / elapsed_secs) } else { None };
+                    
+                    progress_reporter.report(ProcessingProgress {
+                        stage: ProcessingStage::ProcessingFiles,
+                        current_file: None,
+                        files_completed: completed,
+                        total_files,
+                        files_per_second,
+                        message: Some(format!("Processed batch {} - completed {} of {} files ({:.1} files/sec)", 
+                                              batch_idx + 1, completed, total_files, 
+                                              files_per_second.unwrap_or(0.0))),
+                    }).await;
+                    
+                    Ok::<Vec<ProcessedChunk>, SagittaEmbedError>(result)
+                }
+            })
+            .collect();
+
+        // Wait for all tasks to complete and collect results
+        let results = try_join_all(tasks).await?;
+        
+        // Flatten all chunks into a single vector
+        let mut all_chunks = Vec::new();
+        for chunks in results {
+            all_chunks.extend(chunks);
+        }
+
+        // Report completion
+        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        let files_per_second = if elapsed_secs > 0.0 { Some(total_files as f64 / elapsed_secs) } else { None };
+        
+        progress_reporter.report(ProcessingProgress {
+            stage: ProcessingStage::Completed,
+            current_file: None,
+            files_completed: total_files,
+            total_files,
+            files_per_second,
+            message: Some(format!("Successfully processed {} files, generated {} chunks ({:.1} files/sec)", 
+                                  total_files, all_chunks.len(), files_per_second.unwrap_or(0.0))),
+        }).await;
+
+        Ok(all_chunks)
     }
 }
 
@@ -170,105 +303,8 @@ impl FileProcessor for DefaultFileProcessor {
         file_paths: &[PathBuf], 
         progress_reporter: Arc<dyn ProgressReporter>
     ) -> Result<Vec<ProcessedChunk>> {
-        if file_paths.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let start_time = Instant::now();
-        let total_files = file_paths.len();
-        
-        // Report starting
-        progress_reporter.report(ProcessingProgress {
-            stage: ProcessingStage::Starting,
-            current_file: None,
-            files_completed: 0,
-            total_files,
-            files_per_second: None,
-            message: Some(format!("Starting to process {} files", total_files)),
-        }).await;
-
-        // Create semaphore to limit concurrent file processing
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.file_processing_concurrency));
-        let files_completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        
-        // Process files concurrently with controlled concurrency
-        let tasks: Vec<_> = file_paths
-            .iter()
-            .enumerate()
-            .map(|(index, file_path)| {
-                let file_path = file_path.clone();
-                let config = self.config.clone();
-                let syntax_parser_fn = self.syntax_parser_fn.clone();
-                let semaphore = semaphore.clone();
-                let progress_reporter = progress_reporter.clone();
-                let files_completed = files_completed.clone();
-                
-                async move {
-                    let _permit = semaphore.acquire().await.map_err(|e| {
-                        SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e))
-                    })?;
-                    
-                    // Report current file being processed
-                    progress_reporter.report(ProcessingProgress {
-                        stage: ProcessingStage::ProcessingFiles,
-                        current_file: Some(file_path.clone()),
-                        files_completed: files_completed.load(std::sync::atomic::Ordering::Relaxed),
-                        total_files,
-                        files_per_second: None,
-                        message: Some(format!("Processing file {} of {}", index + 1, total_files)),
-                    }).await;
-                    
-                    // Process file in blocking task
-                    let result = task::spawn_blocking(move || {
-                        let mut processor = DefaultFileProcessor::new(config);
-                        processor.syntax_parser_fn = syntax_parser_fn;
-                        processor.process_file_sync(&file_path)
-                    })
-                    .await
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing task failed: {}", e)))?;
-                    
-                    // Update completed count and report progress
-                    let completed = files_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let elapsed_secs = start_time.elapsed().as_secs_f64();
-                    let files_per_second = if elapsed_secs > 0.0 { Some(completed as f64 / elapsed_secs) } else { None };
-                    
-                    progress_reporter.report(ProcessingProgress {
-                        stage: ProcessingStage::ProcessingFiles,
-                        current_file: None,
-                        files_completed: completed,
-                        total_files,
-                        files_per_second,
-                        message: Some(format!("Completed {} of {} files", completed, total_files)),
-                    }).await;
-                    
-                    result
-                }
-            })
-            .collect();
-
-        // Wait for all tasks to complete and collect results
-        let results = try_join_all(tasks).await?;
-        
-        // Flatten all chunks into a single vector
-        let mut all_chunks = Vec::new();
-        for chunks in results {
-            all_chunks.extend(chunks);
-        }
-
-        // Report completion
-        let elapsed_secs = start_time.elapsed().as_secs_f64();
-        let files_per_second = if elapsed_secs > 0.0 { Some(total_files as f64 / elapsed_secs) } else { None };
-        
-        progress_reporter.report(ProcessingProgress {
-            stage: ProcessingStage::Completed,
-            current_file: None,
-            files_completed: total_files,
-            total_files,
-            files_per_second,
-            message: Some(format!("Successfully processed {} files, generated {} chunks", total_files, all_chunks.len())),
-        }).await;
-
-        Ok(all_chunks)
+        // Use the optimized batched processing
+        self.process_files_batched(file_paths, progress_reporter).await
     }
 
     fn config(&self) -> &ProcessingConfig {

@@ -61,4 +61,13 @@ pub const DEFAULT_EMBEDDING_DIMENSION: usize = 384;
 pub const DEFAULT_MAX_SESSIONS: usize = 4;
 
 /// Default maximum sequence length for tokenization
-pub const DEFAULT_MAX_SEQUENCE_LENGTH: usize = 128; 
+pub const DEFAULT_MAX_SEQUENCE_LENGTH: usize = 128;
+
+/// Default session timeout in seconds
+pub const DEFAULT_SESSION_TIMEOUT_SECONDS: u64 = 300;
+
+/// Default enable session cleanup setting
+pub const DEFAULT_ENABLE_SESSION_CLEANUP: bool = true;
+
+/// Default embedding batch size
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 128; 

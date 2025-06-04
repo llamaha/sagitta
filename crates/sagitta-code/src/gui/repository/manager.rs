@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use sagitta_search::AppConfig;
 use sagitta_search::RepositoryConfig;
 use sagitta_search::search_impl::search_collection;
-use sagitta_search::EmbeddingHandler;
+use sagitta_search::EmbeddingPool;
 use sagitta_search::repo_helpers;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::qdrant::{QueryResponse, Filter, Condition};
@@ -20,6 +20,7 @@ use sagitta_search::fs_utils::{find_files_matching_pattern, read_file_range};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use git_manager::{GitManager, SwitchResult, SyncRequirement};
+use sagitta_search::{EmbeddingProcessor};
 
 use super::types::{RepoInfo, CoreSyncProgress, SimpleSyncStatus, DisplayableSyncProgress};
 use crate::gui::progress::{GuiProgressReporter, GuiSyncReport};
@@ -58,7 +59,7 @@ pub struct RepositoryManager {
     config: Arc<Mutex<SagittaAppConfig>>,
     // The following fields will be needed for real implementations
     client: Option<Arc<QdrantClient>>,
-    embedding_handler: Option<Arc<EmbeddingHandler>>,
+    embedding_handler: Option<Arc<EmbeddingPool>>,
     // Track sync status for repositories
     sync_status_map: Arc<Mutex<HashMap<String, SyncStatus>>>,
     // Cache of repositories for updates
@@ -190,14 +191,14 @@ impl RepositoryManager {
             } else {
                 log::info!("[RepositoryManager] ONNX files exist, creating embedding handler...");
                 
-                match EmbeddingHandler::new(&sagitta_search::app_config_to_embedding_config(&config_guard)) {
-                    Ok(handler) => {
+                match EmbeddingPool::with_configured_sessions(sagitta_search::app_config_to_embedding_config(&config_guard)) {
+                    Ok(pool) => {
                         log::info!("[RepositoryManager] Embedding handler created successfully");
-                        self.embedding_handler = Some(Arc::new(handler));
+                        self.embedding_handler = Some(Arc::new(pool));
                     },
                     Err(e) => {
-                        log::warn!("[RepositoryManager] Failed to initialize embedding handler: {}. Continuing without embedding support.", e);
-                        // Don't fail initialization, just continue without embedding handler
+                        log::error!("Failed to create EmbeddingPool: {}", e);
+                        self.embedding_handler = None;
                     }
                 }
             }
@@ -419,8 +420,7 @@ impl RepositoryManager {
         
         // Get embedding dimension
         let embedding_dim = self.embedding_handler.as_ref().unwrap()
-            .dimension()
-            .context("Failed to get embedding dimension")? as u64;
+            .dimension() as u64;
         
         // Get repositories base path
         let repo_base_path = get_repo_base_path(Some(&*config_guard))
@@ -498,8 +498,7 @@ impl RepositoryManager {
         
         // Get embedding dimension
         let embedding_dim = self.embedding_handler.as_ref().unwrap()
-            .dimension()
-            .context("Failed to get embedding dimension")? as u64;
+            .dimension() as u64;
         
         // Get repositories base path
         let repo_base_path = get_repo_base_path(Some(&*config_guard))

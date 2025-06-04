@@ -52,7 +52,7 @@ pub mod progress;
 
 // Re-export key components from the core library for convenience
 pub use sagitta_search::config::{AppConfig, IndexingConfig, RepositoryConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
-pub use sagitta_search::{EmbeddingHandler, EmbeddingModel, EmbeddingModelType};
+pub use sagitta_search::{EmbeddingPool, EmbeddingModel, EmbeddingModelType};
 pub use sagitta_search::error::{SagittaError, Result as CoreResult}; // Alias CoreResult to avoid clash
 pub use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 pub use sagitta_search::constants::*;

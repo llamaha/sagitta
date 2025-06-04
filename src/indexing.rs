@@ -1,5 +1,4 @@
 use crate::{
-    EmbeddingHandler, // Use re-export from main crate
     error::{Result, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
     config::{self, AppConfig},
@@ -124,7 +123,7 @@ impl EmbedProgressReporter for EmbeddingProgressBridge {
 /// * `file_extensions` - Optional set of lowercase file extensions (without '.') to include.
 /// * `collection_name` - The Qdrant collection name.
 /// * `client` - An Arc-wrapped Qdrant client instance.
-/// * `embedding_handler` - Reference to the initialized EmbeddingHandler (used for configuration).
+/// * `embedding_pool` - Reference to the initialized EmbeddingPool.
 /// * `progress_reporter` - Optional progress reporter for reporting.
 /// * `config` - The application configuration.
 ///
@@ -137,7 +136,7 @@ pub async fn index_paths<
     file_extensions: Option<HashSet<String>>,
     collection_name: &str,
     client: Arc<C>,
-    embedding_handler: &EmbeddingHandler,
+    embedding_pool: &EmbeddingPool,
     progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
     config: &AppConfig,
 ) -> Result<(usize, usize)> {
@@ -150,7 +149,7 @@ pub async fn index_paths<
     );
 
     // --- 1. Ensure Collection Exists ---
-    let embedding_dim = embedding_handler.dimension()?;
+    let embedding_dim = embedding_pool.dimension();
     ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?; 
     log::debug!("Core: Collection \"{}\" ensured.", collection_name);
 
@@ -196,7 +195,6 @@ pub async fn index_paths<
 
     let file_processor = DefaultFileProcessor::new(processing_config.clone())
         .with_syntax_parser(syntax_parser_fn);
-    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
 
     // --- 4. Process Files (CPU-intensive, parallel) ---
     let progress_bridge = Arc::new(FileProcessingProgressBridge {
@@ -345,7 +343,7 @@ pub async fn index_paths<
 /// * `branch_name` - The current branch name.
 /// * `commit_hash` - The current commit hash.
 /// * `client` - An Arc-wrapped Qdrant client instance.
-/// * `embedding_handler` - Reference to the main EmbeddingHandler.
+/// * `embedding_pool` - Reference to the initialized EmbeddingPool.
 /// * `progress_reporter` - Optional progress reporter for reporting.
 /// * `max_concurrent_upserts` - Maximum number of concurrent Qdrant upsert operations.
 ///
@@ -361,7 +359,7 @@ pub async fn index_repo_files<
     branch_name: &str,
     commit_hash: &str,
     client: Arc<C>,
-    embedding_handler: Arc<EmbeddingHandler>,
+    embedding_pool: Arc<EmbeddingPool>,
     progress_reporter: Option<Arc<dyn SyncProgressReporter>>, 
     max_concurrent_upserts: usize,
 ) -> Result<usize> {
@@ -386,7 +384,7 @@ pub async fn index_repo_files<
     }
 
     // --- 1. Ensure Collection Exists ---
-    let embedding_dim = embedding_handler.dimension()?;
+    let embedding_dim = embedding_pool.dimension();
     ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?;
     log::debug!("Core: Collection \"{}\" ensured.", collection_name);
 
@@ -418,7 +416,7 @@ pub async fn index_repo_files<
 
     let file_processor = DefaultFileProcessor::new(processing_config.clone())
         .with_syntax_parser(syntax_parser_fn);
-    let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
+    let embedding_pool_ref = &*embedding_pool;
 
     // Convert relative paths to absolute paths
     let absolute_paths: Vec<PathBuf> = relative_paths.iter()
@@ -446,7 +444,7 @@ pub async fn index_repo_files<
         total_chunks: processed_chunks.len(),
     });
 
-    let embedded_chunks = embedding_pool.process_chunks_with_progress(processed_chunks, progress_bridge).await?;
+    let embedded_chunks = embedding_pool_ref.process_chunks_with_progress(processed_chunks, progress_bridge).await?;
     
     log::info!("Generated {} embeddings for repo files", embedded_chunks.len());
 

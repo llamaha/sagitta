@@ -16,13 +16,14 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn, instrument};
 use sagitta_search::{
-    config::{AppConfig, get_repo_base_path, save_config, load_config, RepositoryConfig},
+    config::{AppConfig, get_repo_base_path, save_config, load_config, RepositoryConfig, get_config_path_or_default},
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    EmbeddingHandler,
-    error::SagittaError,
+    EmbeddingPool, EmbeddingProcessor,
+    app_config_to_embedding_config,
     qdrant_client_trait::QdrantClientTrait,
+    error::SagittaError,
     repo_add::{AddRepoArgs, handle_repo_add, AddRepoError},
     repo_helpers::{
         get_collection_name, delete_repository_data, index_files,
