@@ -392,14 +392,17 @@ impl SettingsPanel {
     
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
-        let mut sagitta_code_config = SagittaCodeConfig::default();
-        
-        // Update Gemini settings
-        sagitta_code_config.gemini.api_key = if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) };
-        sagitta_code_config.gemini.model = self.gemini_model.clone();
-        sagitta_code_config.gemini.max_reasoning_steps = self.gemini_max_reasoning_steps;
-        
-        sagitta_code_config
+        let sagitta_code_config = self.sagitta_code_config.blocking_lock().clone();
+        SagittaCodeConfig {
+            gemini: GeminiConfig {
+                api_key: if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) },
+                model: self.gemini_model.clone(),
+                max_history_size: sagitta_code_config.gemini.max_history_size,
+                max_reasoning_steps: self.gemini_max_reasoning_steps,
+            },
+            workspaces: sagitta_code_config.workspaces.clone(),
+            ..sagitta_code_config
+        }
     }
 }
 
@@ -409,7 +412,7 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, GeminiConfig, UiConfig, LoggingConfig, ConversationConfig};
+    use crate::config::types::{SagittaCodeConfig, GeminiConfig, UiConfig, LoggingConfig, ConversationConfig, WorkspaceConfig};
     // Import specific loader functions for more direct testing of file operations
     use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 
@@ -449,18 +452,14 @@ mod tests {
             gemini: GeminiConfig {
                 api_key: Some("test-api-key".to_string()),
                 model: "test-model".to_string(),
-                max_history_size: 30,
-                max_reasoning_steps: 75,
+                max_history_size: 20,
+                max_reasoning_steps: 10,
             },
-            sagitta: crate::config::types::SagittaDbConfig::default(),
-            ui: UiConfig {
-                dark_mode: false,
-                theme: "dark".to_string(),
-                window_width: 1000,
-                window_height: 800,
-            },
+            sagitta: Default::default(),
+            ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
+            workspaces: WorkspaceConfig::default(),
         }
     }
 
@@ -484,7 +483,7 @@ mod tests {
         // Check values from create_test_sagitta_code_config()
         assert_eq!(panel.gemini_api_key, "test-api-key");
         assert_eq!(panel.gemini_model, "test-model");
-        assert_eq!(panel.gemini_max_reasoning_steps, 75);
+        assert_eq!(panel.gemini_max_reasoning_steps, 10);
 
         assert!(!panel.is_open);
     }
@@ -512,7 +511,7 @@ mod tests {
         
         assert_eq!(panel.gemini_api_key, "test-api-key");
         assert_eq!(panel.gemini_model, "test-model");
-        assert_eq!(panel.gemini_max_reasoning_steps, 75);
+        assert_eq!(panel.gemini_max_reasoning_steps, 10);
     }
 
     #[test]

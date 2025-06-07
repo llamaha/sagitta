@@ -3,10 +3,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use egui::{Align, Color32, ComboBox, Frame, Grid, Layout, RichText, ScrollArea, Stroke, TextEdit, Ui, Vec2, WidgetText, Context};
+use egui::{Align, Color32, ComboBox, Frame, Grid, Layout, RichText, ScrollArea, Stroke, TextEdit, Ui, Vec2, WidgetText, Context, Margin};
 use egui_extras::{Size, StripBuilder};
 
-use crate::agent::conversation::types::{ConversationSummary, ProjectType};
+use crate::agent::conversation::types::{ConversationSummary, ProjectType, ProjectContext};
+use crate::project::workspace::types::WorkspaceSummary;
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::branching::{BranchSuggestion, ConversationBranchingManager};
 use crate::agent::conversation::checkpoints::CheckpointSuggestion;
@@ -24,6 +25,7 @@ pub enum SidebarAction {
     SwitchToConversation(Uuid),
     CreateNewConversation,
     RefreshConversations,
+    SetWorkspace(Uuid),
     // Branch-related actions
     CreateBranch(Uuid, BranchSuggestion),
     DismissBranchSuggestion(Uuid, Uuid), // conversation_id, message_id
@@ -424,13 +426,19 @@ impl ConversationSidebar {
         &self,
         conversations: &[ConversationSummary],
         clusters: Option<&[ConversationCluster]>,
+        workspaces: &[WorkspaceSummary],
+        active_workspace_id: Option<Uuid>,
     ) -> Result<OrganizedConversations> {
-        // Apply filters first
+        // Apply search and filters first
         let filtered_conversations = self.apply_filters(conversations);
         
         // Apply search if present
-        let searched_conversations = if let Some(ref query) = self.search_query {
-            self.apply_search(&filtered_conversations, query)
+        let searched_conversations = if let Some(query) = &self.search_query {
+            if !query.is_empty() {
+                self.apply_search(&filtered_conversations, query)
+            } else {
+                filtered_conversations
+            }
         } else {
             filtered_conversations
         };
@@ -438,7 +446,7 @@ impl ConversationSidebar {
         // Organize into groups based on mode
         let groups = match &self.organization_mode {
             OrganizationMode::Recency => self.organize_by_recency(&searched_conversations),
-            OrganizationMode::Project => self.organize_by_project(&searched_conversations),
+            OrganizationMode::Project => self.organize_by_project(&searched_conversations, workspaces, active_workspace_id),
             OrganizationMode::Status => self.organize_by_status(&searched_conversations),
             OrganizationMode::Clusters => self.organize_by_clusters(&searched_conversations, clusters),
             OrganizationMode::Tags => self.organize_by_tags(&searched_conversations),
@@ -590,25 +598,55 @@ impl ConversationSidebar {
     }
     
     /// Organize conversations by project
-    fn organize_by_project(&self, conversations: &[ConversationSummary]) -> Result<Vec<ConversationGroup>> {
-        let mut project_groups: HashMap<String, Vec<ConversationSummary>> = HashMap::new();
-        
-        for conv in conversations {
-            let project_name = conv.project_name.clone().unwrap_or_else(|| "No Project".to_string());
-            project_groups.entry(project_name).or_insert_with(Vec::new).push(conv.clone());
+    fn organize_by_project(
+        &self,
+        conversations: &[ConversationSummary],
+        workspaces: &[WorkspaceSummary],
+        active_workspace_id: Option<Uuid>,
+    ) -> Result<Vec<ConversationGroup>> {
+        let mut groups: HashMap<Option<Uuid>, Vec<ConversationSummary>> = HashMap::new();
+
+        // Filter conversations by active workspace if one is selected
+        let conversations_to_organize = if let Some(active_id) = active_workspace_id {
+            conversations
+                .iter()
+                .filter(|c| c.workspace_id == Some(active_id))
+                .cloned()
+                .collect()
+        } else {
+            conversations.to_vec()
+        };
+
+        for conv in conversations_to_organize {
+            groups.entry(conv.workspace_id).or_default().push(conv);
         }
-        
-        let mut groups = Vec::new();
-        for (project_name, mut convs) in project_groups {
-            convs.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-            let group_id = format!("project_{}", project_name.to_lowercase().replace(' ', "_"));
-            groups.push(self.create_group(&group_id, &project_name, convs, 50)?);
+
+        let mut conversation_groups = Vec::new();
+        for (workspace_id, convs) in groups {
+            let (group_name, priority) = match workspace_id {
+                Some(id) => {
+                    let name = workspaces
+                        .iter()
+                        .find(|ws| ws.id == id)
+                        .map(|ws| ws.name.clone())
+                        .unwrap_or_else(|| "Unknown Workspace".to_string());
+                    (name, 0)
+                }
+                None => ("No Workspace".to_string(), 1),
+            };
+
+            let group = self.create_group(
+                &workspace_id.map(|id| id.to_string()).unwrap_or_else(|| "no-workspace".to_string()),
+                &group_name,
+                convs,
+                priority,
+            )?;
+            conversation_groups.push(group);
         }
-        
-        // Sort groups by name
-        groups.sort_by(|a, b| a.name.cmp(&b.name));
-        
-        Ok(groups)
+
+        conversation_groups.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.name.cmp(&b.name)));
+
+        Ok(conversation_groups)
     }
     
     /// Organize conversations by status
@@ -653,7 +691,11 @@ impl ConversationSidebar {
                 .map(|conv| (conv.id, conv))
                 .collect();
             
-            for cluster in clusters {
+            // Sort clusters by cohesion score (highest first)
+            let mut sorted_clusters: Vec<&ConversationCluster> = clusters.iter().collect();
+            sorted_clusters.sort_by(|a, b| b.cohesion_score.partial_cmp(&a.cohesion_score).unwrap_or(std::cmp::Ordering::Equal));
+            
+            for (index, cluster) in sorted_clusters.iter().enumerate() {
                 let cluster_conversations: Vec<ConversationSummary> = cluster
                     .conversation_ids
                     .iter()
@@ -663,7 +705,21 @@ impl ConversationSidebar {
                 
                 if !cluster_conversations.is_empty() {
                     let group_id = format!("cluster_{}", cluster.id);
-                    groups.push(self.create_group(&group_id, &cluster.title, cluster_conversations, 50)?);
+                    
+                    // Create enhanced group with cluster metadata
+                    let mut group = self.create_group(&group_id, &cluster.title, cluster_conversations, 50 - index as i32)?;
+                    
+                    // Enhance metadata with cluster information
+                    group.metadata.avg_success_rate = Some(cluster.cohesion_score);
+                    group.metadata.statistics.common_tags = cluster.common_tags.clone();
+                    
+                    // Set time range from cluster
+                    group.metadata.last_activity = Some(cluster.time_range.1);
+                    
+                    // Set priority based on cohesion score (higher cohesion = higher priority)
+                    group.priority = (100.0 - cluster.cohesion_score * 100.0) as i32;
+                    
+                    groups.push(group);
                 }
             }
             
@@ -1072,82 +1128,89 @@ impl ConversationSidebar {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, app_state: &mut AppState, theme: &AppTheme) {
+        let panel_frame = Frame {
+            inner_margin: Margin::same(8),
+            outer_margin: Margin::same(0),
+            ..Default::default()
+        };
+
         egui::SidePanel::left("conversation_sidebar")
+            .frame(panel_frame)
+            .default_width(280.0)
+            .min_width(200.0)
             .resizable(true)
-            .default_width(300.0)
             .show(ctx, |ui| {
                 self.render_header(ui, app_state, theme);
+                ui.separator();
                 self.render_search_bar(ui, app_state);
                 ui.separator();
 
-                ScrollArea::vertical().show(ui, |ui| {
-                    // Use the sophisticated organization system
-                    match self.organize_conversations(&app_state.conversation_list, Some(&self.clusters)) {
-                        Ok(organized) => {
-                            // Display organized groups
-                            for group in &organized.groups {
-                                self.render_conversation_group(ui, group, app_state, theme);
-                            }
-                            
-                            // Show organization info
-                            ui.add_space(8.0);
-                            ui.separator();
-                            ui.label(format!("📊 Showing {} of {} conversations", organized.filtered_count, organized.total_count));
-                        },
-                        Err(e) => {
-                            log::error!("Failed to organize conversations: {}", e);
-                            // Fallback to simple list
-                            self.render_simple_conversation_list(ui, app_state, theme);
-                        }
-                    }
-                    
-                    // Show branch suggestions if enabled and available
-                    if self.show_branch_suggestions {
-                        if let Some(conversation_id) = app_state.current_conversation_id {
-                            ui.add_space(8.0);
-                            ui.separator();
-                            
-                            match self.branch_suggestions_ui.render(ui, conversation_id, theme) {
-                                Ok(Some(action)) => {
+                if app_state.conversation_data_loading {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                        ui.label("Loading conversations...");
+                    });
+                    return;
+                }
+
+                match self.organize_conversations(
+                    &app_state.conversation_list,
+                    Some(&self.clusters),
+                    &app_state.workspaces,
+                    app_state.active_workspace_id,
+                ) {
+                    Ok(organized_data) => {
+                        if self.show_branch_suggestions {
+                            if let Some(conversation_id) = app_state.current_conversation_id {
+                                if let Ok(Some(action)) = self.branch_suggestions_ui.render(ui, conversation_id, theme) {
                                     if let Some(sidebar_action) = self.handle_branch_suggestion_action(action) {
                                         self.pending_action = Some(sidebar_action);
                                     }
-                                },
-                                Ok(None) => {
-                                    // No action taken
-                                },
-                                Err(e) => {
-                                    log::error!("Failed to render branch suggestions: {}", e);
                                 }
                             }
                         }
-                    }
-                    
-                    // Show checkpoint suggestions if enabled and available
-                    if self.show_checkpoint_suggestions {
-                        if let Some(conversation_id) = app_state.current_conversation_id {
-                            ui.add_space(8.0);
-                            ui.separator();
-                            
-                            match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
-                                Ok(Some(action)) => {
-                                    if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
-                                        self.pending_action = Some(sidebar_action);
-                                    }
-                                },
-                                Ok(None) => {
-                                    // No action taken
-                                },
-                                Err(e) => {
-                                    log::error!("Failed to render checkpoint suggestions: {}", e);
-                                }
-                            }
+                        
+                        // Display organized groups
+                        for group in &organized_data.groups {
+                            self.render_conversation_group(ui, group, app_state, theme);
                         }
+                        
+                        // Show organization info
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(format!("📊 Showing {} of {} conversations", organized_data.filtered_count, organized_data.total_count));
+                    },
+                    Err(e) => {
+                        log::error!("Failed to organize conversations: {}", e);
+                        // Fallback to simple list
+                        self.render_simple_conversation_list(ui, app_state, theme);
                     }
-                });
+                }
                 
-                self.handle_sidebar_actions(app_state, ctx);
+                // Show checkpoint suggestions if enabled and available
+                if self.show_checkpoint_suggestions {
+                    if let Some(conversation_id) = app_state.current_conversation_id {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        
+                        match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
+                            Ok(Some(action)) => {
+                                if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
+                                    self.pending_action = Some(sidebar_action);
+                                }
+                            },
+                            Ok(None) => {
+                                // No action taken
+                            },
+                            Err(e) => {
+                                log::error!("Failed to render checkpoint suggestions: {}", e);
+                            }
+                        }
+                    }
+                }
             });
+        
+        self.handle_sidebar_actions(app_state, ctx);
     }
 
     // Render the header with organization mode selector
@@ -1178,6 +1241,46 @@ impl ConversationSidebar {
         
         ui.add_space(4.0);
         
+        // Breadcrumb navigation for cluster mode
+        if self.organization_mode == OrganizationMode::Clusters {
+            ui.horizontal(|ui| {
+                ui.label("📍");
+                
+                // Always show "All" as root
+                if ui.link("All").clicked() {
+                    // Clear all expanded groups to show all clusters
+                    self.expanded_groups.clear();
+                }
+                
+                ui.label("→");
+                
+                // Show "Clusters" as current level
+                ui.label("🔗 Clusters");
+                
+                // Show expanded cluster name if any
+                let expanded_cluster_names: Vec<String> = self.expanded_groups
+                    .iter()
+                    .filter(|group_id| group_id.starts_with("cluster_"))
+                    .map(|group_id| {
+                        // Extract cluster name from group_id (remove "cluster_" prefix)
+                        group_id.strip_prefix("cluster_").unwrap_or(group_id).to_string()
+                    })
+                    .collect();
+                
+                if !expanded_cluster_names.is_empty() {
+                    ui.label("→");
+                    for (i, cluster_name) in expanded_cluster_names.iter().enumerate() {
+                        if i > 0 {
+                            ui.label(",");
+                        }
+                        ui.label(format!("📂 {}", cluster_name));
+                    }
+                }
+            });
+            
+            ui.add_space(2.0);
+        }
+        
         // Organization mode selector
         ui.horizontal(|ui| {
             ui.label("📋 Organize by:");
@@ -1192,6 +1295,43 @@ impl ConversationSidebar {
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Success, "✅ Success");
                 });
         });
+
+        // Workspace selector - only shown when in Project mode
+        if self.organization_mode == OrganizationMode::Project {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("📁 Workspace:");
+                let mut selected_workspace = app_state.active_workspace_id;
+                ComboBox::from_id_source("workspace_selector")
+                    .selected_text(
+                        selected_workspace
+                            .and_then(|id| app_state.workspaces.iter().find(|ws| ws.id == id))
+                            .map_or("All Workspaces", |ws| &ws.name),
+                    )
+                    .show_ui(ui, |ui| {
+                        // Option for all workspaces
+                        ui.selectable_value(&mut selected_workspace, None, "All Workspaces");
+
+                        // Options for each workspace
+                        for workspace in &app_state.workspaces {
+                            ui.selectable_value(
+                                &mut selected_workspace,
+                                Some(workspace.id),
+                                &workspace.name,
+                            );
+                        }
+                    });
+
+                if selected_workspace != app_state.active_workspace_id {
+                    if let Some(id) = selected_workspace {
+                        self.pending_action = Some(SidebarAction::SetWorkspace(id));
+                    } else {
+                        // Handle 'All Workspaces' selection
+                        app_state.set_active_workspace(None);
+                    }
+                }
+            });
+        }
     }
 
     // Render search bar and filters
@@ -1243,7 +1383,20 @@ impl ConversationSidebar {
             let expand_icon = if is_expanded { "▼" } else { "▶" };
             let header_text = format!("{} {} ({})", expand_icon, group.name, group.metadata.count);
             
-            if ui.button(header_text).clicked() {
+            let mut header_response = ui.button(header_text);
+            
+            // Add cohesion score tooltip for cluster groups
+            if group.id.starts_with("cluster_") {
+                if let Some(cohesion_score) = group.metadata.avg_success_rate {
+                    header_response = header_response.on_hover_text(format!(
+                        "Cluster Cohesion: {:.1}%\nCommon tags: {}\nClick to expand/collapse",
+                        cohesion_score * 100.0,
+                        group.metadata.statistics.common_tags.join(", ")
+                    ));
+                }
+            }
+            
+            if header_response.clicked() {
                 self.toggle_group(&group_id);
             }
             
@@ -1255,9 +1408,24 @@ impl ConversationSidebar {
                 ui.label(format!("✅ {}", group.metadata.statistics.completed_count));
             }
             
-            // Show average success rate if available
-            if let Some(success_rate) = group.metadata.avg_success_rate {
-                ui.label(format!("📈 {:.1}%", success_rate * 100.0));
+            // Show cohesion score for clusters
+            if group.id.starts_with("cluster_") {
+                if let Some(cohesion_score) = group.metadata.avg_success_rate {
+                    let cohesion_color = if cohesion_score > 0.8 {
+                        Color32::from_rgb(0, 200, 0) // Green for high cohesion
+                    } else if cohesion_score > 0.6 {
+                        Color32::from_rgb(255, 165, 0) // Orange for medium cohesion
+                    } else {
+                        Color32::from_rgb(255, 100, 100) // Red for low cohesion
+                    };
+                    
+                    ui.colored_label(cohesion_color, format!("🔗 {:.1}%", cohesion_score * 100.0));
+                }
+            } else {
+                // Show average success rate for non-cluster groups
+                if let Some(success_rate) = group.metadata.avg_success_rate {
+                    ui.label(format!("📈 {:.1}%", success_rate * 100.0));
+                }
             }
         });
         
@@ -1443,8 +1611,11 @@ impl ConversationSidebar {
                     // This would typically trigger an async operation
                 },
                 SidebarAction::ShowCheckpointDetails(conversation_id, checkpoint_id) => {
-                    log::info!("Show checkpoint details for conversation {} with checkpoint: {}", conversation_id, checkpoint_id);
-                    // This would typically trigger an async operation
+                    log::info!("Show details for checkpoint {} in conversation {}", checkpoint_id, conversation_id);
+                    // This could open a modal or navigate to a detailed view
+                },
+                SidebarAction::SetWorkspace(workspace_id) => {
+                    app_state.set_active_workspace(Some(workspace_id));
                 },
             }
         }
@@ -1553,23 +1724,33 @@ mod tests {
     use super::*;
     use crate::agent::conversation::types::{ConversationSummary, ProjectType};
     use crate::agent::state::types::ConversationStatus;
-    use chrono::Utc;
     use uuid::Uuid;
+    use chrono::Utc;
 
-    fn create_test_conversation(title: &str, status: ConversationStatus, project_type: Option<ProjectType>) -> ConversationSummary {
+    fn create_test_conversation(
+        title: &str,
+        status: ConversationStatus,
+        project_type: Option<ProjectType>,
+        workspace_id: Option<Uuid>,
+    ) -> ConversationSummary {
         ConversationSummary {
             id: Uuid::new_v4(),
             title: title.to_string(),
-            created_at: Utc::now(),
             last_active: Utc::now(),
-            message_count: 5,
             status,
-            tags: vec!["test".to_string()],
-            workspace_id: None,
-            has_branches: false,
-            has_checkpoints: false,
-            project_name: project_type.map(|pt| format!("{:?} Project", pt)),
+            project_name: project_type.map(|p| format!("{:?} Project", p)),
+            workspace_id,
+            tags: vec!["test".to_string()], // Add the "test" tag that the test expects
+            ..Default::default()
         }
+    }
+
+    fn create_test_conversations() -> Vec<ConversationSummary> {
+        vec![
+            create_test_conversation("Rust talk", ConversationStatus::Active, Some(ProjectType::Rust), None),
+            create_test_conversation("JS progress", ConversationStatus::Completed, Some(ProjectType::JavaScript), None),
+            create_test_conversation("Python script", ConversationStatus::Paused, Some(ProjectType::Python), None),
+        ]
     }
 
     #[test]
@@ -1588,9 +1769,9 @@ mod tests {
         let sidebar = ConversationSidebar::new(config);
         
         let conversations = vec![
-            create_test_conversation("Active Conv", ConversationStatus::Active, Some(ProjectType::Rust)),
-            create_test_conversation("Completed Conv", ConversationStatus::Completed, Some(ProjectType::Python)),
-            create_test_conversation("Archived Conv", ConversationStatus::Archived, Some(ProjectType::JavaScript)),
+            create_test_conversation("Active Conv", ConversationStatus::Active, Some(ProjectType::Rust), None),
+            create_test_conversation("Completed Conv", ConversationStatus::Completed, Some(ProjectType::Python), None),
+            create_test_conversation("Archived Conv", ConversationStatus::Archived, Some(ProjectType::JavaScript), None),
         ];
         
         // Test status filter
@@ -1618,9 +1799,9 @@ mod tests {
         let sidebar = ConversationSidebar::new(config);
         
         let conversations = vec![
-            create_test_conversation("Rust Programming Help", ConversationStatus::Active, Some(ProjectType::Rust)),
-            create_test_conversation("Python Data Analysis", ConversationStatus::Active, Some(ProjectType::Python)),
-            create_test_conversation("JavaScript Frontend", ConversationStatus::Active, Some(ProjectType::JavaScript)),
+            create_test_conversation("Rust Programming Help", ConversationStatus::Active, Some(ProjectType::Rust), None),
+            create_test_conversation("Python Data Analysis", ConversationStatus::Active, Some(ProjectType::Python), None),
+            create_test_conversation("JavaScript Frontend", ConversationStatus::Active, Some(ProjectType::JavaScript), None),
         ];
         
         // Test title search
@@ -1704,7 +1885,7 @@ mod tests {
         let sidebar = ConversationSidebar::new(config);
         
         let conversations = vec![
-            create_test_conversation("Main Conversation", ConversationStatus::Active, Some(ProjectType::Rust)),
+            create_test_conversation("Main Conversation", ConversationStatus::Active, Some(ProjectType::Rust), None),
         ];
         
         // Test that conversations with branches are properly identified
@@ -1785,9 +1966,9 @@ mod tests {
         let sidebar = ConversationSidebar::new(config);
         
         let conversations = vec![
-            create_test_conversation("Rust Error Handling", ConversationStatus::Active, Some(ProjectType::Rust)),
-            create_test_conversation("Python Error Handling", ConversationStatus::Active, Some(ProjectType::Python)),
-            create_test_conversation("JavaScript Async", ConversationStatus::Active, Some(ProjectType::JavaScript)),
+            create_test_conversation("Rust Error Handling", ConversationStatus::Active, Some(ProjectType::Rust), None),
+            create_test_conversation("Python Error Handling", ConversationStatus::Active, Some(ProjectType::Python), None),
+            create_test_conversation("JavaScript Async", ConversationStatus::Active, Some(ProjectType::JavaScript), None),
         ];
         
         // Create mock clusters
@@ -1834,9 +2015,9 @@ mod tests {
         let sidebar = ConversationSidebar::new(config);
         
         let conversations = vec![
-            create_test_conversation("High Success Conv", ConversationStatus::Completed, Some(ProjectType::Rust)),
-            create_test_conversation("Low Success Conv", ConversationStatus::Active, Some(ProjectType::Python)),
-            create_test_conversation("Failed Conv", ConversationStatus::Archived, Some(ProjectType::JavaScript)),
+            create_test_conversation("High Success Conv", ConversationStatus::Completed, Some(ProjectType::Rust), None),
+            create_test_conversation("Low Success Conv", ConversationStatus::Active, Some(ProjectType::Python), None),
+            create_test_conversation("Failed Conv", ConversationStatus::Archived, Some(ProjectType::JavaScript), None),
         ];
         
         // Test success rate filtering
@@ -1855,29 +2036,84 @@ mod tests {
         let config = SidebarConfig::default();
         let sidebar = ConversationSidebar::new(config);
         
+        let workspace1_id = Uuid::new_v4();
+        let workspaces = vec![WorkspaceSummary {
+            id: workspace1_id,
+            name: "Workspace 1".to_string(),
+            ..Default::default()
+        }];
+
         let conversations = vec![
-            create_test_conversation("Rust Project Conv", ConversationStatus::Active, Some(ProjectType::Rust)),
-            create_test_conversation("Python Project Conv", ConversationStatus::Active, Some(ProjectType::Python)),
-            create_test_conversation("Another Rust Conv", ConversationStatus::Completed, Some(ProjectType::Rust)),
-            create_test_conversation("No Project Conv", ConversationStatus::Active, None),
+            create_test_conversation("Rust Project Conv", ConversationStatus::Active, Some(ProjectType::Rust), Some(workspace1_id)),
+            create_test_conversation("Python Project Conv", ConversationStatus::Active, Some(ProjectType::Python), None),
+            create_test_conversation("Another Rust Conv", ConversationStatus::Completed, Some(ProjectType::Rust), Some(workspace1_id)),
+            create_test_conversation("No Project Conv", ConversationStatus::Active, None, None),
         ];
         
-        let organized = sidebar.organize_by_project(&conversations).unwrap();
+        let organized = sidebar
+            .organize_by_project(&conversations, &workspaces, None)
+            .unwrap();
         
-        // Should have 3 groups: Rust Project, Python Project, No Project
-        assert_eq!(organized.len(), 3);
+        // Should have 2 groups: Workspace 1, No Workspace
+        assert_eq!(organized.len(), 2);
         
-        // Check Rust project group
-        let rust_group = organized.iter().find(|g| g.name.contains("Rust")).unwrap();
+        // Check Workspace 1 group
+        let rust_group = organized.iter().find(|g| g.name.contains("Workspace 1")).unwrap();
         assert_eq!(rust_group.conversations.len(), 2);
         
-        // Check Python project group
-        let python_group = organized.iter().find(|g| g.name.contains("Python")).unwrap();
-        assert_eq!(python_group.conversations.len(), 1);
-        
-        // Check No Project group
-        let no_project_group = organized.iter().find(|g| g.name == "No Project").unwrap();
-        assert_eq!(no_project_group.conversations.len(), 1);
+        // Check No Workspace group
+        let no_project_group = organized.iter().find(|g| g.name == "No Workspace").unwrap();
+        assert_eq!(no_project_group.conversations.len(), 2);
+    }
+
+    #[test]
+    fn test_project_workspace_filtering() {
+        let config = SidebarConfig::default();
+        let sidebar = ConversationSidebar::new(config);
+
+        let workspace1_id = Uuid::new_v4();
+        let workspace2_id = Uuid::new_v4();
+
+        let workspaces = vec![
+            WorkspaceSummary {
+                id: workspace1_id,
+                name: "Workspace 1".to_string(),
+                ..Default::default()
+            },
+            WorkspaceSummary {
+                id: workspace2_id,
+                name: "Workspace 2".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        let mut conv1 = create_test_conversation("Conv 1", ConversationStatus::Active, None, Some(workspace1_id));
+        let mut conv2 = create_test_conversation("Conv 2", ConversationStatus::Active, None, Some(workspace2_id));
+        let conv3 = create_test_conversation("Conv 3", ConversationStatus::Active, None, None);
+
+        let conversations = vec![conv1, conv2, conv3];
+
+        // Test filtering for Workspace 1
+        let organized1 = sidebar
+            .organize_by_project(&conversations, &workspaces, Some(workspace1_id))
+            .unwrap();
+        assert_eq!(organized1.len(), 1);
+        assert_eq!(organized1[0].name, "Workspace 1");
+        assert_eq!(organized1[0].conversations.len(), 1);
+
+        // Test filtering for Workspace 2
+        let organized2 = sidebar
+            .organize_by_project(&conversations, &workspaces, Some(workspace2_id))
+            .unwrap();
+        assert_eq!(organized2.len(), 1);
+        assert_eq!(organized2[0].name, "Workspace 2");
+        assert_eq!(organized2[0].conversations.len(), 1);
+
+        // Test with no active workspace (should show all)
+        let organized_all = sidebar
+            .organize_by_project(&conversations, &workspaces, None)
+            .unwrap();
+        assert_eq!(organized_all.len(), 3); // Workspace 1, Workspace 2, and No Workspace
     }
 
     #[test]
@@ -1976,5 +2212,311 @@ mod tests {
             },
             _ => panic!("Expected DismissBranchSuggestion action"),
         }
+    }
+
+    #[test]
+    fn test_cluster_cohesion_score_display() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let clusters = vec![
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "High Cohesion Cluster".to_string(),
+                conversation_ids: vec![conversations[0].id, conversations[1].id],
+                centroid: vec![0.1, 0.2, 0.3],
+                cohesion_score: 0.95, // High cohesion
+                common_tags: vec!["rust".to_string(), "async".to_string()],
+                dominant_project_type: Some(ProjectType::Rust),
+                time_range: (Utc::now() - chrono::Duration::days(7), Utc::now()),
+            },
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "Medium Cohesion Cluster".to_string(),
+                conversation_ids: vec![conversations[2].id],
+                centroid: vec![0.4, 0.5, 0.6],
+                cohesion_score: 0.65, // Medium cohesion
+                common_tags: vec!["javascript".to_string()],
+                dominant_project_type: Some(ProjectType::JavaScript),
+                time_range: (Utc::now() - chrono::Duration::days(3), Utc::now()),
+            },
+        ];
+        
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        // Should have 2 cluster groups
+        assert_eq!(organized.len(), 2);
+        
+        // Check high cohesion cluster
+        let high_cohesion_group = organized.iter().find(|g| g.name == "High Cohesion Cluster").unwrap();
+        assert_eq!(high_cohesion_group.conversations.len(), 2);
+        // Cohesion score should be stored in metadata for display
+        assert!(high_cohesion_group.metadata.avg_success_rate.is_some());
+        
+        // Check medium cohesion cluster
+        let medium_cohesion_group = organized.iter().find(|g| g.name == "Medium Cohesion Cluster").unwrap();
+        assert_eq!(medium_cohesion_group.conversations.len(), 1);
+    }
+
+    #[test]
+    fn test_cluster_breadcrumb_navigation() {
+        let mut sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let clusters = vec![
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "Error Handling".to_string(),
+                conversation_ids: vec![conversations[0].id, conversations[1].id],
+                centroid: vec![0.1, 0.2, 0.3],
+                cohesion_score: 0.85,
+                common_tags: vec!["error".to_string(), "handling".to_string()],
+                dominant_project_type: Some(ProjectType::Rust),
+                time_range: (Utc::now() - chrono::Duration::days(7), Utc::now()),
+            },
+        ];
+        
+        // Set organization mode to clusters
+        sidebar.set_organization_mode(OrganizationMode::Clusters);
+        
+        // Test breadcrumb state tracking
+        assert_eq!(sidebar.organization_mode, OrganizationMode::Clusters);
+        
+        // Test cluster group expansion
+        let cluster_group_id = format!("cluster_{}", clusters[0].id);
+        sidebar.toggle_group(&cluster_group_id);
+        assert!(sidebar.expanded_groups.contains(&cluster_group_id));
+        
+        // Test breadcrumb path: All → Clusters → Error Handling
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        let error_handling_group = organized.iter().find(|g| g.name == "Error Handling").unwrap();
+        
+        // Verify breadcrumb components
+        assert_eq!(error_handling_group.name, "Error Handling");
+        assert_eq!(error_handling_group.conversations.len(), 2);
+        assert!(error_handling_group.id.starts_with("cluster_"));
+    }
+
+    #[test]
+    fn test_cluster_tooltip_information() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let cluster = ConversationCluster {
+            id: Uuid::new_v4(),
+            title: "Async Programming".to_string(),
+            conversation_ids: vec![conversations[0].id, conversations[1].id],
+            centroid: vec![0.1, 0.2, 0.3],
+            cohesion_score: 0.78,
+            common_tags: vec!["async".to_string(), "tokio".to_string()],
+            dominant_project_type: Some(ProjectType::Rust),
+            time_range: (Utc::now() - chrono::Duration::days(5), Utc::now()),
+        };
+        
+        let clusters = vec![cluster.clone()];
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        let async_group = organized.iter().find(|g| g.name == "Async Programming").unwrap();
+        
+        // Verify tooltip information is available in metadata
+        assert_eq!(async_group.conversations.len(), 2);
+        assert!(async_group.metadata.statistics.common_tags.contains(&"async".to_string()));
+        assert!(async_group.metadata.statistics.common_tags.contains(&"tokio".to_string()));
+        
+        // Cohesion score should be reflected in success rate for display
+        assert!(async_group.metadata.avg_success_rate.is_some());
+        let cohesion_as_success = async_group.metadata.avg_success_rate.unwrap();
+        assert!((cohesion_as_success - 0.78).abs() < 0.01); // Should match cohesion score
+    }
+
+    #[test]
+    fn test_cluster_empty_state_handling() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        // Test with no clusters
+        let organized = sidebar.organize_by_clusters(&conversations, None).unwrap();
+        
+        // Should create a single "All Conversations" group
+        assert_eq!(organized.len(), 1);
+        let all_group = &organized[0];
+        assert_eq!(all_group.name, "All Conversations");
+        assert_eq!(all_group.conversations.len(), conversations.len());
+        assert_eq!(all_group.id, "all");
+    }
+
+    #[test]
+    fn test_cluster_unclustered_conversations() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        // Create cluster that only includes some conversations
+        let clusters = vec![
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "Partial Cluster".to_string(),
+                conversation_ids: vec![conversations[0].id], // Only first conversation
+                centroid: vec![0.1, 0.2, 0.3],
+                cohesion_score: 0.90,
+                common_tags: vec!["rust".to_string()],
+                dominant_project_type: Some(ProjectType::Rust),
+                time_range: (Utc::now() - chrono::Duration::days(1), Utc::now()),
+            },
+        ];
+        
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        // Should have cluster group + unclustered group
+        assert_eq!(organized.len(), 2);
+        
+        let partial_cluster = organized.iter().find(|g| g.name == "Partial Cluster").unwrap();
+        assert_eq!(partial_cluster.conversations.len(), 1);
+        
+        let unclustered = organized.iter().find(|g| g.name == "Unclustered").unwrap();
+        assert_eq!(unclustered.conversations.len(), conversations.len() - 1);
+        assert_eq!(unclustered.id, "unclustered");
+    }
+
+    #[test]
+    fn test_cluster_sorting_by_cohesion() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let clusters = vec![
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "Low Cohesion".to_string(),
+                conversation_ids: vec![conversations[0].id],
+                centroid: vec![0.1, 0.2, 0.3],
+                cohesion_score: 0.45, // Low cohesion
+                common_tags: vec![],
+                dominant_project_type: None,
+                time_range: (Utc::now() - chrono::Duration::days(1), Utc::now()),
+            },
+            ConversationCluster {
+                id: Uuid::new_v4(),
+                title: "High Cohesion".to_string(),
+                conversation_ids: vec![conversations[1].id],
+                centroid: vec![0.4, 0.5, 0.6],
+                cohesion_score: 0.95, // High cohesion
+                common_tags: vec!["excellent".to_string()],
+                dominant_project_type: Some(ProjectType::Rust),
+                time_range: (Utc::now() - chrono::Duration::days(1), Utc::now()),
+            },
+        ];
+        
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        // Should have both clusters
+        assert_eq!(organized.len(), 3); // 2 clusters + unclustered
+        
+        // Find clusters by name
+        let high_cohesion = organized.iter().find(|g| g.name == "High Cohesion").unwrap();
+        let low_cohesion = organized.iter().find(|g| g.name == "Low Cohesion").unwrap();
+        
+        // High cohesion should have higher priority (lower number = higher priority)
+        assert!(high_cohesion.priority < low_cohesion.priority);
+        
+        // Verify cohesion scores are preserved in metadata
+        assert!(high_cohesion.metadata.avg_success_rate.unwrap() > low_cohesion.metadata.avg_success_rate.unwrap());
+    }
+
+    #[test]
+    fn test_cluster_time_range_display() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let start_time = Utc::now() - chrono::Duration::days(7);
+        let end_time = Utc::now() - chrono::Duration::days(1);
+        
+        let cluster = ConversationCluster {
+            id: Uuid::new_v4(),
+            title: "Time Range Cluster".to_string(),
+            conversation_ids: vec![conversations[0].id, conversations[1].id],
+            centroid: vec![0.1, 0.2, 0.3],
+            cohesion_score: 0.80,
+            common_tags: vec!["temporal".to_string()],
+            dominant_project_type: Some(ProjectType::Rust),
+            time_range: (start_time, end_time),
+        };
+        
+        let clusters = vec![cluster];
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        let time_range_group = organized.iter().find(|g| g.name == "Time Range Cluster").unwrap();
+        
+        // Verify time range information is available
+        assert_eq!(time_range_group.conversations.len(), 2);
+        assert!(time_range_group.metadata.last_activity.is_some());
+        
+        // The last activity should reflect the cluster's time range
+        let last_activity = time_range_group.metadata.last_activity.unwrap();
+        assert!(last_activity >= start_time && last_activity <= end_time + chrono::Duration::hours(1));
+    }
+
+    #[test]
+    fn test_cluster_common_tags_integration() {
+        let sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let cluster = ConversationCluster {
+            id: Uuid::new_v4(),
+            title: "Tagged Cluster".to_string(),
+            conversation_ids: vec![conversations[0].id, conversations[1].id],
+            centroid: vec![0.1, 0.2, 0.3],
+            cohesion_score: 0.88,
+            common_tags: vec!["rust".to_string(), "async".to_string(), "performance".to_string()],
+            dominant_project_type: Some(ProjectType::Rust),
+            time_range: (Utc::now() - chrono::Duration::days(3), Utc::now()),
+        };
+        
+        let clusters = vec![cluster];
+        let organized = sidebar.organize_by_clusters(&conversations, Some(&clusters)).unwrap();
+        
+        let tagged_group = organized.iter().find(|g| g.name == "Tagged Cluster").unwrap();
+        
+        // Verify common tags are preserved in group metadata
+        assert!(tagged_group.metadata.statistics.common_tags.contains(&"rust".to_string()));
+        assert!(tagged_group.metadata.statistics.common_tags.contains(&"async".to_string()));
+        assert!(tagged_group.metadata.statistics.common_tags.contains(&"performance".to_string()));
+        assert_eq!(tagged_group.metadata.statistics.common_tags.len(), 3);
+    }
+
+    #[test]
+    fn test_cluster_navigation_state_persistence() {
+        let mut sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        let cluster_id = Uuid::new_v4();
+        let cluster = ConversationCluster {
+            id: cluster_id,
+            title: "Navigation Test Cluster".to_string(),
+            conversation_ids: vec![conversations[0].id],
+            centroid: vec![0.1, 0.2, 0.3],
+            cohesion_score: 0.75,
+            common_tags: vec!["navigation".to_string()],
+            dominant_project_type: Some(ProjectType::Rust),
+            time_range: (Utc::now() - chrono::Duration::days(2), Utc::now()),
+        };
+        
+        let clusters = vec![cluster];
+        
+        // Set organization mode to clusters
+        sidebar.set_organization_mode(OrganizationMode::Clusters);
+        
+        // Expand the cluster group
+        let cluster_group_id = format!("cluster_{}", cluster_id);
+        sidebar.toggle_group(&cluster_group_id);
+        
+        // Verify state persistence
+        assert_eq!(sidebar.organization_mode, OrganizationMode::Clusters);
+        assert!(sidebar.expanded_groups.contains(&cluster_group_id));
+        
+        // Switch to different mode and back
+        sidebar.set_organization_mode(OrganizationMode::Recency);
+        sidebar.set_organization_mode(OrganizationMode::Clusters);
+        
+        // Expanded state should persist
+        assert!(sidebar.expanded_groups.contains(&cluster_group_id));
     }
 } 

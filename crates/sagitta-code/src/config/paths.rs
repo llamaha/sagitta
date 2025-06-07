@@ -50,6 +50,16 @@ pub fn get_logs_path() -> Result<PathBuf> {
     Ok(logs_dir)
 }
 
+/// Gets the path for workspace storage
+/// This will be ~/.local/share/sagitta/workspaces/
+pub fn get_workspaces_path() -> Result<PathBuf> {
+    let workspaces_dir = get_sagitta_data_dir()?.join("workspaces");
+    if !workspaces_dir.exists() {
+        std::fs::create_dir_all(&workspaces_dir).map_err(|e| anyhow::anyhow!("Failed to create workspaces directory {:?}: {}", workspaces_dir, e))?;
+    }
+    Ok(workspaces_dir)
+}
+
 /// Migrates configuration from old locations to new unified structure
 pub fn migrate_old_config() -> Result<()> {
     // Old paths
@@ -160,6 +170,27 @@ mod tests {
             Ok(path) => {
                 // Should end with logs
                 assert!(path.to_string_lossy().ends_with("logs"));
+                
+                // Should be in data directory
+                assert!(path.to_string_lossy().contains("sagitta"));
+                
+                // Path should be absolute
+                assert!(path.is_absolute());
+            },
+            Err(e) => {
+                assert!(!e.to_string().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_workspaces_path() {
+        let result = get_workspaces_path();
+        
+        match result {
+            Ok(path) => {
+                // Should end with workspaces
+                assert!(path.to_string_lossy().ends_with("workspaces"));
                 
                 // Should be in data directory
                 assert!(path.to_string_lossy().contains("sagitta"));

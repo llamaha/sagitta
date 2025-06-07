@@ -23,6 +23,10 @@ pub struct SagittaCodeConfig {
     /// Conversation management configuration
     #[serde(default)]
     pub conversation: ConversationConfig,
+
+    /// Workspace configuration
+    #[serde(default)]
+    pub workspaces: WorkspaceConfig,
 }
 
 impl Default for SagittaCodeConfig {
@@ -33,6 +37,7 @@ impl Default for SagittaCodeConfig {
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
+            workspaces: WorkspaceConfig::default(),
         }
     }
 }
@@ -206,6 +211,26 @@ impl Default for ConversationConfig {
     }
 }
 
+/// Configuration for project workspaces
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    /// Directory to store workspace data
+    pub storage_path: Option<PathBuf>,
+    
+    /// Automatically detect and switch workspaces
+    #[serde(default = "default_auto_detect_workspaces")]
+    pub auto_detect: bool,
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            storage_path: crate::config::paths::get_workspaces_path().ok(),
+            auto_detect: default_auto_detect_workspaces(),
+        }
+    }
+}
+
 fn default_gemini_model() -> String {
     "gemini-2.5-flash-preview-05-20".to_string()
 }
@@ -247,6 +272,10 @@ fn default_auto_create() -> bool {
 }
 
 fn default_auto_checkpoints() -> bool {
+    true
+}
+
+fn default_auto_detect_workspaces() -> bool {
     true
 }
 

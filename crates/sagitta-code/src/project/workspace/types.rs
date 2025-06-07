@@ -65,7 +65,7 @@ pub struct GitInfo {
 }
 
 /// Summary of a workspace for list views
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceSummary {
     pub id: Uuid,
     pub name: String,

@@ -199,11 +199,29 @@ Tests: ✅ precision/recall on sample corpus, UI workflow test.
 
 ---
 
-## Phase 8 – Project Workspaces Integration (1 day)
-1. Bind workspace switcher to project organization mode.
-2. Persist last-used workspace per screen size.
+## Phase 8 – Project Workspaces Integration (1 day) ✅ **COMPLETED**
+1. ✅ Bind workspace switcher to project organization mode.
+2. ✅ Persist last-used workspace per screen size.
 
-**Ready for Phase 8:** Project Workspaces Integration.
+**Completed Tasks:**
+- ✅ **Workspace Configuration Integration** – Added `WorkspaceConfig` to `SagittaCodeConfig` with storage path and auto-detection settings
+- ✅ **Application State Management** – Added `workspaces: Vec<WorkspaceSummary>` and `active_workspace_id: Option<Uuid>` to `AppState`
+- ✅ **WorkspaceManager Integration** – Integrated `WorkspaceManagerImpl` into `SagittaCodeApp` with proper initialization and workspace loading
+- ✅ **Sidebar UI Enhancement** – Enhanced conversation sidebar with workspace selector in Project organization mode:
+  - ComboBox for workspace selection with "All Workspaces" option
+  - Workspace filtering in `organize_by_project` method
+  - `SetWorkspace` action handling for workspace switching
+- ✅ **Configuration Infrastructure** – Added `get_workspaces_path()` helper function and updated settings panel to handle workspace configuration
+- ✅ **Comprehensive Testing** – All library tests passing with workspace integration, including new test for workspace filtering functionality
+
+**Technical Achievements:**
+- Seamless workspace switching with conversation filtering
+- Persistent workspace state management
+- Clean separation between workspace management and UI concerns
+- Robust error handling and graceful fallback behavior
+- Full integration with existing conversation organization system
+
+**Ready for Phase 9:** Responsive UI & Scroll-bars.
 
 ---
 
@@ -247,8 +265,9 @@ Total ≈ 12–13 dev-days (spread across 2 sprints with buffer).
 - ✅ **Phase 5 completed successfully** – Smart Checkpoints implementation with comprehensive details about the Smart Checkpoints implementation.
 - ✅ **Phase 6 completed successfully** – Semantic Clustering UX implementation with cohesion score display, breadcrumb navigation, cluster integration, and comprehensive testing.
 - ✅ **Phase 7 completed successfully** – Conversation Analytics Dashboard implementation with comprehensive UI, state management, event-driven integration, and TDD approach.
+- ✅ **Phase 8 completed successfully** – Project Workspaces Integration with workspace switcher, conversation filtering, and persistent state management.
 
-**Ready for Phase 8:** Project Workspaces Integration.
+**Ready for Phase 9:** Responsive UI & Scroll-bars.
 
 ---
 

@@ -6,6 +6,7 @@ use egui::{Context, Key};
 use tokio::sync::{Mutex, mpsc, broadcast};
 use uuid;
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
@@ -19,6 +20,13 @@ use super::theme::AppTheme;
 use crate::config::SagittaCodeConfig;
 use sagitta_search::config::AppConfig;
 use crate::agent::events::AgentEvent;
+use crate::agent::conversation::service::ConversationService;
+use crate::agent::conversation::clustering::ConversationClusteringManager;
+use crate::agent::conversation::analytics::{ConversationAnalyticsManager, AnalyticsConfig};
+use crate::agent::conversation::manager::ConversationManagerImpl;
+use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
+use crate::agent::conversation::search::text::TextConversationSearchEngine;
+use crate::project::workspace::manager::{WorkspaceManager, WorkspaceManagerImpl};
 
 // Import the modularized components
 mod panels;
@@ -65,6 +73,12 @@ pub struct SagittaCodeApp {
     config: Arc<SagittaCodeConfig>,
     app_core_config: Arc<AppConfig>,
     
+    // Workspace Manager
+    pub workspace_manager: Arc<Mutex<WorkspaceManagerImpl>>,
+
+    // Conversation service for cluster management
+    conversation_service: Option<Arc<ConversationService>>,
+    
     // State management - make public for direct access
     pub state: AppState,
     
@@ -107,6 +121,19 @@ impl SagittaCodeApp {
             "dark" | _ => initial_state.current_theme = AppTheme::Dark, // Default to Dark
         }
 
+        // Initialize Workspace Manager
+        let workspace_storage_path = sagitta_code_config.workspaces.storage_path
+            .clone()
+            .unwrap_or_else(|| {
+                // Default path if not set in config, e.g., in user's data directory
+                dirs::data_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("sagitta")
+                    .join("workspaces")
+            });
+
+        let workspace_manager = Arc::new(Mutex::new(WorkspaceManagerImpl::new(workspace_storage_path)));
+
         Self {
             agent: None,
             repo_panel: RepoPanel::new(repo_manager.clone()),
@@ -115,6 +142,7 @@ impl SagittaCodeApp {
             conversation_sidebar: ConversationSidebar::with_default_config(),
             config: sagitta_code_config_arc,
             app_core_config: app_core_config_arc,
+            workspace_manager,
             
             // Initialize state management with theme from config
             state: initial_state,
@@ -131,6 +159,9 @@ impl SagittaCodeApp {
             
             // Tool result formatting
             tool_formatter: ToolResultFormatter::new(),
+            
+            // Conversation service for cluster management
+            conversation_service: None,
         }
     }
 
@@ -171,7 +202,104 @@ impl SagittaCodeApp {
 
     /// Initialize application state, including loading configurations and setting up the agent
     pub async fn initialize(&mut self) -> Result<()> {
+        let mut workspace_manager = self.workspace_manager.lock().await;
+        if let Err(e) = workspace_manager.load_workspaces().await {
+            log::error!("Failed to load workspaces: {}", e);
+            // Decide if you want to bail out or continue with an empty workspace list
+        }
+        self.state.workspaces = workspace_manager.list_workspaces().await?;
+        drop(workspace_manager);
         initialization::initialize(self).await
+    }
+
+    /// Initialize conversation service with clustering support
+    pub async fn initialize_conversation_service(&mut self) -> Result<()> {
+        if let Some(agent) = &self.agent {
+            // Create persistence layer
+            let storage_path = std::env::var("CONVERSATION_STORAGE_PATH")
+                .unwrap_or_else(|_| {
+                    let mut path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    path.push("conversations");
+                    path.to_string_lossy().to_string()
+                });
+            let persistence = Box::new(DiskConversationPersistence::new(std::path::PathBuf::from(storage_path)).await?);
+            
+            // Create search engine
+            let search_engine = Box::new(TextConversationSearchEngine::new());
+            
+            // Create conversation manager
+            let conversation_manager = Arc::new(ConversationManagerImpl::new(persistence, search_engine).await?);
+            
+            // Try to create clustering manager (optional, requires Qdrant)
+            let clustering_manager = match self.try_create_clustering_manager().await {
+                Ok(manager) => Some(manager),
+                Err(e) => {
+                    log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                    None
+                }
+            };
+            
+            // Create analytics manager
+            let analytics_manager = ConversationAnalyticsManager::new(AnalyticsConfig::default());
+            
+            // Create conversation service
+            let service = ConversationService::new(
+                conversation_manager,
+                clustering_manager,
+                analytics_manager,
+            );
+            
+            self.conversation_service = Some(Arc::new(service));
+            
+            // Initial refresh of conversation data
+            self.refresh_conversation_clusters().await?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Try to create clustering manager (may fail if Qdrant is not available)
+    async fn try_create_clustering_manager(&self) -> Result<ConversationClusteringManager> {
+        use qdrant_client::Qdrant;
+        use sagitta_search::EmbeddingPool;
+        
+        // Try to connect to Qdrant
+        let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
+        let qdrant_client = Arc::new(Qdrant::from_url(&qdrant_url).build()?);
+        
+        // Create embedding pool
+        let embedding_config = sagitta_search::app_config_to_embedding_config(&self.app_core_config);
+        let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
+        
+        // Create clustering manager
+        ConversationClusteringManager::with_default_config(
+            qdrant_client,
+            embedding_pool,
+            "conversation_clusters".to_string(),
+        ).await
+    }
+    
+    /// Refresh conversation clusters and update sidebar
+    pub async fn refresh_conversation_clusters(&mut self) -> Result<()> {
+        if let Some(service) = &self.conversation_service {
+            // Refresh the service data
+            service.refresh().await?;
+            
+            // Get updated clusters
+            let clusters = service.get_clusters().await?;
+            
+            // Update sidebar with new cluster data
+            self.conversation_sidebar.clusters = clusters;
+            
+            log::info!("Updated conversation sidebar with {} clusters", self.conversation_sidebar.clusters.len());
+        }
+        
+        Ok(())
+    }
+    
+    /// Get conversation service for external use
+    pub fn get_conversation_service(&self) -> Option<Arc<ConversationService>> {
+        self.conversation_service.clone()
     }
 
     /// Set preview panel content and make it visible
