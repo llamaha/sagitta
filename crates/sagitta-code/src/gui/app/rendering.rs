@@ -115,6 +115,46 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
     }
     
+    // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
+    if app.config.conversation.sidebar.enable_keyboard_shortcuts {
+        if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.ctrl) {
+            // Ctrl+1: Switch to Recency mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Recency
+            );
+        }
+        if ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.ctrl) {
+            // Ctrl+2: Switch to Project mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Project
+            );
+        }
+        if ctx.input(|i| i.key_pressed(Key::Num3) && i.modifiers.ctrl) {
+            // Ctrl+3: Switch to Status mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Status
+            );
+        }
+        if ctx.input(|i| i.key_pressed(Key::Num4) && i.modifiers.ctrl) {
+            // Ctrl+4: Switch to Clusters mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Clusters
+            );
+        }
+        if ctx.input(|i| i.key_pressed(Key::Num5) && i.modifiers.ctrl) {
+            // Ctrl+5: Switch to Tags mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Tags
+            );
+        }
+        if ctx.input(|i| i.key_pressed(Key::Num6) && i.modifiers.ctrl) {
+            // Ctrl+6: Switch to Success mode
+            app.conversation_sidebar.set_organization_mode(
+                crate::gui::conversation::sidebar::OrganizationMode::Success
+            );
+        }
+    }
+    
     // Loop control shortcuts
     if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.ctrl) && app.state.is_in_loop {
         // Ctrl+I: Toggle loop injection input when in loop
@@ -526,6 +566,19 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.label(egui::RichText::new("Ctrl + Shift + A: Toggle Analytics Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + Shift + T: Toggle Theme Customizer").color(theme.text_color()));
                 ui.separator();
+                
+                // Phase 10: Organization mode shortcuts
+                if app.config.conversation.sidebar.enable_keyboard_shortcuts {
+                    ui.label(egui::RichText::new("Conversation Organization:").color(theme.accent_color()).strong());
+                    ui.label(egui::RichText::new("Ctrl + 1: Recency Mode").color(theme.text_color()));
+                    ui.label(egui::RichText::new("Ctrl + 2: Project Mode").color(theme.text_color()));
+                    ui.label(egui::RichText::new("Ctrl + 3: Status Mode").color(theme.text_color()));
+                    ui.label(egui::RichText::new("Ctrl + 4: Clusters Mode").color(theme.text_color()));
+                    ui.label(egui::RichText::new("Ctrl + 5: Tags Mode").color(theme.text_color()));
+                    ui.label(egui::RichText::new("Ctrl + 6: Success Mode").color(theme.text_color()));
+                    ui.separator();
+                }
+                
                 ui.label(egui::RichText::new("General:").color(theme.accent_color()).strong());
                 ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
                 ui.separator();

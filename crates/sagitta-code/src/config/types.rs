@@ -194,6 +194,150 @@ pub struct ConversationConfig {
     /// Default tags to apply to new conversations
     #[serde(default)]
     pub default_tags: Vec<String>,
+    
+    /// Sidebar configuration for persistent state
+    #[serde(default)]
+    pub sidebar: SidebarPersistentConfig,
+}
+
+/// Configuration for persistent sidebar state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarPersistentConfig {
+    /// Last used organization mode
+    #[serde(default = "default_organization_mode")]
+    pub last_organization_mode: String,
+    
+    /// Expanded groups (group IDs)
+    #[serde(default)]
+    pub expanded_groups: Vec<String>,
+    
+    /// Last search query
+    pub last_search_query: Option<String>,
+    
+    /// Filter settings
+    #[serde(default)]
+    pub filters: SidebarFiltersConfig,
+    
+    /// Show filters panel
+    #[serde(default)]
+    pub show_filters: bool,
+    
+    /// Show branch suggestions
+    #[serde(default)]
+    pub show_branch_suggestions: bool,
+    
+    /// Show checkpoint suggestions
+    #[serde(default)]
+    pub show_checkpoint_suggestions: bool,
+    
+    /// Sidebar width
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: f32,
+    
+    /// Enable keyboard shortcuts
+    #[serde(default = "default_enable_keyboard_shortcuts")]
+    pub enable_keyboard_shortcuts: bool,
+    
+    /// Enable accessibility features
+    #[serde(default = "default_enable_accessibility")]
+    pub enable_accessibility: bool,
+    
+    /// Color blind friendly palette
+    #[serde(default)]
+    pub color_blind_friendly: bool,
+    
+    /// Performance settings
+    #[serde(default)]
+    pub performance: SidebarPerformanceConfig,
+}
+
+impl Default for SidebarPersistentConfig {
+    fn default() -> Self {
+        Self {
+            last_organization_mode: default_organization_mode(),
+            expanded_groups: Vec::new(),
+            last_search_query: None,
+            filters: SidebarFiltersConfig::default(),
+            show_filters: false,
+            show_branch_suggestions: false,
+            show_checkpoint_suggestions: false,
+            sidebar_width: default_sidebar_width(),
+            enable_keyboard_shortcuts: default_enable_keyboard_shortcuts(),
+            enable_accessibility: default_enable_accessibility(),
+            color_blind_friendly: false,
+            performance: SidebarPerformanceConfig::default(),
+        }
+    }
+}
+
+/// Filter configuration for persistence
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SidebarFiltersConfig {
+    /// Filter by project types
+    #[serde(default)]
+    pub project_types: Vec<String>,
+    
+    /// Filter by statuses
+    #[serde(default)]
+    pub statuses: Vec<String>,
+    
+    /// Filter by tags
+    #[serde(default)]
+    pub tags: Vec<String>,
+    
+    /// Minimum message count
+    pub min_messages: Option<usize>,
+    
+    /// Minimum success rate
+    pub min_success_rate: Option<f32>,
+    
+    /// Show only favorites
+    #[serde(default)]
+    pub favorites_only: bool,
+    
+    /// Show only with branches
+    #[serde(default)]
+    pub branches_only: bool,
+    
+    /// Show only with checkpoints
+    #[serde(default)]
+    pub checkpoints_only: bool,
+}
+
+/// Performance configuration for sidebar
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarPerformanceConfig {
+    /// Enable virtual scrolling for large lists
+    #[serde(default = "default_enable_virtual_scrolling")]
+    pub enable_virtual_scrolling: bool,
+    
+    /// Threshold for enabling virtual scrolling
+    #[serde(default = "default_virtual_scrolling_threshold")]
+    pub virtual_scrolling_threshold: usize,
+    
+    /// Maximum items to render at once
+    #[serde(default = "default_max_rendered_items")]
+    pub max_rendered_items: usize,
+    
+    /// Enable lazy loading of conversation details
+    #[serde(default = "default_enable_lazy_loading")]
+    pub enable_lazy_loading: bool,
+    
+    /// Debounce delay for search (milliseconds)
+    #[serde(default = "default_search_debounce_ms")]
+    pub search_debounce_ms: u64,
+}
+
+impl Default for SidebarPerformanceConfig {
+    fn default() -> Self {
+        Self {
+            enable_virtual_scrolling: default_enable_virtual_scrolling(),
+            virtual_scrolling_threshold: default_virtual_scrolling_threshold(),
+            max_rendered_items: default_max_rendered_items(),
+            enable_lazy_loading: default_enable_lazy_loading(),
+            search_debounce_ms: default_search_debounce_ms(),
+        }
+    }
 }
 
 impl Default for ConversationConfig {
@@ -207,6 +351,7 @@ impl Default for ConversationConfig {
             auto_checkpoints: default_auto_checkpoints(),
             auto_branching: false,
             default_tags: Vec::new(),
+            sidebar: SidebarPersistentConfig::default(),
         }
     }
 }
@@ -277,6 +422,42 @@ fn default_auto_checkpoints() -> bool {
 
 fn default_auto_detect_workspaces() -> bool {
     true
+}
+
+fn default_organization_mode() -> String {
+    "Recency".to_string()
+}
+
+fn default_sidebar_width() -> f32 {
+    280.0
+}
+
+fn default_enable_keyboard_shortcuts() -> bool {
+    true
+}
+
+fn default_enable_accessibility() -> bool {
+    true
+}
+
+fn default_enable_virtual_scrolling() -> bool {
+    true
+}
+
+fn default_virtual_scrolling_threshold() -> usize {
+    1000
+}
+
+fn default_max_rendered_items() -> usize {
+    100
+}
+
+fn default_enable_lazy_loading() -> bool {
+    true
+}
+
+fn default_search_debounce_ms() -> u64 {
+    300
 }
 
 // Configuration structures will go here
