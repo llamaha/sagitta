@@ -8,6 +8,7 @@ pub mod persistence;
 pub mod search;
 pub mod search_service;
 pub mod service;
+pub mod tagging;
 pub mod types;
 
 // Re-export key types for easy access
@@ -25,4 +26,5 @@ pub use navigation::*;
 pub use persistence::*;
 pub use search::*;
 pub use search_service::*;
-pub use service::*; 
+pub use service::*;
+pub use tagging::*; 
