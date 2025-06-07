@@ -445,6 +445,12 @@ impl DecisionEngine {
             }
         }
         
+        // Update metrics for successful decisions
+        if outcome.success {
+            let mut metrics = self.metrics.write().await;
+            metrics.successful_decisions += 1;
+        }
+        
         // Update patterns based on outcome (separate scope to avoid borrow conflicts)
         self.learn_from_outcome(decision_id, outcome).await?;
         
@@ -542,6 +548,155 @@ impl DecisionEngine {
     /// Get decision metrics
     pub async fn get_metrics(&self) -> DecisionMetrics {
         self.metrics.read().await.clone()
+    }
+
+    /// NEW: Detect if current decision context indicates task completion
+    pub async fn detect_completion_in_context(&self, context: &DecisionContext) -> Option<f32> {
+        let completion_indicators = [
+            "completed", "finished", "done", "success", "final", "result",
+            "concluded", "accomplished", "achieved", "resolved"
+        ];
+        
+        let continuation_indicators = [
+            "now", "next", "continue", "proceed", "then", "after", "still", "more",
+            "further", "additional", "also", "again"
+        ];
+        
+        let description_lower = context.description.to_lowercase();
+        let state_lower = context.state_summary.to_lowercase();
+        
+        // Check for continuation indicators first - these reduce completion confidence
+        let has_continuation_signal = continuation_indicators.iter()
+            .any(|indicator| description_lower.contains(indicator) || state_lower.contains(indicator));
+        
+        // Check for partial completion indicators
+        let has_partial_indicators = description_lower.contains("partial") || 
+                                   description_lower.contains("partly") ||
+                                   description_lower.contains("some");
+        
+        let mut max_signal_strength: f32 = 0.0;
+        
+        // Check description for completion phrases
+        for indicator in &completion_indicators {
+            if description_lower.contains(indicator) {
+                let strength = match *indicator {
+                    "completed" | "finished" | "done" => 1.0,
+                    "success" | "accomplished" | "achieved" => 0.9,
+                    "final" | "result" | "concluded" => 0.8,
+                    "resolved" => 0.7,
+                    _ => 0.5,
+                };
+                max_signal_strength = max_signal_strength.max(strength);
+            }
+        }
+        
+        // Check state summary for completion indicators
+        for indicator in &completion_indicators {
+            if state_lower.contains(indicator) {
+                let strength = match *indicator {
+                    "completed" | "finished" | "done" => 1.0,
+                    "success" | "accomplished" | "achieved" => 0.9,
+                    "final" | "result" | "concluded" => 0.8,
+                    "resolved" => 0.7,
+                    _ => 0.5,
+                };
+                max_signal_strength = max_signal_strength.max(strength);
+            }
+        }
+        
+        // Check for quantified results (like "150 lines") - but only if not a continuation
+        if !has_continuation_signal && (state_lower.contains("lines") || state_lower.contains("count") || 
+           state_lower.contains("total") || state_lower.contains("found")) {
+            max_signal_strength = max_signal_strength.max(0.7);
+        }
+        
+        // Reduce signal strength if continuation indicators are present
+        if has_continuation_signal {
+            if has_partial_indicators {
+                // Partial completion contexts get moderate reduction
+                max_signal_strength *= 0.6; 
+            } else {
+                // Pure continuation contexts get heavy reduction
+                max_signal_strength *= 0.2; 
+            }
+        }
+        
+        if max_signal_strength > 0.25 { // Raise threshold slightly to be more restrictive
+            Some(max_signal_strength)
+        } else {
+            None
+        }
+    }
+    
+    /// NEW: Check if decision should prefer direct file operations over shell commands
+    pub fn should_prefer_direct_operations(&self, context: &DecisionContext) -> bool {
+        let simple_tasks = [
+            "count", "read", "list", "check", "view", "display", "show",
+            "lines", "size", "content", "exists"
+        ];
+        
+        let description_lower = context.description.to_lowercase();
+        simple_tasks.iter().any(|task| description_lower.contains(task))
+    }
+    
+    /// NEW: Evaluate whether previous successful actions should prevent retry
+    pub async fn should_skip_based_on_history(&self, context: &DecisionContext) -> bool {
+        let history = self.decision_history.read().await;
+        
+        // Look for recent successful decisions with similar context
+        for record in history.iter().rev().take(10) {
+            if let Some(outcome) = &record.outcome {
+                if outcome.success && self.is_similar_context(&record.context, context) {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+    
+    /// NEW: Check if two contexts are similar enough to reuse decisions
+    fn is_similar_context(&self, old_context: &DecisionContext, new_context: &DecisionContext) -> bool {
+        // Simple similarity check based on description keywords
+        let old_desc_lower = old_context.description.to_lowercase();
+        let new_desc_lower = new_context.description.to_lowercase();
+        
+        let old_words: Vec<&str> = old_desc_lower.split_whitespace().collect();
+        let new_words: Vec<&str> = new_desc_lower.split_whitespace().collect();
+        
+        let common_words = old_words.iter()
+            .filter(|word| new_words.contains(word))
+            .count();
+        
+        let similarity_ratio = common_words as f32 / old_words.len().max(new_words.len()) as f32;
+        
+        similarity_ratio > 0.4 // Lower threshold to be more forgiving
+    }
+    
+    /// NEW: Get completion confidence for a specific option
+    pub fn get_option_completion_confidence(&self, option: &DecisionOption) -> f32 {
+        let completion_indicators = [
+            "read_file", "get_file_content", "check_file", "file_exists",
+            "list_directory", "directory_listing", "analyze_file"
+        ];
+        
+        let option_id_lower = option.id.to_lowercase();
+        let option_desc_lower = option.description.to_lowercase();
+        
+        for indicator in &completion_indicators {
+            if option_id_lower.contains(indicator) || option_desc_lower.contains(indicator) {
+                return match *indicator {
+                    "read_file" | "get_file_content" => 0.9,
+                    "list_directory" | "directory_listing" => 0.8,
+                    "check_file" | "file_exists" => 0.7,
+                    "analyze_file" => 0.8,
+                    _ => 0.6,
+                };
+            }
+        }
+        
+        // Default confidence for non-completion options
+        option.base_confidence
     }
 
     /// Validate decision context
@@ -850,10 +1005,189 @@ mod tests {
         let config = DecisionConfig::default();
         let mut engine = DecisionEngine::new(config).await.unwrap();
         
-        let context = DecisionContext::new("Empty options test".to_string());
-        // No options added
+        let context = DecisionContext::new("Test decision with no options".to_string());
         
         let result = engine.make_decision(context).await;
         assert!(result.is_err());
+    }
+
+    // NEW COMPREHENSIVE TESTS FOR COMPLETION DETECTION
+
+    #[tokio::test]
+    async fn test_completion_detection_in_context() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Test context with clear completion indicators
+        let mut completed_context = DecisionContext::new("Task completed successfully".to_string());
+        completed_context.state_summary = "File analysis finished, found 150 lines".to_string();
+        
+        let completion_confidence = engine.detect_completion_in_context(&completed_context).await;
+        assert!(completion_confidence.is_some());
+        assert!(completion_confidence.unwrap() > 0.5);
+        
+        // Test context without completion indicators
+        let mut ongoing_context = DecisionContext::new("Analyzing file".to_string());
+        ongoing_context.state_summary = "Processing data".to_string();
+        
+        let no_completion = engine.detect_completion_in_context(&ongoing_context).await;
+        assert!(no_completion.is_none() || no_completion.unwrap() < 0.3);
+    }
+    
+    #[tokio::test]
+    async fn test_prefer_direct_operations() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Test simple file operations that should prefer direct operations
+        let read_context = DecisionContext::new("Read the contents of file.txt".to_string());
+        assert!(engine.should_prefer_direct_operations(&read_context));
+        
+        let count_context = DecisionContext::new("Count lines in the file".to_string());
+        assert!(engine.should_prefer_direct_operations(&count_context));
+        
+        let list_context = DecisionContext::new("List files in directory".to_string());
+        assert!(engine.should_prefer_direct_operations(&list_context));
+        
+        // Test complex operations that should not prefer direct operations
+        let complex_context = DecisionContext::new("Deploy application to production server".to_string());
+        assert!(!engine.should_prefer_direct_operations(&complex_context));
+    }
+    
+    #[tokio::test]
+    async fn test_skip_based_on_history() {
+        let config = DecisionConfig::default();
+        let mut engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Create a successful decision in history
+        let mut original_context = DecisionContext::new("Read file contents".to_string());
+        original_context.add_option(DecisionOption::new("read_file".to_string(), 0.9));
+        
+        let decision = engine.make_decision(original_context.clone()).await.unwrap();
+        
+        // Simulate successful outcome
+        let outcome = DecisionOutcome {
+            success: true,
+            actual_confidence: 0.95,
+            execution_time: Duration::from_millis(100),
+            lessons: vec!["File read successfully".to_string()],
+            metadata: HashMap::new(),
+        };
+        
+        engine.update_decision_outcome(decision.id, outcome).await.unwrap();
+        
+        // Test similar context - should skip
+        let similar_context = DecisionContext::new("Read file content".to_string());
+        let should_skip = engine.should_skip_based_on_history(&similar_context).await;
+        assert!(should_skip);
+        
+        // Test different context - should not skip
+        let different_context = DecisionContext::new("Delete file permanently".to_string());
+        let should_not_skip = engine.should_skip_based_on_history(&different_context).await;
+        assert!(!should_not_skip);
+    }
+    
+    #[tokio::test]
+    async fn test_context_similarity() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        let context1 = DecisionContext::new("Read file contents from disk".to_string());
+        let context2 = DecisionContext::new("Read file content from storage".to_string());
+        let context3 = DecisionContext::new("Delete all files permanently".to_string());
+        
+        // Similar contexts should match
+        assert!(engine.is_similar_context(&context1, &context2));
+        
+        // Different contexts should not match
+        assert!(!engine.is_similar_context(&context1, &context3));
+    }
+    
+    #[tokio::test]
+    async fn test_option_completion_confidence() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        // High completion confidence options
+        let read_option = DecisionOption::new("read_file".to_string(), 0.5)
+            .with_description("Read file contents".to_string());
+        assert_eq!(engine.get_option_completion_confidence(&read_option), 0.9);
+        
+        let list_option = DecisionOption::new("list_directory".to_string(), 0.5)
+            .with_description("List directory contents".to_string());
+        assert_eq!(engine.get_option_completion_confidence(&list_option), 0.8);
+        
+        // Lower completion confidence options
+        let generic_option = DecisionOption::new("custom_action".to_string(), 0.7)
+            .with_description("Perform custom action".to_string());
+        assert_eq!(engine.get_option_completion_confidence(&generic_option), 0.7);
+    }
+    
+    #[tokio::test]
+    async fn test_completion_signals_in_quantified_results() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Test context with quantified results
+        let mut context = DecisionContext::new("File analysis".to_string());
+        context.state_summary = "Found 150 lines in the file".to_string();
+        
+        let completion_confidence = engine.detect_completion_in_context(&context).await;
+        assert!(completion_confidence.is_some());
+        assert!(completion_confidence.unwrap() > 0.3);
+        
+        // Test with count result
+        context.state_summary = "Total count: 42 files".to_string();
+        let completion_confidence2 = engine.detect_completion_in_context(&context).await;
+        assert!(completion_confidence2.is_some());
+    }
+    
+    #[tokio::test]
+    async fn test_already_exists_error_handling() {
+        let config = DecisionConfig::default();
+        let mut engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Simulate "already exists" scenario
+        let mut context = DecisionContext::new("Create directory".to_string());
+        context.add_option(DecisionOption::new("create_dir".to_string(), 0.8));
+        
+        let decision = engine.make_decision(context).await.unwrap();
+        
+        // Simulate "already exists" outcome - should be treated as informational, not failure
+        let outcome = DecisionOutcome {
+            success: true, // Even though it "failed", directory already exists is success
+            actual_confidence: 0.8,
+            execution_time: Duration::from_millis(50),
+            lessons: vec!["Directory already exists - no action needed".to_string()],
+            metadata: HashMap::new(),
+        };
+        
+        engine.update_decision_outcome(decision.id, outcome).await.unwrap();
+        
+        let metrics = engine.get_metrics().await;
+        assert_eq!(metrics.successful_decisions, 1);
+    }
+    
+    #[tokio::test]
+    async fn test_task_completion_vs_continuation() {
+        let config = DecisionConfig::default();
+        let engine = DecisionEngine::new(config).await.unwrap();
+        
+        // Test completed task context
+        let completed_context = DecisionContext::new("Analysis completed successfully".to_string());
+        let completion_confidence = engine.detect_completion_in_context(&completed_context).await;
+        assert!(completion_confidence.is_some());
+        assert!(completion_confidence.unwrap() > 0.7);
+        
+        // Test continuation context
+        let continuation_context = DecisionContext::new("Now process the results".to_string());
+        let continuation_confidence = engine.detect_completion_in_context(&continuation_context).await;
+        assert!(continuation_confidence.is_none() || continuation_confidence.unwrap() < 0.3);
+        
+        // Test partial completion context
+        let partial_context = DecisionContext::new("Partially done, continue processing".to_string());
+        let partial_confidence = engine.detect_completion_in_context(&partial_context).await;
+        assert!(partial_confidence.is_some());
+        assert!(partial_confidence.unwrap() < 0.7); // Should be moderate confidence
     }
 } 

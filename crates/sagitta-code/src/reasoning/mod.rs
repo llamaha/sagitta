@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use uuid::Uuid;
 use std::collections::HashMap;
+use terminal_stream::events::StreamEvent;
 
 pub mod config;
 pub mod llm_adapter;
@@ -23,17 +24,139 @@ use crate::{agent::events::AgentEvent, tools::{registry::ToolRegistry, types::To
 
 pub struct AgentToolExecutor {
     tool_registry: Arc<ToolRegistry>,
+    terminal_event_sender: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
 }
 
 impl AgentToolExecutor {
     pub fn new(tool_registry: Arc<ToolRegistry>) -> Self {
-        Self { tool_registry }
+        Self { 
+            tool_registry,
+            terminal_event_sender: None,
+        }
+    }
+    
+    /// Set the terminal event sender for streaming shell execution
+    pub fn set_terminal_event_sender(&mut self, sender: tokio::sync::mpsc::Sender<StreamEvent>) {
+        self.terminal_event_sender = Some(sender);
+    }
+    
+    /// Execute shell command with streaming when terminal sender is available
+    async fn execute_streaming_shell_tool(&self, name: &str, args: Value) -> ReasoningEngineResult<ToolResult> {
+        // Get the streaming shell execution tool
+        let streaming_tool = self
+            .tool_registry
+            .get("streaming_shell_execution")
+            .await
+            .ok_or_else(|| ReasoningError::tool_execution(name.to_string(), "Streaming shell execution tool not found".to_string()))?;
+
+        // Parse shell execution parameters
+        let shell_params: crate::tools::shell_execution::ShellExecutionParams = serde_json::from_value(args.clone())
+            .map_err(|e| ReasoningError::tool_execution(name.to_string(), format!("Invalid shell execution parameters: {}", e)))?;
+
+        // Cast to streaming shell tool
+        let streaming_shell_tool = streaming_tool
+            .as_any()
+            .downcast_ref::<crate::tools::shell_execution::StreamingShellExecutionTool>()
+            .ok_or_else(|| ReasoningError::tool_execution(name.to_string(), "Failed to cast to StreamingShellExecutionTool".to_string()))?;
+
+        // Get terminal event sender
+        let terminal_sender = self.terminal_event_sender.as_ref()
+            .ok_or_else(|| ReasoningError::tool_execution(name.to_string(), "Terminal event sender not configured".to_string()))?;
+
+        // Execute with streaming
+        match streaming_shell_tool.execute_streaming(shell_params, terminal_sender.clone()).await {
+            Ok(shell_result) => {
+                let result_value = serde_json::to_value(shell_result)
+                    .map_err(|e| ReasoningError::tool_execution(name.to_string(), format!("Failed to serialize shell result: {}", e)))?;
+                
+                // Post-process the result for better completion confidence
+                let processed_result = self.post_process_shell_result(&result_value).unwrap_or(result_value);
+                
+                Ok(ToolResult {
+                    success: true,
+                    data: processed_result,
+                    error: None,
+                    execution_time_ms: 0,
+                    metadata: HashMap::new(),
+                })
+            }
+            Err(error) => {
+                Err(ReasoningError::tool_execution(name.to_string(), error.to_string()))
+            }
+        }
+    }
+    
+    /// Post-process shell execution results to provide better context and completion confidence
+    fn post_process_shell_result(&self, result_value: &Value) -> Option<Value> {
+        // Try to extract meaningful information from shell execution results
+        if let Some(result_obj) = result_value.as_object() {
+            if let (Some(stdout), Some(exit_code)) = (
+                result_obj.get("stdout").and_then(|v| v.as_str()),
+                result_obj.get("exit_code").and_then(|v| v.as_i64())
+            ) {
+                if exit_code == 0 && !stdout.trim().is_empty() {
+                    // Try to detect common patterns and provide helpful summaries
+                    let stdout_trimmed = stdout.trim();
+                    
+                    // Line counting commands (wc -l, find | wc -l, etc.)
+                    if let Ok(line_count) = stdout_trimmed.parse::<u64>() {
+                        if line_count > 0 {
+                            let mut enhanced_result = result_obj.clone();
+                            enhanced_result.insert(
+                                "summary".to_string(),
+                                Value::String(format!("Command completed successfully. Total count: {}", line_count))
+                            );
+                            return Some(Value::Object(enhanced_result));
+                        }
+                    }
+                    
+                    // Multi-line output with numbers (like detailed file counts)
+                    if stdout_trimmed.lines().count() > 1 {
+                        let lines: Vec<&str> = stdout_trimmed.lines().collect();
+                        if let Some(last_line) = lines.last() {
+                            if last_line.contains("total") || last_line.trim().parse::<u64>().is_ok() {
+                                let mut enhanced_result = result_obj.clone();
+                                enhanced_result.insert(
+                                    "summary".to_string(),
+                                    Value::String(format!("Command completed successfully. Result summary: {}", last_line.trim()))
+                                );
+                                return Some(Value::Object(enhanced_result));
+                            }
+                        }
+                    }
+                    
+                    // For other successful commands, add a basic summary
+                    if stdout_trimmed.len() < 200 {
+                        let mut enhanced_result = result_obj.clone();
+                        enhanced_result.insert(
+                            "summary".to_string(),
+                            Value::String(format!("Command completed successfully. Output: {}", stdout_trimmed))
+                        );
+                        return Some(Value::Object(enhanced_result));
+                    } else {
+                        let mut enhanced_result = result_obj.clone();
+                        enhanced_result.insert(
+                            "summary".to_string(),
+                            Value::String(format!("Command completed successfully. Output length: {} characters", stdout_trimmed.len()))
+                        );
+                        return Some(Value::Object(enhanced_result));
+                    }
+                }
+            }
+        }
+        
+        None
     }
 }
 
 #[async_trait]
 impl ToolExecutor for AgentToolExecutor {
     async fn execute_tool(&self, name: &str, args: Value) -> ReasoningEngineResult<ToolResult> {
+        // Special handling for shell_execution when terminal streaming is available
+        if name == "shell_execution" && self.terminal_event_sender.is_some() {
+            return self.execute_streaming_shell_tool(name, args).await;
+        }
+        
         let tool = self
             .tool_registry
             .get(name)
@@ -43,13 +166,22 @@ impl ToolExecutor for AgentToolExecutor {
         match tool.execute(args.clone()).await {
             Ok(sagitta_code_tool_result) => {
                 match sagitta_code_tool_result {
-                    crate::tools::types::ToolResult::Success(val) => Ok(ToolResult {
-                        success: true,
-                        data: val,
-                        error: None,
-                        execution_time_ms: 0, // Placeholder for duration
-                        metadata: HashMap::new(),
-                    }),
+                    crate::tools::types::ToolResult::Success(val) => {
+                        // Post-process shell execution results to provide better completion confidence
+                        let processed_result = if name == "shell_execution" {
+                            self.post_process_shell_result(&val).unwrap_or(val)
+                        } else {
+                            val
+                        };
+                        
+                        Ok(ToolResult {
+                            success: true,
+                            data: processed_result,
+                            error: None,
+                            execution_time_ms: 0, // Placeholder for duration
+                            metadata: HashMap::new(),
+                        })
+                    },
                     crate::tools::types::ToolResult::Error { error: msg } => Ok(ToolResult { 
                         success: false,
                         data: Value::Null,

@@ -81,7 +81,7 @@ pub async fn handle_delete_branch(
     }
     
     // Delete the branch
-    git_manager.delete_branch(&repo_path, &args.name)?;
+    git_manager.delete_branch(&repo_path, &args.name, args.force)?;
     
     println!(
         "{}",

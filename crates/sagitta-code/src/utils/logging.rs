@@ -193,17 +193,19 @@ mod tests {
     fn test_log_collector_different_levels() {
         let collector = SagittaCodeLogCollector;
         
-        // Clear any existing logs
-        if let Ok(mut logs) = LOG_COLLECTOR.lock() {
-            logs.clear();
-        }
+        // Record initial log count instead of clearing (to avoid race conditions with other tests)
+        let initial_count = if let Ok(logs) = LOG_COLLECTOR.lock() {
+            logs.len()
+        } else {
+            0
+        };
         
         let test_cases = vec![
-            (Level::Error, "Test ERROR message"),
-            (Level::Warn, "Test WARN message"),
-            (Level::Info, "Test INFO message"),
-            (Level::Debug, "Test DEBUG message"),
-            (Level::Trace, "Test TRACE message"),
+            (Level::Error, "Test ERROR message UNIQUE_12345"),
+            (Level::Warn, "Test WARN message UNIQUE_12345"),
+            (Level::Info, "Test INFO message UNIQUE_12345"),
+            (Level::Debug, "Test DEBUG message UNIQUE_12345"),
+            (Level::Trace, "Test TRACE message UNIQUE_12345"),
         ];
         
         for (level, message) in test_cases {
@@ -218,17 +220,19 @@ mod tests {
                 .build());
         }
         
-        // Check that all levels were logged
+        // Check that our specific levels were logged
         if let Ok(logs) = LOG_COLLECTOR.lock() {
-            assert!(logs.len() >= 5);
+            assert!(logs.len() >= initial_count + 5, 
+                "Expected at least {} logs (initial {} + 5), but found {}", 
+                initial_count + 5, initial_count, logs.len());
             
-            // Check that different levels are present
+            // Check that our specific test messages with unique identifier are present
             let log_text = logs.iter().map(|(_, msg)| msg.as_str()).collect::<Vec<_>>().join(" ");
-            assert!(log_text.contains("ERROR"));
-            assert!(log_text.contains("WARN"));
-            assert!(log_text.contains("INFO"));
-            assert!(log_text.contains("DEBUG"));
-            assert!(log_text.contains("TRACE"));
+            assert!(log_text.contains("Test ERROR message UNIQUE_12345"), "ERROR level log not found");
+            assert!(log_text.contains("Test WARN message UNIQUE_12345"), "WARN level log not found");
+            assert!(log_text.contains("Test INFO message UNIQUE_12345"), "INFO level log not found");
+            assert!(log_text.contains("Test DEBUG message UNIQUE_12345"), "DEBUG level log not found");
+            assert!(log_text.contains("Test TRACE message UNIQUE_12345"), "TRACE level log not found");
         }
     }
 

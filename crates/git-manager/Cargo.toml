@@ -5,10 +5,6 @@ edition = "2021"
 description = "Centralized git functionality for sagitta with branch management and merkle tree optimization"
 license = "MIT OR Apache-2.0"
 
-[[bin]]
-name = "git-manager-test"
-path = "src/bin/git-manager-test.rs"
-
 [dependencies]
 # Git operations
 git2 = "0.18"
@@ -45,6 +41,7 @@ pathdiff = "0.2"
 
 # For debugging
 env_logger = "0.11"
+log = "0.4.27"
 
 [dev-dependencies]
 tempfile = "3.0"

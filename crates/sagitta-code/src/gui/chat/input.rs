@@ -244,7 +244,8 @@ pub fn chat_input_ui(
                     .hint_text("Type your message here... (Enter to send, Ctrl+Enter for new line)")
                     .desired_width(f32::INFINITY)
                     .desired_rows(3)
-                    .text_color(text_color);
+                    .text_color(text_color)
+                    .frame(false);
                 
                 let response = ui.add(text_edit);
                 text_edit_id = Some(response.id);
@@ -261,41 +262,48 @@ pub fn chat_input_ui(
         
         // Bottom controls
         ui.horizontal(|ui| {
-            // Send button
-            let send_button_enabled = !input_buffer.trim().is_empty() && !is_waiting;
-            let send_button_color = if send_button_enabled { 
-                theme.button_text_color() 
-            } else { 
-                theme.button_disabled_text_color() 
-            };
-            let send_button_bg = if send_button_enabled { 
-                button_bg_color 
-            } else { 
-                theme.button_disabled_color() 
-            };
-            
-            if ui.add_enabled(
-                send_button_enabled,
-                egui::Button::new(RichText::new("Send").color(send_button_color))
-                    .fill(send_button_bg)
-            ).clicked() {
-                *on_submit = true;
-            }
-            
-            ui.add_space(8.0);
-            
-            // Clear button
-            if ui.button(RichText::new("Clear").color(theme.button_text_color()))
-                .on_hover_text("Clear the input field")
-                .clicked() 
-            {
-                input_buffer.clear();
-            }
-            
-            // Right side controls
+            // Left side - keyboard shortcuts hint
+            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • ?: Help").color(hint_color));
+
+            // Right side - buttons
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // Keyboard shortcuts hint
-                ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • ?: Help").color(hint_color));
+                // Clear button (ghost style)
+                if ui.add(
+                    egui::Button::new(
+                        RichText::new("Clear")
+                            .color(hint_color)
+                            .size(12.0)
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .corner_radius(Rounding::same(16))
+                    .min_size(Vec2::new(80.0, 24.0))
+                )
+                .on_hover_text("Clear the input field")
+                .clicked()
+                {
+                    input_buffer.clear();
+                }
+
+                ui.add_space(8.0);
+
+                // Send button (prominent style)
+                let send_button_enabled = !input_buffer.trim().is_empty() && !is_waiting;
+                let send_color = if send_button_enabled { accent_color } else { theme.button_disabled_color() };
+                let send_text_color = if send_button_enabled { Color32::WHITE } else { theme.button_disabled_text_color() };
+
+                if ui.add_enabled(
+                    send_button_enabled,
+                    egui::Button::new(
+                        RichText::new("📤 Send")
+                            .color(send_text_color)
+                            .strong()
+                    )
+                    .fill(send_color)
+                    .corner_radius(Rounding::same(18))
+                    .min_size(Vec2::new(100.0, 36.0))
+                ).clicked() {
+                    *on_submit = true;
+                }
             });
         });
     });

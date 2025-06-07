@@ -98,9 +98,17 @@ pub use sync::{
 // Operations for branch management and switching
 pub use operations::{
     BranchSwitcher, SwitchOptions, SyncOptions, SyncType, SyncRequirement,
-    switch_branch, switch_branch_no_sync
+    switch_branch, switch_branch_no_sync,
+    // Re-export create/clone operations
+    RepositoryCloner, CloneOptions, CloneResult, init_repository,
+    // Re-export change management operations  
+    ChangeManager, CommitOptions, CommitResult, GitPushOptions, PushResult,
+    PullOptions, PullResult, GitSignature,
 };
 pub use operations::switch::{VectorSyncTrait, VectorSyncResult, NoSync};
+
+// Branch management operations
+pub use core::branch::{BranchInfo, BranchManager, CreateBranchOptions};
 
 // Indexing utilities for file processing
 pub use indexing::{
@@ -108,6 +116,7 @@ pub use indexing::{
 };
 
 use std::sync::Arc;
+use anyhow::Context;
 
 /// Main git manager struct that coordinates all git operations
 ///
@@ -562,26 +571,30 @@ where
         repo.create_branch(branch_name, start_point)
     }
 
-    /// Delete a branch
-    ///
-    /// Deletes the specified branch. The branch must not be the current branch.
-    ///
-    /// # Examples
-    /// ```rust,no_run
-    /// use git_manager::GitManager;
-    /// use std::path::PathBuf;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let manager = GitManager::new();
-    /// let repo_path = PathBuf::from("/path/to/repo");
-    ///
-    /// manager.delete_branch(&repo_path, "old-feature")?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn delete_branch(&self, repo_path: &std::path::Path, branch_name: &str) -> GitResult<()> {
+    /// Delete a branch, with an option to force deletion
+    pub fn delete_branch(&self, repo_path: &std::path::Path, branch_name: &str, force: bool) -> GitResult<()> {
         let repo = GitRepository::open(repo_path)?;
-        repo.delete_branch(branch_name)
+        let mut branch = repo.repo().find_branch(branch_name, git2::BranchType::Local)
+            .map_err(|_| GitError::BranchNotFound { branch: branch_name.to_string() })?;
+
+        if branch.is_head() {
+            return Err(GitError::DeleteHeadBranch);
+        }
+        
+        branch.delete()?;
+        
+        // The above only deletes the ref. To fully emulate `git branch -d/-D`, 
+        // we might need to update config, but for most local cases this is sufficient.
+        // The `force` parameter is not directly used by `branch.delete()`, which is more like `git branch -d`.
+        // A true `git branch -D` would involve deleting even if not merged.
+        // The current implementation is a "safe" delete. If a "force" delete is truly needed,
+        // it would require more complex logic to bypass git2's safety checks, which isn't
+        // straightforward. For now, we accept the `force` parameter but acknowledge this limitation.
+        if force {
+             log::warn!("'force' delete for branches is not fully implemented in git-manager; using standard delete.");
+        }
+
+        Ok(())
     }
 
     /// Check if a repository has uncommitted changes

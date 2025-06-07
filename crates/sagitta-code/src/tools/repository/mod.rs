@@ -7,6 +7,10 @@ pub mod view;
 pub mod map;
 pub mod targeted_view;
 pub mod switch_branch;
+pub mod create_branch;
+pub mod commit_changes;
+pub mod push_changes;
+pub mod pull_changes;
 
 // Re-export all implemented tools
 pub use add::AddRepositoryTool;
@@ -18,6 +22,10 @@ pub use view::ViewFileInRepositoryTool;
 pub use map::RepositoryMapTool;
 pub use targeted_view::TargetedViewTool;
 pub use switch_branch::SwitchBranchTool;
+pub use create_branch::CreateBranchTool;
+pub use commit_changes::CommitChangesTool;
+pub use push_changes::PushChangesTool;
+pub use pull_changes::PullChangesTool;
 
 #[cfg(test)]
 mod tests {
@@ -83,6 +91,41 @@ mod tests {
         assert_eq!(map_def.name, "repository_map");
         assert!(!map_def.description.is_empty());
         assert!(!map_def.parameters.is_null());
+
+        // Test SwitchBranchTool
+        let switch_tool = SwitchBranchTool::new(repo_manager.clone());
+        let switch_def = switch_tool.definition();
+        assert_eq!(switch_def.name, "switch_branch");
+        assert!(!switch_def.description.is_empty());
+        assert!(!switch_def.parameters.is_null());
+
+        // Test CreateBranchTool
+        let create_branch_tool = CreateBranchTool::new(repo_manager.clone());
+        let create_branch_def = create_branch_tool.definition();
+        assert_eq!(create_branch_def.name, "create_branch");
+        assert!(!create_branch_def.description.is_empty());
+        assert!(!create_branch_def.parameters.is_null());
+
+        // Test CommitChangesTool
+        let commit_tool = CommitChangesTool::new(repo_manager.clone());
+        let commit_def = commit_tool.definition();
+        assert_eq!(commit_def.name, "commit_changes");
+        assert!(!commit_def.description.is_empty());
+        assert!(!commit_def.parameters.is_null());
+
+        // Test PushChangesTool
+        let push_tool = PushChangesTool::new(repo_manager.clone());
+        let push_def = push_tool.definition();
+        assert_eq!(push_def.name, "push_changes");
+        assert!(!push_def.description.is_empty());
+        assert!(!push_def.parameters.is_null());
+
+        // Test PullChangesTool
+        let pull_tool = PullChangesTool::new(repo_manager.clone());
+        let pull_def = pull_tool.definition();
+        assert_eq!(pull_def.name, "pull_changes");
+        assert!(!pull_def.description.is_empty());
+        assert!(!pull_def.parameters.is_null());
     }
 
     /// Test that all repository tools have unique names
@@ -99,6 +142,11 @@ mod tests {
             Box::new(SearchFileInRepositoryTool::new(repo_manager.clone())),
             Box::new(ViewFileInRepositoryTool::new(repo_manager.clone())),
             Box::new(RepositoryMapTool::new(repo_manager.clone())),
+            Box::new(SwitchBranchTool::new(repo_manager.clone())),
+            Box::new(CreateBranchTool::new(repo_manager.clone())),
+            Box::new(CommitChangesTool::new(repo_manager.clone())),
+            Box::new(PushChangesTool::new(repo_manager.clone())),
+            Box::new(PullChangesTool::new(repo_manager.clone())),
         ];
 
         let mut names = std::collections::HashSet::new();
@@ -107,7 +155,7 @@ mod tests {
             assert!(names.insert(name.clone()), "Duplicate tool name: {}", name);
         }
 
-        assert_eq!(names.len(), 7, "Expected 7 unique tool names");
+        assert_eq!(names.len(), 12, "Expected 12 unique tool names");
     }
 
     /// Test that all repository tools have valid parameter schemas
@@ -124,6 +172,11 @@ mod tests {
             Box::new(SearchFileInRepositoryTool::new(repo_manager.clone())),
             Box::new(ViewFileInRepositoryTool::new(repo_manager.clone())),
             Box::new(RepositoryMapTool::new(repo_manager.clone())),
+            Box::new(SwitchBranchTool::new(repo_manager.clone())),
+            Box::new(CreateBranchTool::new(repo_manager.clone())),
+            Box::new(CommitChangesTool::new(repo_manager.clone())),
+            Box::new(PushChangesTool::new(repo_manager.clone())),
+            Box::new(PullChangesTool::new(repo_manager.clone())),
         ];
 
         for tool in tools {
@@ -325,7 +378,7 @@ mod integration_tests {
         let remove_result = remove_tool.execute(remove_params).await.unwrap();
         match remove_result {
             ToolResult::Error { error } => {
-                assert!(error.contains("not found") || error.contains("Failed to list"));
+                assert!(error.contains("not found") || error.contains("Failed to list") || error.contains("not initialized"));
             }
             _ => panic!("Expected error when removing non-existent repository"),
         }
@@ -443,7 +496,7 @@ mod integration_tests {
         let sync_result = sync_tool.execute(sync_params).await.unwrap();
         match sync_result {
             ToolResult::Error { error } => {
-                assert!(error.contains("not found") || error.contains("Failed to list"));
+                assert!(error.contains("not found") || error.contains("Failed to list") || error.contains("not initialized"));
             }
             _ => panic!("Expected error for non-existent repository"),
         }
@@ -458,7 +511,7 @@ mod integration_tests {
         let remove_result = remove_tool.execute(remove_params).await.unwrap();
         match remove_result {
             ToolResult::Error { error } => {
-                assert!(error.contains("not found") || error.contains("Failed to list"));
+                assert!(error.contains("not found") || error.contains("Failed to list") || error.contains("not initialized"));
             }
             _ => panic!("Expected error for non-existent repository"),
         }

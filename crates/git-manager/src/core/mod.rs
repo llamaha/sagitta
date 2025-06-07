@@ -7,4 +7,4 @@ pub mod remote;
 // Re-export commonly used types
 pub use state::{BranchState, RepositoryState, StateManager};
 pub use repository::{GitRepository, RepositoryInfo};
-pub use branch::*; 
+pub use branch::{BranchInfo, BranchManager, CreateBranchOptions}; 

@@ -38,7 +38,7 @@ impl PreviewPanel {
         self.content = content.to_string();
     }
 
-    pub fn render(&mut self, ctx: &Context) {
+    pub fn render(&mut self, ctx: &Context, theme: crate::gui::theme::AppTheme) {
         if !self.visible {
             return;
         }
@@ -46,6 +46,7 @@ impl PreviewPanel {
         egui::SidePanel::right("preview_panel")
             .resizable(true)
             .default_width(400.0)
+            .frame(theme.side_panel_frame())
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.heading("Preview Panel");
@@ -116,6 +117,7 @@ impl LoggingPanel {
         egui::SidePanel::right("logging_panel")
             .resizable(true)
             .default_width(500.0)
+            .frame(crate::gui::theme::AppTheme::default().side_panel_frame())
             .show(ctx, |ui| {
                 ui.heading("Sagitta Code Logs");
                 ui.horizontal(|ui| {

@@ -47,7 +47,7 @@ impl SwitchBranchTool {
 impl Tool for SwitchBranchTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "switch_repository_branch".to_string(),
+            name: "switch_branch".to_string(),
             description: "Switch to a different branch or Git reference in a repository with automatic resync. Supports branches, tags, commits, and remote references.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
@@ -135,6 +135,10 @@ impl Tool for SwitchBranchTool {
                 Err(SagittaCodeError::ToolError(format!("Failed to switch branch/ref: {}", e)))
             }
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

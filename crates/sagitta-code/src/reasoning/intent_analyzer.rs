@@ -1,41 +1,36 @@
+//! Intent analysis for Sagitta Code reasoning engine.
+//! 
+//! This module provides intent analysis capabilities to determine when the LLM
+//! has completed a task, needs more input, or encounters issues requiring intervention.
+
 use async_trait::async_trait;
 use std::sync::Arc;
-use log::{debug, warn, trace};
-use serde_json::Value;
 use tokio::runtime::Handle;
+use tracing::{debug, trace, warn};
 
-// Corrected paths to refer to sagitta_search library
-use sagitta_embed::provider::EmbeddingProvider; // The trait
-use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
+use reasoning_engine::traits::{IntentAnalyzer, LlmMessage, DetectedIntent};
+use reasoning_engine::ReasoningError;
+use sagitta_embed::EmbeddingProvider;
 
-// Corrected ReasoningError import
-use reasoning_engine::traits::{IntentAnalyzer, DetectedIntent, LlmMessage};
-use reasoning_engine::ReasoningError; // Import ReasoningError directly
-
-use std::collections::HashMap; // For more complex prototype storage if needed
-
-use crate::utils::errors::SagittaCodeError;
-
-// Basic cosine similarity function (can be moved to a shared utility module)
-fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f32 {
-    if v1.len() != v2.len() || v1.is_empty() {
-        return 0.0;
-    }
-    let dot_product: f32 = v1.iter().zip(v2.iter()).map(|(a, b)| a * b).sum();
-    let norm_v1: f32 = v1.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_v2: f32 = v2.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    if norm_v1 == 0.0 || norm_v2 == 0.0 {
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let magnitude_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let magnitude_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    
+    if magnitude_a == 0.0 || magnitude_b == 0.0 {
         0.0
     } else {
-        dot_product / (norm_v1 * norm_v2)
+        dot_product / (magnitude_a * magnitude_b)
     }
 }
 
-#[derive(Debug)] // Added Debug derive
+/// Intent analyzer specifically designed for Sagitta Code workflows.
+/// 
+/// This analyzer embeds various intent prototypes and uses semantic similarity
+/// to classify LLM responses, with special handling for coding and repository tasks.
 pub struct SagittaCodeIntentAnalyzer {
     embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
-    intent_prototypes: Vec<(DetectedIntent, Vec<f32>)>, // Store pre-embedded prototypes
+    intent_prototypes: Vec<(DetectedIntent, Vec<f32>)>,
     rt_handle: Handle,
 }
 
@@ -58,10 +53,17 @@ impl SagittaCodeIntentAnalyzer {
             (DetectedIntent::RequestsMoreInput, "Please tell me more so I can help."),
             (DetectedIntent::RequestsMoreInput, "What would you like me to do next?"),
             
-            // Inability to proceed
+            // Enhanced inability to proceed patterns - especially for system/permission failures
             (DetectedIntent::StatesInabilityToProceed, "I'm sorry, I cannot fulfill that request at this time."),
             (DetectedIntent::StatesInabilityToProceed, "I am unable to do that."),
             (DetectedIntent::StatesInabilityToProceed, "This is not something I can accomplish."),
+            (DetectedIntent::StatesInabilityToProceed, "I lack the necessary file system permissions to create directories and files."),
+            (DetectedIntent::StatesInabilityToProceed, "I am encountering persistent permission issues that prevent me from proceeding."),
+            (DetectedIntent::StatesInabilityToProceed, "I cannot proceed with creating the project due to system restrictions."),
+            (DetectedIntent::StatesInabilityToProceed, "The execution environment prevents me from performing this operation."),
+            (DetectedIntent::StatesInabilityToProceed, "I am unable to complete your request due to permission restrictions."),
+            (DetectedIntent::StatesInabilityToProceed, "Docker container restrictions prevent me from creating files or directories."),
+            (DetectedIntent::StatesInabilityToProceed, "System permissions deny access to the required operations."),
             
             // Plans without action (should trigger nudging)
             (DetectedIntent::ProvidesPlanWithoutExplicitAction, "Okay, first I will do X, then I will do Y, and finally Z."),
@@ -121,6 +123,36 @@ impl IntentAnalyzer for SagittaCodeIntentAnalyzer {
         }
 
         debug!("SagittaCodeIntentAnalyzer: Analyzing intent for text: \"{}\"", text);
+
+        // CRITICAL: Enhanced detection of system failures that require human intervention
+        let indicates_critical_system_failure = text.contains("persistent permission issues") ||
+                                               text.contains("execution environment") ||
+                                               text.contains("permission restrictions") ||
+                                               text.contains("system restrictions") ||
+                                               text.contains("container restrictions") ||
+                                               text.contains("Docker") && text.contains("permission") ||
+                                               text.contains("file system permissions") ||
+                                               text.contains("cannot create") && (text.contains("permission") || text.contains("denied")) ||
+                                               text.contains("access denied") ||
+                                               text.contains("operation not permitted") ||
+                                               text.contains("insufficient privileges") ||
+                                               // Multiple failed attempts at the same operation
+                                               (text.contains("unable") && text.contains("create") && 
+                                                text.contains("director") && text.contains("file")) ||
+                                               // Clear statements of incapability
+                                               text.contains("I cannot proceed") ||
+                                               text.contains("I am unable to complete") ||
+                                               text.contains("cannot fulfill") ||
+                                               text.contains("cannot perform this operation") ||
+                                               text.contains("I lack the necessary") ||
+                                               // Repeated failure indicators
+                                               text.matches("failed").count() >= 2 ||
+                                               text.matches("error").count() >= 2;
+
+        if indicates_critical_system_failure {
+            debug!("SagittaCodeIntentAnalyzer: Detected critical system failure requiring human intervention.");
+            return Ok(DetectedIntent::StatesInabilityToProceed);
+        }
 
         // CRITICAL: Check for intermediate summaries that should NOT be treated as final answers
         let is_intermediate_summary = text.contains("I've finished those tasks") ||
@@ -245,10 +277,10 @@ impl IntentAnalyzer for SagittaCodeIntentAnalyzer {
             }
         }
         
-        // Lower threshold for most intents to be less conservative, but higher for final answers
+        // Enhanced threshold logic for critical failure detection
         let similarity_threshold = match best_match {
             DetectedIntent::ProvidesFinalAnswer => 0.80, // Higher threshold for final answers
-            DetectedIntent::StatesInabilityToProceed => 0.75, // Higher threshold for inability
+            DetectedIntent::StatesInabilityToProceed => 0.65, // Lower threshold for inability to catch more failure cases
             _ => 0.55, // Lower threshold for other intents to be less conservative
         };
         

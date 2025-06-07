@@ -1,10 +1,12 @@
 // Panel management for the Sagitta Code application
 
 use std::sync::Arc;
-use egui::{Context, ScrollArea, Window, RichText, Color32};
+use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, Button, Vec2, Rounding};
 use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;
+use crate::agent::conversation::types::ProjectType;
+use std::path::PathBuf;
 
 /// Panel type enum for tracking which panel is currently open
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +19,223 @@ pub enum ActivePanel {
     Events,
     Analytics,
     ThemeCustomizer,
+    CreateProject,
+}
+
+/// Create Project panel for creating new project workspaces
+pub struct CreateProjectPanel {
+    pub visible: bool,
+    pub project_name: String,
+    pub project_path: String,
+    pub project_type: ProjectType,
+    pub auto_detect_type: bool,
+    pub initialize_git: bool,
+    pub add_to_current_workspace: bool,
+    pub template_selection: Option<String>,
+    pub error_message: Option<String>,
+    pub creating_project: bool,
+}
+
+impl CreateProjectPanel {
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            project_name: String::new(),
+            project_path: std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .to_string_lossy()
+                .to_string(),
+            project_type: ProjectType::Unknown,
+            auto_detect_type: true,
+            initialize_git: true,
+            add_to_current_workspace: false,
+            template_selection: None,
+            error_message: None,
+            creating_project: false,
+        }
+    }
+
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+        if self.visible {
+            self.reset_form();
+        }
+    }
+
+    pub fn reset_form(&mut self) {
+        self.project_name.clear();
+        self.project_path = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .to_string_lossy()
+            .to_string();
+        self.project_type = ProjectType::Unknown;
+        self.auto_detect_type = true;
+        self.initialize_git = true;
+        self.add_to_current_workspace = false;
+        self.template_selection = None;
+        self.error_message = None;
+        self.creating_project = false;
+    }
+
+    pub fn render(&mut self, ctx: &Context, theme: AppTheme) -> Option<CreateProjectRequest> {
+        if !self.visible {
+            return None;
+        }
+
+        let mut create_request = None;
+
+        egui::SidePanel::right("create_project_panel")
+            .resizable(true)
+            .default_width(400.0)
+            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading("Create New Project");
+                        ui.add_space(8.0);
+                        if ui.button("×").clicked() {
+                            self.visible = false;
+                        }
+                    });
+                    ui.separator();
+                    
+                    ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_space(8.0);
+                            
+                            // Project Name
+                            ui.label("Project Name:");
+                            ui.add_space(4.0);
+                            ui.add(TextEdit::singleline(&mut self.project_name)
+                                .hint_text("Enter project name"));
+                            ui.add_space(8.0);
+                            
+                            // Project Path
+                            ui.label("Project Path:");
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.add(TextEdit::singleline(&mut self.project_path)
+                                    .hint_text("Enter or browse project path"));
+                                if ui.button("📁").clicked() {
+                                    // TODO: Implement file dialog for path selection
+                                    // For now, just use current directory
+                                    if let Ok(current_dir) = std::env::current_dir() {
+                                        self.project_path = current_dir.to_string_lossy().to_string();
+                                    }
+                                }
+                            });
+                            ui.add_space(8.0);
+                            
+                            // Project Type
+                            ui.label("Project Type:");
+                            ui.add_space(4.0);
+                            ui.checkbox(&mut self.auto_detect_type, "Auto-detect from files");
+                            
+                            if !self.auto_detect_type {
+                                ComboBox::from_label("")
+                                    .selected_text(format!("{:?}", self.project_type))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.project_type, ProjectType::Rust, "Rust");
+                                        ui.selectable_value(&mut self.project_type, ProjectType::Python, "Python");
+                                        ui.selectable_value(&mut self.project_type, ProjectType::JavaScript, "JavaScript");
+                                        ui.selectable_value(&mut self.project_type, ProjectType::Go, "Go");
+                                        ui.selectable_value(&mut self.project_type, ProjectType::Unknown, "Unknown");
+                                    });
+                            }
+                            ui.add_space(8.0);
+                            
+                            // Options
+                            ui.label("Options:");
+                            ui.add_space(4.0);
+                            ui.checkbox(&mut self.initialize_git, "Initialize Git repository");
+                            ui.checkbox(&mut self.add_to_current_workspace, "Add to current workspace");
+                            ui.add_space(8.0);
+                            
+                            // Template Selection (future feature)
+                            ui.label("Template (Coming Soon):");
+                            ui.add_space(4.0);
+                            ComboBox::from_label("")
+                                .selected_text("None")
+                                .width(200.0)
+                                .show_ui(ui, |ui| {
+                                    // Future template options would go here
+                                    ui.label("No templates available yet");
+                                });
+                            ui.add_space(16.0);
+                            
+                            // Error Message
+                            if let Some(ref error) = self.error_message {
+                                ui.colored_label(theme.error_color(), error);
+                                ui.add_space(8.0);
+                            }
+                            
+                            // Action Buttons
+                            ui.horizontal(|ui| {
+                                let create_enabled = !self.project_name.trim().is_empty() 
+                                    && !self.project_path.trim().is_empty() 
+                                    && !self.creating_project;
+                                
+                                if ui.add_enabled(create_enabled, 
+                                    Button::new("Create Project")
+                                        .fill(theme.accent_color())
+                                        .rounding(Rounding::same(4))
+                                        .min_size(Vec2::new(100.0, 32.0))
+                                ).clicked() {
+                                    self.creating_project = true;
+                                    self.error_message = None;
+                                    
+                                    let final_project_type = if self.auto_detect_type {
+                                        let path = PathBuf::from(&self.project_path);
+                                        ProjectType::detect_from_path(&path)
+                                    } else {
+                                        self.project_type
+                                    };
+                                    
+                                    create_request = Some(CreateProjectRequest {
+                                        name: self.project_name.clone(),
+                                        path: PathBuf::from(&self.project_path),
+                                        project_type: final_project_type,
+                                        initialize_git: self.initialize_git,
+                                        add_to_workspace: self.add_to_current_workspace,
+                                        template: self.template_selection.clone(),
+                                    });
+                                }
+                                
+                                ui.add_space(8.0);
+                                
+                                if ui.button("Cancel").clicked() {
+                                    self.visible = false;
+                                }
+                            });
+                        });
+                });
+            });
+
+        create_request
+    }
+
+    pub fn set_error(&mut self, error: String) {
+        self.error_message = Some(error);
+        self.creating_project = false;
+    }
+
+    pub fn project_created(&mut self) {
+        self.creating_project = false;
+        self.visible = false;
+        self.reset_form();
+    }
+}
+
+/// Request to create a new project
+#[derive(Debug, Clone)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    pub path: PathBuf,
+    pub project_type: ProjectType,
+    pub initialize_git: bool,
+    pub add_to_workspace: bool,
+    pub template: Option<String>,
 }
 
 /// Preview panel for tool outputs and code changes
@@ -282,6 +501,7 @@ pub struct PanelManager {
     pub events_panel: EventsPanel,
     pub analytics_panel: AnalyticsPanel,
     pub theme_customizer: ThemeCustomizer,
+    pub create_project_panel: CreateProjectPanel,
 }
 
 impl PanelManager {
@@ -293,6 +513,7 @@ impl PanelManager {
             events_panel: EventsPanel::new(),
             analytics_panel: AnalyticsPanel::new(),
             theme_customizer: ThemeCustomizer::new(),
+            create_project_panel: CreateProjectPanel::new(),
         }
     }
 
@@ -373,6 +594,16 @@ impl PanelManager {
                     self.active_panel = ActivePanel::ThemeCustomizer;
                 }
             },
+            ActivePanel::CreateProject => {
+                if matches!(self.active_panel, ActivePanel::CreateProject) {
+                    self.create_project_panel.toggle(); // Close
+                    self.active_panel = ActivePanel::None;
+                } else {
+                    self.close_all_panels();
+                    self.create_project_panel.toggle(); // Open
+                    self.active_panel = ActivePanel::CreateProject;
+                }
+            },
             ActivePanel::None => {
                 self.close_all_panels();
             }
@@ -399,6 +630,11 @@ impl PanelManager {
             ActivePanel::ThemeCustomizer => {
                 if self.theme_customizer.is_open() {
                     self.theme_customizer.toggle(); // Close
+                }
+            },
+            ActivePanel::CreateProject => {
+                if self.create_project_panel.visible {
+                    self.create_project_panel.toggle(); // Close
                 }
             },
             _ => {}
@@ -712,5 +948,142 @@ impl AnalyticsPanel {
                 });
 
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_create_project_panel_new() {
+        let panel = CreateProjectPanel::new();
+        assert!(!panel.visible);
+        assert!(panel.project_name.is_empty());
+        assert!(!panel.project_path.is_empty()); // Should default to current dir
+        assert_eq!(panel.project_type, ProjectType::Unknown);
+        assert!(panel.auto_detect_type);
+        assert!(panel.initialize_git);
+        assert!(!panel.add_to_current_workspace);
+        assert!(panel.template_selection.is_none());
+        assert!(panel.error_message.is_none());
+        assert!(!panel.creating_project);
+    }
+
+    #[test]
+    fn test_create_project_panel_toggle() {
+        let mut panel = CreateProjectPanel::new();
+        assert!(!panel.visible);
+        
+        panel.toggle();
+        assert!(panel.visible);
+        
+        panel.toggle();
+        assert!(!panel.visible);
+    }
+
+    #[test]
+    fn test_create_project_panel_reset_form() {
+        let mut panel = CreateProjectPanel::new();
+        
+        // Modify some fields
+        panel.project_name = "Test Project".to_string();
+        panel.project_type = ProjectType::Rust;
+        panel.auto_detect_type = false;
+        panel.initialize_git = false;
+        panel.error_message = Some("Test error".to_string());
+        panel.creating_project = true;
+        
+        panel.reset_form();
+        
+        assert!(panel.project_name.is_empty());
+        assert_eq!(panel.project_type, ProjectType::Unknown);
+        assert!(panel.auto_detect_type);
+        assert!(panel.initialize_git);
+        assert!(!panel.add_to_current_workspace);
+        assert!(panel.template_selection.is_none());
+        assert!(panel.error_message.is_none());
+        assert!(!panel.creating_project);
+    }
+
+    #[test]
+    fn test_create_project_panel_set_error() {
+        let mut panel = CreateProjectPanel::new();
+        panel.creating_project = true;
+        
+        panel.set_error("Test error message".to_string());
+        
+        assert_eq!(panel.error_message, Some("Test error message".to_string()));
+        assert!(!panel.creating_project);
+    }
+
+    #[test]
+    fn test_create_project_panel_project_created() {
+        let mut panel = CreateProjectPanel::new();
+        panel.visible = true;
+        panel.creating_project = true;
+        panel.project_name = "Test Project".to_string();
+        
+        panel.project_created();
+        
+        assert!(!panel.visible);
+        assert!(!panel.creating_project);
+        assert!(panel.project_name.is_empty()); // Should be reset
+    }
+
+    #[test]
+    fn test_create_project_request() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().to_path_buf();
+        
+        let request = CreateProjectRequest {
+            name: "Test Project".to_string(),
+            path: path.clone(),
+            project_type: ProjectType::Rust,
+            initialize_git: true,
+            add_to_workspace: false,
+            template: Some("rust-template".to_string()),
+        };
+        
+        assert_eq!(request.name, "Test Project");
+        assert_eq!(request.path, path);
+        assert_eq!(request.project_type, ProjectType::Rust);
+        assert!(request.initialize_git);
+        assert!(!request.add_to_workspace);
+        assert_eq!(request.template, Some("rust-template".to_string()));
+    }
+
+    #[test]
+    fn test_panel_manager_with_create_project() {
+        let mut panel_manager = PanelManager::new();
+        
+        // Should start with no active panel
+        assert_eq!(panel_manager.active_panel, ActivePanel::None);
+        assert!(!panel_manager.create_project_panel.visible);
+        
+        // Toggle create project panel
+        panel_manager.toggle_panel(ActivePanel::CreateProject);
+        assert_eq!(panel_manager.active_panel, ActivePanel::CreateProject);
+        assert!(panel_manager.create_project_panel.visible);
+        
+        // Toggle again should close it
+        panel_manager.toggle_panel(ActivePanel::CreateProject);
+        assert_eq!(panel_manager.active_panel, ActivePanel::None);
+        assert!(!panel_manager.create_project_panel.visible);
+    }
+
+    #[test]
+    fn test_panel_manager_close_all_includes_create_project() {
+        let mut panel_manager = PanelManager::new();
+        
+        // Open create project panel
+        panel_manager.toggle_panel(ActivePanel::CreateProject);
+        assert!(panel_manager.create_project_panel.visible);
+        
+        // Close all panels
+        panel_manager.close_all_panels();
+        assert!(!panel_manager.create_project_panel.visible);
+        assert_eq!(panel_manager.active_panel, ActivePanel::None);
     }
 } 

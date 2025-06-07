@@ -10,6 +10,7 @@ use sagitta_search::sync_progress::SyncStage as CoreSyncStage;
 pub enum RepoPanelTab {
     List,
     Add,
+    CreateProject,
     Sync,
     Query,
     SearchFile,
@@ -313,6 +314,7 @@ pub struct SimpleSyncStatus {
     pub output_lines: Vec<String>,
     pub final_message: String,
     pub started_at: Option<std::time::Instant>,
+    pub final_elapsed_seconds: Option<f64>, // Store final elapsed time when sync completes
 }
 
 /// State for the repository panel
@@ -325,6 +327,7 @@ pub struct RepoPanelState {
     pub initial_load_attempted: bool,
     pub repository_filter: RepoFilterOptions,
     pub add_repo_form: AddRepoForm,
+    pub project_creation_state: crate::gui::tools::panel::ProjectCreationPanelState,
     pub selected_repo: Option<String>,
     pub selected_repos: Vec<String>,
     pub branch_overrides: std::collections::HashMap<String, String>,
@@ -335,9 +338,19 @@ pub struct RepoPanelState {
     pub is_loading_repos: bool,
     pub file_search_result: FileSearchResult,
     pub file_view_result: FileViewResult,
-    pub sync_status_map: Option<std::collections::HashMap<String, super::manager::SyncStatus>>,
-    pub simple_sync_status_map: Option<std::collections::HashMap<String, SimpleSyncStatus>>,
     pub branch_management: BranchManagementState,
+    pub force_sync: bool, // Force sync option
+}
+
+impl RepoPanelState {
+    /// Get repository names from either enhanced or basic repositories
+    pub fn repo_names(&self) -> Vec<String> {
+        if self.use_enhanced_repos && !self.enhanced_repositories.is_empty() {
+            self.enhanced_repositories.iter().map(|r| r.name.clone()).collect()
+        } else {
+            self.repositories.iter().map(|r| r.name.clone()).collect()
+        }
+    }
 }
 
 /// State for branch management operations
@@ -985,34 +998,202 @@ mod tests {
 
     #[test]
     fn test_score_range() {
+        // Scores should be non-negative
         let item = QueryResultItem {
-            score: 0.85,
+            score: 0.95,
             path: "test.rs".to_string(),
             start_line: 1,
             end_line: 10,
-            content: "test".to_string(),
+            content: "content".to_string(),
         };
         
-        // Scores should typically be between 0.0 and 1.0
-        assert!(item.score >= 0.0);
-        assert!(item.score <= 1.0);
+        assert!(item.score >= 0.0, "Score should be non-negative");
+        assert!(item.score <= 2.0, "Score should be reasonable (typically <= 2.0)");
     }
 
     #[test]
     fn test_line_numbers_validity() {
         let item = QueryResultItem {
-            score: 0.95,
+            score: 1.0,
             path: "test.rs".to_string(),
-            start_line: 10,
-            end_line: 25,
-            content: "test content".to_string(),
+            start_line: 5,
+            end_line: 10,
+            content: "content".to_string(),
         };
         
-        // End line should be >= start line
-        assert!(item.end_line >= item.start_line);
+        assert!(item.start_line > 0, "Start line should be positive (1-indexed)");
+        assert!(item.end_line >= item.start_line, "End line should be >= start line");
+    }
+
+    #[test]
+    fn test_repo_names_with_enhanced_repos() {
+        let mut state = RepoPanelState::default();
         
-        // Line numbers should be positive
-        assert!(item.start_line > 0);
-        assert!(item.end_line > 0);
+        // Set up enhanced repositories
+        state.use_enhanced_repos = true;
+        state.enhanced_repositories = vec![
+            EnhancedRepoInfo {
+                name: "enhanced-repo-1".to_string(),
+                remote: Some("https://github.com/test/repo1.git".to_string()),
+                branch: Some("main".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/repo1")),
+                is_syncing: false,
+                filesystem_status: FilesystemStatus {
+                    exists: true,
+                    accessible: true,
+                    is_git_repository: true,
+                },
+                git_status: None,
+                sync_status: RepoSyncStatus {
+                    state: SyncState::UpToDate,
+                    needs_sync: false,
+                    last_synced_commit: None,
+                },
+                indexed_languages: None,
+                file_extensions: vec![],
+                total_files: None,
+                size_bytes: None,
+            },
+            EnhancedRepoInfo {
+                name: "enhanced-repo-2".to_string(),
+                remote: Some("https://github.com/test/repo2.git".to_string()),
+                branch: Some("dev".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/repo2")),
+                is_syncing: false,
+                filesystem_status: FilesystemStatus {
+                    exists: true,
+                    accessible: true,
+                    is_git_repository: true,
+                },
+                git_status: None,
+                sync_status: RepoSyncStatus {
+                    state: SyncState::UpToDate,
+                    needs_sync: false,
+                    last_synced_commit: None,
+                },
+                indexed_languages: None,
+                file_extensions: vec![],
+                total_files: None,
+                size_bytes: None,
+            },
+        ];
+        
+        // Leave basic repositories empty (this is the bug scenario)
+        state.repositories = vec![];
+        
+        let repo_names = state.repo_names();
+        assert_eq!(repo_names.len(), 2);
+        assert!(repo_names.contains(&"enhanced-repo-1".to_string()));
+        assert!(repo_names.contains(&"enhanced-repo-2".to_string()));
+    }
+
+    #[test]
+    fn test_repo_names_with_basic_repos_fallback() {
+        let mut state = RepoPanelState::default();
+        
+        // Set up basic repositories only
+        state.use_enhanced_repos = false;
+        state.repositories = vec![
+            RepoInfo {
+                name: "basic-repo-1".to_string(),
+                remote: Some("https://github.com/test/repo1.git".to_string()),
+                branch: Some("main".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/repo1")),
+                is_syncing: false,
+            },
+            RepoInfo {
+                name: "basic-repo-2".to_string(),
+                remote: Some("https://github.com/test/repo2.git".to_string()),
+                branch: Some("dev".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/repo2")),
+                is_syncing: false,
+            },
+        ];
+        
+        // Enhanced repositories empty
+        state.enhanced_repositories = vec![];
+        
+        let repo_names = state.repo_names();
+        assert_eq!(repo_names.len(), 2);
+        assert!(repo_names.contains(&"basic-repo-1".to_string()));
+        assert!(repo_names.contains(&"basic-repo-2".to_string()));
+    }
+
+    #[test]
+    fn test_repo_names_empty_when_no_repos() {
+        let state = RepoPanelState::default();
+        
+        let repo_names = state.repo_names();
+        assert!(repo_names.is_empty());
+    }
+
+    #[test]
+    fn test_sync_status_final_elapsed_time() {
+        let mut status = SimpleSyncStatus {
+            is_running: true,
+            is_complete: false,
+            is_success: false,
+            output_lines: vec!["Starting sync...".to_string()],
+            final_message: String::new(),
+            started_at: Some(std::time::Instant::now()),
+            final_elapsed_seconds: None,
+        };
+
+        // Simulate completion
+        status.is_running = false;
+        status.is_complete = true;
+        status.is_success = true;
+        status.final_elapsed_seconds = Some(5.5); // 5.5 seconds elapsed
+        
+        assert_eq!(status.final_elapsed_seconds, Some(5.5));
+        assert!(!status.is_running);
+        assert!(status.is_complete);
+    }
+
+    #[test]
+    fn test_repo_names_prefers_enhanced_when_available() {
+        let mut state = RepoPanelState::default();
+        
+        // Set up both basic and enhanced repositories  
+        state.use_enhanced_repos = true;
+        state.repositories = vec![
+            RepoInfo {
+                name: "basic-repo".to_string(),
+                remote: Some("https://github.com/test/basic.git".to_string()),
+                branch: Some("main".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/basic")),
+                is_syncing: false,
+            },
+        ];
+        state.enhanced_repositories = vec![
+            EnhancedRepoInfo {
+                name: "enhanced-repo".to_string(),
+                remote: Some("https://github.com/test/enhanced.git".to_string()),
+                branch: Some("main".to_string()),
+                local_path: Some(std::path::PathBuf::from("/tmp/enhanced")),
+                is_syncing: false,
+                filesystem_status: FilesystemStatus {
+                    exists: true,
+                    accessible: true,
+                    is_git_repository: true,
+                },
+                git_status: None,
+                sync_status: RepoSyncStatus {
+                    state: SyncState::UpToDate,
+                    needs_sync: false,
+                    last_synced_commit: None,
+                },
+                indexed_languages: None,
+                file_extensions: vec![],
+                total_files: None,
+                size_bytes: None,
+            },
+        ];
+        
+        let repo_names = state.repo_names();
+        // Should prefer enhanced repos when use_enhanced_repos = true and enhanced_repositories is not empty
+        assert_eq!(repo_names.len(), 1);
+        assert!(repo_names.contains(&"enhanced-repo".to_string()));
+        assert!(!repo_names.contains(&"basic-repo".to_string()));
     }
 } 

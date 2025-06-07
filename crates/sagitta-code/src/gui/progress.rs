@@ -1,6 +1,7 @@
 use async_trait::async_trait;
-use tokio::sync::mpsc;
-use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter as CoreSyncProgressReporter};
+use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter as CoreSyncProgressReporter, SyncStage};
+use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
+use crate::gui::repository::types::{SimpleSyncStatus, DisplayableSyncProgress};
 
 // Using String for RepositoryId as per observations in manager.rs
 pub type RepositoryId = String;
@@ -12,28 +13,64 @@ pub struct GuiSyncReport {
     pub progress: SyncProgress, // This is sagitta_search::sync_progress::SyncProgress
 }
 
-/// Implements the SyncProgressReporter trait to send progress updates to a central handler.
+/// Implements the SyncProgressReporter trait to send progress updates to the global state.
 pub struct GuiProgressReporter {
-    progress_sender: mpsc::UnboundedSender<GuiSyncReport>,
     repo_id: RepositoryId,
 }
 
 impl GuiProgressReporter {
-    pub fn new(progress_sender: mpsc::UnboundedSender<GuiSyncReport>, repo_id: RepositoryId) -> Self {
-        Self { progress_sender, repo_id }
+    pub fn new(repo_id: RepositoryId) -> Self {
+        Self { repo_id }
     }
 }
 
 #[async_trait]
 impl CoreSyncProgressReporter for GuiProgressReporter {
     async fn report(&self, progress: SyncProgress) {
-        let report = GuiSyncReport {
-            repo_id: self.repo_id.clone(),
-            progress,
-        };
-        if let Err(e) = self.progress_sender.send(report) {
-            // TODO: Use sagitta-code's logging mechanism (e.g., log::error!)
-            eprintln!("[GuiProgressReporter] Failed to send sync progress to GUI for repo '{}': {}", self.repo_id, e);
+        // Convert core progress into the GUI flavour
+        // We don't have elapsed time here, but the GUI can calculate it.
+        let displayable = DisplayableSyncProgress::from_core_progress(&progress, 0.0);
+
+        // Update the global maps
+        DETAILED_STATUS.insert(self.repo_id.clone(), displayable.clone());
+
+        // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
+        let mut simple = SIMPLE_STATUS
+            .entry(self.repo_id.clone())
+            .or_insert_with(SimpleSyncStatus::default);
+
+        simple.is_running = matches!(progress.stage, 
+            SyncStage::GitFetch { .. } | 
+            SyncStage::DiffCalculation { .. } | 
+            SyncStage::IndexFile { .. } | 
+            SyncStage::DeleteFile { .. } | 
+            SyncStage::CollectFiles { .. } | 
+            SyncStage::QueryLanguages { .. } | 
+            SyncStage::VerifyingCollection { .. }
+        );
+        simple.is_complete = matches!(progress.stage, SyncStage::Completed { .. } | SyncStage::Error { .. });
+        simple.is_success  = matches!(progress.stage, SyncStage::Completed { .. });
+
+        if simple.output_lines.len() > 100 { // Limit log lines
+            simple.output_lines.remove(0);
+        }
+        simple.output_lines.push(displayable.message.clone());
+
+        if simple.is_complete {
+            if let Some(started_at) = simple.started_at {
+                let duration = started_at.elapsed();
+                let final_elapsed_seconds = duration.as_secs_f64();
+                let final_message = format!(
+                    "{} in {:.2}s",
+                    if simple.is_success { "✅ Completed" } else { "❌ Failed" },
+                    duration.as_secs_f32()
+                );
+                simple.final_message = final_message;
+                simple.final_elapsed_seconds = Some(final_elapsed_seconds);
+            } else {
+                simple.final_message = if simple.is_success { "✅ Completed" } else { "❌ Failed" }.to_string();
+                simple.final_elapsed_seconds = None; // No start time available
+            }
         }
     }
 }
@@ -43,12 +80,12 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
     use sagitta_search::sync_progress::SyncStage;
+    use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 
     #[tokio::test]
-    async fn test_gui_progress_reporter_sends_report() {
-        let (tx, mut rx) = mpsc::unbounded_channel::<GuiSyncReport>();
-        let repo_id = "test_repo".to_string();
-        let reporter = GuiProgressReporter::new(tx, repo_id.clone());
+    async fn test_gui_progress_reporter_updates_global_state() {
+        let repo_id = format!("test_repo_global_state_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        let reporter = GuiProgressReporter::new(repo_id.clone());
 
         let core_progress = SyncProgress {
             stage: SyncStage::Idle,
@@ -56,35 +93,18 @@ mod tests {
 
         reporter.report(core_progress.clone()).await;
 
-        let received_report = rx.recv().await.expect("Should receive a report");
+        // Simple checks that don't depend on complex state
+        assert!(SIMPLE_STATUS.contains_key(&repo_id), "Simple status should be in the map");
+        assert!(DETAILED_STATUS.contains_key(&repo_id), "Detailed status should be in the map");
 
-        assert_eq!(received_report.repo_id, repo_id);
-        // Minimal check, as SyncProgress comparison can be tricky due to non-PartialEq fields in some stages.
-        // We primarily care that *a* report for the correct repo_id was sent.
-        // A more detailed check would involve asserting specific fields of received_report.progress
-        // if SyncProgress derived PartialEq or by matching stage variants.
-        match received_report.progress.stage {
-            SyncStage::Idle => { /* Correct stage */ },
-            _ => panic!("Incorrect stage received"),
+        // Check basic state
+        if let Some(simple_status) = SIMPLE_STATUS.get(&repo_id) {
+            assert!(!simple_status.is_running, "Idle stage should not be considered running");
+            assert!(!simple_status.is_complete, "Idle stage should not be considered complete");
         }
-    }
 
-    #[tokio::test]
-    async fn test_gui_progress_reporter_handles_closed_channel() {
-        let (tx, mut rx) = mpsc::unbounded_channel::<GuiSyncReport>();
-        let repo_id = "test_repo_closed_channel".to_string();
-        
-        // Drop the receiver to simulate a closed channel
-        drop(rx);
-        
-        let reporter = GuiProgressReporter::new(tx, repo_id.clone());
-
-        let core_progress = SyncProgress {
-            stage: SyncStage::GitFetch { message: "Fetching...".to_string(), progress: Some((10, 100)) },
-        };
-
-        // This should not panic, error will be printed to eprintln by the reporter
-        reporter.report(core_progress).await;
-        // Test passes if it doesn't panic and the error is logged (manually verifiable for now or by capturing stderr)
+        // Cleanup immediately
+        SIMPLE_STATUS.remove(&repo_id);
+        DETAILED_STATUS.remove(&repo_id);
     }
 } 

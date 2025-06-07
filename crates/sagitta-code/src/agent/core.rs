@@ -39,8 +39,8 @@ use crate::reasoning::{
     AgentMetricsCollector,
     config::create_reasoning_config,
     SagittaCodeIntentAnalyzer,
+    llm_adapter::ReasoningLlmClientAdapter,
 };
-use crate::reasoning::llm_adapter::ReasoningLlmClientAdapter;
 use reasoning_engine::ReasoningEngine;
 use reasoning_engine::ReasoningError;
 use reasoning_engine::ReasoningConfig;
@@ -72,6 +72,8 @@ use crate::llm::client::Role as LlmClientRole;
 // Add imports for the traits
 use crate::agent::conversation::persistence::ConversationPersistence;
 use crate::agent::conversation::search::ConversationSearchEngine;
+
+use terminal_stream::events::StreamEvent;
 
 /// The system prompt instructing the agent how to respond
 const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by Gemini and sagitta-search.
@@ -198,7 +200,7 @@ pub struct Agent {
     state_manager: Arc<StateManager>,
     
     /// The tool executor (from sagitta-code's own tools module)
-    tool_executor: SagittaCodeToolExecutorInternal,
+    tool_executor: Arc<tokio::sync::Mutex<SagittaCodeToolExecutorInternal>>,
     
     /// Sender for agent events
     event_sender: broadcast::Sender<AgentEvent>,
@@ -224,6 +226,9 @@ pub struct Agent {
 
     /// NEW: Reasoning state cache for session continuity
     reasoning_state_cache: Arc<tokio::sync::Mutex<HashMap<Uuid, ReasoningState>>>,
+    
+    /// Terminal event sender for streaming shell execution
+    terminal_event_sender: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<StreamEvent>>>>,
 }
 
 impl Agent {
@@ -354,7 +359,7 @@ impl Agent {
             tool_registry,
             history: Arc::new(history_manager),
             state_manager: Arc::new(state_manager_instance.clone()), // Now Arc wrapping the instance
-            tool_executor: tool_executor_internal,
+            tool_executor: Arc::new(tokio::sync::Mutex::new(tool_executor_internal)),
             event_sender: event_sender.clone(),
             config,
             state: Arc::new(tokio::sync::Mutex::new(AgentState::Idle)),
@@ -364,6 +369,7 @@ impl Agent {
             event_handler: EventHandler::new(event_sender.clone()),
             recovery_manager: Arc::new(RecoveryManager::new(RecoveryConfig::default(), Arc::new(state_manager_instance), event_sender.clone())),
             reasoning_state_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            terminal_event_sender: Arc::new(tokio::sync::Mutex::new(None)),
         };
         
         // Start event listeners
@@ -420,42 +426,69 @@ impl Agent {
         debug!("Added current user message to history manager.");
 
         // Fetch the complete conversation history from ConversationAwareHistoryManager
-        let agent_conversation_history: Vec<AgentMessage> = self.history.get_messages().await; // Corrected method name
+        let mut agent_conversation_history: Vec<AgentMessage> = self.history.get_messages().await; // Corrected method name
         debug!("Fetched {} messages from history manager for LLM.", agent_conversation_history.len());
+        
+        // CRITICAL FIX: Ensure we always have at least the current user message in the history
+        if agent_conversation_history.is_empty() || !agent_conversation_history.iter().any(|msg| {
+            msg.role == LlmClientRole::User && msg.content.trim() == message_text.trim()
+        }) {
+            warn!("History is missing current user message, adding it manually");
+            let user_message = AgentMessage::user(message_text.clone());
+            agent_conversation_history.push(user_message);
+        }
         
         // Get current conversation ID for analytics reporting
         let current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
         
         let reasoning_llm_history = convert_agent_messages_to_reasoning_llm_messages(agent_conversation_history);
-        if reasoning_llm_history.is_empty() && !message_text.is_empty() {
-            warn!("Converted reasoning_llm_history is empty despite current input. This might indicate an issue in history retrieval or conversion.");
-        }
-        debug!("Converted agent history to {} LlmMessages for ReasoningEngine.", reasoning_llm_history.len());
+        
+        // CRITICAL FIX: Always ensure we have at least one message for the reasoning engine
+        let final_reasoning_history = if reasoning_llm_history.is_empty() {
+            warn!("Converted reasoning_llm_history is empty, creating minimal history with current user message");
+            vec![LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text(message_text.clone())],
+            }]
+        } else {
+            reasoning_llm_history
+        };
+        
+        debug!("Final reasoning history contains {} LlmMessages for ReasoningEngine.", final_reasoning_history.len());
 
         let (tx, rx) = mpsc::unbounded_channel::<Result<SagittaCodeStreamChunk, SagittaCodeError>>();
 
-        let tool_executor_adapter = Arc::new(AgentToolExecutor::new(self.tool_registry.clone()));
+        let mut tool_executor_adapter = AgentToolExecutor::new(self.tool_registry.clone());
+        
+        // Configure terminal event sender if available
+        if let Some(terminal_sender) = self.terminal_event_sender.lock().await.clone() {
+            tool_executor_adapter.set_terminal_event_sender(terminal_sender);
+            log::debug!("Configured AgentToolExecutor with terminal event sender for streaming shell execution");
+        }
+        
+        let tool_executor_adapter = Arc::new(tool_executor_adapter);
         let event_emitter_adapter = Arc::new(AgentEventEmitter::new(self.event_sender.clone()));
-        let stream_handler_adapter = Arc::new(AgentStreamHandler::new(tx.clone(), self.event_sender.clone(), current_conversation_id));
+        let stream_handler_adapter = Arc::new(AgentStreamHandler::new(tx.clone(), self.event_sender.clone(), current_conversation_id, self.history.clone()));
         
         let engine_arc_clone: Arc<tokio::sync::Mutex<ReasoningEngine<ReasoningLlmClientAdapter, SagittaCodeIntentAnalyzer>>> = Arc::clone(&self.new_reasoning_engine);
         let event_sender_clone = self.event_sender.clone();
         let reasoning_state_cache_clone = Arc::clone(&self.reasoning_state_cache);
 
         tokio::spawn(async move {
-            let mut engine_guard = engine_arc_clone.lock().await;
+            debug!("Starting reasoning engine task...");
             
-            if reasoning_llm_history.is_empty() {
-                error!("Cannot call ReasoningEngine::process with an empty message history.");
-                // Use a more generic error or add InvalidInput to SagittaCodeError
-                if tx.send(Err(SagittaCodeError::Unknown("Cannot process with empty history.".to_string()))).is_err() {
-                    warn!("Reasoning process cannot start (empty history), but output stream receiver is already gone.");
+            let engine_guard_result = engine_arc_clone.try_lock();
+            if engine_guard_result.is_err() {
+                error!("Failed to acquire lock on reasoning engine");
+                if tx.send(Err(SagittaCodeError::ReasoningError("Failed to acquire reasoning engine lock".to_string()))).is_err() {
+                    warn!("Failed to send error to stream - receiver dropped");
                 }
-                let _ = event_sender_clone.send(AgentEvent::Error("Reasoning process cannot start with empty history.".to_string()));
                 return;
             }
-
-            debug!("Calling ReasoningEngine::process with {} history messages.", reasoning_llm_history.len());
+            
+            let mut engine_guard = engine_guard_result.unwrap();
+            
+            debug!("Calling ReasoningEngine::process_with_context with {} history messages.", final_reasoning_history.len());
             
             // NEW: Get previous reasoning state for session continuity
             let previous_state = if let Some(conv_id) = current_conversation_id {
@@ -464,14 +497,18 @@ impl Agent {
                 None
             };
             
+            debug!("About to call ReasoningEngine::process_with_context");
+            
             let reasoning_result = engine_guard.process_with_context(
-                reasoning_llm_history, 
+                final_reasoning_history, 
                 tool_executor_adapter,
                 event_emitter_adapter,
                 stream_handler_adapter,
                 previous_state.as_ref(),
                 current_conversation_id,
             ).await;
+
+            debug!("ReasoningEngine::process_with_context completed");
 
             // More detailed logging for the result of process_with_context
             match &reasoning_result { // Use a reference here to log before consuming
@@ -492,18 +529,7 @@ impl Agent {
                 }
             }
 
-            // Original handling (can be removed or kept depending on whether the match above consumes reasoning_result)
-            // For now, let's assume the match block above does not consume it, so we proceed with original logic
-            // If it was consumed, you'd need to handle the Ok/Err path again or store its outcome.
-            // To be safe, let's re-evaluate based on the logged output from the match block.
-            // For now, assume we still have reasoning_result available here.
-            if reasoning_result.is_err() {
-                 // This block would be redundant if the Err arm of the match above handles everything.
-                 // However, keeping it for a moment for clarity during debug.
-                 let e = reasoning_result.err().unwrap(); // We know it's an error here
-                 error!("Double check: Reasoning process failed (is_err() path): {}", e);
-            }
-
+            debug!("Reasoning engine task completed");
         });
 
         Ok(Box::pin(UnboundedReceiverStream::new(rx)))
@@ -511,7 +537,7 @@ impl Agent {
     
     /// Execute a tool by name with parameters (with recovery)
     pub async fn execute_tool(&self, tool_name: &str, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        self.tool_executor.execute_tool(tool_name, parameters).await
+        self.tool_executor.lock().await.execute_tool(tool_name, parameters).await
     }
     
     /// Get the current conversation history
@@ -532,6 +558,21 @@ impl Agent {
     /// Get the current agent mode
     pub async fn get_mode(&self) -> AgentMode {
         self.state_manager.get_agent_mode().await
+    }
+    
+    /// Set the terminal event sender for streaming shell execution
+    pub async fn set_terminal_event_sender(&self, sender: tokio::sync::mpsc::Sender<StreamEvent>) {
+        // Set the terminal event sender on the internal tool executor
+        self.tool_executor.lock().await.set_terminal_event_sender(sender.clone());
+        log::info!("Terminal event sender set on agent's tool executor");
+        
+        // Store the sender for use in future reasoning sessions
+        {
+            let mut terminal_sender_guard = self.terminal_event_sender.lock().await;
+            *terminal_sender_guard = Some(sender);
+        }
+        
+        log::info!("Terminal event sender configured for reasoning engine tool executor");
     }
     
     /// Clear the conversation history (except system prompts)
@@ -608,19 +649,28 @@ impl Agent {
 mod tests;
 
 // Adapter for reasoning_engine::StreamHandler
-struct AgentStreamHandler {
+pub(crate) struct AgentStreamHandler {
     raw_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>,
     agent_event_sender: broadcast::Sender<AgentEvent>,
     conversation_id: Option<Uuid>, // Added conversation_id
+    history: Arc<ConversationAwareHistoryManager>, // NEW: Add history manager
+    buffered_response: Arc<tokio::sync::Mutex<String>>, // NEW: Buffer for assistant response
 }
 
 impl AgentStreamHandler {
-    fn new(
+    pub(crate) fn new(
         raw_chunk_sender: mpsc::UnboundedSender<Result<SagittaCodeStreamChunk, SagittaCodeError>>,
         agent_event_sender: broadcast::Sender<AgentEvent>,
         conversation_id: Option<Uuid>, // Added conversation_id
+        history: Arc<ConversationAwareHistoryManager>, // NEW: Add history parameter
     ) -> Self {
-        Self { raw_chunk_sender, agent_event_sender, conversation_id }
+        Self { 
+            raw_chunk_sender, 
+            agent_event_sender, 
+            conversation_id,
+            history, // NEW: Store history
+            buffered_response: Arc::new(tokio::sync::Mutex::new(String::new())), // NEW: Initialize buffer
+        }
     }
 }
 
@@ -636,6 +686,14 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 match String::from_utf8(chunk.data.clone()) {
                     Ok(text_content) => {
                         log::debug!("AgentStreamHandler: Text chunk content: '{}'", text_content);
+                        
+                        // NEW: Buffer the text content for assistant message
+                        if !text_content.trim().is_empty() {
+                            let mut buffer = self.buffered_response.lock().await;
+                            buffer.push_str(&text_content);
+                            log::debug!("AgentStreamHandler: Buffered text, total length: {}", buffer.len());
+                        }
+                        
                         // CRITICAL FIX: Always create a text part for non-empty text content
                         if !text_content.trim().is_empty() {
                             Ok(Some(SagittaCodeMessagePart::Text { text: text_content }))
@@ -677,6 +735,41 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         }
                     })
             }
+            "tool_result" => {
+                // First, attempt to parse the canonical UiToolResultChunk struct
+                match serde_json::from_slice::<terminal_stream::UiToolResultChunk>(&chunk.data) {
+                    Ok(ui_chunk) => {
+                        log::debug!("AgentStreamHandler: UiToolResultChunk parsed successfully");
+                        Ok(Some(SagittaCodeMessagePart::ToolResult {
+                            tool_call_id: ui_chunk.tool_call_id,
+                            name: ui_chunk.name,
+                            result: ui_chunk.data,
+                        }))
+                    }
+                    Err(parse_err) => {
+                        // Fall back to generic ToolResult (older format) or raw bytes so the stream does not fail
+                        log::warn!("AgentStreamHandler: Failed to parse UiToolResultChunk: {}. Falling back to generic handling.", parse_err);
+
+                        match serde_json::from_slice::<serde_json::Value>(&chunk.data) {
+                            Ok(raw_json) => Ok(Some(SagittaCodeMessagePart::ToolResult {
+                                tool_call_id: chunk.metadata.get("tool_call_id")
+                                    .map(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string(),
+                                name: chunk.metadata.get("tool_name")
+                                    .map(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string(),
+                                result: raw_json,
+                            })),
+                            Err(_) => {
+                                // As an absolute last resort, emit a Text chunk with base64 content
+                                Ok(Some(SagittaCodeMessagePart::Text { text: format!("[Unparsable tool_result]: {} bytes", chunk.data.len()) }))
+                            }
+                        }
+                    }
+                }
+            }
             // Other chunk_types like "tool_result" could be handled if the ReasoningEngine sends them.
             _ => {
                 log::debug!("AgentStreamHandler: Received chunk_type: '{}' with {} bytes", chunk.chunk_type, chunk.data.len());
@@ -684,6 +777,12 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 if let Ok(text_content) = String::from_utf8(chunk.data.clone()) {
                     if !text_content.trim().is_empty() {
                         log::debug!("AgentStreamHandler: Treating unknown chunk_type '{}' as text: '{}'", chunk.chunk_type, text_content);
+                        
+                        // NEW: Buffer unknown text content too
+                        let mut buffer = self.buffered_response.lock().await;
+                        buffer.push_str(&text_content);
+                        log::debug!("AgentStreamHandler: Buffered unknown text, total length: {}", buffer.len());
+                        
                         Ok(Some(SagittaCodeMessagePart::Text { text: text_content }))
                     } else {
                         Ok(None)
@@ -694,6 +793,33 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 }
             }
         };
+
+        // NEW: Save assistant message to history when final chunk is received
+        if chunk.is_final {
+            let buffer = self.buffered_response.lock().await;
+            if !buffer.trim().is_empty() {
+                log::info!("AgentStreamHandler: Stream is final, saving assistant message to history. Content length: {}", buffer.len());
+                let assistant_content = buffer.clone();
+                drop(buffer); // Release the lock before async operation
+                
+                // Save the complete assistant message to history
+                self.history.add_assistant_message(assistant_content.clone()).await;
+                log::info!("AgentStreamHandler: Successfully saved assistant message to history");
+                
+                // Emit an AgentEvent::LlmMessage for GUI consumption
+                let assistant_message = AgentMessage::assistant(assistant_content);
+                if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmMessage(assistant_message)) {
+                    log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmMessage: {}", e);
+                }
+                
+                // Clear the buffer for next conversation turn
+                let mut buffer = self.buffered_response.lock().await;
+                buffer.clear();
+                log::debug!("AgentStreamHandler: Cleared response buffer");
+            } else {
+                log::debug!("AgentStreamHandler: Stream is final but buffer is empty, not saving to history");
+            }
+        }
 
         match sagitta_code_chunk_part_result {
             Ok(Some(sagitta_code_part)) => {
@@ -731,7 +857,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for thought: {}", e);
                         }
                     }
-                    SagittaCodeMessagePart::ToolCall { name, parameters, .. } => {
+                    SagittaCodeMessagePart::ToolCall { tool_call_id: _tool_call_id, name, parameters: _params, .. } => {
                         // Emit a descriptive text chunk for tool calls
                         let tool_description = format!("\n\n[TOOL] Executing tool (core.rs): **{}**\n", name);
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
@@ -796,6 +922,35 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
 
     async fn handle_stream_complete(&self, _stream_id: Uuid) -> Result<(), ReasoningError> {
         debug!("AgentStreamHandler: Stream complete notification received for stream_id: {}", _stream_id);
+
+        // NEW: Ensure any buffered assistant content is persisted even if the ReasoningEngine
+        // did not flag the final chunk with `is_final = true`. This provides an additional
+        // safeguard so that assistant responses are never lost.
+
+        let mut buffer_guard = self.buffered_response.lock().await;
+
+        if !buffer_guard.trim().is_empty() {
+            let assistant_content = buffer_guard.clone();
+
+            // Persist to history.
+            self.history.add_assistant_message(assistant_content.clone()).await;
+            log::info!(
+                "AgentStreamHandler: Saved buffered assistant message to history on stream_complete (len={}).",
+                assistant_content.len()
+            );
+
+            // Emit a full LlmMessage event so the UI can reflect the completed assistant turn.
+            let assistant_message = AgentMessage::assistant(assistant_content);
+            if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmMessage(assistant_message)) {
+                log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmMessage on stream_complete: {}", e);
+            }
+
+            // Clear buffer for safety.
+            buffer_guard.clear();
+        } else {
+            log::debug!("AgentStreamHandler: No buffered content to persist on stream_complete");
+        }
+
         Ok(())
     }
 

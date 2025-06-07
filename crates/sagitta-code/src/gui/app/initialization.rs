@@ -30,7 +30,6 @@ use crate::tools::code_edit::edit::EditTool; // Corrected import for EditTool
 use crate::config::SagittaCodeConfig;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::shell_execution::ShellExecutionTool;
-use crate::tools::test_execution::TestExecutionTool;
 // Add imports for concrete persistence/search and traits
 use crate::agent::conversation::persistence::{
     ConversationPersistence, 
@@ -271,9 +270,22 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
     tool_registry.register(Arc::new(EditTool::new(repo_manager.clone()))).await?; // Added EditTool registration
     tool_registry.register(Arc::new(crate::tools::repository::SwitchBranchTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::repository::CreateBranchTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::repository::CommitChangesTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::repository::PushChangesTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::repository::PullChangesTool::new(repo_manager.clone()))).await?;
+
     let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
     tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::test_execution::TestExecutionTool::new(default_working_dir.clone()))).await?;
+
+    // Register streaming shell execution tool for terminal integration
+    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(default_working_dir.clone()))).await?;
+
+    // Note: Project creation and test execution functionality is now available through shell_execution tool
+    // Examples:
+    // - Project creation: Use shell_execution with commands like "cargo init my-project", "npm init", "python -m venv myenv"
+    // - Test execution: Use shell_execution with commands like "cargo test", "npm test", "pytest", "go test"
 
     // Now populate Qdrant with all registered tools
     let all_tool_defs_for_qdrant = tool_registry.get_definitions().await;
@@ -336,6 +348,16 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
                 log::error!("Failed to set agent mode to FullyAutonomous: {}", e);
             } else {
                 log::info!("Agent mode set to FullyAutonomous for automatic tool execution");
+            }
+            
+            // CRITICAL: Wire up terminal event sender to tool executor for streaming shell execution
+            if let Some(terminal_sender) = app.state.get_terminal_event_sender() {
+                // Set the terminal event sender on the agent's tool executor
+                // Note: This requires making the tool_executor field accessible or adding a method to Agent
+                agent.set_terminal_event_sender(terminal_sender).await;
+                log::info!("Terminal event sender connected to agent tool executor for streaming shell execution");
+            } else {
+                log::warn!("No terminal event sender available - shell execution will not stream to terminal");
             }
             
             // Subscribe to agent events

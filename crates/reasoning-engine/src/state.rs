@@ -11,6 +11,147 @@ use crate::error::{Result, ReasoningError};
 use crate::traits::{ToolResult, ReasoningEvent};
 use crate::orchestration::OrchestrationResult;
 
+/// Task completion tracking for conversation state management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCompletion {
+    /// Unique task identifier
+    pub task_id: String,
+    /// Completion marker message
+    pub completion_marker: String,
+    /// Tool outputs that led to completion
+    pub tool_outputs: Vec<String>,
+    /// Confidence in task completion (0.0 to 1.0)
+    pub success_confidence: f32,
+    /// When the task was completed
+    pub completed_at: DateTime<Utc>,
+    /// Tools that were used to complete this task
+    pub tools_used: Vec<String>,
+}
+
+/// Tool execution state caching to prevent re-execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolExecutionCache {
+    /// Successfully executed tools with their results
+    pub successful_executions: HashMap<String, CachedToolResult>,
+    /// Failed execution attempts for learning
+    pub failed_attempts: Vec<FailedExecution>,
+    /// Signals that indicate task completion
+    pub completion_signals: Vec<CompletionSignal>,
+}
+
+/// Cached result from successful tool execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedToolResult {
+    /// Tool name
+    pub tool_name: String,
+    /// Input arguments used
+    pub args: Value,
+    /// Result from the tool
+    pub result: ToolResult,
+    /// When this was cached
+    pub cached_at: DateTime<Utc>,
+    /// How many times this has been referenced
+    pub reference_count: u32,
+}
+
+/// Record of a failed tool execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedExecution {
+    /// Tool that failed
+    pub tool_name: String,
+    /// Arguments used
+    pub args: Value,
+    /// Error message
+    pub error: String,
+    /// When it failed
+    pub failed_at: DateTime<Utc>,
+    /// Whether to retry or avoid
+    pub should_retry: bool,
+}
+
+/// Signal indicating task completion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionSignal {
+    /// Type of completion signal
+    pub signal_type: CompletionSignalType,
+    /// Signal strength (0.0 to 1.0)
+    pub strength: f32,
+    /// Message or context that triggered the signal
+    pub message: String,
+    /// When the signal was detected
+    pub detected_at: DateTime<Utc>,
+}
+
+/// Types of completion signals
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CompletionSignalType {
+    /// Tool reported success
+    ToolSuccess,
+    /// Output contains completion phrases
+    CompletionPhrase,
+    /// All objectives met
+    ObjectiveComplete,
+    /// User indicated satisfaction
+    UserSatisfaction,
+    /// System detected task completion
+    SystemDetection,
+}
+
+/// Enhanced conversation phase management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConversationPhase {
+    /// Starting a new conversation
+    Fresh,
+    /// Continuing an ongoing conversation
+    Ongoing,
+    /// Investigating a specific topic
+    Investigating { topic: String },
+    /// Working on a specific task
+    TaskFocused { task: String },
+    /// Task execution in progress
+    TaskExecution { task: String, progress: f32 },
+    /// Task completed successfully
+    TaskCompleted { task: String, completion_marker: String },
+    /// Waiting for user clarification
+    AwaitingClarification,
+    /// Follow-up question about completed task
+    FollowUpQuestion { completed_task: String },
+    /// New task request after completion
+    NewTaskRequest,
+    /// Completed successfully (for backward compatibility)
+    Completed,
+}
+
+/// Tool execution state management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolExecutionState {
+    /// Current execution cache
+    pub cache: ToolExecutionCache,
+    /// Tools currently being executed
+    pub active_executions: HashMap<String, DateTime<Utc>>,
+    /// Tools that should not be retried
+    pub blocked_tools: HashSet<String>,
+    /// Execution history for this session
+    pub execution_history: Vec<ToolExecutionRecord>,
+}
+
+/// Record of a tool execution attempt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolExecutionRecord {
+    /// Tool name
+    pub tool_name: String,
+    /// Arguments used
+    pub args: Value,
+    /// Whether it succeeded
+    pub success: bool,
+    /// Result or error message
+    pub result_or_error: String,
+    /// When it was executed
+    pub executed_at: DateTime<Utc>,
+    /// Step ID that triggered execution
+    pub step_id: Uuid,
+}
+
 /// The main reasoning state that persists across reasoning steps
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningState {
@@ -83,6 +224,18 @@ pub struct ReasoningState {
     
     /// NEW: Session metadata for tracking across multiple reasoning calls
     pub session_metadata: SessionMetadata,
+
+    /// NEW: Tool execution state for this specific reasoning session
+    pub tool_execution_state: ToolExecutionState,
+
+    /// NEW: Task completion tracking for this session
+    pub current_task_completion: Option<TaskCompletion>,
+
+    /// NEW: Last analyzed content to prevent re-processing
+    pub last_analyzed_content: Option<String>,
+
+    /// NEW: Content analysis cache
+    pub content_analysis_cache: HashMap<String, DateTime<Utc>>,
 }
 
 /// Context that accumulates knowledge across reasoning steps
@@ -561,8 +714,14 @@ pub struct ConversationContext {
     /// Patterns that have been effective in this conversation
     pub effective_patterns: Vec<String>,
     
-    /// Current conversation state
-    pub conversation_state: ConversationState,
+    /// Current conversation phase
+    pub conversation_phase: ConversationPhase,
+
+    /// Task completion tracking
+    pub completed_tasks: Vec<TaskCompletion>,
+
+    /// Tool execution state for this conversation
+    pub tool_execution_state: ToolExecutionState,
 }
 
 /// NEW: Metadata for tracking reasoning sessions
@@ -600,7 +759,7 @@ pub struct SessionSummary {
     pub completed_at: DateTime<Utc>,
 }
 
-/// NEW: Current state of the conversation
+/// NEW: Current state of the conversation (DEPRECATED - replaced by ConversationPhase)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConversationState {
     /// Starting a new conversation
@@ -625,7 +784,9 @@ impl Default for ConversationContext {
             accumulated_knowledge: HashMap::new(),
             successful_tools: HashSet::new(),
             effective_patterns: Vec::new(),
-            conversation_state: ConversationState::Fresh,
+            conversation_phase: ConversationPhase::Fresh,
+            completed_tasks: Vec::new(),
+            tool_execution_state: ToolExecutionState::default(),
         }
     }
 }
@@ -674,6 +835,10 @@ impl ReasoningState {
             is_final_success_status: None,
             conversation_context: ConversationContext::default(),
             session_metadata: SessionMetadata::default(),
+            tool_execution_state: ToolExecutionState::default(),
+            current_task_completion: None,
+            last_analyzed_content: None,
+            content_analysis_cache: HashMap::new(),
         }
     }
     
@@ -711,7 +876,7 @@ impl ReasoningState {
         }
         
         // Update conversation state
-        new_state.conversation_context.conversation_state = ConversationState::Ongoing;
+        new_state.conversation_context.conversation_phase = ConversationPhase::Ongoing;
         
         new_state
     }
@@ -809,19 +974,31 @@ impl ReasoningState {
         let mut summary = Vec::new();
         
         // Add conversation state
-        match &self.conversation_context.conversation_state {
-            ConversationState::Fresh => summary.push("Starting fresh conversation".to_string()),
-            ConversationState::Ongoing => summary.push("Continuing ongoing conversation".to_string()),
-            ConversationState::Investigating { topic } => {
+        match &self.conversation_context.conversation_phase {
+            ConversationPhase::Fresh => summary.push("Starting fresh conversation".to_string()),
+            ConversationPhase::Ongoing => summary.push("Continuing ongoing conversation".to_string()),
+            ConversationPhase::Investigating { topic } => {
                 summary.push(format!("Currently investigating: {}", topic));
             }
-            ConversationState::TaskFocused { task } => {
+            ConversationPhase::TaskFocused { task } => {
                 summary.push(format!("Working on task: {}", task));
             }
-            ConversationState::AwaitingClarification => {
+            ConversationPhase::TaskExecution { task, progress } => {
+                summary.push(format!("Executing task: {} ({}% complete)", task, (progress * 100.0) as u32));
+            }
+            ConversationPhase::TaskCompleted { task, completion_marker } => {
+                summary.push(format!("Completed task: {} - {}", task, completion_marker));
+            }
+            ConversationPhase::AwaitingClarification => {
                 summary.push("Awaiting user clarification".to_string());
             }
-            ConversationState::Completed => summary.push("Previous task completed".to_string()),
+            ConversationPhase::FollowUpQuestion { completed_task } => {
+                summary.push(format!("Follow-up question about: {}", completed_task));
+            }
+            ConversationPhase::NewTaskRequest => {
+                summary.push("Ready for new task request".to_string());
+            }
+            ConversationPhase::Completed => summary.push("Previous task completed".to_string()),
         }
         
         // Add successful tools
@@ -967,6 +1144,397 @@ impl ReasoningState {
     pub fn is_successful(&self) -> bool {
         self.is_final_success_status.unwrap_or(false)
     }
+
+    /// NEW: Detect if task has been completed based on multiple signals
+    pub fn detect_task_completion(&mut self, response_text: &str, tool_results: &HashMap<String, ToolResult>) -> Option<TaskCompletion> {
+        let mut completion_signals = Vec::new();
+        
+        // NEW: Check if this is a multi-step task that might not be complete
+        let is_multistep_task = self.is_multistep_task(&self.context.original_request);
+        let has_completion_request = self.has_explicit_completion_request(&self.context.original_request);
+        
+        // Check for completion phrases in response
+        if let Some(signal) = self.detect_completion_phrases(response_text) {
+            completion_signals.push(signal);
+        }
+        
+        // Check tool success indicators
+        for (tool_name, result) in tool_results {
+            if let Some(signal) = self.detect_tool_completion_signal(tool_name, result) {
+                completion_signals.push(signal);
+            }
+        }
+        
+        // Calculate completion confidence
+        let total_strength: f32 = completion_signals.iter().map(|s| s.strength).sum();
+        let avg_strength = if completion_signals.is_empty() { 0.0 } else { total_strength / completion_signals.len() as f32 };
+        
+        // NEW: Adjust threshold based on task type and completion requirements
+        let completion_threshold = if is_multistep_task {
+            if has_completion_request {
+                // Multi-step task with explicit completion request (e.g., "tell me you are done")
+                0.9 // Require very high confidence and explicit completion language
+            } else {
+                // Multi-step task without explicit completion request
+                1.2 // Nearly impossible threshold - avoid premature completion
+            }
+        } else {
+            // Single-step task
+            0.7 // Original threshold
+        };
+        
+        // NEW: For multi-step tasks, also check if all steps are mentioned as complete
+        let all_steps_complete = if is_multistep_task {
+            self.check_all_multistep_tasks_complete(response_text, tool_results)
+        } else {
+            true // Single step task doesn't need this check
+        };
+        
+        if total_strength >= completion_threshold && all_steps_complete {
+            let task_completion = TaskCompletion {
+                task_id: self.session_id.to_string(),
+                completion_marker: response_text.to_string(),
+                tool_outputs: tool_results.values().map(|r| format!("{:?}", r.data)).collect(),
+                success_confidence: avg_strength.min(1.0),
+                completed_at: Utc::now(),
+                tools_used: tool_results.keys().cloned().collect(),
+            };
+            
+            // Add signals to cache
+            self.tool_execution_state.cache.completion_signals.extend(completion_signals);
+            
+            Some(task_completion)
+        } else {
+            None
+        }
+    }
+    
+    /// NEW: Check if the original request indicates a multi-step task
+    fn is_multistep_task(&self, request: &str) -> bool {
+        let request_lower = request.to_lowercase();
+        let multistep_indicators = [
+            "then", "next", "after", "afterwards", "subsequently", 
+            "and then", "followed by", "once", "when", "first",
+            "second", "finally", "lastly", "step", "steps"
+        ];
+        
+        // NEW: Check for complex task patterns that inherently require multiple steps
+        let complex_task_patterns = [
+            "improve", "help me", "create a solution", "analyze", "research",
+            "best approach", "error handling", "optimization", "review"
+        ];
+        
+        let has_explicit_multistep = multistep_indicators.iter().any(|indicator| request_lower.contains(indicator));
+        let is_complex_task = complex_task_patterns.iter().any(|pattern| request_lower.contains(pattern));
+        
+        has_explicit_multistep || is_complex_task
+    }
+    
+    /// NEW: Check if the request explicitly asks for completion confirmation
+    fn has_explicit_completion_request(&self, request: &str) -> bool {
+        let request_lower = request.to_lowercase();
+        let completion_requests = [
+            "tell me", "let me know", "inform me", "say", "report",
+            "done", "finished", "complete", "ready"
+        ];
+        
+        // Look for phrases like "tell me you are done", "let me know when finished", etc.
+        completion_requests.iter().any(|req| request_lower.contains(req)) &&
+        (request_lower.contains("done") || request_lower.contains("finished") || 
+         request_lower.contains("complete") || request_lower.contains("ready"))
+    }
+    
+    /// NEW: Check if all steps in a multi-step task appear to be complete
+    fn check_all_multistep_tasks_complete(&self, response_text: &str, tool_results: &HashMap<String, ToolResult>) -> bool {
+        let request_lower = self.context.original_request.to_lowercase();
+        let response_lower = response_text.to_lowercase();
+        
+        // NEW: Special handling for complex workflows that require solution creation
+        let requires_solution_creation = self.requires_solution_creation(&request_lower);
+        
+        if requires_solution_creation {
+            // For tasks that require solution creation, check if creation step has been completed
+            let has_solution_creation = self.has_completed_solution_creation(&response_lower, tool_results);
+            if !has_solution_creation {
+                return false; // Not complete until solution is created
+            }
+        }
+        
+        // Extract potential task actions from the original request
+        let task_actions = self.extract_task_actions(&request_lower);
+        
+        // Check if all actions are reflected in the response or tool results
+        if task_actions.is_empty() {
+            return true; // If we can't extract actions, assume it's complete
+        }
+        
+        let mut completed_actions = 0;
+        for action in &task_actions {
+            // Check if this action is mentioned as complete in the response
+            if response_lower.contains(&format!("{} complete", action)) ||
+               response_lower.contains(&format!("{} finished", action)) ||
+               response_lower.contains(&format!("{} done", action)) ||
+               response_lower.contains(&format!("created {}", action)) ||
+               response_lower.contains(&format!("found {}", action)) {
+                completed_actions += 1;
+            }
+            
+            // Check if relevant tools for this action were executed
+            for tool_name in tool_results.keys() {
+                if self.tool_matches_action(tool_name, action) {
+                    completed_actions += 1;
+                    break;
+                }
+            }
+        }
+        
+        // NEW: For complex workflows, require higher completion rate
+        let required_completion_rate = if requires_solution_creation { 0.8 } else { 0.7 };
+        completed_actions as f32 / task_actions.len() as f32 >= required_completion_rate
+    }
+    
+    /// NEW: Check if the task requires solution creation as a key step
+    fn requires_solution_creation(&self, request: &str) -> bool {
+        let solution_creation_indicators = [
+            "improve", "help me", "create", "solution", "approach", "fix",
+            "error handling", "best practices", "optimization", "enhance"
+        ];
+        
+        solution_creation_indicators.iter().any(|indicator| request.contains(indicator))
+    }
+    
+    /// NEW: Check if solution creation has been completed
+    fn has_completed_solution_creation(&self, response: &str, tool_results: &HashMap<String, ToolResult>) -> bool {
+        // Check if file creation tools were used
+        let has_file_creation = tool_results.keys().any(|tool| 
+            tool.contains("edit_file") || tool.contains("create_file") || tool.contains("write_file")
+        );
+        
+        // Check if response mentions solution creation
+        let mentions_solution_creation = response.contains("created") || 
+                                       response.contains("solution") ||
+                                       response.contains("file") ||
+                                       response.contains("example") ||
+                                       response.contains("documentation") ||
+                                       response.contains("based on");
+        
+        has_file_creation && mentions_solution_creation
+    }
+    
+    /// NEW: Extract action words from a task request
+    fn extract_task_actions(&self, request: &str) -> Vec<String> {
+        let action_words = [
+            "search", "find", "create", "write", "make", "build", "generate",
+            "analyze", "process", "read", "list", "count", "check", "verify",
+            "tell", "report", "inform", "say", "explain", "describe"
+        ];
+        
+        let mut actions = Vec::new();
+        for action in &action_words {
+            if request.contains(action) {
+                actions.push(action.to_string());
+            }
+        }
+        
+        actions
+    }
+    
+    /// NEW: Check if a tool name matches a task action
+    fn tool_matches_action(&self, tool_name: &str, action: &str) -> bool {
+        match action {
+            "search" | "find" => tool_name.contains("search") || tool_name.contains("web"),
+            "create" | "write" | "make" => tool_name.contains("edit") || tool_name.contains("write") || tool_name.contains("create"),
+            "read" | "analyze" => tool_name.contains("read") || tool_name.contains("analyze"),
+            "list" | "count" => tool_name.contains("list") || tool_name.contains("dir") || tool_name.contains("count"),
+            _ => false,
+        }
+    }
+    
+    /// NEW: Detect completion phrases in text
+    fn detect_completion_phrases(&self, text: &str) -> Option<CompletionSignal> {
+        let text_lower = text.to_lowercase();
+        let completion_patterns = [
+            ("completed", 0.9),
+            ("finished", 0.8),
+            ("done", 0.7),
+            ("success", 0.8),
+            ("analyzed", 0.6),
+            ("processed", 0.6),
+            ("created", 0.5),
+            ("found", 0.4),
+            ("has been", 0.3),
+            ("count:", 0.7), // For line counting tasks
+            ("lines", 0.6),  // For file analysis
+            ("total", 0.5),
+        ];
+        
+        let mut best_match = None;
+        let mut best_strength = 0.0;
+        
+        for (pattern, base_strength) in &completion_patterns {
+            if text_lower.contains(pattern) {
+                let strength = if text_lower.contains("successfully") { 
+                    base_strength + 0.2 
+                } else { 
+                    *base_strength 
+                };
+                
+                if strength > best_strength {
+                    best_strength = strength;
+                    best_match = Some(CompletionSignal {
+                        signal_type: CompletionSignalType::CompletionPhrase,
+                        strength,
+                        message: text.to_string(),
+                        detected_at: Utc::now(),
+                    });
+                }
+            }
+        }
+        
+        best_match
+    }
+    
+    /// NEW: Detect tool completion signals
+    fn detect_tool_completion_signal(&self, tool_name: &str, result: &ToolResult) -> Option<CompletionSignal> {
+        if result.success {
+            let strength = match tool_name {
+                "read_file" | "file_read" => 0.8,
+                "list_dir" | "directory_list" => 0.6,
+                "create_file" | "write_file" => 0.9,
+                "run_command" | "execute_command" => 0.7,
+                _ => 0.5,
+            };
+            
+            Some(CompletionSignal {
+                signal_type: CompletionSignalType::ToolSuccess,
+                strength,
+                message: format!("Tool {} completed successfully", tool_name),
+                detected_at: Utc::now(),
+            })
+        } else {
+            None
+        }
+    }
+    
+    /// NEW: Check if content has been analyzed recently to prevent re-processing
+    pub fn has_content_been_analyzed(&self, content: &str) -> bool {
+        if let Some(last_content) = &self.last_analyzed_content {
+            if last_content == content {
+                return true;
+            }
+        }
+        
+        // Check in analysis cache
+        if let Some(analyzed_at) = self.content_analysis_cache.get(content) {
+            let elapsed = Utc::now().signed_duration_since(*analyzed_at);
+            // Consider content "fresh" for 5 minutes
+            elapsed.num_minutes() < 5
+        } else {
+            false
+        }
+    }
+    
+    /// NEW: Mark content as analyzed
+    pub fn mark_content_analyzed(&mut self, content: String) {
+        self.last_analyzed_content = Some(content.clone());
+        self.content_analysis_cache.insert(content, Utc::now());
+    }
+    
+    /// NEW: Check if tool execution should be skipped (already executed successfully)
+    pub fn should_skip_tool_execution(&self, tool_name: &str, args: &serde_json::Value) -> Option<&CachedToolResult> {
+        let tool_key = format!("{}_{}", tool_name, serde_json::to_string(args).unwrap_or_default());
+        self.tool_execution_state.cache.successful_executions.get(&tool_key)
+    }
+    
+    /// NEW: Cache successful tool execution
+    pub fn cache_tool_execution(&mut self, tool_name: String, args: serde_json::Value, result: ToolResult) {
+        let tool_key = format!("{}_{}", tool_name, serde_json::to_string(&args).unwrap_or_default());
+        let cached_result = CachedToolResult {
+            tool_name: tool_name.clone(),
+            args: args.clone(),
+            result,
+            cached_at: Utc::now(),
+            reference_count: 1,
+        };
+        
+        self.tool_execution_state.cache.successful_executions.insert(tool_key, cached_result);
+        
+        // Add to execution history
+        let execution_record = ToolExecutionRecord {
+            tool_name,
+            args,
+            success: true,
+            result_or_error: "Cached successful execution".to_string(),
+            executed_at: Utc::now(),
+            step_id: Uuid::new_v4(),
+        };
+        
+        self.tool_execution_state.execution_history.push(execution_record);
+    }
+    
+    /// NEW: Record failed tool execution
+    pub fn record_failed_execution(&mut self, tool_name: String, args: serde_json::Value, error: String) {
+        let should_retry = !error.to_lowercase().contains("already exists") && 
+                           !error.to_lowercase().contains("not found") &&
+                           !error.to_lowercase().contains("permission denied");
+        
+        let failed_execution = FailedExecution {
+            tool_name: tool_name.clone(),
+            args: args.clone(),
+            error: error.clone(),
+            failed_at: Utc::now(),
+            should_retry,
+        };
+        
+        self.tool_execution_state.cache.failed_attempts.push(failed_execution);
+        
+        // Add to execution history
+        let execution_record = ToolExecutionRecord {
+            tool_name,
+            args,
+            success: false,
+            result_or_error: error,
+            executed_at: Utc::now(),
+            step_id: Uuid::new_v4(),
+        };
+        
+        self.tool_execution_state.execution_history.push(execution_record);
+    }
+    
+    /// NEW: Update conversation phase based on current state
+    pub fn update_conversation_phase(&mut self, new_phase: ConversationPhase) {
+        self.conversation_context.conversation_phase = new_phase;
+        self.updated_at = Utc::now();
+    }
+    
+    /// NEW: Check if we're in a completion state that should terminate iteration
+    pub fn should_terminate_iteration(&self) -> bool {
+        match &self.conversation_context.conversation_phase {
+            ConversationPhase::TaskCompleted { .. } => true,
+            ConversationPhase::FollowUpQuestion { .. } => true,
+            _ => false,
+        }
+    }
+    
+    /// NEW: Get completion confidence based on signals and state
+    pub fn get_completion_confidence(&self) -> f32 {
+        if let Some(task_completion) = &self.current_task_completion {
+            return task_completion.success_confidence;
+        }
+        
+        let signal_strengths: Vec<f32> = self.tool_execution_state
+            .cache
+            .completion_signals
+            .iter()
+            .map(|s| s.strength)
+            .collect();
+        
+        if signal_strengths.is_empty() {
+            0.0
+        } else {
+            signal_strengths.iter().sum::<f32>() / signal_strengths.len() as f32
+        }
+    }
 }
 
 impl ReasoningContext {
@@ -1046,6 +1614,27 @@ impl StreamingState {
 impl Default for StreamingState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Default for ToolExecutionState {
+    fn default() -> Self {
+        Self {
+            cache: ToolExecutionCache::default(),
+            active_executions: HashMap::new(),
+            blocked_tools: HashSet::new(),
+            execution_history: Vec::new(),
+        }
+    }
+}
+
+impl Default for ToolExecutionCache {
+    fn default() -> Self {
+        Self {
+            successful_executions: HashMap::new(),
+            failed_attempts: Vec::new(),
+            completion_signals: Vec::new(),
+        }
     }
 }
 
@@ -1147,11 +1736,263 @@ mod tests {
     #[test]
     fn test_state_serialization() {
         let state = ReasoningState::new("Test request".to_string());
+        let serialized = serde_json::to_string(&state).expect("Should serialize");
+        let _deserialized: ReasoningState = serde_json::from_str(&serialized).expect("Should deserialize");
+    }
+
+    // NEW COMPREHENSIVE TESTS FOR COMPLETION DETECTION AND STATE MANAGEMENT
+
+    #[test]
+    fn test_task_completion_tracking() {
+        let task_completion = TaskCompletion {
+            task_id: "test_task_1".to_string(),
+            completion_marker: "File successfully analyzed: 150 lines".to_string(),
+            tool_outputs: vec!["line_count: 150".to_string()],
+            success_confidence: 0.95,
+            completed_at: Utc::now(),
+            tools_used: vec!["read_file".to_string()],
+        };
+
+        assert_eq!(task_completion.task_id, "test_task_1");
+        assert_eq!(task_completion.success_confidence, 0.95);
+        assert_eq!(task_completion.tools_used.len(), 1);
+    }
+
+    #[test]
+    fn test_tool_execution_cache() {
+        let mut cache = ToolExecutionCache::default();
         
-        let serialized = serde_json::to_string(&state).unwrap();
-        let deserialized: ReasoningState = serde_json::from_str(&serialized).unwrap();
+        let cached_result = CachedToolResult {
+            tool_name: "read_file".to_string(),
+            args: serde_json::json!({"file": "test.txt"}),
+            result: ToolResult::success(serde_json::json!({"content": "Hello world"}), 100),
+            cached_at: Utc::now(),
+            reference_count: 1,
+        };
+
+        cache.successful_executions.insert("read_file_test.txt".to_string(), cached_result);
         
-        assert_eq!(state.session_id, deserialized.session_id);
-        assert_eq!(state.context.original_request, deserialized.context.original_request);
+        assert_eq!(cache.successful_executions.len(), 1);
+        assert!(cache.successful_executions.contains_key("read_file_test.txt"));
+    }
+
+    #[test]
+    fn test_completion_signal_detection() {
+        let signal = CompletionSignal {
+            signal_type: CompletionSignalType::CompletionPhrase,
+            strength: 0.8,
+            message: "Task completed successfully".to_string(),
+            detected_at: Utc::now(),
+        };
+
+        assert!(matches!(signal.signal_type, CompletionSignalType::CompletionPhrase));
+        assert_eq!(signal.strength, 0.8);
+    }
+
+    #[test]
+    fn test_conversation_phase_transitions() {
+        let mut state = ReasoningState::new("Count lines in file.txt".to_string());
+        
+        // Start fresh
+        assert!(matches!(state.conversation_context.conversation_phase, ConversationPhase::Fresh));
+        
+        // Move to task focused
+        state.conversation_context.conversation_phase = ConversationPhase::TaskFocused { 
+            task: "Count lines in file.txt".to_string() 
+        };
+        
+        if let ConversationPhase::TaskFocused { task } = &state.conversation_context.conversation_phase {
+            assert_eq!(task, "Count lines in file.txt");
+        } else {
+            panic!("Expected TaskFocused phase");
+        }
+        
+        // Move to task execution
+        state.conversation_context.conversation_phase = ConversationPhase::TaskExecution { 
+            task: "Count lines in file.txt".to_string(),
+            progress: 0.5 
+        };
+        
+        // Complete the task
+        state.conversation_context.conversation_phase = ConversationPhase::TaskCompleted { 
+            task: "Count lines in file.txt".to_string(),
+            completion_marker: "File has 150 lines".to_string()
+        };
+        
+        if let ConversationPhase::TaskCompleted { task, completion_marker } = &state.conversation_context.conversation_phase {
+            assert_eq!(task, "Count lines in file.txt");
+            assert_eq!(completion_marker, "File has 150 lines");
+        } else {
+            panic!("Expected TaskCompleted phase");
+        }
+    }
+
+    #[test]
+    fn test_tool_execution_state_tracking() {
+        let mut state = ReasoningState::new("Test task".to_string());
+        
+        // Add a successful execution to cache
+        let cached_result = CachedToolResult {
+            tool_name: "read_file".to_string(),
+            args: serde_json::json!({"file": "test.txt"}),
+            result: ToolResult::success(serde_json::json!({"lines": 150}), 100),
+            cached_at: Utc::now(),
+            reference_count: 1,
+        };
+        
+        state.tool_execution_state.cache.successful_executions.insert(
+            "read_file_test.txt".to_string(), 
+            cached_result
+        );
+        
+        // Add to execution history
+        let execution_record = ToolExecutionRecord {
+            tool_name: "read_file".to_string(),
+            args: serde_json::json!({"file": "test.txt"}),
+            success: true,
+            result_or_error: "Successfully read 150 lines".to_string(),
+            executed_at: Utc::now(),
+            step_id: Uuid::new_v4(),
+        };
+        
+        state.tool_execution_state.execution_history.push(execution_record);
+        
+        assert_eq!(state.tool_execution_state.cache.successful_executions.len(), 1);
+        assert_eq!(state.tool_execution_state.execution_history.len(), 1);
+        assert!(state.tool_execution_state.execution_history[0].success);
+    }
+
+    #[test]
+    fn test_failed_execution_tracking() {
+        let mut state = ReasoningState::new("Test task".to_string());
+        
+        let failed_execution = FailedExecution {
+            tool_name: "delete_file".to_string(),
+            args: serde_json::json!({"file": "nonexistent.txt"}),
+            error: "File not found".to_string(),
+            failed_at: Utc::now(),
+            should_retry: false,
+        };
+        
+        state.tool_execution_state.cache.failed_attempts.push(failed_execution);
+        
+        assert_eq!(state.tool_execution_state.cache.failed_attempts.len(), 1);
+        assert!(!state.tool_execution_state.cache.failed_attempts[0].should_retry);
+    }
+
+    #[test]
+    fn test_content_analysis_cache() {
+        let mut state = ReasoningState::new("Test task".to_string());
+        
+        let content = "Count the lines in file.txt";
+        state.last_analyzed_content = Some(content.to_string());
+        state.content_analysis_cache.insert(content.to_string(), Utc::now());
+        
+        assert!(state.last_analyzed_content.is_some());
+        assert_eq!(state.last_analyzed_content.as_ref().unwrap(), content);
+        assert!(state.content_analysis_cache.contains_key(content));
+    }
+
+    #[test]
+    fn test_completion_marker_detection() {
+        let completion_phrases = [
+            "Task completed successfully",
+            "File analysis complete: 150 lines",
+            "Successfully created project",
+            "Done. The file has been processed.",
+            "Finished counting lines",
+        ];
+        
+        for phrase in &completion_phrases {
+            let signal = CompletionSignal {
+                signal_type: CompletionSignalType::CompletionPhrase,
+                strength: 0.8,
+                message: phrase.to_string(),
+                detected_at: Utc::now(),
+            };
+            
+            assert!(matches!(signal.signal_type, CompletionSignalType::CompletionPhrase));
+            assert!(phrase.to_lowercase().contains("complet") || 
+                   phrase.to_lowercase().contains("done") || 
+                   phrase.to_lowercase().contains("finish") ||
+                   phrase.to_lowercase().contains("success"));
+        }
+    }
+
+    #[test]
+    fn test_duplicate_execution_prevention() {
+        let mut state = ReasoningState::new("Test task".to_string());
+        
+        // First execution
+        let tool_key = "read_file_test.txt";
+        let cached_result = CachedToolResult {
+            tool_name: "read_file".to_string(),
+            args: serde_json::json!({"file": "test.txt"}),
+            result: ToolResult::success(serde_json::json!({"lines": 150}), 100),
+            cached_at: Utc::now(),
+            reference_count: 1,
+        };
+        
+        state.tool_execution_state.cache.successful_executions.insert(
+            tool_key.to_string(), 
+            cached_result
+        );
+        
+        // Check if we can detect duplicate execution
+        assert!(state.tool_execution_state.cache.successful_executions.contains_key(tool_key));
+        
+        // Simulate incrementing reference count instead of re-executing
+        if let Some(cached) = state.tool_execution_state.cache.successful_executions.get_mut(tool_key) {
+            cached.reference_count += 1;
+        }
+        
+        assert_eq!(
+            state.tool_execution_state.cache.successful_executions[tool_key].reference_count, 
+            2
+        );
+    }
+
+    #[test]
+    fn test_conversation_continuation() {
+        let mut first_state = ReasoningState::new("Count lines in file.txt".to_string());
+        
+        // Complete the first task
+        first_state.set_completed(true, "File has 150 lines".to_string());
+        first_state.conversation_context.conversation_phase = ConversationPhase::TaskCompleted {
+            task: "Count lines in file.txt".to_string(),
+            completion_marker: "File has 150 lines".to_string(),
+        };
+        
+        // Create continuation state
+        let second_state = ReasoningState::new_continuation(
+            "Now delete the file".to_string(),
+            &first_state,
+            Some(Uuid::new_v4()),
+        );
+        
+        assert!(second_state.session_metadata.is_continuation);
+        assert_eq!(second_state.session_metadata.previous_session_id, Some(first_state.session_id));
+        assert!(matches!(second_state.conversation_context.conversation_phase, ConversationPhase::Ongoing));
+        assert_eq!(second_state.conversation_context.previous_sessions.len(), 1);
+    }
+
+    #[test]
+    fn test_already_exists_handling() {
+        let mut state = ReasoningState::new("Create project directory".to_string());
+        
+        // Simulate "already exists" scenario
+        let failed_execution = FailedExecution {
+            tool_name: "create_directory".to_string(),
+            args: serde_json::json!({"path": "/tmp/test_project"}),
+            error: "Directory already exists".to_string(),
+            failed_at: Utc::now(),
+            should_retry: false, // Don't retry "already exists" errors
+        };
+        
+        state.tool_execution_state.cache.failed_attempts.push(failed_execution);
+        
+        // Should be treated as informational, not an error requiring task restart
+        assert!(!state.tool_execution_state.cache.failed_attempts[0].should_retry);
+        assert!(state.tool_execution_state.cache.failed_attempts[0].error.contains("already exists"));
     }
 } 

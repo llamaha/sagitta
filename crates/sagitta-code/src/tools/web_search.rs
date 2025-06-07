@@ -477,6 +477,10 @@ The tool provides both human-readable results and structured data that can be us
         
         Ok(ToolResult::Success(result))
     }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

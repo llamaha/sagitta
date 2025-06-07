@@ -455,9 +455,43 @@ impl AppTheme {
     /// Get diff removed text color
     pub fn diff_removed_text(&self) -> Color32 {
         match self {
-            AppTheme::Dark => Color32::from_rgb(255, 120, 120),  // Light red text
-            AppTheme::Light => Color32::from_rgb(100, 0, 0),     // Dark red text
+            AppTheme::Dark => Color32::from_rgb(200, 100, 100),
+            AppTheme::Light => Color32::from_rgb(150, 0, 0),
             AppTheme::Custom => get_custom_theme_colors().diff_removed_text,
+        }
+    }
+
+    /// Get info background color for suggestions and notifications
+    pub fn info_background(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgba_unmultiplied(70, 130, 180, 30), // Steel blue with low alpha
+            AppTheme::Light => Color32::from_rgba_unmultiplied(173, 216, 230, 50), // Light blue with medium alpha
+            AppTheme::Custom => Color32::from_rgba_unmultiplied(100, 149, 237, 30), // Cornflower blue with low alpha
+        }
+    }
+    
+    /// Get info text/border color for suggestions and notifications
+    pub fn info_color(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(135, 206, 235), // Sky blue
+            AppTheme::Light => Color32::from_rgb(70, 130, 180), // Steel blue
+            AppTheme::Custom => get_custom_theme_colors().accent_color,
+        }
+    }
+
+    /// Get frame for side panels with consistent inner padding
+    pub fn side_panel_frame(&self) -> egui::Frame {
+        egui::Frame::none()
+            .fill(self.panel_background())
+            .inner_margin(egui::Margin::same(8))
+    }
+
+    /// Get tool result background color
+    pub fn tool_result_background(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(50, 50, 60),
+            AppTheme::Light => Color32::from_rgb(245, 245, 250),
+            AppTheme::Custom => get_custom_theme_colors().button_background, // Reuse button background for custom
         }
     }
 }
@@ -836,5 +870,23 @@ mod tests {
         assert!(default_colors.user_color.a() > 0);
         assert!(default_colors.success_color.a() > 0);
         // ... and so on for all colors
+    }
+
+    #[test]
+    fn test_side_panel_frame() {
+        let themes = [AppTheme::Dark, AppTheme::Light, AppTheme::Custom];
+        
+        for theme in themes {
+            let frame = theme.side_panel_frame();
+            
+            // Check that the frame has the correct margins (8px all around)
+            assert_eq!(frame.inner_margin.left, 8, "Side panel frame should have 8px left margin for {:?}", theme);
+            assert_eq!(frame.inner_margin.right, 8, "Side panel frame should have 8px right margin for {:?}", theme);
+            assert_eq!(frame.inner_margin.top, 8, "Side panel frame should have 8px top margin for {:?}", theme);
+            assert_eq!(frame.inner_margin.bottom, 8, "Side panel frame should have 8px bottom margin for {:?}", theme);
+            
+            // Check that the background is set
+            assert_eq!(frame.fill, theme.panel_background(), "Side panel frame should use panel background color for {:?}", theme);
+        }
     }
 } 

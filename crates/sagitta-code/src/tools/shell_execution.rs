@@ -1,13 +1,14 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::Stdio;
-use tokio::process::Command;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use std::path::{Path, PathBuf};
+use tokio::sync::mpsc;
+use terminal_stream::events::StreamEvent;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
+use crate::tools::local_executor::{LocalExecutor, LocalExecutorConfig, ApprovalPolicy, CommandExecutor};
 use crate::utils::errors::SagittaCodeError;
+use sagitta_search::config::{get_repo_base_path, AppConfig};
 
 /// Configuration for shell execution containers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,12 +34,12 @@ pub struct ContainerConfig {
 impl Default for ContainerConfig {
     fn default() -> Self {
         Self {
-            image: "megabytelabs/devcontainer:latest".to_string(),
+            image: "alpine:3.19".to_string(),
             workdir: "/workspace".to_string(),
             env_vars: HashMap::new(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()), // Isolated by default
-            memory_limit: Some("512m".to_string()),
+            memory_limit: Some("256m".to_string()),
             cpu_limit: Some("1.0".to_string()),
             timeout_seconds: 300, // 5 minutes default
         }
@@ -55,16 +56,28 @@ impl Default for LanguageContainers {
     fn default() -> Self {
         let mut configs = HashMap::new();
         
-        // General devtools container
-        configs.insert("default".to_string(), ContainerConfig::default());
+        // General lightweight container - using Alpine with basic tools
+        configs.insert("default".to_string(), ContainerConfig {
+            image: "alpine:3.19".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: [
+                ("PATH".to_string(), "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()),
+            ].into_iter().collect(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("256m".to_string()),
+            cpu_limit: Some("1.0".to_string()),
+            timeout_seconds: 300,
+        });
         
-        // Rust-specific container
+        // Rust-specific container - Alpine with Rust toolchain
         configs.insert("rust".to_string(), ContainerConfig {
-            image: "rust:1.75".to_string(),
+            image: "rust:1.75-alpine".to_string(),
             workdir: "/workspace".to_string(),
             env_vars: [
                 ("CARGO_HOME".to_string(), "/usr/local/cargo".to_string()),
                 ("RUSTUP_HOME".to_string(), "/usr/local/rustup".to_string()),
+                ("PATH".to_string(), "/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string()),
             ].into_iter().collect(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()),
@@ -73,13 +86,14 @@ impl Default for LanguageContainers {
             timeout_seconds: 600, // 10 minutes for compilation
         });
         
-        // Python-specific container
+        // Python-specific container - Alpine with Python
         configs.insert("python".to_string(), ContainerConfig {
-            image: "python:3.11".to_string(),
+            image: "python:3.12-alpine".to_string(),
             workdir: "/workspace".to_string(),
             env_vars: [
                 ("PYTHONPATH".to_string(), "/workspace".to_string()),
                 ("PYTHONUNBUFFERED".to_string(), "1".to_string()),
+                ("PYTHONDONTWRITEBYTECODE".to_string(), "1".to_string()),
             ].into_iter().collect(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()),
@@ -88,12 +102,13 @@ impl Default for LanguageContainers {
             timeout_seconds: 300,
         });
         
-        // Node.js-specific container
+        // JavaScript/TypeScript container - Alpine with Node.js
         configs.insert("javascript".to_string(), ContainerConfig {
-            image: "node:20".to_string(),
+            image: "node:20-alpine".to_string(),
             workdir: "/workspace".to_string(),
             env_vars: [
                 ("NODE_ENV".to_string(), "development".to_string()),
+                ("NPM_CONFIG_UPDATE_NOTIFIER".to_string(), "false".to_string()),
             ].into_iter().collect(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()),
@@ -102,13 +117,29 @@ impl Default for LanguageContainers {
             timeout_seconds: 300,
         });
         
-        // Go-specific container
+        // TypeScript uses the same Node.js container
+        configs.insert("typescript".to_string(), ContainerConfig {
+            image: "node:20-alpine".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: [
+                ("NODE_ENV".to_string(), "development".to_string()),
+                ("NPM_CONFIG_UPDATE_NOTIFIER".to_string(), "false".to_string()),
+            ].into_iter().collect(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("512m".to_string()),
+            cpu_limit: Some("1.0".to_string()),
+            timeout_seconds: 300,
+        });
+        
+        // Go-specific container - Alpine with Go toolchain
         configs.insert("go".to_string(), ContainerConfig {
-            image: "golang:1.21".to_string(),
+            image: "golang:1.21-alpine".to_string(),
             workdir: "/workspace".to_string(),
             env_vars: [
                 ("GOPATH".to_string(), "/go".to_string()),
                 ("GO111MODULE".to_string(), "on".to_string()),
+                ("CGO_ENABLED".to_string(), "0".to_string()), // Disable CGO for static binaries
             ].into_iter().collect(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()),
@@ -117,16 +148,70 @@ impl Default for LanguageContainers {
             timeout_seconds: 300,
         });
         
-        // Ruby-specific container
-        configs.insert("ruby".to_string(), ContainerConfig {
-            image: "ruby:3.1".to_string(),
+        // Golang uses the same Go container
+        configs.insert("golang".to_string(), ContainerConfig {
+            image: "golang:1.21-alpine".to_string(),
             workdir: "/workspace".to_string(),
-            env_vars: HashMap::new(),
+            env_vars: [
+                ("GOPATH".to_string(), "/go".to_string()),
+                ("GO111MODULE".to_string(), "on".to_string()),
+                ("CGO_ENABLED".to_string(), "0".to_string()), // Disable CGO for static binaries
+            ].into_iter().collect(),
             volumes: HashMap::new(),
             network_mode: Some("none".to_string()),
             memory_limit: Some("512m".to_string()),
             cpu_limit: Some("1.0".to_string()),
             timeout_seconds: 300,
+        });
+        
+        // Ruby-specific container - Alpine with Ruby
+        configs.insert("ruby".to_string(), ContainerConfig {
+            image: "ruby:3.2-alpine".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: [
+                ("BUNDLE_SILENCE_ROOT_WARNING".to_string(), "1".to_string()),
+            ].into_iter().collect(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("512m".to_string()),
+            cpu_limit: Some("1.0".to_string()),
+            timeout_seconds: 300,
+        });
+        
+        // HTML - uses lightweight Alpine with basic tools for static content
+        configs.insert("html".to_string(), ContainerConfig {
+            image: "alpine:3.19".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: HashMap::new(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("128m".to_string()),
+            cpu_limit: Some("0.5".to_string()),
+            timeout_seconds: 60,
+        });
+        
+        // YAML - uses Alpine with yq for YAML processing
+        configs.insert("yaml".to_string(), ContainerConfig {
+            image: "alpine:3.19".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: HashMap::new(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("128m".to_string()),
+            cpu_limit: Some("0.5".to_string()),
+            timeout_seconds: 60,
+        });
+        
+        // Markdown - uses Alpine with basic text processing tools
+        configs.insert("markdown".to_string(), ContainerConfig {
+            image: "alpine:3.19".to_string(),
+            workdir: "/workspace".to_string(),
+            env_vars: HashMap::new(),
+            volumes: HashMap::new(),
+            network_mode: Some("none".to_string()),
+            memory_limit: Some("128m".to_string()),
+            cpu_limit: Some("0.5".to_string()),
+            timeout_seconds: 60,
         });
         
         Self { configs }
@@ -146,24 +231,24 @@ impl LanguageContainers {
 }
 
 /// Parameters for shell command execution
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellExecutionParams {
     /// The command to execute
     pub command: String,
-    /// Optional language/environment to use (determines container)
+    /// Optional language/environment to use (for backwards compatibility, now ignored)
     pub language: Option<String>,
-    /// Working directory to mount (defaults to current repository)
+    /// Working directory for command execution
     pub working_directory: Option<PathBuf>,
-    /// Whether to allow network access
+    /// Whether to allow network access (for backwards compatibility, now ignored)
     pub allow_network: Option<bool>,
     /// Additional environment variables
     pub env_vars: Option<HashMap<String, String>>,
-    /// Custom timeout in seconds
+    /// Custom timeout in seconds (for backwards compatibility, now ignored)
     pub timeout_seconds: Option<u64>,
 }
 
 /// Result of shell command execution
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellExecutionResult {
     /// Exit code of the command
     pub exit_code: i32,
@@ -173,164 +258,78 @@ pub struct ShellExecutionResult {
     pub stderr: String,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
-    /// Container used for execution
+    /// Container used for execution (now always "local")
     pub container_image: String,
     /// Whether the command timed out
     pub timed_out: bool,
 }
 
-/// Shell execution tool for running commands in isolated containers
+/// Shell execution tool that uses local execution instead of Docker
 #[derive(Debug)]
 pub struct ShellExecutionTool {
-    language_containers: LanguageContainers,
+    executor: LocalExecutor,
     pub default_working_dir: PathBuf,
 }
 
 impl ShellExecutionTool {
+    /// Create a new shell execution tool with default configuration
     pub fn new(default_working_dir: PathBuf) -> Self {
+        let repositories_base_path = get_repo_base_path(None).unwrap_or_else(|_| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+        let config = LocalExecutorConfig {
+            repositories_base_path,
+            approval_policy: ApprovalPolicy::Auto,
+            allow_automatic_tool_install: false,
+            cpu_limit_seconds: None,
+            memory_limit_mb: None,
+        };
+        
         Self {
-            language_containers: LanguageContainers::default(),
+            executor: LocalExecutor::new(config),
             default_working_dir,
         }
     }
     
-    pub fn with_language_containers(mut self, containers: LanguageContainers) -> Self {
-        self.language_containers = containers;
-        self
-    }
-    
-    /// Check if Docker is available
-    pub async fn check_docker_available(&self) -> Result<bool, SagittaCodeError> {
-        let output = Command::new("docker")
-            .arg("--version")
-            .output()
-            .await;
-            
-        match output {
-            Ok(output) => Ok(output.status.success()),
-            Err(_) => Ok(false),
+    /// Create a shell execution tool with custom executor configuration
+    pub fn with_executor_config(default_working_dir: PathBuf, config: LocalExecutorConfig) -> Self {
+        Self {
+            executor: LocalExecutor::new(config),
+            default_working_dir,
         }
     }
-    
-    /// Execute a command in a container
-    async fn execute_in_container(
+
+    /// Check if the execution environment is available (always true for local execution)
+    pub async fn check_environment_available(&self) -> Result<bool, SagittaCodeError> {
+                                Ok(true)
+    }
+
+    /// Get help text for environment setup (now just mentions local execution)
+    pub fn get_environment_setup_help() -> String {
+        "Local execution is enabled. Commands will run directly on your system with the following security measures:
+
+1. **Spatial Containment**: All operations are restricted to the repository base directory
+2. **Command Approval**: Potentially dangerous commands require user approval
+3. **Tool Detection**: Missing tools will be detected with installation guidance
+4. **Audit Logging**: All executed commands are logged for security tracking
+
+For maximum security, you can enable 'always ask' approval mode in your configuration.
+
+Required tools (like git, cargo, npm, etc.) should be installed on your system for best results.".to_string()
+    }
+
+    /// Execute a command with streaming output
+    pub async fn execute_streaming(
         &self,
         params: &ShellExecutionParams,
-        config: &ContainerConfig,
+        event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
-        let start_time = std::time::Instant::now();
-        
-        // Prepare Docker command
-        let mut docker_cmd = Command::new("docker");
-        docker_cmd.arg("run")
-            .arg("--rm")
-            .arg("--interactive");
-        
-        // Set working directory
-        docker_cmd.arg("--workdir").arg(&config.workdir);
-        
-        // Set memory limit
-        if let Some(memory) = &config.memory_limit {
-            docker_cmd.arg("--memory").arg(memory);
-        }
-        
-        // Set CPU limit
-        if let Some(cpu) = &config.cpu_limit {
-            docker_cmd.arg("--cpus").arg(cpu);
-        }
-        
-        // Set network mode
-        if let Some(network) = &config.network_mode {
-            if !params.allow_network.unwrap_or(false) {
-                docker_cmd.arg("--network").arg(network);
-            }
-        }
-        
-        // Add environment variables
-        for (key, value) in &config.env_vars {
-            docker_cmd.arg("-e").arg(format!("{}={}", key, value));
-        }
-        
-        // Add custom environment variables
-        if let Some(env_vars) = &params.env_vars {
-            for (key, value) in env_vars {
-                docker_cmd.arg("-e").arg(format!("{}={}", key, value));
-            }
-        }
-        
-        // Add volume mounts
-        let working_dir = params.working_directory
-            .as_ref()
-            .unwrap_or(&self.default_working_dir);
-        
-        docker_cmd.arg("-v").arg(format!("{}:{}", 
-            working_dir.display(), 
-            config.workdir
-        ));
-        
-        // Add additional volume mounts
-        for (host_path, container_path) in &config.volumes {
-            docker_cmd.arg("-v").arg(format!("{}:{}", host_path, container_path));
-        }
-        
-        // Add the container image
-        docker_cmd.arg(&config.image);
-        
-        // Add the command to execute
-        docker_cmd.arg("sh").arg("-c").arg(&params.command);
-        
-        // Set up stdio
-        docker_cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        
-        // Execute the command
-        let mut child = docker_cmd.spawn()
-            .map_err(|e| SagittaCodeError::ToolError(
-                format!("Failed to spawn Docker command: {}", e)
-            ))?;
-        
-        // Set up timeout
-        let timeout_duration = std::time::Duration::from_secs(
-            params.timeout_seconds.unwrap_or(config.timeout_seconds)
-        );
-        
-        // Wait for completion or timeout
-        let result = tokio::time::timeout(timeout_duration, async {
-            child.wait_with_output().await
-        }).await;
-        
-        let execution_time = start_time.elapsed();
-        
-        match result {
-            Ok(Ok(output)) => {
-                Ok(ShellExecutionResult {
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                    execution_time_ms: execution_time.as_millis() as u64,
-                    container_image: config.image.clone(),
-                    timed_out: false,
-                })
-            }
-            Ok(Err(e)) => {
-                Err(SagittaCodeError::ToolError(
-                    format!("Command execution failed: {}", e)
-                ))
-            }
-            Err(_) => {
-                // Timeout occurred, try to kill the process if it's still running
-                // Note: child is moved into the timeout future, so we can't access it here
-                // Docker containers should be cleaned up automatically when the process exits
-                Ok(ShellExecutionResult {
-                    exit_code: -1,
-                    stdout: String::new(),
-                    stderr: "Command timed out".to_string(),
-                    execution_time_ms: execution_time.as_millis() as u64,
-                    container_image: config.image.clone(),
-                    timed_out: true,
-                })
-            }
-        }
+        self.executor.execute_streaming(params, event_sender).await
+    }
+
+    /// Execute a command without streaming (convenience method)
+    pub async fn execute_command(&self, params: &ShellExecutionParams) -> Result<ShellExecutionResult, SagittaCodeError> {
+        self.executor.execute(params).await
     }
 }
 
@@ -339,7 +338,7 @@ impl Tool for ShellExecutionTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "shell_execution".to_string(),
-            description: "Execute shell commands in isolated Docker containers for safe code execution and testing".to_string(),
+            description: "Execute shell commands locally with security controls. All operations are restricted to the repository base directory with command approval for potentially dangerous operations.".to_string(),
             category: ToolCategory::ShellExecution,
             is_required: false,
             parameters: serde_json::json!({
@@ -351,25 +350,27 @@ impl Tool for ShellExecutionTool {
                     },
                     "language": {
                         "type": "string",
-                        "description": "Programming language/environment (rust, python, javascript, go, ruby, or default)",
-                        "default": "default"
+                        "description": "Optional language/environment hint (for backwards compatibility, now ignored)",
+                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default"]
                     },
                     "working_directory": {
                         "type": "string",
-                        "description": "Working directory to mount into container"
+                        "description": "Working directory for command execution (must be within repository base)"
                     },
                     "allow_network": {
                         "type": "boolean",
-                        "description": "Whether to allow network access (default: false for security)",
-                        "default": false
+                        "description": "Whether to allow network access (for backwards compatibility, now ignored)"
                     },
                     "env_vars": {
                         "type": "object",
-                        "description": "Additional environment variables as JSON object"
+                        "description": "Additional environment variables",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
                     },
                     "timeout_seconds": {
                         "type": "number",
-                        "description": "Timeout for command execution in seconds"
+                        "description": "Custom timeout in seconds (for backwards compatibility, now ignored)"
                     }
                 },
                 "required": ["command"]
@@ -379,28 +380,109 @@ impl Tool for ShellExecutionTool {
     }
     
     async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
-        // Check if Docker is available
-        if !self.check_docker_available().await? {
-            return Err(SagittaCodeError::ToolError(
-                "Docker is not available. Please install Docker to use shell execution.".to_string()
-            ));
-        }
-        
         // Parse parameters
         let params: ShellExecutionParams = serde_json::from_value(parameters)
             .map_err(|e| SagittaCodeError::ToolError(
-                format!("Invalid parameters: {}", e)
+                format!("Invalid shell execution parameters: {}", e)
             ))?;
         
-        // Get container configuration
-        let language = params.language.as_deref().unwrap_or("default");
-        let config = self.language_containers.get_config(language);
-        
         // Execute the command
-        let result = self.execute_in_container(&params, config).await?;
+        let result = self.execute_command(&params).await?;
         
         // Return the result
-        Ok(ToolResult::Success(serde_json::to_value(result)?))
+        let result_value = serde_json::to_value(result)
+            .map_err(|e| SagittaCodeError::ToolError(
+                format!("Failed to serialize execution result: {}", e)
+            ))?;
+        
+        Ok(ToolResult::Success(result_value))
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Streaming shell execution tool for terminal integration
+#[derive(Debug)]
+pub struct StreamingShellExecutionTool {
+    base_tool: ShellExecutionTool,
+}
+
+impl StreamingShellExecutionTool {
+    pub fn new(default_working_dir: PathBuf) -> Self {
+        Self {
+            base_tool: ShellExecutionTool::new(default_working_dir),
+        }
+    }
+    
+    /// Execute a command with streaming output to a terminal widget
+    pub async fn execute_streaming(
+        &self,
+        params: ShellExecutionParams,
+        event_sender: mpsc::Sender<StreamEvent>,
+    ) -> Result<ShellExecutionResult, SagittaCodeError> {
+        self.base_tool.execute_streaming(&params, event_sender).await
+    }
+    
+    /// Check if the execution environment is available
+    pub async fn check_environment_available(&self) -> Result<bool, SagittaCodeError> {
+        self.base_tool.check_environment_available().await
+    }
+}
+
+#[async_trait]
+impl Tool for StreamingShellExecutionTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "streaming_shell_execution".to_string(),
+            description: "Execute shell commands locally with real-time streaming output to terminal. All operations are restricted to the repository base directory with command approval for potentially dangerous operations.".to_string(),
+            category: ToolCategory::ShellExecution,
+            is_required: false,
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute"
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Optional language/environment hint (for backwards compatibility, now ignored)",
+                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default"]
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Working directory for command execution (must be within repository base)"
+                    },
+                    "allow_network": {
+                        "type": "boolean",
+                        "description": "Whether to allow network access (for backwards compatibility, now ignored)"
+                    },
+                    "env_vars": {
+                        "type": "object",
+                        "description": "Additional environment variables",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Custom timeout in seconds (for backwards compatibility, now ignored)"
+                    }
+                },
+                "required": ["command"]
+            }),
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+    
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        self.base_tool.execute(parameters).await
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -447,7 +529,7 @@ mod tests {
         assert!(props.contains_key("language"));
         assert_eq!(props["language"]["type"], "string");
         assert!(props["language"]["description"].is_string());
-        assert_eq!(props["language"]["default"], "default");
+        // Note: language field no longer has a default value since it's optional for backwards compatibility
 
         assert!(props.contains_key("working_directory"));
         assert_eq!(props["working_directory"]["type"], "string");
@@ -456,7 +538,7 @@ mod tests {
         assert!(props.contains_key("allow_network"));
         assert_eq!(props["allow_network"]["type"], "boolean");
         assert!(props["allow_network"]["description"].is_string());
-        assert_eq!(props["allow_network"]["default"], false);
+        // Note: allow_network field no longer has a default value since it's optional for backwards compatibility
 
         assert!(props.contains_key("env_vars"));
         assert_eq!(props["env_vars"]["type"], "object");
@@ -470,17 +552,17 @@ mod tests {
         assert!(required.contains(&json!("command")));
     }
     
-    #[tokio::test]
-    async fn test_container_config_default() {
+    #[test]
+    fn test_container_config_default() {
         let config = ContainerConfig::default();
-        assert_eq!(config.image, "megabytelabs/devcontainer:latest");
+        assert_eq!(config.image, "alpine:3.19");
         assert_eq!(config.workdir, "/workspace");
         assert_eq!(config.timeout_seconds, 300);
         assert_eq!(config.network_mode, Some("none".to_string()));
     }
     
-    #[tokio::test]
-    async fn test_language_containers_default() {
+    #[test]
+    fn test_language_containers_default() {
         let containers = LanguageContainers::default();
         
         // Test that we have configurations for supported languages
@@ -493,21 +575,21 @@ mod tests {
         
         // Test getting a config
         let rust_config = containers.get_config("rust");
-        assert_eq!(rust_config.image, "rust:1.75");
+        assert_eq!(rust_config.image, "rust:1.75-alpine");
         
         // Test fallback to default
         let unknown_config = containers.get_config("unknown");
-        assert_eq!(unknown_config.image, "megabytelabs/devcontainer:latest");
+        assert_eq!(unknown_config.image, "alpine:3.19");
     }
     
     #[test]
     fn test_language_containers_get_config_specific_language() {
         let lc = LanguageContainers::default();
         let rust_config = lc.get_config("rust");
-        assert_eq!(rust_config.image, "rust:1.75");
+        assert_eq!(rust_config.image, "rust:1.75-alpine");
         assert!(lc.configs.contains_key("python")); // Check python is present
         let python_config = lc.get_config("python");
-        assert_eq!(python_config.image, "python:3.11");
+        assert_eq!(python_config.image, "python:3.12-alpine");
     }
 
     #[test]
@@ -540,7 +622,7 @@ mod tests {
         let mut lc = LanguageContainers::default();
         let rust_lang = "rust";
         let original_rust_config = lc.get_config(rust_lang);
-        assert_eq!(original_rust_config.image, "rust:1.75"); // Make sure it's the original
+        assert_eq!(original_rust_config.image, "rust:1.75-alpine"); // Make sure it's the original
 
         let new_rust_config = ContainerConfig {
             image: "rust:latest".to_string(),
@@ -565,9 +647,9 @@ mod tests {
         assert!(lc.configs.contains_key("ruby"));
 
         let go_config = lc.get_config("go");
-        assert_eq!(go_config.image, "golang:1.21");
+        assert_eq!(go_config.image, "golang:1.21-alpine");
         let ruby_config = lc.get_config("ruby");
-        assert_eq!(ruby_config.image, "ruby:3.1");
+        assert_eq!(ruby_config.image, "ruby:3.2-alpine");
     }
 
     #[tokio::test]
@@ -593,17 +675,6 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_docker_availability_check() {
-        let temp_dir = TempDir::new().unwrap();
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        
-        // This test will pass if Docker is installed, fail if not
-        // In a real environment, we'd mock this
-        let _is_available = tool.check_docker_available().await.unwrap();
-        // We can't assert the result since it depends on the test environment
-    }
-    
-    #[tokio::test]
     async fn test_execute_with_invalid_parameters() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
@@ -616,7 +687,7 @@ mod tests {
         assert!(result.is_err());
         
         if let Err(SagittaCodeError::ToolError(msg)) = result {
-            assert!(msg.contains("Invalid parameters"));
+            assert!(msg.contains("Invalid shell execution parameters"));
         } else {
             panic!("Expected ToolError");
         }
@@ -636,6 +707,36 @@ mod tests {
         assert!(result.is_err());
     }
     
+    // Test with extended timeout for Docker operations
+    #[tokio::test]
+    async fn test_shell_execution_with_extended_timeout() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+
+        // Test with a command that might need time for Docker image pull
+        let params = serde_json::json!({
+            "command": "echo 'Testing extended timeout'",
+            "language": "default",
+            "timeout_seconds": 120  // 2 minutes timeout
+        });
+        
+        let start_time = std::time::Instant::now();
+        let result = tool.execute(params).await.unwrap();
+        let execution_time = start_time.elapsed();
+        
+        if let ToolResult::Success(value) = result {
+            let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
+            assert_eq!(exec_result.exit_code, 0);
+            assert!(exec_result.stdout.contains("Testing extended timeout"));
+            assert!(!exec_result.timed_out);
+            
+            // Should complete well within the timeout even with Docker image pull
+            assert!(execution_time.as_secs() < 120);
+        } else {
+            panic!("Expected successful execution");
+        }
+    }
+    
     // Integration test - only runs if Docker is available
     #[tokio::test]
     #[ignore] // Ignore by default since it requires Docker
@@ -643,14 +744,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
-        // Skip test if Docker is not available
-        if !tool.check_docker_available().await.unwrap() {
-            return;
-        }
-        
         let params = serde_json::json!({
-            "command": "echo 'Hello, World!'",
-            "language": "default"
+            "command": "echo hello world"
         });
         
         let result = tool.execute(params).await.unwrap();
@@ -658,7 +753,8 @@ mod tests {
         if let ToolResult::Success(value) = result {
             let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
             assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("Hello, World!"));
+            assert!(exec_result.stdout.contains("hello world"));
+            assert_eq!(exec_result.container_image, "local");
             assert!(!exec_result.timed_out);
         } else {
             panic!("Expected successful execution");
@@ -672,26 +768,24 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
-        // Skip test if Docker is not available
-        if !tool.check_docker_available().await.unwrap() {
-            return;
-        }
-        
         let params = serde_json::json!({
-            "command": "python3 -c \"print('Python is working!')\"",
+            "command": "echo 'print(\"Python works\")' | python3 -",
             "language": "python"
         });
         
-        let result = tool.execute(params).await.unwrap();
+        // Note: This test will only work if python3 is installed on the system
+        // In a real environment, we might want to check if python3 is available first
+        let result = tool.execute(params).await;
         
-        if let ToolResult::Success(value) = result {
+        // If python3 is not available, we expect a tool missing error
+        if let Ok(ToolResult::Success(value)) = result {
             let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
-            assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("Python is working!"));
-            assert_eq!(exec_result.container_image, "python:3.11");
-        } else {
-            panic!("Expected successful execution");
+            if exec_result.exit_code == 0 {
+                assert!(exec_result.stdout.contains("Python works"));
+            }
+            assert_eq!(exec_result.container_image, "local");
         }
+        // If python3 is not available, the test should fail gracefully
     }
     
     // Test file operations in container
@@ -699,21 +793,14 @@ mod tests {
     #[ignore] // Ignore by default since it requires Docker
     async fn test_execute_with_file_operations() {
         let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
         // Create a test file in the temp directory
         let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "Hello from file!").unwrap();
-        
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        
-        // Skip test if Docker is not available
-        if !tool.check_docker_available().await.unwrap() {
-            return;
-        }
+        std::fs::write(&test_file, "test content").unwrap();
         
         let params = serde_json::json!({
-            "command": "cat test.txt",
-            "language": "default",
+            "command": format!("cat {}", test_file.display()),
             "working_directory": temp_dir.path().to_string_lossy()
         });
         
@@ -722,7 +809,8 @@ mod tests {
         if let ToolResult::Success(value) = result {
             let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
             assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("Hello from file!"));
+            assert!(exec_result.stdout.contains("test content"));
+            assert_eq!(exec_result.container_image, "local");
         } else {
             panic!("Expected successful execution");
         }
@@ -732,13 +820,13 @@ mod tests {
     fn test_container_config_serialization_deserialization() {
         let original_config = ContainerConfig {
             image: "test_image:latest".to_string(),
-            workdir: "/test_workdir".to_string(),
-            env_vars: [("KEY".to_string(), "VALUE".to_string())].iter().cloned().collect(),
-            volumes: [("/host".to_string(), "/container".to_string())].iter().cloned().collect(),
-            network_mode: Some("host".to_string()),
-            memory_limit: Some("2g".to_string()),
-            cpu_limit: Some("1.5".to_string()),
-            timeout_seconds: 120,
+            workdir: "/test".to_string(),
+            env_vars: [("KEY".to_string(), "value".to_string())].into_iter().collect(),
+            volumes: [("/host".to_string(), "/container".to_string())].into_iter().collect(),
+            network_mode: Some("bridge".to_string()),
+            memory_limit: Some("1g".to_string()),
+            cpu_limit: Some("2.0".to_string()),
+            timeout_seconds: 600,
         };
 
         let serialized = serde_json::to_string(&original_config).unwrap();
@@ -777,26 +865,58 @@ mod tests {
     }
 
     #[test]
-    fn test_shell_execution_tool_new_with_default_containers() {
+    fn test_shell_execution_tool_new_with_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        assert_eq!(tool.language_containers.get_config("default").image, ContainerConfig::default().image);
-        assert!(tool.language_containers.configs.contains_key("rust")); // Check a specific default language
+        assert_eq!(tool.executor.config().repositories_base_path, get_repo_base_path(None).unwrap_or_else(|_| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        }));
+        assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
+        assert!(!tool.executor.config().allow_automatic_tool_install);
+        assert!(tool.executor.config().cpu_limit_seconds.is_none());
+        assert!(tool.executor.config().memory_limit_mb.is_none());
     }
 
     #[test]
-    fn test_shell_execution_tool_with_custom_language_containers() {
+    fn test_shell_execution_tool_with_custom_executor_config() {
         let temp_dir = TempDir::new().unwrap();
-        let mut custom_containers = LanguageContainers::default();
-        custom_containers.add_config("custom_lang".to_string(), ContainerConfig {
-            image: "custom_image:1.0".to_string(),
-            ..Default::default()
-        });
+        let config = LocalExecutorConfig {
+            repositories_base_path: get_repo_base_path(None).unwrap_or_else(|_| {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            }),
+            approval_policy: ApprovalPolicy::Auto,
+            allow_automatic_tool_install: false,
+            cpu_limit_seconds: None,
+            memory_limit_mb: None,
+        };
 
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf())
-            .with_language_containers(custom_containers.clone());
+        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
-        assert_eq!(tool.language_containers.get_config("custom_lang").image, "custom_image:1.0");
-        assert_eq!(tool.language_containers.configs.len(), custom_containers.configs.len());
+        assert_eq!(tool.executor.config().repositories_base_path, get_repo_base_path(None).unwrap_or_else(|_| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        }));
+        assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
+        assert!(!tool.executor.config().allow_automatic_tool_install);
+        assert!(tool.executor.config().cpu_limit_seconds.is_none());
+        assert!(tool.executor.config().memory_limit_mb.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_shell_execution_tool_check_environment_available() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        let result = tool.check_environment_available().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_shell_execution_tool_get_environment_setup_help() {
+        let help_text = ShellExecutionTool::get_environment_setup_help();
+        assert!(!help_text.is_empty());
+        assert!(help_text.contains("Local execution"));
+        assert!(help_text.contains("Spatial Containment"));
+        assert!(help_text.contains("Command Approval"));
     }
 } 

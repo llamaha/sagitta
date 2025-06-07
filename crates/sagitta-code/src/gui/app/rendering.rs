@@ -1,6 +1,6 @@
 // UI rendering for the Sagitta Code application
 
-use egui::{Context, Key, TopBottomPanel, Frame, Vec2};
+use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Widget};
 use crate::gui::app::AppEvent;
 use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
@@ -32,6 +32,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
 
     // Process app events
     app.process_app_events();
+    
+    // Process terminal events
+    app.state.process_terminal_events();
     
     // Handle temporary thinking indicator timeout (3 seconds)
     if let Some(start_time) = app.state.thinking_start_time {
@@ -95,6 +98,18 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::T) && i.modifiers.ctrl && i.modifiers.shift) {
         // Ctrl+Shift+T: Toggle theme customizer panel
         app.panels.toggle_panel(ActivePanel::ThemeCustomizer);
+    }
+    if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
+        // Ctrl+`: Toggle terminal panel (like VS Code)
+        app.state.toggle_terminal();
+    }
+    if ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.ctrl) {
+        // Ctrl+P: Toggle create project panel
+        app.panels.toggle_panel(ActivePanel::CreateProject);
+    }
+    if ctx.input(|i| i.key_pressed(Key::F1)) {
+        // F1: Toggle hotkeys modal
+        app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
     }
     
     // Loop control shortcuts
@@ -339,6 +354,42 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                             log::error!("Failed to save custom theme config: {}", err);
                         }
                     });
+                }
+            }
+        },
+        ActivePanel::CreateProject => {
+            // Handle project creation requests
+            if let Some(create_request) = app.panels.create_project_panel.render(ctx, app.state.current_theme) {
+                // TODO: Implement project creation logic
+                // For now, just log the request and show success
+                log::info!("Create project request: {:?}", create_request);
+                
+                // Create directory if it doesn't exist
+                if let Err(e) = std::fs::create_dir_all(&create_request.path) {
+                    app.panels.create_project_panel.set_error(format!("Failed to create directory: {}", e));
+                } else {
+                    // TODO: Initialize git repository if requested
+                    if create_request.initialize_git {
+                        // Git initialization would go here
+                    }
+                    
+                    // TODO: Add to workspace if requested
+                    if create_request.add_to_workspace {
+                        // Workspace integration would go here
+                    }
+                    
+                    // TODO: Apply template if selected
+                    if let Some(_template) = create_request.template {
+                        // Template application would go here
+                    }
+                    
+                    app.panels.create_project_panel.project_created();
+                    
+                    // Add event to events panel
+                    app.panels.events_panel.add_event(
+                        super::SystemEventType::Info,
+                        format!("Created project '{}' at {}", create_request.name, create_request.path.display())
+                    );
                 }
             }
         },
@@ -661,14 +712,19 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
+                ui.label(egui::RichText::new("Panel Controls:").color(theme.accent_color()).strong());
                 ui.label(egui::RichText::new("Ctrl + R: Toggle Repository Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + W: Toggle Preview Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + S: Toggle Settings Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + T: Toggle Conversation Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + E: Toggle Events Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + L: Toggle Logging Panel").color(theme.text_color()));
+                ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + Shift + A: Toggle Analytics Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + Shift + T: Toggle Theme Customizer").color(theme.text_color()));
+                ui.separator();
+                ui.label(egui::RichText::new("General:").color(theme.accent_color()).strong());
+                ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
                 ui.separator();
                 ui.label(egui::RichText::new("Loop Control:").color(theme.accent_color()).strong());
                 ui.label(egui::RichText::new("Ctrl + I: Toggle Loop Injection Input").color(theme.text_color()));
@@ -743,6 +799,32 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         });
 
+    // --- Terminal Panel (Above Input) ---
+    if app.state.show_terminal {
+        TopBottomPanel::bottom("terminal_panel")
+            .resizable(true)
+            .min_height(200.0)
+            .max_height(600.0)
+            .default_height(400.0)
+            .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(8.0, 8.0)))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Terminal");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Clear").clicked() {
+                            app.state.clear_terminal();
+                        }
+                        if ui.small_button("Hide").clicked() {
+                            app.state.toggle_terminal();
+                        }
+                    });
+                });
+                ui.separator();
+                
+                app.state.terminal_widget.show(ui);
+            });
+    }
+
     // --- Chat View Panel (Central) ---
     egui::CentralPanel::default()
         .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)))
@@ -769,12 +851,62 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
 /// Render tool info modal
 fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &str, tool_args: &str) {
-    // Check if this is a tool result (indicated by " Result" suffix)
-    if tool_name.ends_with(" Result") {
-        // This is a tool result - show it directly
-        app.show_preview(tool_name, tool_args);
+    // Check if this is a tool result (indicated by " Result" suffix or " - Terminal Output" suffix)
+    if tool_name.ends_with(" Result") || tool_name.contains(" - ") {
+        // This is a tool result - determine how to display it
+        if tool_name.contains("Terminal Output") || tool_name.contains("shell") || tool_name.contains("execution") ||
+           tool_args.contains("stdout") || tool_args.contains("stderr") || tool_args.contains("exit_code") {
+            // This is shell execution output - show in terminal
+            app.state.show_terminal = true;
+            
+            // Parse and add the shell output to terminal
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(tool_args) {
+                if let Some(obj) = json_value.as_object() {
+                    let mut terminal_output = String::new();
+                    
+                    // Add command info if available
+                    if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
+                        terminal_output.push_str(&format!("$ {}\n", command));
+                    }
+                    
+                    // Add stdout
+                    if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
+                        if !stdout.trim().is_empty() {
+                            terminal_output.push_str(stdout);
+                            if !stdout.ends_with('\n') {
+                                terminal_output.push('\n');
+                            }
+                        }
+                    }
+                    
+                    // Add stderr
+                    if let Some(stderr) = obj.get("stderr").and_then(|v| v.as_str()) {
+                        if !stderr.trim().is_empty() {
+                            terminal_output.push_str(&format!("stderr: {}\n", stderr));
+                        }
+                    }
+                    
+                    // Add exit code
+                    if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
+                        terminal_output.push_str(&format!("Exit code: {}\n", exit_code));
+                    }
+                    
+                    // Add the output to terminal widget
+                    app.state.terminal_widget.add_output(&terminal_output);
+                } else {
+                    // Fallback: add raw JSON to terminal
+                    app.state.terminal_widget.add_output(tool_args);
+                }
+            } else {
+                // Not JSON, add as plain text
+                app.state.terminal_widget.add_output(tool_args);
+            }
+        } else {
+            // This is a non-shell tool result - show in preview
+            app.show_preview(tool_name, tool_args);
+        }
     } else {
-        // This is a tool call - format tool arguments nicely
+        // This is a tool call - format tool arguments nicely and show in preview
         let formatted_args = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(tool_args) {
             serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| tool_args.to_string())
         } else {
@@ -1036,6 +1168,7 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
+            ActivePanel::CreateProject,
         ];
         
         // Test that we can match on all variants
@@ -1049,6 +1182,7 @@ mod tests {
                 ActivePanel::Events => {},
                 ActivePanel::Analytics => {},
                 ActivePanel::ThemeCustomizer => {},
+                ActivePanel::CreateProject => {},
             }
         }
     }
@@ -1064,6 +1198,7 @@ mod tests {
         let _conversation = ActivePanel::Conversation;
         let _events = ActivePanel::Events;
         let _analytics = ActivePanel::Analytics;
+        let _create_project = ActivePanel::CreateProject;
         let _none = ActivePanel::None;
         
         // If this compiles, the imports are working correctly
@@ -1133,5 +1268,41 @@ mod tests {
         app.panels.toggle_panel(ActivePanel::Analytics);
         assert_eq!(app.panels.active_panel, ActivePanel::None);
         assert!(!app.panels.analytics_panel.visible);
+    }
+
+    #[test]
+    fn test_new_keyboard_shortcuts() {
+        let mut app = create_test_app();
+        
+        // Test Ctrl+P for CreateProject panel
+        app.panels.toggle_panel(ActivePanel::CreateProject);
+        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
+        assert!(app.panels.create_project_panel.visible);
+        
+        // Test F1 for hotkeys modal (simulated)
+        app.state.show_hotkeys_modal = false;
+        // Simulate F1 press
+        app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
+        assert!(app.state.show_hotkeys_modal);
+        
+        // Press F1 again to close
+        app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
+        assert!(!app.state.show_hotkeys_modal);
+    }
+
+    #[test]
+    fn test_create_project_panel_in_integration() {
+        let mut app = create_test_app();
+        
+        // Test that CreateProject panel is included in integration
+        app.panels.toggle_panel(ActivePanel::CreateProject);
+        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
+        assert!(app.panels.create_project_panel.visible);
+        
+        // Test that switching to another panel closes CreateProject
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
+        assert!(!app.panels.create_project_panel.visible);
+        assert!(app.panels.preview_panel.visible);
     }
 } 

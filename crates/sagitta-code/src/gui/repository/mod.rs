@@ -9,5 +9,6 @@ pub mod search;
 pub mod types;
 pub mod view;
 pub mod branches;
+pub mod shared_sync_state;
 
 pub use panel::RepoPanel; 

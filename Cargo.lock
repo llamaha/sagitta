@@ -2272,6 +2272,7 @@ dependencies = [
  "env_logger 0.11.8",
  "git2",
  "indexmap 2.9.0",
+ "log",
  "pathdiff",
  "pretty_assertions",
  "serde",
@@ -2569,11 +2570,11 @@ dependencies = [
 
 [[package]]
 name = "headers"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "322106e6bd0cba2d5ead589ddb8150a13d7c4217cf80d7c4f682ca994ccc6aa9"
+checksum = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "bytes",
  "headers-core",
  "http 1.3.1",
@@ -4662,9 +4663,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
+checksum = "9dee91521343f4c5c6a63edd65e54f31f5c92fe8978c40a4282f8372194c6a7d"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -5012,6 +5013,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "terminal-stream",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
@@ -5486,6 +5488,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mockall",
+ "once_cell",
  "qdrant-client",
  "rand 0.8.5",
  "reasoning-engine",
@@ -5500,10 +5503,12 @@ dependencies = [
  "similar",
  "syntect",
  "tempfile",
+ "terminal-stream",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-test",
+ "tokio-util",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -6164,6 +6169,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "terminal-stream"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "crossbeam-channel",
+ "eframe",
+ "egui 0.31.1",
+ "futures-util",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tokio-test",
+ "uuid",
 ]
 
 [[package]]

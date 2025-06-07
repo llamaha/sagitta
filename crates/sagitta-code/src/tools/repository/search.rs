@@ -71,34 +71,23 @@ impl Tool for SearchFileInRepositoryTool {
     }
     
     async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        // Parse parameters
         let params: SearchFileParams = serde_json::from_value(parameters)
-            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse search_file parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Invalid parameters: {}", e)))?;
         
-        // Get the repository manager
         let repo_manager = self.repo_manager.lock().await;
+        let result = repo_manager.search_file(&params.repository_name, &params.pattern, false).await;
         
-        // Search for files
-        let files = repo_manager.search_file(
-            &params.repository_name,
-            &params.pattern,
-            params.case_sensitive,
-        ).await;
-        
-        match files {
-            Ok(files) => {
-                Ok(ToolResult::Success(serde_json::json!({
-                    "repository_name": params.repository_name,
-                    "pattern": params.pattern,
-                    "case_sensitive": params.case_sensitive,
-                    "files": files,
-                    "count": files.len(),
-                })))
-            },
-            Err(e) => {
-                Err(SagittaCodeError::ToolError(format!("Failed to search for files: {}", e)))
-            }
+        match result {
+            Ok(files) => Ok(ToolResult::Success(serde_json::json!({
+                "files": files,
+                "pattern": params.pattern
+            }))),
+            Err(e) => Err(SagittaCodeError::ToolError(format!("Failed to search files: {}", e)))
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

@@ -76,48 +76,25 @@ impl Tool for ViewFileInRepositoryTool {
     }
     
     async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        // Parse parameters
         let params: ViewFileParams = serde_json::from_value(parameters)
-            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse view_file parameters: {}", e)))?;
+            .map_err(|e| SagittaCodeError::ToolError(format!("Invalid parameters: {}", e)))?;
         
-        log::info!("[ViewFileInRepositoryTool] Viewing file '{}' from repository '{}' (lines: {:?}-{:?})", 
-                  params.file_path, params.repository_name, params.start_line, params.end_line);
-        
-        // Get the repository manager
         let repo_manager = self.repo_manager.lock().await;
+        let result = repo_manager.view_file(&params.repository_name, &params.file_path, params.start_line, params.end_line).await;
         
-        // View the file
-        let content = repo_manager.view_file(
-            &params.repository_name,
-            &params.file_path,
-            params.start_line,
-            params.end_line,
-        ).await;
-        
-        match content {
-            Ok(file_content) => {
-                // Determine file type for syntax highlighting (if implemented later)
-                let file_extension = params.file_path.split('.').last().unwrap_or("txt");
-                
-                log::info!("[ViewFileInRepositoryTool] Successfully viewed {} characters from file '{}' in repository '{}'", 
-                          file_content.len(), params.file_path, params.repository_name);
-                
-                Ok(ToolResult::Success(serde_json::json!({
-                    "repository_name": params.repository_name,
-                    "file_path": params.file_path,
-                    "start_line": params.start_line,
-                    "end_line": params.end_line,
-                    "file_type": file_extension,
-                    "content": file_content,
-                })))
-            },
-            Err(e) => {
-                let detailed_error = format!("Failed to view file '{}' from repository '{}': {}", 
-                                           params.file_path, params.repository_name, e);
-                log::error!("[ViewFileInRepositoryTool] {}", detailed_error);
-                Err(SagittaCodeError::ToolError(detailed_error))
-            }
+        match result {
+            Ok(content) => Ok(ToolResult::Success(serde_json::json!({
+                "file_path": params.file_path,
+                "content": content,
+                "start_line": params.start_line,
+                "end_line": params.end_line
+            }))),
+            Err(e) => Err(SagittaCodeError::ToolError(format!("Failed to view file: {}", e)))
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

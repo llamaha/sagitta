@@ -34,6 +34,9 @@ pub struct EditParams {
     pub format: bool,
 }
 
+/// Maximum content size in bytes to prevent streaming buffer overflows
+const MAX_CONTENT_SIZE: usize = 50 * 1024; // 50KB limit
+
 /// Tool for editing code by line numbers
 #[derive(Debug)]
 pub struct EditTool {
@@ -174,6 +177,14 @@ impl Tool for EditTool {
         let params: EditParams = serde_json::from_value(parameters)
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse edit parameters: {}", e)))?;
         
+        // Validate content size to prevent streaming buffer issues
+        if params.content.len() > MAX_CONTENT_SIZE {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Content size ({} bytes) exceeds maximum allowed size ({} bytes). Consider breaking large edits into smaller chunks.",
+                params.content.len(), MAX_CONTENT_SIZE
+            )));
+        }
+        
         // Perform the edit
         match self.perform_edit(&params).await {
             Ok(message) => {
@@ -190,5 +201,9 @@ impl Tool for EditTool {
                 Err(e)
             }
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 } 
