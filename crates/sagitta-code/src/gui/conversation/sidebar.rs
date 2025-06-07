@@ -1259,11 +1259,6 @@ impl ConversationSidebar {
             .max_width(max_width)
             .resizable(true)
             .show(ctx, |ui| {
-                // Phase 10: Add accessibility attributes
-                if self.accessibility_enabled {
-                    ui.ctx().set_debug_on_hover(false); // Reduce visual noise for screen readers
-                }
-                
                 // Wrap entire sidebar content in ScrollArea for comprehensive scrolling
                 ScrollArea::vertical()
                     .auto_shrink(false)
