@@ -212,6 +212,38 @@ pub struct SidebarConfig {
     
     /// Refresh interval for live updates (in seconds)
     pub refresh_interval_seconds: u64,
+    
+    /// Responsive UI settings
+    pub responsive: ResponsiveConfig,
+}
+
+/// Responsive configuration for different screen sizes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponsiveConfig {
+    /// Enable responsive behavior
+    pub enabled: bool,
+    
+    /// Small screen breakpoint (width in pixels)
+    pub small_screen_breakpoint: f32,
+    
+    /// Compact mode settings
+    pub compact_mode: CompactModeConfig,
+}
+
+/// Configuration for compact mode on smaller screens
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactModeConfig {
+    /// Use smaller buttons and icons
+    pub small_buttons: bool,
+    
+    /// Reduce spacing between elements
+    pub reduced_spacing: bool,
+    
+    /// Show abbreviated labels
+    pub abbreviated_labels: bool,
+    
+    /// Hide less important UI elements
+    pub hide_secondary_elements: bool,
 }
 
 impl Default for SidebarConfig {
@@ -225,6 +257,28 @@ impl Default for SidebarConfig {
             default_organization: OrganizationMode::Recency,
             persist_state: true,
             refresh_interval_seconds: 30,
+            responsive: ResponsiveConfig::default(),
+        }
+    }
+}
+
+impl Default for ResponsiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            small_screen_breakpoint: 1366.0,
+            compact_mode: CompactModeConfig::default(),
+        }
+    }
+}
+
+impl Default for CompactModeConfig {
+    fn default() -> Self {
+        Self {
+            small_buttons: true,
+            reduced_spacing: true,
+            abbreviated_labels: true,
+            hide_secondary_elements: false,
         }
     }
 }
@@ -1134,80 +1188,121 @@ impl ConversationSidebar {
             ..Default::default()
         };
 
+        // Get screen size for responsive constraints
+        let screen_size = ctx.screen_rect().size();
+        let is_small_screen = self.config.responsive.enabled && 
+            screen_size.x <= self.config.responsive.small_screen_breakpoint;
+        
+        // Responsive width constraints
+        let (default_width, min_width, max_width) = if is_small_screen {
+            (240.0, 180.0, 320.0) // Smaller constraints for small screens
+        } else {
+            (280.0, 200.0, 400.0) // Standard constraints for larger screens
+        };
+
         egui::SidePanel::left("conversation_sidebar")
             .frame(panel_frame)
-            .default_width(280.0)
-            .min_width(200.0)
+            .default_width(default_width)
+            .min_width(min_width)
+            .max_width(max_width)
             .resizable(true)
             .show(ctx, |ui| {
-                self.render_header(ui, app_state, theme);
-                ui.separator();
-                self.render_search_bar(ui, app_state);
-                ui.separator();
+                // Wrap entire sidebar content in ScrollArea for comprehensive scrolling
+                ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .max_height(ui.available_height())
+                    .show(ui, |ui| {
+                        // Set consistent width for all content
+                        ui.set_min_width(ui.available_width());
+                        
+                        self.render_header(ui, app_state, theme);
+                        
+                        // Responsive spacing
+                        let spacing = if is_small_screen && self.config.responsive.compact_mode.reduced_spacing {
+                            2.0
+                        } else {
+                            4.0
+                        };
+                        ui.add_space(spacing);
+                        
+                        self.render_search_bar(ui, app_state);
+                        
+                        ui.add_space(spacing);
 
-                if app_state.conversation_data_loading {
-                    ui.centered_and_justified(|ui| {
-                        ui.spinner();
-                        ui.label("Loading conversations...");
-                    });
-                    return;
-                }
+                        if app_state.conversation_data_loading {
+                            ui.centered_and_justified(|ui| {
+                                ui.spinner();
+                                ui.label("Loading conversations...");
+                            });
+                            return;
+                        }
 
-                match self.organize_conversations(
-                    &app_state.conversation_list,
-                    Some(&self.clusters),
-                    &app_state.workspaces,
-                    app_state.active_workspace_id,
-                ) {
-                    Ok(organized_data) => {
-                        if self.show_branch_suggestions {
+                        match self.organize_conversations(
+                            &app_state.conversation_list,
+                            Some(&self.clusters),
+                            &app_state.workspaces,
+                            app_state.active_workspace_id,
+                        ) {
+                            Ok(organized_data) => {
+                                if self.show_branch_suggestions {
+                                    if let Some(conversation_id) = app_state.current_conversation_id {
+                                        if let Ok(Some(action)) = self.branch_suggestions_ui.render(ui, conversation_id, theme) {
+                                            if let Some(sidebar_action) = self.handle_branch_suggestion_action(action) {
+                                                self.pending_action = Some(sidebar_action);
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Display organized groups with responsive spacing
+                                for (index, group) in organized_data.groups.iter().enumerate() {
+                                    self.render_conversation_group(ui, group, app_state, theme);
+                                    
+                                    // Only add space between groups, not after the last one
+                                    if index < organized_data.groups.len() - 1 {
+                                        ui.add_space(if is_small_screen { 1.0 } else { 2.0 });
+                                    }
+                                }
+                                
+                                // Show organization info with responsive spacing
+                                ui.add_space(if is_small_screen { 4.0 } else { 6.0 });
+                                ui.separator();
+                                ui.add_space(if is_small_screen { 1.0 } else { 2.0 });
+                                ui.label(format!("📊 Showing {} of {} conversations", organized_data.filtered_count, organized_data.total_count));
+                            },
+                            Err(e) => {
+                                log::error!("Failed to organize conversations: {}", e);
+                                // Fallback to simple list
+                                self.render_simple_conversation_list(ui, app_state, theme);
+                            }
+                        }
+                        
+                        // Show checkpoint suggestions if enabled and available
+                        if self.show_checkpoint_suggestions {
                             if let Some(conversation_id) = app_state.current_conversation_id {
-                                if let Ok(Some(action)) = self.branch_suggestions_ui.render(ui, conversation_id, theme) {
-                                    if let Some(sidebar_action) = self.handle_branch_suggestion_action(action) {
-                                        self.pending_action = Some(sidebar_action);
+                                ui.add_space(if is_small_screen { 4.0 } else { 6.0 });
+                                ui.separator();
+                                ui.add_space(if is_small_screen { 1.0 } else { 2.0 });
+                                
+                                match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
+                                    Ok(Some(action)) => {
+                                        if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
+                                            self.pending_action = Some(sidebar_action);
+                                        }
+                                    },
+                                    Ok(None) => {
+                                        // No action taken
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to render checkpoint suggestions: {}", e);
                                     }
                                 }
                             }
                         }
                         
-                        // Display organized groups
-                        for group in &organized_data.groups {
-                            self.render_conversation_group(ui, group, app_state, theme);
-                        }
-                        
-                        // Show organization info
+                        // Add bottom padding to ensure content doesn't get cut off
                         ui.add_space(8.0);
-                        ui.separator();
-                        ui.label(format!("📊 Showing {} of {} conversations", organized_data.filtered_count, organized_data.total_count));
-                    },
-                    Err(e) => {
-                        log::error!("Failed to organize conversations: {}", e);
-                        // Fallback to simple list
-                        self.render_simple_conversation_list(ui, app_state, theme);
-                    }
-                }
-                
-                // Show checkpoint suggestions if enabled and available
-                if self.show_checkpoint_suggestions {
-                    if let Some(conversation_id) = app_state.current_conversation_id {
-                        ui.add_space(8.0);
-                        ui.separator();
-                        
-                        match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
-                            Ok(Some(action)) => {
-                                if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
-                                    self.pending_action = Some(sidebar_action);
-                                }
-                            },
-                            Ok(None) => {
-                                // No action taken
-                            },
-                            Err(e) => {
-                                log::error!("Failed to render checkpoint suggestions: {}", e);
-                            }
-                        }
-                    }
-                }
+                    });
             });
         
         self.handle_sidebar_actions(app_state, ctx);
@@ -1215,47 +1310,69 @@ impl ConversationSidebar {
 
     // Render the header with organization mode selector
     fn render_header(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) {
+        // Get screen size for responsive layout
+        let screen_size = ui.ctx().screen_rect().size();
+        let is_small_screen = self.config.responsive.enabled && 
+            screen_size.x <= self.config.responsive.small_screen_breakpoint;
+        
         ui.horizontal(|ui| {
-            ui.heading("💬 Conversations");
+            if is_small_screen && self.config.responsive.compact_mode.abbreviated_labels {
+                ui.label("💬"); // Just icon for small screens
+            } else {
+                ui.heading("💬 Conversations");
+            }
+            
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("🔄").on_hover_text("Refresh conversations").clicked() {
+                let button_fn = if is_small_screen && self.config.responsive.compact_mode.small_buttons {
+                    |ui: &mut Ui, text: &str| ui.small_button(text)
+                } else {
+                    |ui: &mut Ui, text: &str| ui.button(text)
+                };
+                
+                if button_fn(ui, "🔄").on_hover_text("Refresh conversations").clicked() {
                     // Trigger refresh action
                     self.pending_action = Some(SidebarAction::RefreshConversations);
                 }
-                if ui.button("➕").on_hover_text("New conversation").clicked() {
+                if button_fn(ui, "➕").on_hover_text("New conversation").clicked() {
                     self.pending_action = Some(SidebarAction::CreateNewConversation);
                 }
                 // Branch suggestions toggle
                 let branch_icon = if self.show_branch_suggestions { "🌳" } else { "🌿" };
-                if ui.button(branch_icon).on_hover_text("Toggle branch suggestions").clicked() {
+                if button_fn(ui, branch_icon).on_hover_text("Toggle branch suggestions").clicked() {
                     self.toggle_branch_suggestions();
                 }
                 
                 // Checkpoint suggestions toggle
                 let checkpoint_icon = if self.show_checkpoint_suggestions { "📍" } else { "📌" };
-                if ui.button(checkpoint_icon).on_hover_text("Toggle checkpoint suggestions").clicked() {
+                if button_fn(ui, checkpoint_icon).on_hover_text("Toggle checkpoint suggestions").clicked() {
                     self.toggle_checkpoint_suggestions();
                 }
             });
         });
         
-        ui.add_space(4.0);
+        // Responsive spacing
+        let spacing = if is_small_screen && self.config.responsive.compact_mode.reduced_spacing {
+            1.0
+        } else {
+            2.0
+        };
+        ui.add_space(spacing);
         
-        // Breadcrumb navigation for cluster mode
+        // Breadcrumb navigation for cluster mode - more compact
         if self.organization_mode == OrganizationMode::Clusters {
             ui.horizontal(|ui| {
-                ui.label("📍");
+                ui.small("📍");
                 
                 // Always show "All" as root
-                if ui.link("All").clicked() {
+                if ui.small_button("All").clicked() {
                     // Clear all expanded groups to show all clusters
                     self.expanded_groups.clear();
                 }
                 
-                ui.label("→");
+                ui.small("→");
                 
                 // Show "Clusters" as current level
-                ui.label("🔗 Clusters");
+                ui.small("🔗 Clusters");
                 
                 // Show expanded cluster name if any
                 let expanded_cluster_names: Vec<String> = self.expanded_groups
@@ -1268,24 +1385,31 @@ impl ConversationSidebar {
                     .collect();
                 
                 if !expanded_cluster_names.is_empty() {
-                    ui.label("→");
+                    ui.small("→");
                     for (i, cluster_name) in expanded_cluster_names.iter().enumerate() {
                         if i > 0 {
-                            ui.label(",");
+                            ui.small(",");
                         }
-                        ui.label(format!("📂 {}", cluster_name));
+                        ui.small(format!("📂 {}", cluster_name));
                     }
                 }
             });
             
-            ui.add_space(2.0);
+            ui.add_space(spacing);
         }
         
-        // Organization mode selector
+        // Organization mode selector - more compact
         ui.horizontal(|ui| {
-            ui.label("📋 Organize by:");
+            if is_small_screen && self.config.responsive.compact_mode.abbreviated_labels {
+                ui.small("📋");
+            } else {
+                ui.small("📋 Organize by:");
+            }
+            
+            let combo_width = if is_small_screen { 120.0 } else { 150.0 };
             ComboBox::from_id_source("organization_mode")
                 .selected_text(self.organization_mode_display_name())
+                .width(if is_small_screen { 120.0 } else { 150.0 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Recency, "📅 Recency");
                     ui.selectable_value(&mut self.organization_mode, OrganizationMode::Project, "📁 Project");
@@ -1296,11 +1420,16 @@ impl ConversationSidebar {
                 });
         });
 
-        // Workspace selector - only shown when in Project mode
+        // Workspace selector - only shown when in Project mode, more compact
         if self.organization_mode == OrganizationMode::Project {
-            ui.add_space(4.0);
+            ui.add_space(2.0); // Reduced spacing
             ui.horizontal(|ui| {
-                ui.label("📁 Workspace:");
+                if is_small_screen {
+                    ui.small("📁");
+                } else {
+                    ui.small("📁 Workspace:");
+                }
+                
                 let mut selected_workspace = app_state.active_workspace_id;
                 ComboBox::from_id_source("workspace_selector")
                     .selected_text(
@@ -1308,6 +1437,7 @@ impl ConversationSidebar {
                             .and_then(|id| app_state.workspaces.iter().find(|ws| ws.id == id))
                             .map_or("All Workspaces", |ws| &ws.name),
                     )
+                    .width(if is_small_screen { 100.0 } else { 130.0 })
                     .show_ui(ui, |ui| {
                         // Option for all workspaces
                         ui.selectable_value(&mut selected_workspace, None, "All Workspaces");
@@ -1327,7 +1457,7 @@ impl ConversationSidebar {
                         self.pending_action = Some(SidebarAction::SetWorkspace(id));
                     } else {
                         // Handle 'All Workspaces' selection
-                        app_state.set_active_workspace(None);
+                        app_state.active_workspace_id = None;
                     }
                 }
             });
@@ -1336,24 +1466,48 @@ impl ConversationSidebar {
 
     // Render search bar and filters
     fn render_search_bar(&mut self, ui: &mut Ui, app_state: &mut AppState) {
+        // Get screen size for responsive layout
+        let screen_size = ui.ctx().screen_rect().size();
+        let is_small_screen = self.config.responsive.enabled && 
+            screen_size.x <= self.config.responsive.small_screen_breakpoint;
+        
         ui.horizontal(|ui| {
-            let search_text = self.search_query.get_or_insert_with(String::new);
             ui.label("🔍");
-            if ui.add(TextEdit::singleline(search_text).hint_text("Search conversations...")).changed() {
-                // Search query changed, will be applied in organize_conversations
+            
+            let mut search_text = self.search_query.clone().unwrap_or_default();
+            let hint_text = if is_small_screen && self.config.responsive.compact_mode.abbreviated_labels {
+                "Search..."
+            } else {
+                "Search conversations..."
+            };
+            
+            let response = ui.add(
+                TextEdit::singleline(&mut search_text)
+                    .hint_text(hint_text)
+                    .desired_width(f32::INFINITY)
+            );
+            
+            if response.changed() {
+                self.search_query = if search_text.trim().is_empty() {
+                    None
+                } else {
+                    Some(search_text)
+                };
             }
             
-            if ui.button("🎛️").on_hover_text("Filters").clicked() {
-                self.show_filters = !self.show_filters;
+            // Clear search button - only show if there's a search query
+            if self.search_query.is_some() {
+                let button_fn = if is_small_screen && self.config.responsive.compact_mode.small_buttons {
+                    |ui: &mut Ui, text: &str| ui.small_button(text)
+                } else {
+                    |ui: &mut Ui, text: &str| ui.button(text)
+                };
+                
+                if button_fn(ui, "✖").on_hover_text("Clear search").clicked() {
+                    self.search_query = None;
+                }
             }
         });
-        
-        // Show filters if enabled
-        if self.show_filters {
-            ui.collapsing("Filters", |ui| {
-                self.render_filters(ui);
-            });
-        }
     }
 
     // Render filter controls
@@ -1378,7 +1532,7 @@ impl ConversationSidebar {
         let group_id = group.id.clone();
         let is_expanded = self.expanded_groups.contains(&group_id);
         
-        // Group header with expand/collapse
+        // Group header with expand/collapse - use compact layout
         ui.horizontal(|ui| {
             let expand_icon = if is_expanded { "▼" } else { "▶" };
             let header_text = format!("{} {} ({})", expand_icon, group.name, group.metadata.count);
@@ -1400,33 +1554,36 @@ impl ConversationSidebar {
                 self.toggle_group(&group_id);
             }
             
-            // Show group statistics
-            if group.metadata.statistics.active_count > 0 {
-                ui.label(format!("🟢 {}", group.metadata.statistics.active_count));
-            }
-            if group.metadata.statistics.completed_count > 0 {
-                ui.label(format!("✅ {}", group.metadata.statistics.completed_count));
-            }
-            
-            // Show cohesion score for clusters
-            if group.id.starts_with("cluster_") {
-                if let Some(cohesion_score) = group.metadata.avg_success_rate {
-                    let cohesion_color = if cohesion_score > 0.8 {
-                        Color32::from_rgb(0, 200, 0) // Green for high cohesion
-                    } else if cohesion_score > 0.6 {
-                        Color32::from_rgb(255, 165, 0) // Orange for medium cohesion
-                    } else {
-                        Color32::from_rgb(255, 100, 100) // Red for low cohesion
-                    };
-                    
-                    ui.colored_label(cohesion_color, format!("🔗 {:.1}%", cohesion_score * 100.0));
+            // Show group statistics in a more compact way
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Show cohesion score for clusters
+                if group.id.starts_with("cluster_") {
+                    if let Some(cohesion_score) = group.metadata.avg_success_rate {
+                        let cohesion_color = if cohesion_score > 0.8 {
+                            Color32::from_rgb(0, 200, 0) // Green for high cohesion
+                        } else if cohesion_score > 0.6 {
+                            Color32::from_rgb(255, 165, 0) // Orange for medium cohesion
+                        } else {
+                            Color32::from_rgb(255, 100, 100) // Red for low cohesion
+                        };
+                        
+                        ui.colored_label(cohesion_color, format!("🔗{:.0}%", cohesion_score * 100.0));
+                    }
+                } else {
+                    // Show average success rate for non-cluster groups
+                    if let Some(success_rate) = group.metadata.avg_success_rate {
+                        ui.label(format!("📈{:.0}%", success_rate * 100.0));
+                    }
                 }
-            } else {
-                // Show average success rate for non-cluster groups
-                if let Some(success_rate) = group.metadata.avg_success_rate {
-                    ui.label(format!("📈 {:.1}%", success_rate * 100.0));
+                
+                // Compact status indicators
+                if group.metadata.statistics.completed_count > 0 {
+                    ui.label(format!("✅{}", group.metadata.statistics.completed_count));
                 }
-            }
+                if group.metadata.statistics.active_count > 0 {
+                    ui.label(format!("🟢{}", group.metadata.statistics.active_count));
+                }
+            });
         });
         
         // Show conversations in group if expanded
@@ -1438,7 +1595,8 @@ impl ConversationSidebar {
             });
         }
         
-        ui.add_space(4.0);
+        // Minimal spacing after group
+        ui.add_space(2.0);
     }
 
     // Render a single conversation item
@@ -1466,7 +1624,8 @@ impl ConversationSidebar {
                     self.editing_conversation_id = None;
                 }
             } else {
-                let label_text = format!("{} {} {}", status_icon, conv_item.display.title, conv_item.display.time_display);
+                // More compact label format
+                let label_text = format!("{} {}", status_icon, conv_item.display.title);
                 if ui.selectable_label(is_current, label_text).on_hover_text(&conv_item.display.title).clicked() {
                     self.pending_action = Some(SidebarAction::SwitchToConversation(conv_item.summary.id));
                 }
@@ -1474,14 +1633,6 @@ impl ConversationSidebar {
 
             if !is_editing {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("🗑").on_hover_text("Delete conversation").clicked() {
-                        self.pending_action = Some(SidebarAction::RequestDeleteConversation(conv_item.summary.id));
-                    }
-                    if ui.button("✏").on_hover_text("Rename conversation").clicked() {
-                        self.edit_buffer = conv_item.summary.title.clone();
-                        self.editing_conversation_id = Some(conv_item.summary.id);
-                    }
-                    
                     // Show branch suggestion badge if available
                     if let Some(suggestions) = self.get_branch_suggestions(conv_item.summary.id) {
                         if !suggestions.is_empty() {
@@ -1499,7 +1650,7 @@ impl ConversationSidebar {
                             };
                             
                             if ui.add_sized(
-                                Vec2::new(20.0, 20.0),
+                                Vec2::new(16.0, 16.0), // Smaller badge size
                                 egui::Button::new(RichText::new("🌳").small())
                                     .fill(badge_color.gamma_multiply(0.3))
                                     .stroke(Stroke::new(1.0, badge_color))
@@ -1514,26 +1665,38 @@ impl ConversationSidebar {
                             }
                         }
                     }
+                    
+                    // Compact action buttons
+                    if ui.small_button("🗑").on_hover_text("Delete conversation").clicked() {
+                        self.pending_action = Some(SidebarAction::RequestDeleteConversation(conv_item.summary.id));
+                    }
+                    if ui.small_button("✏").on_hover_text("Rename conversation").clicked() {
+                        self.edit_buffer = conv_item.summary.title.clone();
+                        self.editing_conversation_id = Some(conv_item.summary.id);
+                    }
                 });
             }
         });
 
-        // Show visual indicators
+        // Show visual indicators in a more compact way
         if !conv_item.display.indicators.is_empty() {
             ui.horizontal(|ui| {
-                ui.add_space(20.0);
+                ui.add_space(16.0); // Reduced indentation
                 for indicator in &conv_item.display.indicators {
-                    ui.label(&indicator.display);
+                    ui.small(indicator.display.clone());
                 }
             });
         }
 
-        // Show preview if available
+        // Show preview if available - more compact
         if let Some(ref preview) = conv_item.preview {
             ui.indent(format!("{}_preview", conv_item.summary.id), |ui| {
                 ui.label(RichText::new(preview).small().weak());
             });
         }
+        
+        // Add minimal spacing between conversation items
+        ui.add_space(1.0);
     }
 
     // Fallback simple conversation list
@@ -2518,5 +2681,53 @@ mod tests {
         
         // Expanded state should persist
         assert!(sidebar.expanded_groups.contains(&cluster_group_id));
+    }
+
+    #[test]
+    fn test_responsive_ui_configuration() {
+        let mut config = SidebarConfig::default();
+        
+        // Test default responsive configuration
+        assert!(config.responsive.enabled);
+        assert_eq!(config.responsive.small_screen_breakpoint, 1366.0);
+        assert!(config.responsive.compact_mode.small_buttons);
+        assert!(config.responsive.compact_mode.reduced_spacing);
+        assert!(config.responsive.compact_mode.abbreviated_labels);
+        assert!(!config.responsive.compact_mode.hide_secondary_elements);
+        
+        // Test custom responsive configuration
+        config.responsive.enabled = false;
+        config.responsive.small_screen_breakpoint = 1024.0;
+        config.responsive.compact_mode.small_buttons = false;
+        
+        let sidebar = ConversationSidebar::new(config.clone());
+        assert_eq!(sidebar.config.responsive.small_screen_breakpoint, 1024.0);
+        assert!(!sidebar.config.responsive.enabled);
+        assert!(!sidebar.config.responsive.compact_mode.small_buttons);
+    }
+
+    #[test]
+    fn test_responsive_ui_behavior() {
+        let conversations = create_test_conversations();
+        let mut sidebar = ConversationSidebar::with_default_config();
+        
+        // Test that responsive configuration affects behavior
+        assert!(sidebar.config.responsive.enabled);
+        assert_eq!(sidebar.config.responsive.small_screen_breakpoint, 1366.0);
+        
+        // Test organization with responsive settings
+        let result = sidebar.organize_conversations(&conversations, None, &[], None);
+        assert!(result.is_ok());
+        
+        let organized = result.unwrap();
+        assert!(organized.total_count > 0);
+        assert_eq!(organized.filtered_count, organized.total_count);
+        
+        // Test that responsive config can be updated
+        let mut new_config = sidebar.config.clone();
+        new_config.responsive.compact_mode.reduced_spacing = false;
+        sidebar.update_config(new_config);
+        
+        assert!(!sidebar.config.responsive.compact_mode.reduced_spacing);
     }
 } 
