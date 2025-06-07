@@ -11,10 +11,12 @@ sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 repo-mapper = { path = "../repo-mapper" }
 reasoning-engine = { path = "../reasoning-engine" }
 git-manager = { path = "../git-manager" }
+terminal-stream = { path = "../terminal-stream" }
 
 # Async and concurrency
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
+tokio-util = "0.7"
 async-trait = "0.1"
 futures-util = "0.3"
 async-stream = "0.3"
@@ -79,6 +81,8 @@ lazy_static = "1.4"
 egui-notify = { version = "0.15", optional = true }
 egui-modal = { version = "0.4", optional = true }
 
+once_cell = "1.19"
+
 [features]
 default = ["gui"]
 gui = [
@@ -98,6 +102,10 @@ gui = [
 [[bin]]
 name = "sagitta-code"
 path = "src/main.rs"
+
+[[bin]]
+name = "chat_cli"
+path = "src/bin/chat_cli.rs"
 
 [dev-dependencies]
 tokio-test = "0.4"

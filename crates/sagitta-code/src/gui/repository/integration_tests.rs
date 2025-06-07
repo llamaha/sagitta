@@ -19,6 +19,7 @@ use crate::tools::repository::{
 use crate::tools::types::{Tool, ToolResult};
 use sagitta_search::config::AppConfig as SagittaAppConfig;
 use serde_json::json;
+use crate::gui::repository::types::{RepoPanelState, RepoInfo, EnhancedRepoInfo, RepoSyncStatus, SyncState, FilesystemStatus};
 
 /// Test helper to create a real git repository with some content
 fn create_real_git_repo(path: &std::path::Path) -> Result<()> {
@@ -615,5 +616,185 @@ mod tests {
             
             println!("Tool {} passed definition consistency check", definition.name);
         }
+    }
+
+    #[test]
+    fn test_sync_panel_integration_with_basic_repositories() {
+        // Test that sync panel works with basic repository list
+        let mut state = RepoPanelState {
+            repositories: vec![
+                RepoInfo {
+                    name: "basic-repo-1".to_string(),
+                    remote: Some("https://github.com/test/basic1.git".to_string()),
+                    branch: Some("main".to_string()),
+                    local_path: Some(PathBuf::from("/tmp/basic1")),
+                    is_syncing: false,
+                },
+                RepoInfo {
+                    name: "basic-repo-2".to_string(),
+                    remote: Some("https://github.com/test/basic2.git".to_string()),
+                    branch: Some("dev".to_string()),
+                    local_path: Some(PathBuf::from("/tmp/basic2")),
+                    is_syncing: true,
+                },
+            ],
+            use_enhanced_repos: false,
+            ..Default::default()
+        };
+        
+        // Verify repositories are available for sync
+        assert!(!state.repositories.is_empty(), "Basic repositories should be available");
+        assert_eq!(state.repositories.len(), 2, "Should have 2 basic repositories");
+        assert!(!state.use_enhanced_repos, "Should not be using enhanced repos");
+        
+        // Simulate the sync panel logic
+        let available_repos = if state.use_enhanced_repos && !state.enhanced_repositories.is_empty() {
+            state.enhanced_repositories.iter().map(|enhanced| {
+                RepoInfo {
+                    name: enhanced.name.clone(),
+                    remote: enhanced.remote.clone(),
+                    branch: enhanced.branch.clone(),
+                    local_path: enhanced.local_path.clone(),
+                    is_syncing: enhanced.is_syncing,
+                }
+            }).collect::<Vec<_>>()
+        } else {
+            state.repositories.clone()
+        };
+        
+        assert!(!available_repos.is_empty(), "Available repos should not be empty");
+        assert_eq!(available_repos.len(), 2, "Should have 2 available repositories");
+    }
+
+    #[test]
+    fn test_sync_panel_integration_with_enhanced_repositories() {
+        // Test that sync panel works with enhanced repository list
+        let mut state = RepoPanelState {
+            enhanced_repositories: vec![
+                EnhancedRepoInfo {
+                    name: "enhanced-repo-1".to_string(),
+                    remote: Some("https://github.com/test/enhanced1.git".to_string()),
+                    branch: Some("main".to_string()),
+                    local_path: Some(PathBuf::from("/tmp/enhanced1")),
+                    is_syncing: false,
+                    filesystem_status: FilesystemStatus {
+                        exists: true,
+                        accessible: true,
+                        is_git_repository: true,
+                    },
+                    git_status: None,
+                    sync_status: RepoSyncStatus {
+                        state: SyncState::NeedsSync,
+                        needs_sync: true,
+                        last_synced_commit: None,
+                    },
+                    indexed_languages: Some(vec!["rust".to_string(), "python".to_string()]),
+                    file_extensions: vec![],
+                    total_files: Some(250),
+                    size_bytes: Some(125000),
+                },
+            ],
+            use_enhanced_repos: true,
+            ..Default::default()
+        };
+        
+        // Verify enhanced repositories are available for sync
+        assert!(!state.enhanced_repositories.is_empty(), "Enhanced repositories should be available");
+        assert_eq!(state.enhanced_repositories.len(), 1, "Should have 1 enhanced repository");
+        assert!(state.use_enhanced_repos, "Should be using enhanced repos");
+        
+        // Simulate the sync panel logic
+        let available_repos = if state.use_enhanced_repos && !state.enhanced_repositories.is_empty() {
+            state.enhanced_repositories.iter().map(|enhanced| {
+                RepoInfo {
+                    name: enhanced.name.clone(),
+                    remote: enhanced.remote.clone(),
+                    branch: enhanced.branch.clone(),
+                    local_path: enhanced.local_path.clone(),
+                    is_syncing: enhanced.is_syncing,
+                }
+            }).collect::<Vec<_>>()
+        } else {
+            state.repositories.clone()
+        };
+        
+        assert!(!available_repos.is_empty(), "Available repos should not be empty");
+        assert_eq!(available_repos.len(), 1, "Should have 1 available repository");
+        assert_eq!(available_repos[0].name, "enhanced-repo-1");
+    }
+
+    #[test]
+    fn test_sync_panel_fallback_to_basic_when_enhanced_empty() {
+        // Test that sync panel falls back to basic repositories when enhanced is empty
+        let mut state = RepoPanelState {
+            repositories: vec![
+                RepoInfo {
+                    name: "fallback-repo".to_string(),
+                    remote: Some("https://github.com/test/fallback.git".to_string()),
+                    branch: Some("main".to_string()),
+                    local_path: Some(PathBuf::from("/tmp/fallback")),
+                    is_syncing: false,
+                },
+            ],
+            enhanced_repositories: vec![], // Empty enhanced list
+            use_enhanced_repos: true, // Trying to use enhanced but they're empty
+            ..Default::default()
+        };
+        
+        // Simulate the sync panel logic
+        let available_repos = if state.use_enhanced_repos && !state.enhanced_repositories.is_empty() {
+            state.enhanced_repositories.iter().map(|enhanced| {
+                RepoInfo {
+                    name: enhanced.name.clone(),
+                    remote: enhanced.remote.clone(),
+                    branch: enhanced.branch.clone(),
+                    local_path: enhanced.local_path.clone(),
+                    is_syncing: enhanced.is_syncing,
+                }
+            }).collect::<Vec<_>>()
+        } else {
+            state.repositories.clone()
+        };
+        
+        // Should fallback to basic repositories
+        assert!(!available_repos.is_empty(), "Should fallback to basic repositories");
+        assert_eq!(available_repos.len(), 1, "Should have 1 fallback repository");
+        assert_eq!(available_repos[0].name, "fallback-repo");
+    }
+
+    #[test]
+    fn test_sync_panel_empty_state_triggers_refresh() {
+        // Test that sync panel triggers refresh when no repositories are available
+        let mut state = RepoPanelState {
+            repositories: vec![],
+            enhanced_repositories: vec![],
+            use_enhanced_repos: false,
+            is_loading_repos: false,
+            initial_load_attempted: true,
+            ..Default::default()
+        };
+        
+        // Simulate the sync panel logic for empty repositories
+        let available_repos = if state.use_enhanced_repos && !state.enhanced_repositories.is_empty() {
+            state.enhanced_repositories.iter().map(|enhanced| {
+                RepoInfo {
+                    name: enhanced.name.clone(),
+                    remote: enhanced.remote.clone(),
+                    branch: enhanced.branch.clone(),
+                    local_path: enhanced.local_path.clone(),
+                    is_syncing: enhanced.is_syncing,
+                }
+            }).collect::<Vec<_>>()
+        } else {
+            state.repositories.clone()
+        };
+        
+        assert!(available_repos.is_empty(), "No repositories should be available initially");
+        
+        // The panel should trigger a refresh in this case
+        // (This would be done by setting state.is_loading_repos = true)
+        // We can't test the UI directly, but we can verify the condition
+        let should_refresh = available_repos.is_empty() && !state.is_loading_repos && state.initial_load_attempted;
+        assert!(should_refresh, "Should trigger a refresh when no repos are available");
     }
 } 

@@ -6,6 +6,11 @@ use super::super::theme::AppTheme;
 use egui_notify::Toasts;
 use uuid::Uuid;
 use std::collections::VecDeque;
+use tokio::sync::mpsc;
+use terminal_stream::{
+    events::StreamEvent,
+    TerminalWidget, TerminalConfig,
+};
 
 /// Application state management
 pub struct AppState {
@@ -20,6 +25,12 @@ pub struct AppState {
     pub show_hotkeys_modal: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
+    
+    // Terminal state
+    pub terminal_widget: TerminalWidget,
+    pub terminal_event_sender: Option<mpsc::Sender<StreamEvent>>,
+    pub terminal_event_receiver: Option<mpsc::Receiver<StreamEvent>>,
+    pub show_terminal: bool,
     
     // Agent operational state flags for UI
     pub current_agent_state: AgentState,
@@ -57,6 +68,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        // Create terminal widget with default config
+        let terminal_config = TerminalConfig::default();
+        let terminal_widget = TerminalWidget::new("main_terminal");
+        
+        // Create terminal event channel
+        let (terminal_event_sender, terminal_event_receiver) = mpsc::channel(1000);
+        
         Self {
             // Chat state
             chat_input_buffer: String::new(),
@@ -69,6 +87,12 @@ impl AppState {
             show_hotkeys_modal: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
+            
+            // Terminal state
+            terminal_widget,
+            terminal_event_sender: Some(terminal_event_sender),
+            terminal_event_receiver: Some(terminal_event_receiver),
+            show_terminal: false,
             
             // Agent operational state flags for UI
             current_agent_state: AgentState::default(),
@@ -180,6 +204,38 @@ impl AppState {
             self.thinking_start_time.map(|start| start.elapsed())
         } else {
             None
+        }
+    }
+
+    /// Toggle terminal visibility
+    pub fn toggle_terminal(&mut self) {
+        self.show_terminal = !self.show_terminal;
+    }
+
+    /// Clear the terminal
+    pub fn clear_terminal(&mut self) {
+        self.terminal_widget.clear();
+    }
+
+    /// Get the terminal event sender for shell execution
+    pub fn get_terminal_event_sender(&self) -> Option<mpsc::Sender<StreamEvent>> {
+        self.terminal_event_sender.clone()
+    }
+
+    /// Process terminal events (call this in the main update loop)
+    pub fn process_terminal_events(&mut self) {
+        if let Some(receiver) = &mut self.terminal_event_receiver {
+            let mut received_any_event = false;
+            while let Ok(event) = receiver.try_recv() {
+                received_any_event = true;
+                let _ = self.terminal_widget.add_event(&event);
+            }
+            
+            // Auto-open terminal panel when first events arrive
+            if received_any_event && !self.show_terminal {
+                log::info!("Auto-opening terminal panel due to incoming events");
+                self.show_terminal = true;
+            }
         }
     }
 }
@@ -522,5 +578,45 @@ mod tests {
         
         state.current_theme = AppTheme::Custom;
         assert_eq!(state.current_theme, AppTheme::Custom);
+    }
+
+    #[test]
+    fn test_process_terminal_events_auto_opens_panel() {
+        let mut state = AppState::new();
+        
+        // Initially terminal should be closed
+        assert!(!state.show_terminal);
+        
+        // Get the sender to simulate incoming events
+        let sender = state.get_terminal_event_sender().unwrap();
+        
+        // Send a test event
+        let test_event = terminal_stream::events::StreamEvent::stdout(None, "Test output".to_string());
+        sender.try_send(test_event).unwrap();
+        
+        // Process events - should auto-open terminal
+        state.process_terminal_events();
+        
+        // Terminal should now be visible
+        assert!(state.show_terminal);
+    }
+
+    #[test]
+    fn test_process_terminal_events_no_auto_open_when_already_open() {
+        let mut state = AppState::new();
+        
+        // Manually open terminal first
+        state.show_terminal = true;
+        
+        // Get the sender and send an event
+        let sender = state.get_terminal_event_sender().unwrap();
+        let test_event = terminal_stream::events::StreamEvent::stdout(None, "Test output".to_string());
+        sender.try_send(test_event).unwrap();
+        
+        // Process events
+        state.process_terminal_events();
+        
+        // Terminal should still be open (no change in behavior)
+        assert!(state.show_terminal);
     }
 } 

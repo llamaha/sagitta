@@ -60,16 +60,10 @@ pub struct RepositoryManager {
     // The following fields will be needed for real implementations
     client: Option<Arc<QdrantClient>>,
     embedding_handler: Option<Arc<EmbeddingPool>>,
-    // Track sync status for repositories
-    sync_status_map: Arc<Mutex<HashMap<String, SyncStatus>>>,
     // Cache of repositories for updates
     repositories: Arc<Mutex<Vec<RepoInfo>>>,
-    // Simple sync status for GUI display
-    simple_sync_status_map: Arc<Mutex<HashMap<String, SimpleSyncStatus>>>,
     // Log sender for sync operations
     sync_log_sender: Arc<Mutex<Option<mpsc::UnboundedSender<SyncLogMessage>>>>,
-    // Channel for receiving progress updates from GuiProgressReporter instances
-    progress_updates_tx: mpsc::UnboundedSender<GuiSyncReport>,
 }
 
 // Manual Debug implementation since QdrantClient doesn't implement Debug
@@ -79,55 +73,28 @@ impl std::fmt::Debug for RepositoryManager {
             .field("config", &"<AppConfig>")
             .field("client", &self.client.is_some())
             .field("embedding_handler", &self.embedding_handler.is_some())
-            .field("sync_status_map", &"<Arc<Mutex<SyncStatusMap>>>")
             .field("repositories", &"<Arc<Mutex<Repositories>>>")
-            .field("simple_sync_status_map", &"<Arc<Mutex<SimpleSyncStatusMap>>>")
             .field("sync_log_sender", &"<SyncLogSender>")
-            .field("progress_updates_tx", &"<ProgressUpdatesTx>")
             .finish()
     }
 }
 
 impl RepositoryManager {
     pub fn new(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
-        let (progress_updates_tx, progress_updates_rx) = mpsc::unbounded_channel::<GuiSyncReport>();
-
-        let sync_status_map = Arc::new(Mutex::new(HashMap::new()));
-        let simple_sync_status_map = Arc::new(Mutex::new(HashMap::new()));
         let repositories = Arc::new(Mutex::new(Vec::new()));
-
-        // Try to spawn the task, but handle the case where there's no runtime gracefully
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::spawn(Self::process_progress_updates(
-                progress_updates_rx, 
-                sync_status_map.clone(), 
-                simple_sync_status_map.clone(),
-            ));
-        } else {
-            // In test environments without a runtime, we'll just drop the receiver
-            // This is fine for tests that don't need progress updates
-            drop(progress_updates_rx);
-        }
 
         Self { 
             config,
             client: None,
             embedding_handler: None,
-            sync_status_map,
             repositories,
-            simple_sync_status_map,
             sync_log_sender: Arc::new(Mutex::new(None)),
-            progress_updates_tx,
         }
     }
     
     /// Create a new RepositoryManager for testing without spawning background tasks
     #[cfg(test)]
     pub fn new_for_test(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
-        let (progress_updates_tx, _progress_updates_rx) = mpsc::unbounded_channel::<GuiSyncReport>();
-
-        let sync_status_map = Arc::new(Mutex::new(HashMap::new()));
-        let simple_sync_status_map = Arc::new(Mutex::new(HashMap::new()));
         let repositories = Arc::new(Mutex::new(Vec::new()));
 
         // Don't spawn any background tasks for tests
@@ -135,11 +102,8 @@ impl RepositoryManager {
             config,
             client: None,
             embedding_handler: None,
-            sync_status_map,
             repositories,
-            simple_sync_status_map,
             sync_log_sender: Arc::new(Mutex::new(None)),
-            progress_updates_tx,
         }
     }
     
@@ -212,132 +176,10 @@ impl RepositoryManager {
         Ok(())
     }
 
-    /// Get the sync status map for updating from async tasks
-    pub async fn get_sync_status_map(&self) -> Result<tokio::sync::MutexGuard<'_, HashMap<String, SyncStatus>>> {
-        Ok(self.sync_status_map.lock().await)
-    }
-    
-    /// Try to get the sync status map without blocking (for GUI updates)
-    pub fn try_get_sync_status_map(&self) -> Option<tokio::sync::MutexGuard<'_, HashMap<String, SyncStatus>>> {
-        self.sync_status_map.try_lock().ok()
-    }
-    
-    /// Get the simple sync status map for GUI display
-    pub async fn get_simple_sync_status_map(&self) -> Result<tokio::sync::MutexGuard<'_, HashMap<String, SimpleSyncStatus>>> {
-        Ok(self.simple_sync_status_map.lock().await)
-    }
-    
-    /// Try to get the simple sync status map without blocking (for GUI updates)
-    pub fn try_get_simple_sync_status_map(&self) -> Option<tokio::sync::MutexGuard<'_, HashMap<String, SimpleSyncStatus>>> {
-        self.simple_sync_status_map.try_lock().ok()
-    }
-    
     /// Set the sync log sender for capturing log messages
     pub async fn set_sync_log_sender(&self, sender: mpsc::UnboundedSender<SyncLogMessage>) {
         let mut log_sender = self.sync_log_sender.lock().await;
         *log_sender = Some(sender);
-    }
-    
-    /// Task to process GuiSyncReport messages from the channel.
-    async fn process_progress_updates(
-        mut rx: mpsc::UnboundedReceiver<GuiSyncReport>,
-        sync_status_map_arc: Arc<Mutex<HashMap<String, SyncStatus>>>,
-        simple_sync_status_map_arc: Arc<Mutex<HashMap<String, SimpleSyncStatus>>>,
-    ) {
-        while let Some(report) = rx.recv().await {
-            let repo_id = report.repo_id.clone();
-            
-            // Create displayable progress from core progress
-            let elapsed_seconds = 0.0; // We don't track elapsed time in this context
-            let displayable_progress = DisplayableSyncProgress::from_core_progress(&report.progress, elapsed_seconds);
-            
-            // Update detailed sync status
-            let mut sync_status_map = sync_status_map_arc.lock().await;
-            let status = sync_status_map.entry(repo_id.clone()).or_insert_with(|| {
-                info!("Creating new sync status entry for repo: {}", repo_id);
-                SyncStatus::default()
-            });
-            
-            // Update the status based on the displayable progress
-            status.state = format!("{}: {}", displayable_progress.stage_detail.name, displayable_progress.stage_detail.overall_message);
-            status.progress = displayable_progress.percentage_overall;
-            status.success = matches!(report.progress.stage, CoreSyncStage::Completed { .. });
-            status.detailed_progress = Some(displayable_progress.clone());
-            
-            // Update simple sync status
-            let mut simple_status_map = simple_sync_status_map_arc.lock().await;
-            let simple_status = simple_status_map.entry(repo_id).or_insert_with(|| {
-                info!("Creating new simple sync status entry for repo");
-                SimpleSyncStatus::default()
-            });
-            
-            // Update the simple status
-            let is_completed = matches!(report.progress.stage, CoreSyncStage::Completed { .. });
-            let is_error = matches!(report.progress.stage, CoreSyncStage::Error { .. });
-            
-            simple_status.is_running = !is_completed && !is_error;
-            simple_status.is_complete = is_completed || is_error;
-            simple_status.is_success = is_completed;
-            
-            // Format output line based on stage
-            let output_line = match &report.progress.stage {
-                CoreSyncStage::Idle => "[Idle] Waiting for sync to start.".to_string(),
-                CoreSyncStage::GitFetch { message, progress } => {
-                    if let Some((current, total)) = progress {
-                        format!("[Git Fetch] {} {}/{}", message, current, total)
-                    } else {
-                        format!("[Git Fetch] {}", message)
-                    }
-                },
-                CoreSyncStage::DiffCalculation { message } => {
-                    format!("[Diff Calculation] {}", message)
-                },
-                CoreSyncStage::IndexFile { current_file, total_files, current_file_num, files_per_second, .. } => {
-                    let file_display = current_file.as_ref()
-                        .map(|p| format!(" (File: {})", p.to_string_lossy()))
-                        .unwrap_or_default();
-                    let speed_display = files_per_second
-                        .map(|fps| format!(" {:.2} files/s", fps))
-                        .unwrap_or_default();
-                    format!("[Indexing] Indexing file {} of {}{}{} {}/{}", 
-                           current_file_num, total_files, file_display, speed_display, current_file_num, total_files)
-                },
-                CoreSyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, .. } => {
-                    let file_display = current_file.as_ref()
-                        .map(|p| format!(" (File: {})", p.to_string_lossy()))
-                        .unwrap_or_default();
-                    let speed_display = files_per_second
-                        .map(|fps| format!(" {:.2} files/s", fps))
-                        .unwrap_or_default();
-                    format!("[Deleting] Deleting file {} of {}{}{} {}/{}", 
-                           current_file_num, total_files, file_display, speed_display, current_file_num, total_files)
-                },
-                CoreSyncStage::CollectFiles { total_files, message } => {
-                    format!("[Collect Files] {} (Total: {})", message, total_files)
-                },
-                CoreSyncStage::QueryLanguages { message } => {
-                    format!("[Query Languages] {}", message)
-                },
-                CoreSyncStage::VerifyingCollection { message } => {
-                    format!("[Verifying Collection] {}", message)
-                },
-                CoreSyncStage::Completed { message } => {
-                    simple_status.final_message = message.clone();
-                    "✅ Sync Completed Successfully.".to_string()
-                },
-                CoreSyncStage::Error { message } => {
-                    simple_status.final_message = message.clone();
-                    "❌ Sync Failed.".to_string()
-                },
-            };
-            
-            simple_status.output_lines.push(output_line);
-            
-            // Limit output lines to prevent memory issues
-            if simple_status.output_lines.len() > 50 {
-                simple_status.output_lines.remove(0);
-            }
-        }
     }
     
     /// Get repositories for updating from async tasks
@@ -444,21 +286,8 @@ impl RepositoryManager {
     }
 
     async fn initialize_sync_status_for_new_repo(&self, repo_name: &str) {
-        let mut ssm_guard = self.sync_status_map.lock().await;
-        ssm_guard.insert(repo_name.to_string(), SyncStatus::default());
-        drop(ssm_guard);
-
-        let mut simple_ssm_guard = self.simple_sync_status_map.lock().await;
-        simple_ssm_guard.insert(repo_name.to_string(), SimpleSyncStatus {
-            is_running: false,
-            is_complete: false,
-            is_success: false,
-            output_lines: vec!["Awaiting initial sync.".to_string()],
-            final_message: "Pending initial sync".to_string(),
-            started_at: None,
-        });
-        drop(simple_ssm_guard);
-        log::info!("[GUI RepoManager] Initialized sync status for new repo '{}'", repo_name);
+        // This is now handled by the UI and global state, so this function is obsolete.
+        log::info!("[GUI RepoManager] Obsolete initialize_sync_status_for_new_repo called for '{}'", repo_name);
     }
 
     pub async fn add_local_repository(&self, name: &str, path: &str) -> Result<()> {
@@ -654,7 +483,11 @@ impl RepositoryManager {
     }
 
     pub async fn sync_repository(&mut self, name: &str) -> Result<()> {
-        log::info!("[GUI RepoManager] Sync repo: {}", name);
+        self.sync_repository_with_options(name, false).await
+    }
+
+    pub async fn sync_repository_with_options(&mut self, name: &str, force: bool) -> Result<()> {
+        log::info!("[GUI RepoManager] Sync repo: {} (force: {})", name, force);
         
         if self.client.is_none() {
             return Err(anyhow!("Qdrant client not initialized"));
@@ -668,36 +501,14 @@ impl RepositoryManager {
                 .clone()
         }; // config_guard dropped here
         
-        // Initial status update (optional, as GuiProgressReporter will send initial Idle state)
-        // Could set a "Queued" or "Preparing" state in sync_status_map directly here if desired.
-        {
-            let mut simple_map = self.simple_sync_status_map.lock().await;
-            let entry = simple_map.entry(name.to_string()).or_insert_with(SimpleSyncStatus::default);
-            entry.is_running = true;
-            entry.is_complete = false;
-            entry.is_success = false;
-            entry.output_lines.clear();
-            entry.output_lines.push("🔄 Starting repository sync...".to_string());
-            entry.final_message = String::new();
-            entry.started_at = Some(std::time::Instant::now());
-
-            let mut detail_map = self.sync_status_map.lock().await;
-            let detail_entry = detail_map.entry(name.to_string()).or_insert_with(SyncStatus::default);
-            detail_entry.state = "Starting...".to_string();
-            detail_entry.progress = 0.0;
-            detail_entry.success = false;
-            detail_entry.detailed_progress = None; // Cleared before new progress comes in
-        }
-
-        // Create GuiProgressReporter
+        // Create GuiProgressReporter - it no longer needs a channel.
         let progress_reporter = Arc::new(GuiProgressReporter::new(
-            self.progress_updates_tx.clone(),
             name.to_string(),
         ));
 
         // Create sync options, now including the progress reporter
         let options = SyncOptions {
-            force: false, // Default, can be configured if needed. Changed from force_full_resync
+            force, // Use the provided force parameter
             extensions: None, // Default, can be configured if needed
             // progress_reporter: Some(progress_reporter as Arc<dyn CoreSyncProgressReporter>),
         };
@@ -752,23 +563,6 @@ impl RepositoryManager {
                 // This error is from sync_repository itself, not from the SyncResult.
                 log::error!("Error during sync_repository call for {}: {}", name, e);
                 // The GuiProgressReporter should have sent an Error stage update.
-                // We might want to ensure the simple_sync_status also reflects this general error.
-                {
-                    let mut simple_map = self.simple_sync_status_map.lock().await;
-                    if let Some(status) = simple_map.get_mut(name) {
-                        status.is_running = false;
-                        status.is_complete = true;
-                        status.is_success = false;
-                    let error_msg = format!("❌ Sync failed: {}", e);
-                        status.output_lines.push(error_msg.clone());
-                        status.final_message = error_msg;
-                    }
-                     let mut detail_map = self.sync_status_map.lock().await;
-                     if let Some(status) = detail_map.get_mut(name) {
-                        status.state = format!("Error: {}", e);
-                        status.success = false;
-                    }
-                }
                 self.cleanup_gpu_memory_after_sync().await;
                 Err(anyhow!("Failed to sync repository {}: {}", name, e))
             }
@@ -803,16 +597,25 @@ impl RepositoryManager {
         log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
                   repo_name, query_text, limit, element_type, language, branch);
         
-        // Get collection name based on tenant and repo
-        let collection_name = repo_helpers::get_collection_name(&tenant_id, repo_name, &config_guard);
+        // Find the repository configuration to determine the effective branch
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        // Determine the effective branch name
+        let branch_name = branch
+            .map(String::from)
+            .or_else(|| repo_config.active_branch.clone())
+            .unwrap_or_else(|| repo_config.default_branch.clone());
+        
+        // Get collection name based on tenant, repo, and branch using branch-aware naming
+        let collection_name = repo_helpers::get_branch_aware_collection_name(&tenant_id, repo_name, &branch_name, &config_guard);
         
         // Create filter conditions
         let mut filter_conditions = Vec::new();
         
-        // Add branch filter if provided
-        if let Some(branch_name) = branch {
-            filter_conditions.push(Condition::matches("branch", branch_name.to_string()));
-        }
+        // Always add branch filter to ensure we only get results from the correct branch
+        filter_conditions.push(Condition::matches("branch", branch_name.clone()));
         
         // Add element_type filter if provided
         if let Some(element) = element_type {
@@ -1142,7 +945,7 @@ impl RepositoryManager {
         let git_manager = GitManager::new();
         
         // Delete branch
-        git_manager.delete_branch(&repo_config.local_path, branch_name)?;
+        git_manager.delete_branch(&repo_config.local_path, branch_name, force)?;
         
         Ok(())
     }
@@ -1183,181 +986,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_initialize_sync_status_for_new_repo() {
-        let (manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
-        let repo_name = "test_repo_for_status_init";
-
-        manager.initialize_sync_status_for_new_repo(repo_name).await;
-
-        // Check detailed sync_status_map
-        let ssm = manager.sync_status_map.lock().await;
-        assert!(ssm.contains_key(repo_name), "Detailed sync status map should contain the new repo");
-        let status = ssm.get(repo_name).unwrap();
-        assert_eq!(status.state, "Pending");
-        assert_eq!(status.progress, 0.0);
-        assert!(!status.success);
-        assert!(status.detailed_progress.is_none());
-
-        // Check simple_sync_status_map
-        let simple_ssm = manager.simple_sync_status_map.lock().await;
-        assert!(simple_ssm.contains_key(repo_name), "Simple sync status map should contain the new repo");
-        let simple_status = simple_ssm.get(repo_name).unwrap();
-        assert!(!simple_status.is_running);
-        assert!(!simple_status.is_complete);
-        assert!(!simple_status.is_success);
-        assert_eq!(simple_status.final_message, "Pending initial sync");
-        assert_eq!(simple_status.output_lines, vec!["Awaiting initial sync.".to_string()]);
-        assert!(simple_status.started_at.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_process_progress_updates_logic() {
-        let (repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
-        let progress_tx = repo_manager.progress_updates_tx.clone();
-        let repo_name = "test-repo-new-progress".to_string();
-
-        // --- Test Idle State --- 
-        let idle_progress = CoreSyncProgress { stage: CoreSyncStage::Idle };
-        progress_tx.send(GuiSyncReport { repo_id: repo_name.clone(), progress: idle_progress }).unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await; // Allow time for processing
-
-        {
-            let detail_map = repo_manager.sync_status_map.lock().await;
-            let status = detail_map.get(&repo_name).expect("Status should exist for idle");
-            assert_eq!(status.state, "Idle: Waiting for sync to start.");
-            assert_eq!(status.progress, 0.0);
-            assert!(!status.success);
-            let displayable = status.detailed_progress.as_ref().unwrap();
-            assert_eq!(displayable.stage_detail.name, "Idle");
-
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&repo_name).expect("Simple status should exist for idle");
-            assert!(simple_status.is_running); // Initial state of simple status assumes running once a report comes
-            assert!(!simple_status.is_complete);
-            assert_eq!(simple_status.output_lines.last().unwrap(), "[Idle] Waiting for sync to start.");
-        }
-
-        // --- Test GitFetch State --- 
-        let fetch_progress_core = CoreSyncProgress {
-            stage: CoreSyncStage::GitFetch { 
-                message: "Fetching objects...".to_string(), 
-                progress: Some((50, 100))
-            }
-        };
-        progress_tx.send(GuiSyncReport { repo_id: repo_name.clone(), progress: fetch_progress_core }).unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        {
-            let detail_map = repo_manager.sync_status_map.lock().await;
-            let status = detail_map.get(&repo_name).expect("Status should exist for fetch");
-            assert_eq!(status.state, "Git Fetch: Fetching objects...");
-            assert_eq!(status.progress, 0.5); // 50/100
-            let displayable = status.detailed_progress.as_ref().unwrap();
-            assert_eq!(displayable.stage_detail.name, "Git Fetch");
-            assert_eq!(displayable.stage_detail.current_progress, Some((50,100)));
-
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&repo_name).expect("Simple status should exist for fetch");
-            assert!(simple_status.output_lines.last().unwrap().contains("[Git Fetch] Fetching objects... 50/100"));
-        }
-
-        // --- Test IndexFile State --- 
-        let index_progress_core = CoreSyncProgress {
-            stage: CoreSyncStage::IndexFile {
-                current_file: Some("/path/to/file.rs".into()),
-                total_files: 200,
-                current_file_num: 20,
-                files_per_second: Some(10.5),
-                message: Some("Indexing files".to_string()),
-            }
-        };
-        progress_tx.send(GuiSyncReport { repo_id: repo_name.clone(), progress: index_progress_core }).unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        {
-            let detail_map = repo_manager.sync_status_map.lock().await;
-            let status = detail_map.get(&repo_name).expect("Status should exist for index");
-            assert_eq!(status.progress, 0.1); // 20/200
-            assert!(status.state.contains("Indexing Files: Indexing file 20 of 200"));
-            let displayable = status.detailed_progress.as_ref().unwrap();
-            assert_eq!(displayable.stage_detail.name, "Indexing Files");
-            assert_eq!(displayable.stage_detail.current_file, Some("/path/to/file.rs".to_string()));
-            assert_eq!(displayable.stage_detail.files_per_second, Some(10.5));
-
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&repo_name).expect("Simple status for index");
-            assert!(simple_status.output_lines.last().unwrap().contains("Indexing file 20 of 200 (File: /path/to/file.rs) 10.50 files/s 20/200"));
-        }
-
-        // --- Test Completed State --- 
-        let completed_progress_core = CoreSyncProgress {
-            stage: CoreSyncStage::Completed { message: "All done!".to_string() }
-        };
-        progress_tx.send(GuiSyncReport { repo_id: repo_name.clone(), progress: completed_progress_core }).unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        {
-            let detail_map = repo_manager.sync_status_map.lock().await;
-            let status = detail_map.get(&repo_name).expect("Status should exist for completed");
-        assert_eq!(status.state, "Completed: All done!");
-            assert_eq!(status.progress, 1.0);
-        assert!(status.success);
-            let displayable = status.detailed_progress.as_ref().unwrap();
-            assert_eq!(displayable.stage_detail.name, "Completed");
-            assert_eq!(displayable.message, "All done!");
-
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&repo_name).expect("Simple status for completed");
-            assert!(!simple_status.is_running);
-            assert!(simple_status.is_complete);
-            assert!(simple_status.is_success);
-            assert_eq!(simple_status.final_message, "All done!");
-            assert!(simple_status.output_lines.last().unwrap().contains("✅ Sync Completed Successfully."));
-        }
-        
-        // --- Test Error State --- 
-        let error_repo_name = "test-repo-error".to_string();
-        let error_progress_core = CoreSyncProgress {
-            stage: CoreSyncStage::Error { message: "Something went wrong".to_string() }
-        };
-        progress_tx.send(GuiSyncReport { repo_id: error_repo_name.clone(), progress: error_progress_core }).unwrap();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        {
-            let detail_map = repo_manager.sync_status_map.lock().await;
-            let status = detail_map.get(&error_repo_name).expect("Status should exist for error");
-            assert_eq!(status.state, "Error: Something went wrong");
-            assert!(!status.success);
-             let displayable = status.detailed_progress.as_ref().unwrap();
-            assert_eq!(displayable.stage_detail.name, "Error");
-            assert_eq!(displayable.message, "Something went wrong");
-
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&error_repo_name).expect("Simple status for error");
-            assert!(!simple_status.is_running);
-            assert!(simple_status.is_complete);
-            assert!(!simple_status.is_success);
-            assert_eq!(simple_status.final_message, "Something went wrong");
-            assert!(simple_status.output_lines.last().unwrap().contains("❌ Sync Failed."));
-        }
-        
-        // --- Test SimpleSyncStatus line limit ---
-        let line_limit_repo = "test-line-limit-repo".to_string();
-        for i in 0..60 {
-            let p = CoreSyncProgress { stage: CoreSyncStage::DiffCalculation { message: format!("Line {}", i) } };
-            progress_tx.send(GuiSyncReport { repo_id: line_limit_repo.clone(), progress: p }).unwrap();
-            // Brief sleep in loop to ensure order and allow processing, though might not be strictly necessary for each one
-            if i % 10 == 0 { tokio::time::sleep(Duration::from_millis(10)).await; }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await; // Final sleep
-        {
-            let simple_map = repo_manager.simple_sync_status_map.lock().await;
-            let simple_status = simple_map.get(&line_limit_repo).expect("Simple status for line limit test");
-            assert_eq!(simple_status.output_lines.len(), 50, "Should be limited to 50 lines");
-            assert!(simple_status.output_lines[0].contains("[Diff Calculation] Line 10"));
-            assert!(simple_status.output_lines[49].contains("[Diff Calculation] Line 59"));
-        }
-    }
-
-    // test_gpu_memory_cleanup_after_sync and test_rayon_threads_environment_variable_setting
-    // are unaffected and can remain.
-    #[tokio::test]
     async fn test_gpu_memory_cleanup_after_sync() {
         let (repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
         
@@ -1391,68 +1019,82 @@ mod tests {
         std::env::remove_var("RAYON_NUM_THREADS");
     }
 
-    // The old tests (test_sync_progress_tracking, test_sync_status_synchronization, 
-    // test_simple_sync_status_updates, test_simple_sync_status_line_limit, test_sync_error_handling)
-    // are now effectively replaced by test_process_progress_updates_logic.
-    // test_repository_manager_initialization_without_dependencies and test_concurrent_sync_status_access
-    // should be reviewed if they are still relevant or need adaptation. For now, assume they are okay
-    // or tested elsewhere if they don't directly touch the removed sync methods.
-
+    /// Tests that the RepositoryManager can be initialized without panicking
+    /// when its core dependencies (Qdrant client, Embedding handler) are not available.
     #[tokio::test]
     async fn test_repository_manager_initialization_without_dependencies() {
-        let (_repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
-        // Test that new() doesn't panic and initializes basic fields
-        // This test implicitly runs due to create_test_repo_manager_with_temp_config
-        // Further checks could be added here if needed for specific initial states not covered by other tests
-        assert!(true); // Placeholder for successful execution
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = AppConfig::default();
+        // Ensure no valid paths are set
+        config.qdrant_url = "".to_string();
+        config.onnx_model_path = None;
+        config.onnx_tokenizer_path = None;
+
+        let mut manager = RepositoryManager::new(Arc::new(Mutex::new(config)));
+        
+        // Initialization should complete without error, even with missing dependencies
+        let result = manager.initialize().await;
+        assert!(result.is_ok());
+        assert!(manager.client.is_none());
+        assert!(manager.embedding_handler.is_none());
     }
 
+    /// Tests that the query method uses branch-aware collection naming that matches
+    /// what the CLI and sync logic use, ensuring collections are found correctly.
     #[tokio::test]
-    async fn test_concurrent_sync_status_access() {
-        let (repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
-        let repo_name_prefix = "concurrent-repo-";
-        let num_tasks = 10;
-        let num_messages_per_task = 5;
+    async fn test_query_uses_branch_aware_collection_naming() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = AppConfig::default();
+        config.tenant_id = Some("test-tenant".to_string());
+        config.performance.collection_name_prefix = "test_repo_".to_string();
         
-        let mut handles = vec![];
-        
-        for i in 0..num_tasks {
-            let tx = repo_manager.progress_updates_tx.clone();
-            let repo_name = format!("{}{}", repo_name_prefix, i);
-            let handle = tokio::spawn(async move {
-                for j in 0..num_messages_per_task {
-                    let progress = CoreSyncProgress {
-                        stage: CoreSyncStage::DiffCalculation {
-                            message: format!("Task {} Msg {}", i, j),
-                        },
-                    };
-                    tx.send(GuiSyncReport { repo_id: repo_name.clone(), progress }).unwrap();
-                    tokio::time::sleep(Duration::from_millis(5)).await; // Small delay
-                }
-            });
-            handles.push(handle);
-        }
-        
-        for handle in handles {
-            handle.await.unwrap();
-        }
-        
-        // Allow some time for all messages to be processed by the RepositoryManager's task
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Add a test repository to the config
+        let test_repo = sagitta_search::RepositoryConfig {
+            name: "test-repo".to_string(),
+            url: "https://github.com/test/repo.git".to_string(),
+            local_path: temp_dir.path().join("test-repo"),
+            default_branch: "main".to_string(),
+            active_branch: Some("feature-branch".to_string()),
+            tracked_branches: vec!["main".to_string(), "feature-branch".to_string()],
+            remote_name: None,
+            last_synced_commits: HashMap::new(),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: Some("test-tenant".to_string()),
+        };
+        config.repositories.push(test_repo);
 
-        let sync_map = repo_manager.sync_status_map.lock().await;
-        let simple_map = repo_manager.simple_sync_status_map.lock().await;
-
-        for i in 0..num_tasks {
-            let repo_name = format!("{}{}", repo_name_prefix, i);
-            assert!(sync_map.contains_key(&repo_name), "Sync map missing repo {}", repo_name);
-            assert!(simple_map.contains_key(&repo_name), "Simple map missing repo {}", repo_name);
-            
-            if let Some(status) = simple_map.get(&repo_name) {
-                assert_eq!(status.output_lines.len(), num_messages_per_task, "Incorrect number of log lines for repo {}", repo_name);
-            }
-        }
-        assert_eq!(sync_map.len(), num_tasks, "Sync map should have {} entries", num_tasks);
-        assert_eq!(simple_map.len(), num_tasks, "Simple map should have {} entries", num_tasks);
+        let manager = RepositoryManager::new_for_test(Arc::new(Mutex::new(config)));
+        
+        // Test query without client/embedding handler (should return placeholder)
+        let result = manager.query(
+            "test-repo", 
+            "test query", 
+            10, 
+            None, 
+            None, 
+            None // No branch specified, should use active_branch
+        ).await;
+        
+        // Should not error due to collection name issues (would get placeholder response)
+        assert!(result.is_ok());
+        
+        // Test with specific branch
+        let result_with_branch = manager.query(
+            "test-repo",
+            "test query", 
+            10, 
+            None, 
+            None, 
+            Some("main") // Specific branch
+        ).await;
+        
+        assert!(result_with_branch.is_ok());
+        
+        // The test passes if we don't get "collection not found" errors
+        // In a real scenario with Qdrant, the branch-aware collection name would be used
     }
 } 

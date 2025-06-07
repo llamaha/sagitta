@@ -161,6 +161,10 @@ mod tests {
         ) -> Result<ToolResult, SagittaCodeError> {
             Ok(ToolResult::success(serde_json::json!({ "status": format!("{} invoked", self.name) })))
         }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 
     #[tokio::test]

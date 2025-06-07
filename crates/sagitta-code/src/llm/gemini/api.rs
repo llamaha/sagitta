@@ -375,6 +375,27 @@ pub struct ErrorDetail {
     pub additional_fields: HashMap<String, Value>,
 }
 
+/// Clean JSON schema by removing fields not supported by Gemini API
+fn clean_json_schema(value: &Value) -> Value {
+    match value {
+        Value::Object(obj) => {
+            let mut cleaned = serde_json::Map::new();
+            for (key, val) in obj {
+                // Skip unsupported schema fields
+                if matches!(key.as_str(), "additionalProperties" | "oneOf" | "anyOf" | "allOf" | "not" | "if" | "then" | "else") {
+                    continue;
+                }
+                cleaned.insert(key.clone(), clean_json_schema(val));
+            }
+            Value::Object(cleaned)
+        }
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(clean_json_schema).collect())
+        }
+        _ => value.clone(),
+    }
+}
+
 /// Helper functions to convert between Gemini and client types
 impl From<&crate::llm::client::Message> for Content {
     fn from(message: &crate::llm::client::Message) -> Self {
@@ -444,7 +465,7 @@ impl From<&crate::llm::client::ToolDefinition> for FunctionDeclaration {
         FunctionDeclaration {
             name: tool.name.clone(),
             description: tool.description.clone(),
-            parameters: tool.parameters.clone(),
+            parameters: clean_json_schema(&tool.parameters),
         }
     }
 }
@@ -1074,11 +1095,11 @@ mod tests {
     #[test]
     fn test_usage_metadata_with_thinking_tokens() {
         let usage = UsageMetadata {
-            prompt_token_count: Some(10),
-            candidates_token_count: Some(20),
-            total_token_count: Some(35),
-            thoughts_token_count: Some(5),
-            cached_content_token_count: None,
+            prompt_token_count: Some(100),
+            candidates_token_count: Some(200),
+            total_token_count: Some(300),
+            thoughts_token_count: Some(50),
+            cached_content_token_count: Some(25),
         };
         
         let serialized = serde_json::to_string(&usage).unwrap();
@@ -1088,5 +1109,153 @@ mod tests {
         assert_eq!(usage.candidates_token_count, deserialized.candidates_token_count);
         assert_eq!(usage.total_token_count, deserialized.total_token_count);
         assert_eq!(usage.thoughts_token_count, deserialized.thoughts_token_count);
+        assert_eq!(usage.cached_content_token_count, deserialized.cached_content_token_count);
+    }
+
+    #[test]
+    fn test_clean_json_schema() {
+        use serde_json::json;
+        
+        // Test schema with unsupported fields
+        let schema_with_unsupported = json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Name field"
+                },
+                "env_vars": {
+                    "type": "object",
+                    "description": "Environment variables",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            },
+            "required": ["name"],
+            "oneOf": [
+                {"required": ["url"]},
+                {"required": ["local_path"]}
+            ]
+        });
+        
+        let cleaned = clean_json_schema(&schema_with_unsupported);
+        
+        // Should keep supported fields
+        assert_eq!(cleaned["type"], "object");
+        assert!(cleaned["properties"].is_object());
+        assert!(cleaned["required"].is_array());
+        
+        // Should remove unsupported fields
+        assert!(cleaned.get("oneOf").is_none());
+        assert!(cleaned["properties"]["env_vars"].get("additionalProperties").is_none());
+        
+        // Should keep nested supported fields
+        assert_eq!(cleaned["properties"]["name"]["type"], "string");
+        assert_eq!(cleaned["properties"]["env_vars"]["type"], "object");
+    }
+
+    #[test]
+    fn test_tool_definition_conversion_with_schema_cleaning() {
+        use crate::llm::client::ToolDefinition;
+        use serde_json::json;
+        
+        let tool_def = ToolDefinition {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "param1": {"type": "string"},
+                    "param2": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"}
+                    }
+                },
+                "required": ["param1"],
+                "oneOf": [
+                    {"required": ["param1"]},
+                    {"required": ["param2"]}
+                ]
+            }),
+            is_required: false,
+        };
+        
+        let function_declaration: FunctionDeclaration = (&tool_def).into();
+        
+        // Should have cleaned parameters
+        assert!(function_declaration.parameters.get("oneOf").is_none());
+        assert!(function_declaration.parameters["properties"]["param2"].get("additionalProperties").is_none());
+        
+        // Should keep supported fields
+        assert_eq!(function_declaration.parameters["type"], "object");
+        assert!(function_declaration.parameters["properties"].is_object());
+        assert!(function_declaration.parameters["required"].is_array());
+    }
+
+    #[test]
+    fn test_tools_with_problematic_schemas() {
+        use crate::llm::client::ToolDefinition;
+        use serde_json::json;
+        
+        // Test with shell execution tool schema (has additionalProperties)
+        let shell_tool = ToolDefinition {
+            name: "shell_execution".to_string(),
+            description: "Execute shell commands".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "env_vars": {
+                        "type": "object",
+                        "description": "Environment variables",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": ["command"]
+            }),
+            is_required: false,
+        };
+
+        // Test with repository tool schema (has oneOf)
+        let repo_tool = ToolDefinition {
+            name: "add_repository".to_string(),
+            description: "Add a repository".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "url": {"type": "string"},
+                    "local_path": {"type": "string"}
+                },
+                "required": ["name"],
+                "oneOf": [
+                    {"required": ["url"]},
+                    {"required": ["local_path"]}
+                ]
+            }),
+            is_required: false,
+        };
+
+        let shell_declaration: FunctionDeclaration = (&shell_tool).into();
+        let repo_declaration: FunctionDeclaration = (&repo_tool).into();
+
+        // Verify shell tool cleaning
+        assert!(shell_declaration.parameters["properties"]["env_vars"].get("additionalProperties").is_none());
+        assert_eq!(shell_declaration.parameters["properties"]["env_vars"]["type"], "object");
+
+        // Verify repo tool cleaning
+        assert!(repo_declaration.parameters.get("oneOf").is_none());
+        assert!(repo_declaration.parameters["properties"].is_object());
+
+        // Ensure all declarations are valid for Gemini API
+        let serialized_shell = serde_json::to_string(&shell_declaration).unwrap();
+        let serialized_repo = serde_json::to_string(&repo_declaration).unwrap();
+        
+        // Should not contain problematic fields
+        assert!(!serialized_shell.contains("additionalProperties"));
+        assert!(!serialized_repo.contains("oneOf"));
     }
 }

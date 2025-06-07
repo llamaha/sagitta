@@ -121,24 +121,30 @@ impl Tool for AddRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        match serde_json::from_value::<AddRepositoryParams>(parameters) {
-            Ok(params) => {
-                match self.add_repository(&params).await {
-                    Ok(message) => Ok(ToolResult::Success(serde_json::json!({
-                        "success": true,
-                        "message": message,
-                        "repository_name": params.name
-                    }))),
-                    Err(e) => Ok(ToolResult::Error {
-                        error: format!("Add repository failed: {}", e),
-                    })
-                }
-            },
-            Err(e) => Ok(ToolResult::Error {
-                error: format!("Invalid parameters for add_repository: {}", e),
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: AddRepositoryParams = match serde_json::from_value(parameters) {
+            Ok(params) => params,
+            Err(e) => return Ok(ToolResult::Error {
+                error: format!("Invalid parameters: {}", e)
             })
+        };
+        
+        match self.add_repository(&params).await {
+            Ok(message) => Ok(ToolResult::Success(serde_json::json!({
+                "repository_name": params.name,
+                "repository_url": params.url,
+                "local_path": params.local_path,
+                "branch": params.branch,
+                "status": "added",
+                "message": message
+            }))),
+            Err(SagittaCodeError::ToolError(msg)) => Ok(ToolResult::Error { error: msg }),
+            Err(e) => Err(e) // Only propagate non-tool errors
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

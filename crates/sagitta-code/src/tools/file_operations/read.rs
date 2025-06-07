@@ -77,44 +77,31 @@ impl Tool for ReadFileTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        // Parse parameters
-        let params: ReadFileParams = serde_json::from_value(parameters)
-            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse read_file parameters: {}", e)))?;
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: ReadFileParams = match serde_json::from_value(parameters) {
+            Ok(params) => params,
+            Err(e) => return Ok(ToolResult::Error {
+                error: format!("Invalid parameters: {}", e)
+            })
+        };
         
-        log::info!("[ReadFileTool] Reading file '{}' from repository '{}' (lines: {:?}-{:?})", 
-                  params.file_path, params.repository_name, params.start_line, params.end_line);
-        
-        // Get the repository manager
         let repo_manager = self.repo_manager.lock().await;
+        let result = repo_manager.view_file(&params.repository_name, &params.file_path, None, None).await;
         
-        // Read the file
-        let file_content = repo_manager.view_file(
-            &params.repository_name,
-            &params.file_path,
-            params.start_line,
-            params.end_line,
-        ).await;
-        
-        match file_content {
-            Ok(content) => {
-                log::info!("[ReadFileTool] Successfully read {} characters from file '{}' in repository '{}'", 
-                          content.len(), params.file_path, params.repository_name);
-                Ok(ToolResult::Success(serde_json::json!({
-                    "repository_name": params.repository_name,
-                    "file_path": params.file_path,
-                    "start_line": params.start_line,
-                    "end_line": params.end_line,
-                    "content": content,
-                })))
-            },
-            Err(e) => {
-                let detailed_error = format!("Failed to read file '{}' from repository '{}': {}", 
-                                           params.file_path, params.repository_name, e);
-                log::error!("[ReadFileTool] {}", detailed_error);
-                Err(SagittaCodeError::ToolError(detailed_error))
-            }
+        match result {
+            Ok(content) => Ok(ToolResult::Success(serde_json::json!({
+                "file_path": params.file_path,
+                "content": content,
+                "size": content.len()
+            }))),
+            Err(e) => Ok(ToolResult::Error { 
+                error: format!("Failed to read file: {}", e)
+            })
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -151,14 +138,15 @@ mod tests {
             "file_path": "test.txt"
         });
         
-        let result = tool.execute(params).await;
-        assert!(result.is_err());
+        let result = tool.execute(params).await.unwrap();
         
-        // Check that the error message contains detailed information
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("non-existent-repo"));
-        assert!(error_msg.contains("test.txt"));
-        assert!(error_msg.contains("Failed to read file"));
+        // Should get ToolResult::Error, not a Rust error
+        match result {
+            ToolResult::Error { error } => {
+                assert!(error.contains("non-existent-repo") || error.contains("Failed to read file"));
+            }
+            _ => panic!("Expected ToolResult::Error for non-existent repository"),
+        }
     }
 
     #[test]

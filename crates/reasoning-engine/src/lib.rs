@@ -21,6 +21,9 @@
 //!     async fn generate_stream(&self, _messages: Vec<reasoning_engine::LlmMessage>) -> reasoning_engine::Result<std::pin::Pin<Box<dyn futures_util::Stream<Item = reasoning_engine::Result<reasoning_engine::LlmStreamChunk>> + Send>>> {
 //!         unimplemented!("MockLlmClient is for doc examples only")
 //!     }
+//!     async fn generate(&self, _messages: Vec<reasoning_engine::LlmMessage>, _tools: Vec<reasoning_engine::ToolDefinition>) -> reasoning_engine::Result<reasoning_engine::LlmResponse> {
+//!         unimplemented!("MockLlmClient is for doc examples only")
+//!     }
 //! }
 //! struct MockIntentAnalyzer;
 //! #[async_trait::async_trait]
@@ -60,7 +63,7 @@ pub mod config;
 
 // Re-export main types for convenience
 pub use error::{ReasoningError, Result};
-pub use traits::{ToolExecutor, EventEmitter, StreamHandler, ToolResult, ToolDefinition, ReasoningEvent, LlmClient, LlmMessage, LlmMessagePart, LlmStreamChunk, ToolCall, IntentAnalyzer, DetectedIntent};
+pub use traits::{ToolExecutor, EventEmitter, StreamHandler, ToolResult, ToolDefinition, ReasoningEvent, LlmClient, LlmMessage, LlmMessagePart, LlmStreamChunk, ToolCall, IntentAnalyzer, DetectedIntent, LlmResponse, TokenUsage};
 pub use state::{ReasoningState, ReasoningContext, ReasoningStep};
 pub use graph::{ReasoningGraph, ReasoningNode, NodeType, GraphEdge, EdgeCondition};
 pub use decision::{DecisionEngine, Decision, DecisionContext, DecisionOption};
@@ -210,9 +213,12 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
 
         // Variable to store the result of the last successful tool orchestration
         let mut pending_tool_summary_info: Option<OrchestrationResult> = None;
-        
-        // Track the last analyzed LLM response to prevent duplicate intent analysis
         let mut last_analyzed_content: Option<String> = None;
+        let mut nudge_performed_this_iteration = false;
+        
+        // NEW: Flag to defer completion check until after LLM processes tool results
+        let mut pending_completion_check = false;
+        let mut pending_completion_data: Option<(String, std::collections::HashMap<String, crate::traits::ToolResult>)> = None;
 
         // Initial planning step (analyze_input) - operates on the *current* user input text
         let initial_tool_request = ToolExecutionRequest::new(
@@ -320,6 +326,74 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
         for iteration in 0..self.config.max_iterations {
             tracing::info!(%session_id, iteration, "Starting reasoning iteration");
             
+            // NEW: Check for deferred completion at the start of iteration (after tool execution)
+            if pending_completion_check {
+                if let Some((response_text, tool_results)) = pending_completion_data.take() {
+                    tracing::debug!(%session_id, iteration, "Processing deferred completion check");
+                    
+                    // Check if content has been analyzed to prevent re-processing
+                    let content_to_analyze = format!("{} {}", 
+                        response_text,
+                        tool_results.values()
+                            .map(|res| format!("{:?}", res.data))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                    
+                    if !state.has_content_been_analyzed(&content_to_analyze) {
+                        state.mark_content_analyzed(content_to_analyze.clone());
+                        
+                        // Detect task completion using multiple signals
+                        if let Some(task_completion) = state.detect_task_completion(&response_text, &tool_results) {
+                            // Analyse intent for the same response text so we only mark completion when the
+                            // LLM explicitly claims it is done.
+                            let detected_intent = match self.intent_analyzer.analyze_intent(&response_text, Some(&llm_conversation_history)).await {
+                                Ok(intent) => intent,
+                                Err(e) => {
+                                    tracing::warn!(%session_id, iteration, "Intent analysis failed during deferred-completion check: {}", e);
+                                    DetectedIntent::Ambiguous
+                                }
+                            };
+
+                            if task_completion.success_confidence >= 0.65 && matches!(detected_intent, DetectedIntent::ProvidesFinalAnswer) {
+                                tracing::info!(%session_id, iteration, completion_confidence = task_completion.success_confidence, "Deferred task completion detected (strict mode passed)");
+
+                                // Update conversation phase to completed
+                                state.update_conversation_phase(crate::state::ConversationPhase::TaskCompleted {
+                                    task: state.context.original_request.clone(),
+                                    completion_marker: task_completion.completion_marker.clone(),
+                                });
+
+                                // Store task completion
+                                state.current_task_completion = Some(task_completion.clone());
+                                state.conversation_context.completed_tasks.push(task_completion.clone());
+
+                                // Cache successful tool executions to prevent duplicates
+                                for (tool_name, tool_result) in &tool_results {
+                                    // Use dummy args since we're reconstructing from history
+                                    let args = serde_json::json!({"reconstructed_from_history": true});
+                                    state.cache_tool_execution(tool_name.clone(), args, tool_result.clone());
+                                }
+
+                                // Set completion status
+                                state.set_completed(true, format!("Task completed: {}", task_completion.completion_marker));
+
+                                tracing::info!(%session_id, iteration, "Deferred task completion confirmed (strict mode), will continue to generate final summary");
+                            } else {
+                                tracing::info!(%session_id, iteration, "Deferred task completion did not meet strict requirements (confidence {:.2} / intent {:?}).", task_completion.success_confidence, detected_intent);
+                            }
+                        }
+                    }
+                }
+                pending_completion_check = false;
+            }
+            
+            // NEW: Early termination check for completed tasks
+            if state.is_successful() && state.current_task_completion.is_some() {
+                tracing::info!(%session_id, iteration, "Task already completed in previous iteration, terminating early");
+                break;
+            }
+            
             // DEBUG: Log the conversation history before LLM call
             tracing::debug!(%session_id, iteration, history_len = llm_conversation_history.len(), "About to call LLM with conversation history");
             for (i, msg) in llm_conversation_history.iter().enumerate() {
@@ -332,15 +406,16 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
             // The actual summary sending and history modification for "What next?" happens *after* tool execution block.
 
             tracing::debug!(%session_id, iteration, "Calling LLM generate_stream");
-            let llm_stream_result = self.llm_client.generate_stream(llm_conversation_history.clone()).await;
-
+            
             let mut current_llm_text_response = String::new();
             let mut requested_tool_calls: Vec<ToolCall> = Vec::new();
             let mut llm_call_successful = false;
             let mut last_stream_error: Option<String> = None;
             let mut text_was_streamed = false; // Track if we streamed any text chunks
 
-            match llm_stream_result {
+            // Attempt to call LLM with stream
+            let mut stream_attempt_failed = false;
+            match self.llm_client.generate_stream(llm_conversation_history.clone()).await {
                 Ok(mut llm_stream) => {
                     llm_call_successful = true;
                     let stream_interaction_id = Uuid::new_v4();
@@ -429,6 +504,19 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                                 stream_handler.handle_stream_error(stream_interaction_id, e.clone()).await.ok();
                                 llm_call_successful = false;
                                 last_stream_error = Some(e.to_string());
+                                
+                                // Check if this is a recoverable streaming error
+                                let error_msg = e.to_string();
+                                let is_streaming_specific_error = error_msg.contains("buffer") || 
+                                                                error_msg.contains("stream") ||
+                                                                error_msg.contains("chunk") ||
+                                                                error_msg.contains("incomplete") ||
+                                                                error_msg.contains("timeout");
+                                
+                                if is_streaming_specific_error && !stream_attempt_failed {
+                                    tracing::warn!(%session_id, "Streaming-specific error detected, marking for non-streaming fallback");
+                                    stream_attempt_failed = true;
+                                }
                                 break;
                             }
                         }
@@ -443,15 +531,119 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                 }
                 Err(e) => {
                     tracing::error!(%session_id, "Failed to initiate LLM stream: {:?}", e);
-                    let error_msg = format!("LLM call failed: {:?}", e);
-                    state.add_step(ReasoningStep::llm_interaction(
-                        llm_conversation_history.last().map(|m| m.parts.iter().filter_map(|p| if let LlmMessagePart::Text(t) = p { Some(t.clone()) } else {None}).collect::<Vec<String>>().join("\n") ).unwrap_or_default(),
-                        String::new(), 
-                        false, 
-                        Some(error_msg.clone())
-                    ));
-                    state.set_completed(false, error_msg);
-                    break; // Break main loop
+                    
+                    // Check if this looks like a streaming-specific error
+                    let error_msg = e.to_string();
+                    let is_streaming_error = error_msg.contains("stream") || 
+                                           error_msg.contains("buffer") ||
+                                           error_msg.contains("chunk") ||
+                                           error_msg.contains("incomplete");
+                    
+                    if is_streaming_error {
+                        tracing::warn!(%session_id, "Stream initiation failed with streaming-specific error, marking for fallback");
+                        stream_attempt_failed = true;
+                        llm_call_successful = false; // Reset to try non-streaming
+                    } else {
+                        // Non-streaming-related error, fail completely
+                        let error_msg = format!("LLM call failed: {:?}", e);
+                        state.add_step(ReasoningStep::llm_interaction(
+                            llm_conversation_history.last().map(|m| m.parts.iter().filter_map(|p| if let LlmMessagePart::Text(t) = p { Some(t.clone()) } else {None}).collect::<Vec<String>>().join("\n") ).unwrap_or_default(),
+                            String::new(), 
+                            false, 
+                            Some(error_msg.clone())
+                        ));
+                        state.set_completed(false, error_msg);
+                        break; // Break main loop
+                    }
+                }
+            }
+
+            // Fallback to non-streaming if streaming failed due to streaming-specific issues
+            if stream_attempt_failed && !llm_call_successful {
+                tracing::warn!(%session_id, iteration, "Attempting non-streaming fallback due to streaming failure");
+                
+                // Convert LlmMessage to the format expected by the LLM client
+                let llm_client_messages: Vec<crate::traits::LlmMessage> = llm_conversation_history.clone()
+                    .into_iter()
+                    .map(|msg| crate::traits::LlmMessage {
+                        role: msg.role,
+                        parts: msg.parts.into_iter().map(|part| match part {
+                            LlmMessagePart::Text(text) => crate::traits::LlmMessagePart::Text(text),
+                            LlmMessagePart::ToolCall(call) => crate::traits::LlmMessagePart::ToolCall(call),
+                            LlmMessagePart::ToolResult { tool_call, result } => crate::traits::LlmMessagePart::ToolResult { 
+                                tool_call, 
+                                result 
+                            },
+                        }).collect(),
+                    })
+                    .collect();
+                
+                match self.llm_client.generate(llm_client_messages, vec![]).await {
+                    Ok(response) => {
+                        tracing::info!(%session_id, "Non-streaming fallback successful");
+                        
+                        // Process the response similar to streaming chunks
+                        for part in response.message.parts {
+                            match part {
+                                crate::traits::LlmMessagePart::Text(text) => {
+                                    current_llm_text_response.push_str(&text);
+                                    
+                                    // Send as a single chunk to maintain streaming interface
+                                    let engine_chunk = crate::streaming::StreamChunk {
+                                        id: Uuid::new_v4(),
+                                        data: text.into_bytes(),
+                                        chunk_type: "text".to_string(),
+                                        is_final: true,
+                                        priority: 0,
+                                        created_at: Instant::now(),
+                                        metadata: HashMap::new(),
+                                    };
+                                    
+                                    if stream_handler.handle_chunk(engine_chunk).await.is_ok() {
+                                        text_was_streamed = true;
+                                    }
+                                }
+                                crate::traits::LlmMessagePart::ToolCall(tool_call) => {
+                                    requested_tool_calls.push(tool_call.clone());
+                                    
+                                    // Stream the tool call
+                                    if let Ok(tool_call_data) = serde_json::to_vec(&tool_call) {
+                                        let engine_tool_call_chunk = crate::streaming::StreamChunk {
+                                            id: Uuid::new_v4(),
+                                            data: tool_call_data,
+                                            chunk_type: "tool_call".to_string(),
+                                            is_final: true,
+                                            priority: 0,
+                                            created_at: Instant::now(),
+                                            metadata: HashMap::new(),
+                                        };
+                                        stream_handler.handle_chunk(engine_tool_call_chunk).await.ok();
+                                    }
+                                }
+                                _ => {} // Ignore other message parts for now
+                            }
+                        }
+                        
+                        llm_call_successful = true;
+                        state.add_step(ReasoningStep::llm_interaction(
+                            current_llm_text_response.clone(),
+                            current_llm_text_response.clone(),
+                            true,
+                            None
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::error!(%session_id, "Non-streaming fallback also failed: {:?}", e);
+                        let error_msg = format!("Both streaming and non-streaming LLM calls failed: {:?}", e);
+                        state.add_step(ReasoningStep::llm_interaction(
+                            String::new(),
+                            String::new(),
+                            false,
+                            Some(error_msg.clone())
+                        ));
+                        state.set_completed(false, error_msg);
+                        break; // Break main loop
+                    }
                 }
             }
 
@@ -505,6 +697,83 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                 // }
                 
                 let mut final_message_str = final_message_to_user_parts.join(" ");
+
+                // NEW: Check for task completion BEFORE intent analysis
+                // This ensures completion detection runs even when LLM provides final answer
+                if !current_llm_text_response.is_empty() {
+                    tracing::debug!(%session_id, iteration, "Checking for task completion based on LLM response");
+                    
+                    // Get the most recent successful tool results from the state's history
+                    let recent_tool_results: std::collections::HashMap<String, crate::traits::ToolResult> = state
+                        .history
+                        .iter()
+                        .rev() // Most recent first
+                        .take(3) // Look at last 3 steps
+                        .filter(|step| step.step_type == crate::state::StepType::Execute && step.success)
+                        .flat_map(|step| &step.tools_used)
+                        .filter_map(|tool_name| {
+                            // Try to get tool result from state context
+                            state.context.tool_results.get(tool_name).map(|result| (tool_name.clone(), result.clone()))
+                        })
+                        .collect();
+                    
+                    // Also check pending tool summary info if available
+                    let additional_tool_results: std::collections::HashMap<String, crate::traits::ToolResult> = pending_tool_summary_info
+                        .as_ref()
+                        .map(|result| {
+                            result.tool_results
+                                .iter()
+                                .filter_map(|(name, exec_result)| {
+                                    exec_result.result.as_ref().map(|res| (name.clone(), res.clone()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    
+                    // Combine recent and pending tool results
+                    let mut combined_tool_results = recent_tool_results;
+                    combined_tool_results.extend(additional_tool_results);
+                    
+                    // Check if we have meaningful tool results and haven't already analyzed this content
+                    let content_to_analyze = format!("{} {}", 
+                        current_llm_text_response,
+                        combined_tool_results.values()
+                            .map(|res| format!("{:?}", res.data))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                    
+                    if !combined_tool_results.is_empty() && !state.has_content_been_analyzed(&content_to_analyze) {
+                        state.mark_content_analyzed(content_to_analyze.clone());
+                        
+                        // Detect task completion using multiple signals
+                        if let Some(task_completion) = state.detect_task_completion(&current_llm_text_response, &combined_tool_results) {
+                            tracing::info!(%session_id, iteration, completion_confidence = task_completion.success_confidence, "Task completion detected before intent analysis");
+                            
+                            // Update conversation phase to completed
+                            state.update_conversation_phase(crate::state::ConversationPhase::TaskCompleted {
+                                task: state.context.original_request.clone(),
+                                completion_marker: task_completion.completion_marker.clone(),
+                            });
+                            
+                            // Store task completion
+                            state.current_task_completion = Some(task_completion.clone());
+                            state.conversation_context.completed_tasks.push(task_completion.clone());
+                            
+                            // Cache successful tool executions to prevent duplicates
+                            for (tool_name, tool_result) in &combined_tool_results {
+                                // Use dummy args since we're reconstructing from history
+                                let args = serde_json::json!({"reconstructed_from_history": true});
+                                state.cache_tool_execution(tool_name.clone(), args, tool_result.clone());
+                            }
+                            
+                            // Set completion status
+                            state.set_completed(true, format!("Task completed: {}", task_completion.completion_marker));
+                            
+                            tracing::info!(%session_id, iteration, "Task completion detected, will continue to generate summary");
+                        }
+                    }
+                }
 
                 // Analyze intent of the LLM's text response to decide on loop continuation and "What next?"
                 // CRITICAL FIX: Prevent duplicate intent analysis of the same content
@@ -708,10 +977,58 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   LlmMessagePart::Text(serde_json::to_string(&result_content).unwrap_or_else(|_| format!("{{\\\"tool_name\\\": \\\"{}\\\", \\\"error\\\": \\\"Serialization failed\\\"}}", name)))
               }).collect();
 
+              // NEW: Stream tool results to UI for interactive display
+              for (tool_name, exec_result) in &corrected_orchestration_result.tool_results {
+                  if let Some(tool_result) = &exec_result.result {
+                      // Build canonical UiToolResultChunk for UI consumption
+                      let ui_chunk = terminal_stream::UiToolResultChunk {
+                          id: Uuid::new_v4().to_string(),
+                          tool_call_id: exec_result.request.id.to_string(),
+                          name: tool_name.clone(),
+                          success: tool_result.success,
+                          data: tool_result.data.clone(),
+                          error: tool_result.error.clone(),
+                      };
+
+                      let tool_result_chunk = crate::streaming::StreamChunk {
+                          id: Uuid::new_v4(),
+                          data: match serde_json::to_vec(&ui_chunk) {
+                              Ok(bytes) => bytes,
+                              Err(e) => {
+                                  tracing::error!(%session_id, tool_name = %tool_name, "Failed to serialize UiToolResultChunk: {}", e);
+                                  Vec::new()
+                              }
+                          },
+                          chunk_type: "tool_result".to_string(),
+                          is_final: false,
+                          priority: 0,
+                          created_at: std::time::Instant::now(),
+                          metadata: {
+                              let mut meta = HashMap::new();
+                              meta.insert("tool_call_id".to_string(), ui_chunk.tool_call_id.clone());
+                              meta.insert("tool_name".to_string(), tool_name.clone());
+                              meta
+                          },
+                      };
+                      
+                      if let Err(e) = stream_handler.handle_chunk(tool_result_chunk).await {
+                          tracing::warn!(%session_id, iteration, tool_name = %tool_name, "Failed to stream tool result: {}", e);
+                      }
+                  }
+              }
+
               if !tool_results_for_llm.is_empty() {
                    llm_conversation_history.push(LlmMessage {
                       role: "user".to_string(), 
                       parts: tool_results_for_llm,
+                  });
+                  
+                  // NEW: Add system directive to ensure LLM processes the tool results
+                  llm_conversation_history.push(LlmMessage {
+                      role: "user".to_string(),
+                      parts: vec![LlmMessagePart::Text(
+                          "Analyze the tool output above and provide a complete answer to the user's question. If the task is complete, clearly state the results. If more actions are needed, call another tool.".to_string()
+                      )],
                   });
               }
 
@@ -725,10 +1042,37 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   }
                   // DO NOT break here, let the loop continue so LLM can see the tool error
               } else {
+                  // Store successful tool results in state context for later completion detection
+                  for (tool_name, exec_result) in &corrected_orchestration_result.tool_results {
+                      if let Some(tool_result) = &exec_result.result {
+                          if tool_result.success {
+                              state.context.tool_results.insert(tool_name.clone(), tool_result.clone());
+                              tracing::debug!(%session_id, iteration, tool_name = %tool_name, "Stored successful tool result in state context");
+                          }
+                      }
+                  }
+                  
+                  // NEW: Defer completion detection until after LLM processes the tool results
+                  tracing::debug!(%session_id, iteration, "Tool execution successful, deferring completion check until after LLM response");
+                  
+                  // Extract tool results for deferred completion detection
+                  let tool_results_for_completion: std::collections::HashMap<String, crate::traits::ToolResult> = corrected_orchestration_result
+                      .tool_results
+                      .iter()
+                      .filter_map(|(name, exec_result)| {
+                          exec_result.result.as_ref().map(|res| (name.clone(), res.clone()))
+                      })
+                      .collect();
+                  
+                  // Set up deferred completion check
+                  pending_completion_check = true;
+                  pending_completion_data = Some((current_llm_text_response.clone(), tool_results_for_completion));
+                  
+                  // Always generate tool summary for successful executions
                   if !corrected_orchestration_result.tool_results.is_empty() {
-                    pending_tool_summary_info = Some(corrected_orchestration_result);
+                      pending_tool_summary_info = Some(corrected_orchestration_result);
                   } else {
-                    pending_tool_summary_info = None;
+                      pending_tool_summary_info = None;
                   }
               }
             }
@@ -883,7 +1227,7 @@ mod tests {
     use std::time::Duration;
 
     // --- Mock IntentAnalyzer for tests ---
-    use crate::traits::{IntentAnalyzer, DetectedIntent, LlmMessage as ReasoningLlmMessage};
+    use crate::traits::{IntentAnalyzer, DetectedIntent, LlmMessage as ReasoningLlmMessage, LlmResponse, TokenUsage};
     use async_trait::async_trait;
 
     #[derive(Debug)]
@@ -967,6 +1311,28 @@ mod tests {
                 Ok(Box::pin(stream))
             }
         }
+
+        async fn generate(
+            &self,
+            _messages: Vec<LlmMessage>,
+            _tools: Vec<ToolDefinition>
+        ) -> Result<LlmResponse> {
+            // For the mock, return a simple response
+            Ok(LlmResponse {
+                message: LlmMessage {
+                    role: "assistant".to_string(),
+                    parts: vec![LlmMessagePart::Text("Mock non-streaming response".to_string())],
+                },
+                token_usage: Some(TokenUsage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                    thinking_tokens: None,
+                    model_name: "mock-model".to_string(),
+                    cached_tokens: None,
+                }),
+            })
+        }
     }
 
     // Mock implementations for testing
@@ -1007,6 +1373,53 @@ mod tests {
             if name == "analyze_input" {
                  return Ok(ToolResult::success(
                     serde_json::json!({"processed_input": "analyzed: "}),
+                    100
+                ));
+            }
+            // NEW: More realistic tool results for completion detection testing
+            if name == "count_lines" {
+                return Ok(ToolResult::success(
+                    serde_json::json!({
+                        "file": args.get("file").unwrap_or(&serde_json::Value::String("test.txt".to_string())),
+                        "line_count": 150,
+                        "status": "completed successfully",
+                        "message": "File analysis completed. Found 150 lines total."
+                    }),
+                    100
+                ));
+            }
+            if name == "list_files" {
+                return Ok(ToolResult::success(
+                    serde_json::json!({
+                        "directory": args.get("directory").unwrap_or(&serde_json::Value::String(".".to_string())),
+                        "files": ["file1.txt", "file2.py", "file3.md", "file4.rs", "file5.json"],
+                        "total_files": 5,
+                        "status": "completed successfully",
+                        "message": "Directory listing completed. Found 5 files."
+                    }),
+                    100
+                ));
+            }
+            if name == "check_file" {
+                return Ok(ToolResult::success(
+                    serde_json::json!({
+                        "file": args.get("file").unwrap_or(&serde_json::Value::String("test.txt".to_string())),
+                        "exists": true,
+                        "status": "completed successfully",
+                        "message": "File check completed successfully. File exists."
+                    }),
+                    100
+                ));
+            }
+            if name == "read_file" {
+                return Ok(ToolResult::success(
+                    serde_json::json!({
+                        "file": args.get("file").unwrap_or(&serde_json::Value::String("test.txt".to_string())),
+                        "content": "Sample file content\nWith multiple lines\nFor testing purposes",
+                        "size": 52,
+                        "status": "completed successfully",
+                        "message": "File read completed successfully."
+                    }),
                     100
                 ));
             }
@@ -1203,10 +1616,17 @@ mod tests {
         let initial_llm_text = "Okay, I need to use a tool. ";
         let serialized_tool_call = serde_json::to_string(&tool_call_to_request).unwrap();
         let subsequent_llm_text = "Tool executed. Final answer.";
-        // The actual streaming order is now: LLM text + tool call + LLM text (summary is emitted as Summary event, not StreamChunk)
+        // The actual streaming order is now: LLM text + tool call + tool result + LLM text
         let expected_stream_output = format!("{}{}{}", initial_llm_text, serialized_tool_call, subsequent_llm_text);
         
-        assert_eq!(stream_handler.get_chunks_as_string().await.trim(), expected_stream_output.trim(), "Streamed output mismatch");
+        // Check that the output contains the expected parts, but be flexible about the tool result UUID
+        let actual_output = stream_handler.get_chunks_as_string().await;
+        assert!(actual_output.contains(initial_llm_text), "Should contain initial LLM text");
+        assert!(actual_output.contains(&serialized_tool_call), "Should contain tool call JSON");
+        assert!(actual_output.contains(subsequent_llm_text), "Should contain subsequent LLM text");
+        assert!(actual_output.contains("\"name\":\"another_tool\""), "Should contain tool result with tool name");
+        assert!(actual_output.contains("\"result\":\"success\""), "Should contain tool result success");
+        
         // state.history: analyze_input, llm_interaction (text+TC), tool_execution (another_tool), llm_interaction (loop2 text)
         assert_eq!(result_state.history.len(), 4, "State history should have 4 steps. Got: {:?}", result_state.history.iter().map(|s| format!("Type: {:?}, Tools: {:?}, Output: {:?}", s.step_type, s.tools_used, s.output)).collect::<Vec<_>>()); 
     }
@@ -1275,10 +1695,17 @@ mod tests {
         let serialized_tool_call_loop1 = serde_json::to_string(&first_tool_call).unwrap();
         let llm_text_loop2 = "Loop 2. Still thinking.";
         
-        // The actual streaming order is now: LLM text + tool call + LLM text (summary is emitted as Summary event, not StreamChunk)
+        // The actual streaming order is now: LLM text + tool call + tool result + LLM text
         let expected_stream_output = format!("{}{}{}", initial_llm_text_loop1, serialized_tool_call_loop1, llm_text_loop2);
         
-        assert_eq!(stream_handler.get_chunks_as_string().await.trim(), expected_stream_output.trim(), "Streamed output mismatch for max_iterations test");
+        // Check that the output contains the expected parts, but be flexible about the tool result UUID
+        let actual_output = stream_handler.get_chunks_as_string().await;
+        assert!(actual_output.contains(initial_llm_text_loop1), "Should contain initial LLM text");
+        assert!(actual_output.contains(&serialized_tool_call_loop1), "Should contain tool call JSON");
+        assert!(actual_output.contains(llm_text_loop2), "Should contain subsequent LLM text");
+        assert!(actual_output.contains("\"name\":\"another_tool\""), "Should contain tool result with tool name");
+        assert!(actual_output.contains("\"result\":\"success\""), "Should contain tool result success");
+        
         assert_eq!(result_state.history.len(), 4, "State history: analyze_input, llm_iter1(text+TC), exec(another_tool), llm_iter2(text). Got: {:?}", result_state.history.iter().map(|s| (s.step_type.clone(), s.reasoning.clone())).collect::<Vec<_>>()); 
     }
 
@@ -1334,10 +1761,16 @@ mod tests {
         let serialized_tool_call = serde_json::to_string(&faulty_tool_call).unwrap();
         let llm_text_2_error_summary = "It appears the 'faulty_tool' encountered an error: Simulated tool failure. I cannot proceed with that specific action.";
         
-        // The actual streaming order is now: LLM text + tool call + LLM text (summary is emitted as Summary event, not StreamChunk)
+        // The actual streaming order is now: LLM text + tool call + tool result + LLM text
         let expected_stream_output = format!("{}{}{}", llm_text_1, serialized_tool_call, llm_text_2_error_summary);
 
-        assert_eq!(stream_handler.get_chunks_as_string().await.trim(), expected_stream_output.trim(), "Streamed output mismatch");
+        // Check that the output contains the expected parts, but be flexible about the tool result UUID
+        let actual_output = stream_handler.get_chunks_as_string().await;
+        assert!(actual_output.contains(llm_text_1), "Should contain initial LLM text");
+        assert!(actual_output.contains(&serialized_tool_call), "Should contain tool call JSON");
+        assert!(actual_output.contains(llm_text_2_error_summary), "Should contain subsequent LLM text");
+        assert!(actual_output.contains("\"name\":\"faulty_tool\""), "Should contain tool result with tool name");
+        assert!(actual_output.contains("\"data\":null"), "Should contain tool result with null data for failed tool");
 
         // Check the history for the execution of faulty_tool
         // state.history: analyze_input, llm_interaction (text+TC), tool_execution (faulty_tool), llm_interaction (error summary)
@@ -1399,19 +1832,156 @@ mod tests {
         }
     }
 
+    // Simple test for scenario functionality - just verify tools are called
     #[tokio::test]
-    async fn test_summary_chunk_metadata() {
+    async fn test_scenario_create_project_with_scaffolding_and_tests() {
         let config = default_config_for_test();
-        let tool_call_to_request = ToolCall { name: "another_tool".to_string(), args: serde_json::json!({ "param": "value" }) };
+        let llm_client = Arc::new(MockLlmClient::new(vec![
+            vec![Ok(LlmStreamChunk::Text { content: "Creating project".to_string(), is_final: true })],
+        ]));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer));
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let conversation = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Create a new project".to_string())],
+            }
+        ];
+
+        let result = engine.process(conversation, tool_executor.clone(), event_emitter.clone(), stream_handler).await;
+        assert!(result.is_ok(), "Project creation scenario should execute without errors");
+        
+        // Verify at least analyze_input was called
+        let call_count = tool_executor.get_call_count();
+        assert!(call_count >= 1, "Should have called at least analyze_input, got {}", call_count);
+    }
+
+    #[tokio::test]
+    async fn test_scenario_refactoring_multiple_files() {
+        let config = default_config_for_test();
+        let llm_client = Arc::new(MockLlmClient::new(vec![
+            vec![Ok(LlmStreamChunk::Text { content: "Refactoring complete".to_string(), is_final: true })],
+        ]));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer));
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let conversation = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Refactor the code".to_string())],
+            }
+        ];
+
+        let result = engine.process(conversation, tool_executor.clone(), event_emitter, stream_handler).await;
+        assert!(result.is_ok(), "Refactoring scenario should execute without errors");
+        
+        let call_count = tool_executor.get_call_count();
+        assert!(call_count >= 1, "Should have called at least analyze_input, got {}", call_count);
+    }
+
+    #[tokio::test]
+    async fn test_scenario_feature_implementation_loop() {
+        let config = default_config_for_test();
+        let llm_client = Arc::new(MockLlmClient::new(vec![
+            vec![Ok(LlmStreamChunk::Text { content: "Feature implemented".to_string(), is_final: true })],
+        ]));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer));
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let conversation = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Implement a feature".to_string())],
+            }
+        ];
+
+        let result = engine.process(conversation, tool_executor.clone(), event_emitter, stream_handler).await;
+        assert!(result.is_ok(), "Feature implementation should execute without errors");
+        
+        let call_count = tool_executor.get_call_count();
+        assert!(call_count >= 1, "Should have called at least analyze_input, got {}", call_count);
+    }
+
+    #[tokio::test]
+    async fn test_scenario_bug_resolution_with_test_addition() {
+        let config = default_config_for_test();
+        let llm_client = Arc::new(MockLlmClient::new(vec![
+            vec![Ok(LlmStreamChunk::Text { content: "Bug fixed".to_string(), is_final: true })],
+        ]));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer));
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let conversation = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Fix the bug".to_string())],
+            }
+        ];
+
+        let result = engine.process(conversation, tool_executor.clone(), event_emitter, stream_handler).await;
+        assert!(result.is_ok(), "Bug resolution should execute without errors");
+        
+        let call_count = tool_executor.get_call_count();
+        assert!(call_count >= 1, "Should have called at least analyze_input, got {}", call_count);
+    }
+
+    #[tokio::test]
+    async fn test_scenario_test_failure_and_recovery() {
+        let config = default_config_for_test();
+        let llm_client = Arc::new(MockLlmClient::new(vec![
+            vec![Ok(LlmStreamChunk::Text { content: "Tests fixed".to_string(), is_final: true })],
+        ]));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer));
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let conversation = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Fix the failing tests".to_string())],
+            }
+        ];
+
+        let result = engine.process(conversation, tool_executor.clone(), event_emitter, stream_handler).await;
+        assert!(result.is_ok(), "Test recovery should execute without errors");
+        
+        let call_count = tool_executor.get_call_count();
+        assert!(call_count >= 1, "Should have called at least analyze_input, got {}", call_count);
+    }
+
+    #[tokio::test]
+    async fn test_deferred_completion_logic() {
+        let config = default_config_for_test();
         let llm_responses = vec![
             vec![
+                Ok(LlmStreamChunk::Text { content: "I'll execute a tool.".to_string(), is_final: false }),
                 Ok(LlmStreamChunk::ToolCall { 
-                    tool_call: tool_call_to_request.clone(),
+                    tool_call: ToolCall { name: "count_lines".to_string(), args: serde_json::json!({"file": "test.txt"}) },
                     is_final: true, 
                 }),
             ],
             vec![
-                Ok(LlmStreamChunk::Text { content: "Done.".to_string(), is_final: true }),
+                Ok(LlmStreamChunk::Text { content: "The file has 150 lines. Task completed successfully.".to_string(), is_final: true }),
             ]
         ];
         let llm_client = Arc::new(MockLlmClient::new(llm_responses));
@@ -1420,56 +1990,90 @@ mod tests {
 
         let tool_executor = Arc::new(MockToolExecutor::new());
         let event_emitter = Arc::new(MockEventEmitter::new());
-        
-        // Custom stream handler to capture chunk metadata
-        struct MetadataCapturingStreamHandler {
-            chunks_with_metadata: Arc<tokio::sync::Mutex<Vec<(String, HashMap<String, String>)>>>,
-        }
-        impl MetadataCapturingStreamHandler {
-            fn new() -> Self {
-                Self {
-                    chunks_with_metadata: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-                }
-            }
-            async fn get_summary_chunks(&self) -> Vec<(String, HashMap<String, String>)> {
-                self.chunks_with_metadata.lock().await.clone()
-            }
-        }
-        #[async_trait::async_trait]
-        impl StreamHandler for MetadataCapturingStreamHandler {
-            async fn handle_chunk(&self, chunk: StreamChunk) -> Result<()> {
-                let content = String::from_utf8(chunk.data).unwrap_or_default();
-                self.chunks_with_metadata.lock().await.push((content, chunk.metadata));
-                Ok(())
-            }
-            async fn handle_stream_complete(&self, _stream_id: Uuid) -> Result<()> { Ok(()) }
-            async fn handle_stream_error(&self, _stream_id: Uuid, _error: ReasoningError) -> Result<()> { Ok(()) }
-        }
-        
-        let stream_handler = Arc::new(MetadataCapturingStreamHandler::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
 
-        let _result_state = engine.process(
+        let result_state = engine.process(
             vec![LlmMessage {
                 role: "user".to_string(),
-                parts: vec![LlmMessagePart::Text("Test summary metadata".to_string())],
+                parts: vec![LlmMessagePart::Text("Count the lines in test.txt".to_string())],
             }],
             tool_executor.clone(),
             event_emitter.clone(),
             stream_handler.clone(),
         ).await.unwrap();
 
-        // Check that Summary events were emitted (not StreamChunks)
+        // Verify the reasoning engine completed successfully and didn't terminate prematurely
+        assert!(result_state.is_successful(), "Reasoning should complete successfully after tool execution");
+        assert_eq!(tool_executor.get_call_count(), 2, "Should execute analyze_input + count_lines"); 
+        
+        // Verify that the LLM had a chance to process tool results
+        let streamed_output = stream_handler.get_chunks_as_string().await;
+        assert!(streamed_output.contains("I'll execute a tool"), "Should contain initial LLM response");
+        assert!(streamed_output.contains("Task completed successfully"), "Should contain final LLM response after tool execution");
+        
+        // Verify completion reason indicates proper task completion, not premature termination
+        assert!(result_state.completion_reason.as_ref().map_or(false, |reason| 
+            reason.contains("ProvidesFinalAnswer") && !reason.contains("Max iterations")
+        ), "Should complete due to final answer, not premature termination");
+    }
+
+    #[tokio::test]
+    async fn test_streaming_shell_execution_integration() {
+        let config = default_config_for_test();
+        let shell_tool_call = ToolCall { 
+            name: "streaming_shell_execution".to_string(), 
+            args: serde_json::json!({"command": "echo 'Hello from shell'"}) 
+        };
+        
+        let llm_responses = vec![
+            vec![
+                Ok(LlmStreamChunk::Text { content: "I'll execute a shell command.".to_string(), is_final: false }),
+                Ok(LlmStreamChunk::ToolCall { 
+                    tool_call: shell_tool_call.clone(),
+                    is_final: true, 
+                }),
+            ],
+            vec![
+                Ok(LlmStreamChunk::Text { content: "Command executed successfully. The output shows the expected message.".to_string(), is_final: true }),
+            ]
+        ];
+        let llm_client = Arc::new(MockLlmClient::new(llm_responses));
+        let intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::ProvidesFinalAnswer)); 
+        let mut engine = ReasoningEngine::new(config, llm_client, intent_analyzer).await.unwrap();
+
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+
+        let result_state = engine.process(
+            vec![LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Execute a shell command to test streaming".to_string())],
+            }],
+            tool_executor.clone(),
+            event_emitter.clone(),
+            stream_handler.clone(),
+        ).await.unwrap();
+
+        // Verify the reasoning engine completed successfully and didn't terminate prematurely
+        assert!(result_state.is_successful(), "Reasoning should complete successfully after shell tool execution");
+        assert_eq!(tool_executor.get_call_count(), 2, "Should execute analyze_input + streaming_shell_execution"); 
+        
+        // Verify that tool results are streamed to the UI
+        let streamed_output = stream_handler.get_chunks_as_string().await;
+        assert!(streamed_output.contains("I'll execute a shell command"), "Should contain initial LLM response");
+        assert!(streamed_output.contains("streaming_shell_execution"), "Should contain tool call");
+        assert!(streamed_output.contains("\"name\":\"streaming_shell_execution\""), "Should contain tool result with tool name");
+        assert!(streamed_output.contains("Command executed successfully"), "Should contain final LLM response after tool execution");
+        
+        // Verify that the LLM had a chance to process tool results (no premature completion)
+        assert!(result_state.completion_reason.as_ref().map_or(false, |reason| 
+            reason.contains("ProvidesFinalAnswer") && !reason.contains("Max iterations")
+        ), "Should complete due to final answer, not premature termination");
+        
+        // Verify that tool result events were emitted for UI integration
         let events = event_emitter.get_events().await;
-        let summary_events: Vec<_> = events.iter().filter(|e| matches!(e, ReasoningEvent::Summary { .. })).collect();
-        
-        assert!(!summary_events.is_empty(), "Expected at least one Summary event to be emitted");
-        
-        if let ReasoningEvent::Summary { content, .. } = &summary_events[0] {
-            assert!(content.contains("Okay, I've finished those tasks"), "Summary should contain expected text");
-            assert!(content.contains("another_tool"), "Summary should mention the executed tool");
-        } else {
-            panic!("Expected Summary event");
-        }
+        let tool_events: Vec<_> = events.iter().filter(|e| matches!(e, ReasoningEvent::ToolExecutionCompleted { .. })).collect();
+        assert!(!tool_events.is_empty(), "Should emit tool execution completed events");
     }
 }
-

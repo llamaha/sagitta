@@ -153,20 +153,53 @@ impl Tool for RepositoryMapTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        match serde_json::from_value::<RepositoryMapParams>(parameters) {
-            Ok(params) => {
-                match self.generate_map(&params).await {
-                    Ok(result) => Ok(ToolResult::Success(result)),
-                    Err(e) => Ok(ToolResult::Error {
-                        error: format!("Repository map generation failed: {}", e),
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: RepositoryMapParams = match serde_json::from_value(parameters) {
+            Ok(params) => params,
+            Err(e) => return Ok(ToolResult::Error {
+                error: format!("Invalid parameters: {}", e)
+            })
+        };
+        
+        let repo_manager = self.repo_manager.lock().await;
+        
+        // Get repository information using list_repositories
+        let result = repo_manager.list_repositories().await;
+        
+        match result {
+            Ok(repositories) => {
+                // Find the requested repository
+                if let Some(repo_config) = repositories.iter().find(|r| r.name == params.name) {
+                    // Create a simple repository map with basic information
+                    let map = serde_json::json!({
+                        "name": repo_config.name,
+                        "url": repo_config.url,
+                        "local_path": repo_config.local_path,
+                        "default_branch": repo_config.default_branch,
+                        "active_branch": repo_config.active_branch,
+                        "last_synced_commits": repo_config.last_synced_commits,
+                        "indexed_languages": repo_config.indexed_languages,
+                        "status": "Repository information retrieved"
+                    });
+                    
+                    Ok(ToolResult::Success(serde_json::json!({
+                        "repository_name": params.name,
+                        "map": map
+                    })))
+                } else {
+                    Ok(ToolResult::Error { 
+                        error: format!("Repository '{}' not found", params.name)
                     })
                 }
-            },
-            Err(e) => Ok(ToolResult::Error {
-                error: format!("Invalid parameters for repository_map: {}", e),
+            }
+            Err(e) => Ok(ToolResult::Error { 
+                error: format!("Failed to get repository information: {}", e)
             })
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

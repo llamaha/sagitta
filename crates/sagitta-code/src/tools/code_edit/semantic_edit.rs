@@ -196,4 +196,8 @@ impl Tool for SemanticEditTool {
             }
         }
     }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 } 

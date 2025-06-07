@@ -102,7 +102,7 @@ impl SettingsPanel {
         egui::SidePanel::right("settings_panel")
             .resizable(true)
             .default_width(400.0)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(theme.side_panel_frame())
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {

@@ -128,5 +128,9 @@ impl Tool for CodeSearchTool {
             }
         }
     }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 

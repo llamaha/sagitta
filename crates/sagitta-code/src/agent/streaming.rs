@@ -33,7 +33,7 @@ pub struct StreamingProcessor {
     state_manager: Arc<StateManager>,
     
     /// The tool executor
-    tool_executor: ToolExecutor,
+    tool_executor: Arc<tokio::sync::Mutex<ToolExecutor>>,
     
     /// Sender for agent events
     event_sender: broadcast::Sender<AgentEvent>,
@@ -49,7 +49,7 @@ impl StreamingProcessor {
         tool_registry: Arc<ToolRegistry>,
         history: Arc<ConversationAwareHistoryManager>,
         state_manager: Arc<StateManager>,
-        tool_executor: ToolExecutor,
+        tool_executor: Arc<tokio::sync::Mutex<ToolExecutor>>,
         event_sender: broadcast::Sender<AgentEvent>,
         continue_reasoning_after_tool: Arc<Mutex<bool>>,
     ) -> Self {
@@ -206,7 +206,7 @@ impl StreamingProcessor {
                                             
                                             // Execute the tool asynchronously without blocking the stream
                                             tokio::spawn(async move {
-                                                match tool_executor_clone.execute_tool_with_id(&tc_id, &tc_name, tc_params).await {
+                                                match tool_executor_clone.lock().await.execute_tool_with_id(&tc_id, &tc_name, tc_params).await {
                                                     Ok(tool_result) => {
                                                         info!("Stream: Tool execution completed for ID: {}. Success: {}", tc_id, tool_result.is_success());
                                                         

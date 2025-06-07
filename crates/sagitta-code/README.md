@@ -31,6 +31,8 @@ Sagitta Code features a **revolutionary conversation management system** that su
 - **Code Editing**: Apply precise code changes with validation
 - **Semantic Editing**: AI-powered code modifications
 - **Code Validation**: Verify changes before application
+- **Shell Execution**: Run commands in secure Docker containers with language-specific environments
+- **Test Execution**: Execute tests in isolated containers for Python, Rust, JavaScript, Go, and more
 
 #### Web Integration
 - **Web Search**: Fast web search for real-time information, git URLs, code examples, and documentation
@@ -146,9 +148,51 @@ sagitta-code/
 ### Prerequisites
 
 1. **Rust Toolchain**: Install from [rustup.rs](https://rustup.rs/)
-2. **ONNX Runtime**: GPU-enabled version recommended (see [main README](../../README.md#prerequisites))
-3. **Qdrant**: Vector database (Docker recommended)
-4. **Google Gemini API Key**: For LLM functionality
+2. **Docker**: Required for secure containerized code execution (see [Docker Installation](#docker-installation))
+3. **ONNX Runtime**: GPU-enabled version recommended (see [main README](../../README.md#prerequisites))
+4. **Qdrant**: Vector database (Docker recommended)
+5. **Google Gemini API Key**: For LLM functionality
+
+#### Docker Installation
+
+Docker is **mandatory** for Sagitta Code as it provides:
+- **🔒 Security**: All code execution happens in isolated containers
+- **🌍 Consistency**: Same environment across all platforms
+- **🛡️ Isolation**: Protects your host system from potentially unsafe code
+- **📦 Dependencies**: Pre-configured language environments
+
+##### Windows
+1. Download [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
+2. Requirements: Windows 10/11 64-bit (Pro, Enterprise, or Education)
+3. Enable WSL 2 (recommended) or Hyper-V in BIOS
+4. Install and restart your system
+5. Start Docker Desktop from the Start menu
+
+##### macOS
+1. Download [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
+2. Choose the correct version:
+   - **Apple Silicon (M1/M2)**: Docker Desktop for Mac with Apple silicon
+   - **Intel**: Docker Desktop for Mac with Intel chip
+3. Install by dragging Docker.app to Applications folder
+4. Start Docker from Applications
+
+##### Linux
+1. Install Docker Engine: [Installation Guide](https://docs.docker.com/engine/install/)
+2. Add your user to docker group: `sudo usermod -aG docker $USER`
+3. Log out and back in for group changes to take effect
+4. Start Docker service: `sudo systemctl start docker`
+5. Enable auto-start: `sudo systemctl enable docker`
+
+**Quick Linux Install:**
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install docker.io docker-compose
+sudo usermod -aG docker $USER
+
+# RHEL/CentOS/Fedora  
+sudo dnf install docker docker-compose
+sudo systemctl start docker && sudo systemctl enable docker
+```
 
 ### Installation
 
@@ -344,6 +388,9 @@ cargo test conversation
 
 # Run with logging
 RUST_LOG=debug cargo test
+
+# Test shell execution functionality
+cargo run --bin test_shell_execution
 ```
 
 ### Adding Custom Tools
@@ -411,20 +458,54 @@ Sagitta Code is built on sagitta-search and inherits all its capabilities:
 
 ### Common Issues
 
-1. **ONNX Runtime not found**:
+1. **Docker is not available**:
+   Docker is required for secure code execution. See [Docker Installation](#docker-installation) above.
+   
+   **Symptoms**: 
+   - "Docker is required for secure containerized execution but is not installed"
+   - Shell execution or test execution fails immediately
+   
+   **Solutions**:
+   - Install Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+   - Start Docker service: `sudo systemctl start docker` (Linux)
+   - Verify installation: `docker --version && docker run hello-world`
+
+2. **Docker daemon not running**:
+   ```bash
+   # Check Docker status
+   docker info
+   
+   # Start Docker (Linux)
+   sudo systemctl start docker
+   
+   # Start Docker Desktop (Windows/Mac)
+   # Use the system tray or Applications menu
+   ```
+
+3. **Shell/Test execution timeouts**:
+   Large Docker images may take time to pull on first use.
+   
+   **Solutions**:
+   - Wait for initial Docker image pulls to complete
+   - Check network connectivity
+   - Pre-pull images: `docker pull python:3.11`, `docker pull rust:1.75`
+
+4. **ONNX Runtime not found**:
    ```bash
    export LD_LIBRARY_PATH=/path/to/onnxruntime/lib:$LD_LIBRARY_PATH
    ```
 
-2. **Qdrant connection failed**:
+5. **Qdrant connection failed**:
    - Ensure Qdrant is running on the configured port
    - Check firewall settings
+   - Restart Qdrant container if needed
 
-3. **Gemini API errors**:
+6. **Gemini API errors**:
    - Verify API key is correct
    - Check rate limits and quotas
+   - Ensure network connectivity
 
-4. **Indexing failures**:
+7. **Indexing failures**:
    - Check file permissions
    - Verify repository accessibility
    - Monitor disk space
@@ -437,11 +518,27 @@ RUST_LOG=sagitta_code=debug ./sagitta-code
 
 Access logs through the GUI logging panel (Ctrl+L) or check the console output.
 
+### Testing Your Setup
+
+Run the comprehensive test suite to verify everything works:
+
+```bash
+# Test shell execution (requires Docker)
+cargo run --bin test_shell_execution
+
+# Run all unit tests
+cargo test
+
+# Run integration tests  
+cargo test --test shell_execution_integration -- --ignored
+```
+
 ## 📚 Related Documentation
 
 - [sagitta-search README](../../README.md) - Core functionality and setup
 - [Configuration Guide](../../docs/configuration.md) - Detailed configuration options
 - [Conversation Management Plan](../../conversation-management-plan.md) - Implementation details
+- [Troubleshooting Guide](docs/troubleshooting.md) - Detailed troubleshooting steps
 
 ## 🔮 Future Enhancements
 
@@ -458,4 +555,40 @@ This project is licensed under the MIT License - see the [LICENSE-MIT](../../LIC
 
 ---
 
-**Sagitta Code** represents the next generation of AI-powered development tools, combining semantic understanding, intelligent conversation management, and comprehensive code analysis in a single, powerful application. 
+**Sagitta Code** represents the next generation of AI-powered development tools, combining semantic understanding, intelligent conversation management, and comprehensive code analysis in a single, powerful application.
+
+## Recent Fixes
+
+### Sync Panel Repository Display (Fixed)
+
+**Issue**: The sync panel in the GUI wasn't displaying repositories for syncing, showing "No repositories available" even when repositories were configured.
+
+**Root Cause**: The sync panel was only checking the basic `repositories` list but not the enhanced `enhanced_repositories` list, which is populated when enhanced repository information is available.
+
+**Fix**: 
+- Modified the sync panel to check both enhanced and basic repository lists
+- Added automatic fallback from enhanced to basic repositories when enhanced list is empty
+- Added refresh button and automatic refresh triggering when no repositories are displayed
+- Added comprehensive test coverage to prevent regression
+
+**Files Changed**:
+- `crates/sagitta-code/src/gui/repository/sync.rs` - Enhanced repository detection logic
+- `crates/sagitta-code/src/gui/repository/panel.rs` - Auto-refresh for sync tab
+- Added integration tests to ensure sync panel always shows available repositories
+
+### Sync Panel Refresh Loop (Fixed)
+
+**Issue**: The sync panel was stuck in an infinite refresh loop, continuously refreshing repositories every second and causing "Repository manager is locked" errors.
+
+**Root Cause**: The auto-refresh logic was triggering continuously because it wasn't properly tracking whether an initial load attempt had been made.
+
+**Fix**:
+- Fixed auto-refresh condition to only trigger once when no repositories are available
+- Added `initial_load_attempted` flag to prevent infinite refresh loops
+- Improved repository manager lock contention handling with better error messages
+- Enhanced UI layout to prevent text overlap between repository names and branch fields
+
+**Files Changed**:
+- `crates/sagitta-code/src/gui/repository/panel.rs` - Fixed refresh loop logic
+- `crates/sagitta-code/src/gui/repository/sync.rs` - Improved UI layout and lock handling
+- Added test to verify infinite loop prevention works correctly

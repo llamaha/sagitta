@@ -76,24 +76,30 @@ impl Tool for SyncRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        match serde_json::from_value::<SyncRepositoryParams>(parameters) {
-            Ok(params) => {
-                match self.sync_repository(&params).await {
-                    Ok(message) => Ok(ToolResult::Success(serde_json::json!({
-                        "success": true,
-                        "message": message,
-                        "repository_name": params.name
-                    }))),
-                    Err(e) => Ok(ToolResult::Error {
-                        error: format!("Sync repository failed: {}", e),
-                    })
-                }
-            },
-            Err(e) => Ok(ToolResult::Error {
-                error: format!("Invalid parameters for sync_repository: {}", e),
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: SyncRepositoryParams = match serde_json::from_value(parameters) {
+            Ok(params) => params,
+            Err(e) => return Ok(ToolResult::Error {
+                error: format!("Invalid parameters: {}", e)
+            })
+        };
+        
+        let mut repo_manager = self.repo_manager.lock().await;
+        let result = repo_manager.sync_repository(&params.name).await;
+        
+        match result {
+            Ok(_) => Ok(ToolResult::Success(serde_json::json!({
+                "repository_name": params.name,
+                "status": "synced"
+            }))),
+            Err(e) => Ok(ToolResult::Error { 
+                error: format!("Failed to sync repository: {}", e)
             })
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

@@ -7,6 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use sagitta_code::{
     agent::Agent,
@@ -204,19 +205,28 @@ mod cli_app {
         // Create and register tools before creating the agent
         let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
         
+        // Create the LLM client first for tools that need it
+        let llm_client_cli: Arc<dyn LlmClient> = Arc::new(
+            GeminiClient::new(&config)
+                .map_err(|e| anyhow!("Failed to create GeminiClient for CLI: {}", e))?
+        );
+        
         // Register AnalyzeInputTool first, passing the qdrant_client
         tool_registry.register(Arc::new(sagitta_code::tools::analyze_input::AnalyzeInputTool::new(tool_registry.clone(), embedding_provider.clone(), qdrant_client.clone()))).await.unwrap_or_else(|e| {
             eprintln!("Warning: Failed to register AnalyzeInputTool: {}", e);
         });
 
-        // Register shell execution and test execution tools
+        // Register shell execution tools
         let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        
         tool_registry.register(Arc::new(sagitta_code::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await.unwrap_or_else(|e| {
             eprintln!("Warning: Failed to register shell execution tool: {}", e);
         });
-        tool_registry.register(Arc::new(sagitta_code::tools::test_execution::TestExecutionTool::new(default_working_dir))).await.unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to register test execution tool: {}", e);
-        });
+
+        // Note: Project creation and test execution functionality is now available through shell_execution tool
+        // Examples:
+        // - Project creation: Use shell_execution with commands like "cargo init my-project", "npm init", "python -m venv myenv"
+        // - Test execution: Use shell_execution with commands like "cargo test", "npm test", "pytest", "go test"
         
         // --- Populate Qdrant tool collection (run once or ensure exists) ---
         // This logic is NOW MOVED to after all tools are registered.
@@ -328,12 +338,6 @@ mod cli_app {
             sagitta_code::agent::conversation::search::text::TextConversationSearchEngine::new()
         );
         
-        // Create the LLM client for the CLI app
-        let llm_client_cli: Arc<dyn LlmClient> = Arc::new(
-            GeminiClient::new(&config)
-                .map_err(|e| anyhow!("Failed to create GeminiClient for CLI: {}", e))?
-        );
-
         let agent = match Agent::new(
             config.clone(), 
             tool_registry.clone(), 

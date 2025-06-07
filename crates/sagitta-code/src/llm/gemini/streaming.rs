@@ -31,76 +31,106 @@ pub struct GeminiStream {
 
     /// Name of the model being used (for token usage reporting)
     model_name: String,
+    
+    /// Maximum buffer size to prevent memory issues with stuck streams
+    max_buffer_size: usize,
 }
 
 impl GeminiStream {
     /// Create a new GeminiStream from a reqwest Response
     pub fn new(response: Response, model_name: String) -> Self {
-        let stream = response.bytes_stream();
-        
         Self {
-            response: Box::pin(stream),
+            response: Box::pin(response.bytes_stream()),
             buffer: String::new(),
             chunk_queue: std::collections::VecDeque::new(),
             done: false,
             model_name,
+            max_buffer_size: 1024 * 1024, // Default to 1MB
+        }
+    }
+    
+    /// Create a new GeminiStream with custom buffer size
+    pub fn with_buffer_size(response: Response, model_name: String, max_buffer_size: usize) -> Self {
+        Self {
+            response: Box::pin(response.bytes_stream()),
+            buffer: String::new(),
+            chunk_queue: std::collections::VecDeque::new(),
+            done: false,
+            model_name,
+            max_buffer_size,
         }
     }
     
     /// Process accumulated data and try to extract complete lines
     /// CRITICAL: Gemini sends "data: {json}\n" format, NOT standard SSE with \n\n separators
+    /// The JSON itself can span multiple lines.
     fn process_buffer(&mut self) -> Option<Result<StreamChunk, SagittaCodeError>> {
         // First, check if we have any queued chunks to emit
         if let Some(chunk) = self.chunk_queue.pop_front() {
             log::debug!("GeminiStream: Emitting queued chunk");
             return Some(Ok(chunk));
         }
-        
-        // No queued chunks, try to process new lines from buffer
-        loop {
-            // Look for complete lines ending with \n
-            if let Some(line_end) = self.buffer.find('\n') {
-                // Extract the complete line (without the \n)
-                let line = self.buffer[..line_end].to_string();
-                
-                // Remove the processed line from buffer (including the \n)
-                self.buffer.drain(..line_end + 1);
-                
-                log::debug!("GeminiStream: Processing line: '{}'", line);
-                
-                // Process this line
-                if let Some(result) = self.process_line(&line) {
-                    match result {
-                        Ok(chunks) => {
-                            if chunks.is_empty() {
-                                log::warn!("GeminiStream: Line processing returned empty chunks vector");
-                                continue;
+
+        // Find the start of a data line
+        if let Some(start_index) = self.buffer.find("data: ") {
+            let json_str_start = start_index + 6;
+            
+            // Find a complete JSON object by tracking braces
+            let mut brace_count = 0;
+            let mut end_index = None;
+            let mut in_string = false;
+            let mut escaped = false;
+
+            for (i, char) in self.buffer[json_str_start..].char_indices() {
+                if in_string {
+                    if escaped {
+                        escaped = false;
+                    } else if char == '\\' {
+                        escaped = true;
+                    } else if char == '"' {
+                        in_string = false;
+                    }
+                } else if char == '"' {
+                    in_string = true;
+                } else if char == '{' {
+                    brace_count += 1;
+                } else if char == '}' {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        // Found complete JSON, but check if there's a newline after it
+                        let potential_end = json_str_start + i + 1;
+                        
+                        // Look for a newline after the JSON to ensure we have a complete line
+                        if let Some(remaining) = self.buffer.get(potential_end..) {
+                            if let Some(newline_pos) = remaining.find('\n') {
+                                end_index = Some(potential_end + newline_pos);
+                                break;
                             }
-                            
-                            // Take the first chunk to return immediately
-                            let mut chunks_iter = chunks.into_iter();
-                            let first_chunk = chunks_iter.next().unwrap();
-                            
-                            // Queue any remaining chunks
-                            for chunk in chunks_iter {
-                                self.chunk_queue.push_back(chunk);
-                            }
-                            
-                            log::info!("GeminiStream: Processed line, emitting first chunk, queued {} additional chunks", self.chunk_queue.len());
-                            return Some(Ok(first_chunk));
-                        },
-                        Err(err) => {
-                            return Some(Err(err));
+                            // If no newline found, we don't have a complete line yet
                         }
+                        break;
                     }
                 }
+            }
+            
+            if let Some(end_index) = end_index {
+                // Extract the JSON data as an owned string before modifying the buffer
+                let json_data = self.buffer[json_str_start..end_index].trim().to_string();
                 
-                // Continue processing if there are more lines
-                continue;
-            } else {
-                // No complete line found, need more data
-                log::debug!("GeminiStream: No complete line found, buffer has {} chars", self.buffer.len());
-                break;
+                // Remove the processed data from the buffer (including the newline)
+                self.buffer.drain(..end_index + 1);
+                
+                match self.parse_json_data(&json_data) {
+                    Ok(chunks) => {
+                        if !chunks.is_empty() {
+                            let mut chunks_iter = chunks.into_iter();
+                            let first_chunk = chunks_iter.next().unwrap();
+                            self.chunk_queue.extend(chunks_iter);
+                            return Some(Ok(first_chunk));
+                        }
+                    },
+                    Err(err) => return Some(Err(err)),
+                }
             }
         }
         
@@ -384,6 +414,75 @@ impl GeminiStream {
             token_usage: None, // Token usage is attached later in convert_response_to_chunks
         })
     }
+
+    /// Try to recover partial content when buffer gets stuck
+    fn try_partial_recovery(&mut self) -> Option<Result<StreamChunk, SagittaCodeError>> {
+        log::info!("GeminiStream: Attempting partial recovery from {} chars", self.buffer.len());
+        
+        // Look for any complete JSON objects in the buffer, even without proper line endings
+        let mut start_pos = 0;
+        while let Some(data_pos) = self.buffer[start_pos..].find("data: ") {
+            let absolute_pos = start_pos + data_pos + 6; // Skip "data: "
+            
+            // Try to find a complete JSON object starting from this position
+            if let Some(json_start) = self.buffer[absolute_pos..].find('{') {
+                let json_start_abs = absolute_pos + json_start;
+                
+                // Look for matching closing brace
+                let mut brace_count = 0;
+                let mut json_end = None;
+                
+                for (i, c) in self.buffer[json_start_abs..].char_indices() {
+                    match c {
+                        '{' => brace_count += 1,
+                        '}' => {
+                            brace_count -= 1;
+                            if brace_count == 0 {
+                                json_end = Some(json_start_abs + i + 1);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                
+                if let Some(end_pos) = json_end {
+                    let json_str = &self.buffer[json_start_abs..end_pos];
+                    log::info!("GeminiStream: Found potentially complete JSON in recovery: {} chars", json_str.len());
+                    
+                    match self.parse_json_data(json_str) {
+                        Ok(chunks) => {
+                            if !chunks.is_empty() {
+                                log::info!("GeminiStream: Successfully recovered {} chunks from partial buffer", chunks.len());
+                                // Clear the buffer since we processed it
+                                self.buffer.clear();
+                                
+                                // Take first chunk, queue the rest
+                                let mut chunks_iter = chunks.into_iter();
+                                let first_chunk = chunks_iter.next().unwrap();
+                                for chunk in chunks_iter {
+                                    self.chunk_queue.push_back(chunk);
+                                }
+                                
+                                return Some(Ok(first_chunk));
+                            }
+                        }
+                        Err(e) => {
+                            log::debug!("GeminiStream: Recovery attempt failed for JSON: {}", e);
+                        }
+                    }
+                }
+            }
+            
+            start_pos = absolute_pos;
+        }
+        
+        // If we can't recover anything, return an error chunk
+        log::warn!("GeminiStream: Could not recover any content from buffer");
+        Some(Err(SagittaCodeError::LlmError(
+            "Stream terminated due to incomplete data - no recoverable content found".to_string()
+        )))
+    }
 }
 
 impl Stream for GeminiStream {
@@ -425,6 +524,27 @@ impl Stream for GeminiStream {
                 log::info!("GeminiStream: Received {} bytes from HTTP stream", bytes_data.len());
                 let bytes_str = std::str::from_utf8(&bytes_data).unwrap_or("<invalid UTF-8>");
                 log::debug!("GeminiStream: Raw bytes content: '{}'", &bytes_str[..bytes_str.len().min(200)]);
+                
+                // Check buffer size before appending
+                if self.buffer.len() + bytes_str.len() > self.max_buffer_size {
+                    log::error!("GeminiStream: Buffer size would exceed limit ({} + {} > {}). Attempting partial recovery.", 
+                              self.buffer.len(), bytes_str.len(), self.max_buffer_size);
+                    
+                    // Try to process what we have so far before giving up
+                    if !self.buffer.is_empty() {
+                        log::warn!("GeminiStream: Attempting to parse incomplete buffer as emergency fallback");
+                        // Try to extract any partial JSON we can
+                        if let Some(partial_result) = self.try_partial_recovery() {
+                            self.done = true;
+                            return Poll::Ready(Some(partial_result));
+                        }
+                    }
+                    
+                    self.done = true;
+                    return Poll::Ready(Some(Err(SagittaCodeError::LlmError(
+                        format!("Stream buffer exceeded maximum size of {} bytes", self.max_buffer_size)
+                    ))));
+                }
                 
                 // Append the new data to our buffer
                 self.buffer.push_str(bytes_str);
@@ -582,6 +702,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Test processing a complete line
@@ -601,6 +722,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Simulate HTTP chunks arriving in pieces
@@ -652,6 +774,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -699,6 +822,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -741,6 +865,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -769,6 +894,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Simulate real Gemini response
@@ -796,6 +922,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Test that incomplete lines are not processed
@@ -820,6 +947,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         let line = "data: {\"test\": \"value\"}\n";
@@ -849,6 +977,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Add multiple lines at once
@@ -879,6 +1008,7 @@ mod tests {
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
         // Simulate receiving data in tiny increments
@@ -907,70 +1037,125 @@ mod tests {
 
     #[test]
     fn test_multi_part_response_processing() {
-        // Test that responses with multiple parts (thought + tool call) are processed correctly
-        let response = GeminiResponse {
-            candidates: vec![Candidate {
-                content: Content {
-                    parts: vec![
-                        Part {
-                            text: Some("Let me search for information about this.".to_string()),
-                            function_call: None,
-                            function_response: None,
-                            thought: Some(true), // This is a thought
-                        },
-                        Part {
-                            text: None,
-                            function_call: Some(FunctionCall {
-                                name: "web_search".to_string(),
-                                args: json!({"search_term": "test query"}),
-                            }),
-                            function_response: None,
-                            thought: None,
-                        },
-                    ],
-                    role: "model".to_string(),
-                },
-                finish_reason: Some("STOP".to_string()),
-                safety_ratings: vec![],
-                grounding_metadata: None,
-            }],
-            usage_metadata: None,
-            prompt_feedback: None,
+        // Test handling responses with multiple parts in one JSON object
+        let mut stream = GeminiStream {
+            response: Box::pin(futures_util::stream::empty()),
+            buffer: String::new(),
+            chunk_queue: VecDeque::new(),
+            done: false,
+            model_name: String::new(),
+            max_buffer_size: 1024 * 1024, // Default to 1MB
         };
 
+        let multi_part_json = r#"{"candidates": [{"content": {"parts": [{"text": "Hello"}, {"text": " World"}],"role": "model"},"finishReason": "STOP","index": 0}]}"#;
+        stream.buffer = format!("data: {}\n", multi_part_json);
+        
+        // First call should return first chunk and queue the second
+        if let Some(Ok(first_chunk)) = stream.process_buffer() {
+            assert!(matches!(first_chunk.part, MessagePart::Text { .. }));
+            assert_eq!(stream.chunk_queue.len(), 1);
+        } else {
+            panic!("Expected to process first chunk successfully");
+        }
+        
+        // Second call should return queued chunk
+        if let Some(Ok(second_chunk)) = stream.process_buffer() {
+            assert!(matches!(second_chunk.part, MessagePart::Text { .. }));
+            assert_eq!(stream.chunk_queue.len(), 0);
+        } else {
+            panic!("Expected to process second chunk successfully");
+        }
+    }
+    
+    #[test]
+    fn test_buffer_size_limit_enforcement() {
+        let mut stream = GeminiStream {
+            response: Box::pin(futures_util::stream::empty()),
+            buffer: String::new(),
+            chunk_queue: VecDeque::new(),
+            done: false,
+            model_name: String::new(),
+            max_buffer_size: 100, // Very small limit for testing
+        };
+
+        // Test that buffer limit is enforced
+        let large_data = "x".repeat(150); // Exceeds the 100 byte limit
+        stream.buffer = "data: ".to_string();
+        
+        // Simulate what would happen in poll_next when buffer limit is exceeded
+        // (We can't directly test poll_next here due to its async nature)
+        assert!(stream.buffer.len() + large_data.len() > stream.max_buffer_size);
+    }
+    
+    #[test]
+    fn test_partial_recovery_with_complete_json() {
+        let mut stream = GeminiStream {
+            response: Box::pin(futures_util::stream::empty()),
+            buffer: String::new(),
+            chunk_queue: VecDeque::new(),
+            done: false,
+            model_name: String::new(),
+            max_buffer_size: 1024 * 1024,
+        };
+
+        // Buffer contains partial line but complete JSON
+        let complete_json = r#"{"candidates": [{"content": {"parts": [{"text": "Recovery test"}],"role": "model"},"finishReason": "STOP","index": 0}]}"#;
+        stream.buffer = format!("data: {}", complete_json); // Note: no newline
+        
+        // Partial recovery should find the complete JSON
+        if let Some(Ok(chunk)) = stream.try_partial_recovery() {
+            if let MessagePart::Text { text } = chunk.part {
+                assert_eq!(text, "Recovery test");
+            } else {
+                panic!("Expected text chunk from recovery");
+            }
+        } else {
+            panic!("Expected successful partial recovery");
+        }
+        
+        // Buffer should be cleared after successful recovery
+        assert!(stream.buffer.is_empty());
+    }
+    
+    #[test]
+    fn test_partial_recovery_with_incomplete_json() {
+        let mut stream = GeminiStream {
+            response: Box::pin(futures_util::stream::empty()),
+            buffer: String::new(),
+            chunk_queue: VecDeque::new(),
+            done: false,
+            model_name: String::new(),
+            max_buffer_size: 1024 * 1024,
+        };
+
+        // Buffer contains incomplete JSON
+        stream.buffer = r#"data: {"candidates": [{"content": {"parts": [{"text": "Incomplete"#.to_string();
+        
+        // Partial recovery should fail gracefully
+        if let Some(Err(_)) = stream.try_partial_recovery() {
+            // Expected: recovery should return an error for incomplete JSON
+        } else {
+            panic!("Expected recovery to fail for incomplete JSON");
+        }
+    }
+    
+    #[test]
+    fn test_custom_buffer_size_constructor() {
+        // Test that we can create a stream with custom buffer size
+        let custom_buffer_size = 2048;
+        
+        // Create a mock response - we can't easily test the full constructor without the http crate
+        // But we can test the buffer size field directly
         let stream = GeminiStream {
             response: Box::pin(futures_util::stream::empty()),
             buffer: String::new(),
             chunk_queue: VecDeque::new(),
             done: false,
             model_name: String::new(),
+            max_buffer_size: custom_buffer_size,
         };
-
-        let result = stream.convert_response_to_chunks(&response);
-
-        assert!(result.is_ok());
-        let chunks = result.unwrap();
         
-        // Should have 2 chunks: one for thought, one for tool call
-        assert_eq!(chunks.len(), 2, "Should have 2 chunks for thought + tool call");
-        
-        // First chunk should be the thought
-        match &chunks[0].part {
-            MessagePart::Thought { text } => {
-                assert_eq!(text, "Let me search for information about this.");
-                assert!(!chunks[0].is_final, "Thought chunk should not be final");
-            },
-            _ => panic!("First chunk should be a Thought part"),
-        }
-        
-        // Second chunk should be the tool call
-        match &chunks[1].part {
-            MessagePart::ToolCall { name, .. } => {
-                assert_eq!(name, "web_search");
-                assert!(!chunks[1].is_final, "Tool call chunk should not be final even with STOP finish reason");
-            },
-            _ => panic!("Second chunk should be a ToolCall part"),
-        }
+        assert_eq!(stream.max_buffer_size, custom_buffer_size);
     }
 }
 

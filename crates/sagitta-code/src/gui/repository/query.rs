@@ -61,7 +61,7 @@ pub fn render_query_repo(
         .spacing([8.0, 8.0])
         .show(ui, |ui| {
             ui.label("Repository:");
-            let repo_names: Vec<String> = state.repositories.iter().map(|r| r.name.clone()).collect();
+            let repo_names = state.repo_names();
             let selected_text = state.selected_repo.as_ref().unwrap_or(&state.query_options.repo_name);
             ComboBox::from_id_source("repository_select")
                 .selected_text(selected_text)

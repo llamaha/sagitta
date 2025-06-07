@@ -666,7 +666,6 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
 
 /// Render tool calls as compact, clickable cards
 fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
-    let opacity = 0.3; // Default opacity for UI elements
     let mut clicked_tool_result = None;
     
     for tool_call in tool_calls {
@@ -695,34 +694,19 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
             if tool_button.clicked() {
                 clicked_tool_result = Some((tool_call.name.clone(), tool_call.arguments.clone()));
             }
-            
-            // CRITICAL FIX: Add tool result button if result is available
-            if let Some(result) = &tool_call.result {
-                ui.add_space(4.0);
+        }); // End of horizontal layout for tool name and icon
+
+        // Render the tool result as a clickable component if available
+        if let Some(result) = &tool_call.result {
+            if !result.trim().is_empty() { // Only render if there's actual content
+                ui.add_space(4.0); // Space before the result content
                 
-                // Create a preview of the result
-                let preview = if result.len() > 50 {
-                    format!("{}...", &result[..47])
-                } else {
-                    result.clone()
-                };
-                
-                // Add clickable result button with better styling
-                let result_button = ui.add(
-                    egui::Button::new(RichText::new(format!("📊 {}", preview)).size(10.0))
-                        .fill(app_theme.button_background())
-                        .stroke(Stroke::new(1.0, app_theme.accent_color()))  // More visible border
-                        .rounding(CornerRadius::same(4))
-                );
-                
-                if result_button.clicked() {
-                    // Return the full result for display in preview panel
-                    clicked_tool_result = Some((format!("{} Result", tool_call.name), result.clone()));
+                // Use the new tool result rendering function
+                if let Some(tool_result_click) = render_tool_result_compact(ui, &tool_call.name, result, bg_color, max_width, app_theme) {
+                    clicked_tool_result = Some(tool_result_click);
                 }
-                
-                result_button.on_hover_text("Click to view full tool result");
             }
-        });
+        }
         
         ui.add_space(1.0); // Reduced spacing between tool calls
     }
@@ -767,38 +751,119 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
 }
 
 /// Render tool result as a compact, clickable summary
-fn render_tool_result_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32) {
-    let opacity = 0.3; // Default opacity for UI elements
-    let summary = extract_tool_result_summary(text);
+fn render_tool_result_compact(ui: &mut Ui, tool_name: &str, result_data: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+    let mut clicked_tool_result = None;
     
     ui.horizontal(|ui| {
+        ui.set_max_width(max_width - 20.0);
+        
+        // Tool result icon
         ui.label(RichText::new("📊").size(12.0));
         ui.add_space(4.0);
         
+        // Determine if this is a shell execution result that should open in terminal
+        let is_shell_result = tool_name.contains("shell") || tool_name.contains("execution") || 
+                             result_data.contains("stdout") || result_data.contains("stderr") ||
+                             result_data.contains("exit_code");
+        
+        // Create a summary of the result for display
+        let summary = create_tool_result_summary(tool_name, result_data);
+        
+        // Clickable result summary button
         let result_button = ui.add(
-            egui::Button::new(RichText::new(format!("Tool Result: {}", summary)).size(11.0))
-                .fill(Color32::from_rgba_premultiplied(
-                    bg_color.r(),
-                    bg_color.g(),
-                    bg_color.b(),
-                    (255.0 * opacity) as u8,
-                ))
-                .stroke(Stroke::new(0.5, Color32::from_rgba_premultiplied(
-                    bg_color.r(),
-                    bg_color.g(),
-                    bg_color.b(),
-                    (255.0 * opacity) as u8,
-                )))
+            egui::Button::new(RichText::new(format!("{} Result: {}", tool_name, summary)).size(11.0))
+                .fill(app_theme.tool_result_background())
+                .stroke(Stroke::new(0.5, app_theme.border_color()))
                 .rounding(CornerRadius::same(4))
         );
         
         if result_button.clicked() {
-            // TODO: Show full result in side panel or modal
-            println!("Tool result clicked: {}", summary);
+            // Return the tool result data with a special marker for UI handling
+            let display_title = if is_shell_result {
+                format!("{} - Terminal Output", tool_name)
+            } else {
+                format!("{} - Result", tool_name)
+            };
+            clicked_tool_result = Some((display_title, result_data.to_string()));
         }
         
-        result_button.on_hover_text("Click to view full result");
+        // Show a small preview of the result type
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let preview_text = if is_shell_result {
+                "🖥️ Terminal"
+            } else if result_data.len() > 200 {
+                "📄 View Details"
+            } else {
+                "👁️ Preview"
+            };
+            ui.label(RichText::new(preview_text).size(9.0).color(app_theme.hint_text_color()));
+        });
     });
+    
+    clicked_tool_result
+}
+
+/// Create a concise summary of tool result data for display
+fn create_tool_result_summary(tool_name: &str, result_data: &str) -> String {
+    // Try to parse as JSON first
+    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(result_data) {
+        // Handle shell execution results
+        if let Some(obj) = json_value.as_object() {
+            if let (Some(exit_code), Some(stdout)) = (
+                obj.get("exit_code").and_then(|v| v.as_i64()),
+                obj.get("stdout").and_then(|v| v.as_str())
+            ) {
+                if exit_code == 0 {
+                    if stdout.trim().is_empty() {
+                        return "completed successfully".to_string();
+                    } else if stdout.len() > 50 {
+                        return format!("completed ({}+ chars output)", stdout.len());
+                    } else {
+                        return format!("completed: {}", stdout.trim());
+                    }
+                } else {
+                    return format!("failed (exit code {})", exit_code);
+                }
+            }
+            
+            // Handle other structured results
+            if let Some(status) = obj.get("status").and_then(|v| v.as_str()) {
+                return status.to_string();
+            }
+            
+            if let Some(message) = obj.get("message").and_then(|v| v.as_str()) {
+                return if message.len() > 50 {
+                    format!("{}...", &message[..47])
+                } else {
+                    message.to_string()
+                };
+            }
+            
+            // Generic object summary
+            return format!("{} fields", obj.len());
+        }
+        
+        // Handle arrays
+        if let Some(arr) = json_value.as_array() {
+            return format!("{} items", arr.len());
+        }
+        
+        // Handle simple values
+        if let Some(s) = json_value.as_str() {
+            return if s.len() > 50 {
+                format!("{}...", &s[..47])
+            } else {
+                s.to_string()
+            };
+        }
+    }
+    
+    // Fallback for non-JSON data
+    if result_data.len() > 50 {
+        format!("{}...", &result_data[..47])
+    } else {
+        result_data.to_string()
+    }
 }
 
 const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;

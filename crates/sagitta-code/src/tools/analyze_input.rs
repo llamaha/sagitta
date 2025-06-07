@@ -421,6 +421,10 @@ impl Tool for AnalyzeInputTool {
             }
         }
     }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

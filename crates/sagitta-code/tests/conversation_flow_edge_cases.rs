@@ -327,6 +327,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
             println!("MockWebSearchTool executed with params: {:?}", parameters);
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "search completed", "results": ["mock result1", "mock result2"]})))
         }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
     tool_registry.register(Arc::new(MockWebSearchTool)).await.unwrap();
     
@@ -341,6 +344,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
                 return Ok(sagitta_code::tools::types::ToolResult::Error { error: "File edit failed: Permission denied".to_string() });
             }
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "file edited successfully"})))
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
     tool_registry.register(Arc::new(MockEditFileTool)).await.unwrap();
@@ -361,6 +367,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
             }
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "search completed", "results": ["match1.rs:42", "match2.py:15"]})))
         }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
     tool_registry.register(Arc::new(MockCodebaseSearchTool)).await.unwrap();
     
@@ -377,6 +386,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
             }
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "command executed", "output": "Command completed successfully"})))
         }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
     tool_registry.register(Arc::new(MockShellExecutionTool)).await.unwrap();
 
@@ -392,6 +404,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
                 return Ok(sagitta_code::tools::types::ToolResult::Error { error: "Repository name is invalid".to_string() });
             }
             Ok(sagitta_code::tools::types::ToolResult::Success(serde_json::json!({"status": "repository added", "name": name})))
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
     tool_registry.register(Arc::new(MockRepositoryTool)).await.unwrap();
@@ -410,6 +425,9 @@ async fn setup_test_agent(mock_llm_client: Arc<MockLlmClient>) -> (Agent, Arc<Th
                 "confidence": 0.85,
                 "suggested_next_tool": null // More neutral, let the main LLM decide
             })))
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
     tool_registry.register(Arc::new(MockAnalyzeInputTool)).await.unwrap();

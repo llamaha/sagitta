@@ -1,0 +1,41 @@
+[package]
+name = "terminal-stream"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time terminal streaming widget for egui applications"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# UI framework
+egui = "0.31.1"
+
+# Async and streaming
+tokio = { version = "1.0", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.3", features = ["serde", "v4"] }
+crossbeam-channel = "0.5"
+
+# Serialization (for configuration)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+log = "0.4"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.10"
+eframe = "0.31.1"
+
+[[example]]
+name = "ts-basic-usage"
+required-features = [] 

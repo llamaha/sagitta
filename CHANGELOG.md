@@ -233,3 +233,45 @@ First release of sagitta-cli with basic functionality.
 ## [1.4.5] - 2024-04-15
 
 ### Added
+
+### Fixed
+- **Infinite Loop Prevention**: Fixed infinite loop issue in Sagitta Code where creating new Python projects would get stuck repeatedly trying to create projects in `/tmp/hello-python` instead of the proper repository base path
+  - Updated reasoning engine configuration with conservative limits (max 10 iterations, reduced retry attempts)
+  - Improved project creation tool with better path resolution and validation
+  - Enhanced shell execution tool with working directory validation and security checks
+  - Added comprehensive integration tests to catch infinite loop scenarios
+
+### Improved
+- **Project Creation Tool**: Enhanced with better logging, parameter validation, and error handling
+  - Added comprehensive logging throughout the creation process
+  - Better parameter validation (empty name/language checks)
+  - Proper path resolution (absolute vs relative paths)
+  - Check for existing non-empty directories
+  - Enhanced error handling for git initialization and setup commands
+
+- **Shell Execution Tool**: Improved security and reliability
+  - Added working directory validation and canonicalization
+  - Security checks to prevent execution in system directories
+  - Better error handling and logging
+  - Improved timeout handling
+
+- **Reasoning Engine Configuration**: Updated with conservative limits to prevent infinite loops
+  - Reduced max iterations from unlimited to 10
+  - Reduced retry attempts from 3 to 2
+  - Shortened retry delays from 10s to 5s
+  - Limited parallel tools from 5 to 3
+  - Added conservative limits for graph depth, decision alternatives, and backtracking steps
+
+### Added
+- **Integration Tests**: Comprehensive test suite for project creation workflow
+  - Tests for project creation with iteration limits to catch infinite loops
+  - Tests for existing project workflow
+  - Tests for path resolution and working directory handling
+  - Tests for error handling and retry logic
+  - Tests for reasoning configuration limits
+
+### Technical Details
+- Fixed working directory mismatch between shell execution tool and project creation logic
+- Resolved path resolution problems where GUI constructs paths like `{path}/{name}` leading to `/tmp/hello-python`
+- Implemented retry logic that learns from previous failed attempts
+- Added safeguards against infinite loops in reasoning engine

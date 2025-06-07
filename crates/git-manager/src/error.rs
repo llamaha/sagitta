@@ -13,6 +13,9 @@ pub enum GitError {
     #[error("Branch '{branch}' already exists")]
     BranchAlreadyExists { branch: String },
 
+    #[error("Cannot delete the current HEAD branch")]
+    DeleteHeadBranch,
+
     #[error("Cannot switch to branch '{branch}': uncommitted changes present")]
     UncommittedChanges { branch: String },
 

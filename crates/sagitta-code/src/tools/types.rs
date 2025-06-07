@@ -179,6 +179,9 @@ pub trait Tool: Send + Sync + std::fmt::Debug {
     
     /// Execute the tool with the given parameters
     async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError>;
+    
+    /// Get a reference to this tool as std::any::Any for downcasting
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// A boxed tool that can be used by the registry

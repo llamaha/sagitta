@@ -96,7 +96,7 @@ impl RepoPanel {
             .default_width(300.0)
             .min_width(250.0)
             .resizable(true)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(theme.side_panel_frame())
             .show(ctx, |ui| {
                 let mut state_guard = match state_clone.try_lock() {
                     Ok(guard) => guard,
@@ -156,7 +156,32 @@ impl RepoPanel {
                     RepoPanelTab::Add => {
                         render_add_repo(ui, &mut state_guard, Arc::clone(&repo_manager_clone), theme);
                     }
+                    RepoPanelTab::CreateProject => {
+                        // We need config and agent for project creation - these should be passed in
+                        // For now, render a placeholder until we wire up the dependencies
+                        ui.vertical_centered(|ui| {
+                            ui.label("🆕 Project Creation");
+                            ui.add_space(8.0);
+                            ui.label("This feature requires access to the agent and config.");
+                            ui.label("Implementation in progress...");
+                        });
+                    }
                     RepoPanelTab::Sync => {
+                        // Auto-refresh repositories if sync tab is accessed with no repositories
+                        let has_repos = if state_guard.use_enhanced_repos {
+                            !state_guard.enhanced_repositories.is_empty()
+                        } else {
+                            !state_guard.repositories.is_empty()
+                        };
+                        
+                        // Only trigger refresh if we have no repositories AND we're not already loading AND we haven't attempted initial load
+                        if !has_repos && !state_guard.is_loading_repos && !state_guard.initial_load_attempted {
+                            // Trigger a refresh if we have no repositories in the sync tab
+                            state_guard.is_loading_repos = true;
+                            state_guard.initial_load_attempted = true; // Mark that we've attempted to prevent loops
+                            log::info!("Auto-triggering repository refresh for sync tab");
+                        }
+                        
                         render_sync_repo(ui, &mut state_guard, Arc::clone(&repo_manager_clone), theme);
                     }
                     RepoPanelTab::Query => {
@@ -186,6 +211,7 @@ impl RepoPanel {
             
             self.tab_button(ui, RepoPanelTab::List, "List", state);
             self.tab_button(ui, RepoPanelTab::Add, "Add", state);
+            self.tab_button(ui, RepoPanelTab::CreateProject, "🆕 Create", state);
             self.tab_button(ui, RepoPanelTab::Sync, "Sync", state);
             self.tab_button(ui, RepoPanelTab::Query, "Query", state);
             self.tab_button(ui, RepoPanelTab::SearchFile, "Files", state);

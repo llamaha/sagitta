@@ -283,7 +283,7 @@ pub struct ToolCall {
 pub enum LlmMessagePart {
     Text(String),
     ToolCall(ToolCall),
-    // Add other parts if needed by ReasoningEngine, e.g., ToolResult
+    ToolResult { tool_call: ToolCall, result: ToolResult },
 }
 
 /// A message for LLM communication
@@ -319,11 +319,25 @@ pub enum LlmStreamChunk {
 /// Simplified LLM client trait for ReasoningEngine
 #[async_trait::async_trait]
 pub trait LlmClient: Send + Sync {
+    /// Generate a streaming response
     async fn generate_stream(
         &self, 
         messages: Vec<LlmMessage>,
         // tools: Vec<ToolDefinition> // Tools might be handled by ToolExecutor
     ) -> Result<std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<LlmStreamChunk>> + Send>>>;
+    
+    /// Generate a non-streaming response for fallback scenarios
+    async fn generate(&self, 
+        messages: Vec<LlmMessage>,
+        tools: Vec<ToolDefinition>
+    ) -> Result<LlmResponse>;
+}
+
+/// Response from LLM client for non-streaming calls
+#[derive(Debug, Clone)]
+pub struct LlmResponse {
+    pub message: LlmMessage,
+    pub token_usage: Option<TokenUsage>,
 }
 
 // --- End LLM Client Traits and Types ---

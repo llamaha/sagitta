@@ -189,24 +189,24 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
             .map(|s| s.as_str())
             .unwrap_or("Select repository...");
             
-        let repositories = state.repositories.clone(); // Clone to avoid borrow conflicts
+        let repo_names = state.repo_names();
             
         egui::ComboBox::from_label("")
             .selected_text(selected_text)
             .show_ui(ui, |ui| {
-                for repo in &repositories {
+                for repo_name in &repo_names {
                     let is_selected = state.branch_management.selected_repo_for_branches
                         .as_ref()
-                        .map_or(false, |selected| selected == &repo.name);
+                        .map_or(false, |selected| selected == repo_name);
                         
                     if ui.selectable_value(
                         &mut state.branch_management.selected_repo_for_branches,
-                        Some(repo.name.clone()),
-                        &repo.name
+                        Some(repo_name.clone()),
+                        repo_name
                     ).clicked() && !is_selected {
                         // Repository changed, reset state and load data
                         reset_branch_state(state);
-                        state.branch_management.selected_repo_for_branches = Some(repo.name.clone());
+                        state.branch_management.selected_repo_for_branches = Some(repo_name.clone());
                         state.branch_management.is_loading_branches = true;
                         state.branch_management.is_loading_tags = true;
                         
@@ -214,8 +214,8 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
                         initialize_channels_if_needed(state);
                         
                         // Start loading operations
-                        load_branches(repo_manager.clone(), repo.name.clone(), get_branch_sender(state));
-                        load_tags(repo_manager.clone(), repo.name.clone(), get_tag_sender(state));
+                        load_branches(repo_manager.clone(), repo_name.clone(), get_branch_sender(state));
+                        load_tags(repo_manager.clone(), repo_name.clone(), get_tag_sender(state));
                     }
                 }
             });

@@ -89,26 +89,30 @@ impl Tool for RemoveRepositoryTool {
         }
     }
     
-    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
-        match serde_json::from_value::<RemoveRepositoryParams>(parameters) {
-            Ok(params) => {
-                match self.remove_repository(&params).await {
-                    Ok(message) => Ok(ToolResult::Success(serde_json::json!({
-                        "success": true,
-                        "message": message,
-                        "repository_name": params.name,
-                        "removed": true,
-                        "local_files_deleted": params.delete_local_files
-                    }))),
-                    Err(e) => Ok(ToolResult::Error {
-                        error: format!("Remove repository failed: {}", e),
-                    })
-                }
-            },
-            Err(e) => Ok(ToolResult::Error {
-                error: format!("Invalid parameters for remove_repository: {}", e),
+    async fn execute(&self, parameters: serde_json::Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: RemoveRepositoryParams = match serde_json::from_value(parameters) {
+            Ok(params) => params,
+            Err(e) => return Ok(ToolResult::Error {
+                error: format!("Invalid parameters: {}", e)
+            })
+        };
+        
+        let mut repo_manager = self.repo_manager.lock().await;
+        let result = repo_manager.remove_repository(&params.name).await;
+        
+        match result {
+            Ok(_) => Ok(ToolResult::Success(serde_json::json!({
+                "repository_name": params.name,
+                "status": "removed"
+            }))),
+            Err(e) => Ok(ToolResult::Error { 
+                error: format!("Failed to remove repository: {}", e)
             })
         }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -206,8 +210,8 @@ mod tests {
             ToolResult::Error { error } => {
                 // Should fail at the repository manager level, not parameter parsing
                 assert!(!error.contains("Invalid parameters"));
-                // Should indicate repository not found
-                assert!(error.contains("not found") || error.contains("Failed to list repositories"));
+                // Should indicate repository not found or initialization issue
+                assert!(error.contains("not found") || error.contains("Failed to list repositories") || error.contains("not initialized"));
             }
             _ => {}
         }

@@ -123,6 +123,14 @@ pub enum AgentEvent {
 
     /// Generic log message from the agent or its components
     Log(String),
+
+    /// Tool result available for UI display
+    ToolResult {
+        call_id: String,
+        name: String,
+        result: serde_json::Value,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 /// Event handler for agent events

@@ -54,6 +54,10 @@ impl Tool for MockAddRepositoryTool {
             })))
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[tokio::test]
