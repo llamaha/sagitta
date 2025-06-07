@@ -8,9 +8,11 @@ use egui_extras::{Size, StripBuilder};
 
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::conversation::clustering::ConversationCluster;
+use crate::agent::conversation::branching::{BranchSuggestion, ConversationBranchingManager};
 use crate::agent::state::types::{AgentMode, ConversationStatus};
 use crate::gui::theme::AppTheme;
 use crate::gui::app::AppState;
+use super::branch_suggestions::{BranchSuggestionsUI, BranchSuggestionAction, BranchSuggestionsConfig};
 
 // --- Sidebar Action for conversation management ---
 #[derive(Debug, Clone)]
@@ -20,6 +22,11 @@ pub enum SidebarAction {
     SwitchToConversation(Uuid),
     CreateNewConversation,
     RefreshConversations,
+    // Branch-related actions
+    CreateBranch(Uuid, BranchSuggestion),
+    DismissBranchSuggestion(Uuid, Uuid), // conversation_id, message_id
+    RefreshBranchSuggestions(Uuid),
+    ShowBranchDetails(BranchSuggestion),
 }
 
 // --- Display types for conversation items ---
@@ -93,6 +100,15 @@ pub struct ConversationSidebar {
     pub filter_active: bool,
     pub filter_completed: bool,
     pub filter_archived: bool,
+    
+    /// Branch suggestions UI
+    pub branch_suggestions_ui: BranchSuggestionsUI,
+    
+    /// Branch suggestions per conversation
+    pub conversation_branch_suggestions: HashMap<Uuid, Vec<BranchSuggestion>>,
+    
+    /// Show branch suggestions panel
+    pub show_branch_suggestions: bool,
 }
 
 /// Organization modes for the sidebar
@@ -372,6 +388,9 @@ impl ConversationSidebar {
             filter_active: false,
             filter_completed: false,
             filter_archived: false,
+            branch_suggestions_ui: BranchSuggestionsUI::new(),
+            conversation_branch_suggestions: HashMap::new(),
+            show_branch_suggestions: false,
         }
     }
     
@@ -928,6 +947,55 @@ impl ConversationSidebar {
     pub fn update_config(&mut self, config: SidebarConfig) {
         self.config = config;
     }
+    
+    /// Update branch suggestions for a conversation
+    pub fn update_branch_suggestions(&mut self, conversation_id: Uuid, suggestions: Vec<BranchSuggestion>) {
+        self.conversation_branch_suggestions.insert(conversation_id, suggestions.clone());
+        
+        // If this is the currently selected conversation, update the UI
+        if self.selected_conversation == Some(conversation_id) {
+            self.branch_suggestions_ui.update_suggestions(suggestions);
+        }
+    }
+    
+    /// Get branch suggestions for a conversation
+    pub fn get_branch_suggestions(&self, conversation_id: Uuid) -> Option<&Vec<BranchSuggestion>> {
+        self.conversation_branch_suggestions.get(&conversation_id)
+    }
+    
+    /// Clear branch suggestions for a conversation
+    pub fn clear_branch_suggestions(&mut self, conversation_id: Uuid) {
+        self.conversation_branch_suggestions.remove(&conversation_id);
+        
+        // If this is the currently selected conversation, clear the UI
+        if self.selected_conversation == Some(conversation_id) {
+            self.branch_suggestions_ui.update_suggestions(Vec::new());
+        }
+    }
+    
+    /// Toggle branch suggestions panel
+    pub fn toggle_branch_suggestions(&mut self) {
+        self.show_branch_suggestions = !self.show_branch_suggestions;
+    }
+    
+    /// Handle branch suggestion actions
+    pub fn handle_branch_suggestion_action(&mut self, action: BranchSuggestionAction) -> Option<SidebarAction> {
+        match action {
+            BranchSuggestionAction::CreateBranch { conversation_id, suggestion } => {
+                Some(SidebarAction::CreateBranch(conversation_id, suggestion))
+            },
+            BranchSuggestionAction::DismissSuggestion { conversation_id, message_id } => {
+                self.branch_suggestions_ui.dismiss_suggestion(message_id);
+                Some(SidebarAction::DismissBranchSuggestion(conversation_id, message_id))
+            },
+            BranchSuggestionAction::ShowDetails { suggestion } => {
+                Some(SidebarAction::ShowBranchDetails(suggestion))
+            },
+            BranchSuggestionAction::RefreshSuggestions { conversation_id } => {
+                Some(SidebarAction::RefreshBranchSuggestions(conversation_id))
+            },
+        }
+    }
 
     pub fn show(&mut self, ctx: &egui::Context, app_state: &mut AppState, theme: &AppTheme) {
         egui::SidePanel::left("conversation_sidebar")
@@ -958,6 +1026,28 @@ impl ConversationSidebar {
                             self.render_simple_conversation_list(ui, app_state, theme);
                         }
                     }
+                    
+                    // Show branch suggestions if enabled and available
+                    if self.show_branch_suggestions {
+                        if let Some(conversation_id) = app_state.current_conversation_id {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            
+                            match self.branch_suggestions_ui.render(ui, conversation_id, theme) {
+                                Ok(Some(action)) => {
+                                    if let Some(sidebar_action) = self.handle_branch_suggestion_action(action) {
+                                        self.pending_action = Some(sidebar_action);
+                                    }
+                                },
+                                Ok(None) => {
+                                    // No action taken
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to render branch suggestions: {}", e);
+                                }
+                            }
+                        }
+                    }
                 });
                 
                 self.handle_sidebar_actions(app_state, ctx);
@@ -975,6 +1065,11 @@ impl ConversationSidebar {
                 }
                 if ui.button("➕").on_hover_text("New conversation").clicked() {
                     self.pending_action = Some(SidebarAction::CreateNewConversation);
+                }
+                // Branch suggestions toggle
+                let branch_icon = if self.show_branch_suggestions { "🌳" } else { "🌿" };
+                if ui.button(branch_icon).on_hover_text("Toggle branch suggestions").clicked() {
+                    self.toggle_branch_suggestions();
                 }
             });
         });
@@ -1116,6 +1211,39 @@ impl ConversationSidebar {
                         self.edit_buffer = conv_item.summary.title.clone();
                         self.editing_conversation_id = Some(conv_item.summary.id);
                     }
+                    
+                    // Show branch suggestion badge if available
+                    if let Some(suggestions) = self.get_branch_suggestions(conv_item.summary.id) {
+                        if !suggestions.is_empty() {
+                            let suggestion_count = suggestions.len();
+                            let highest_confidence = suggestions.iter()
+                                .map(|s| s.confidence)
+                                .fold(0.0f32, f32::max);
+                            
+                            let badge_color = if highest_confidence >= 0.8 {
+                                Color32::from_rgb(0, 255, 0) // Green
+                            } else if highest_confidence >= 0.6 {
+                                Color32::from_rgb(255, 255, 0) // Yellow
+                            } else {
+                                Color32::from_rgb(255, 165, 0) // Orange
+                            };
+                            
+                            if ui.add_sized(
+                                Vec2::new(20.0, 20.0),
+                                egui::Button::new(RichText::new("🌳").small())
+                                    .fill(badge_color.gamma_multiply(0.3))
+                                    .stroke(Stroke::new(1.0, badge_color))
+                            ).on_hover_text(format!(
+                                "{} branch suggestion{}\nHighest confidence: {:.0}%\nClick to show suggestions",
+                                suggestion_count,
+                                if suggestion_count == 1 { "" } else { "s" },
+                                highest_confidence * 100.0
+                            )).clicked() {
+                                self.show_branch_suggestions = true;
+                                self.pending_action = Some(SidebarAction::SwitchToConversation(conv_item.summary.id));
+                            }
+                        }
+                    }
                 });
             }
         });
@@ -1178,6 +1306,22 @@ impl ConversationSidebar {
                 },
                 SidebarAction::RenameConversation(id, new_name) => {
                     log::info!("Rename conversation {} to '{}'", id, new_name);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::CreateBranch(conversation_id, suggestion) => {
+                    log::info!("Create branch for conversation {} with suggestion: {}", conversation_id, suggestion.suggested_title);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::DismissBranchSuggestion(conversation_id, message_id) => {
+                    log::info!("Dismiss branch suggestion for conversation {} and message: {}", conversation_id, message_id);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::RefreshBranchSuggestions(conversation_id) => {
+                    log::info!("Refresh branch suggestions for conversation: {}", conversation_id);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::ShowBranchDetails(suggestion) => {
+                    log::info!("Show branch details for suggestion: {}", suggestion.suggested_title);
                     // This would typically trigger an async operation
                 },
             }
@@ -1585,5 +1729,103 @@ mod tests {
         // Check No Project group
         let no_project_group = organized.iter().find(|g| g.name == "No Project").unwrap();
         assert_eq!(no_project_group.conversations.len(), 1);
+    }
+
+    #[test]
+    fn test_branch_suggestions_integration() {
+        let config = SidebarConfig::default();
+        let mut sidebar = ConversationSidebar::new(config);
+        
+        let conversation_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        
+        // Create a test branch suggestion
+        let suggestion = BranchSuggestion {
+            message_id,
+            confidence: 0.8,
+            reason: crate::agent::conversation::branching::BranchReason::AlternativeApproach,
+            suggested_title: "Alternative Solution".to_string(),
+            success_probability: Some(0.7),
+            context: crate::agent::conversation::branching::BranchContext {
+                relevant_messages: vec![],
+                trigger_keywords: vec!["alternative".to_string()],
+                conversation_state: crate::agent::conversation::branching::ConversationState::SolutionDevelopment,
+                project_context: None,
+                mentioned_tools: vec!["git".to_string()],
+            },
+        };
+        
+        // Test updating branch suggestions
+        sidebar.update_branch_suggestions(conversation_id, vec![suggestion.clone()]);
+        assert!(sidebar.get_branch_suggestions(conversation_id).is_some());
+        assert_eq!(sidebar.get_branch_suggestions(conversation_id).unwrap().len(), 1);
+        
+        // Test clearing branch suggestions
+        sidebar.clear_branch_suggestions(conversation_id);
+        assert!(sidebar.get_branch_suggestions(conversation_id).is_none());
+        
+        // Test toggle branch suggestions
+        assert!(!sidebar.show_branch_suggestions);
+        sidebar.toggle_branch_suggestions();
+        assert!(sidebar.show_branch_suggestions);
+        
+        // Test handling branch suggestion actions
+        let action = BranchSuggestionAction::CreateBranch {
+            conversation_id,
+            suggestion: suggestion.clone(),
+        };
+        
+        let sidebar_action = sidebar.handle_branch_suggestion_action(action);
+        assert!(sidebar_action.is_some());
+        
+        match sidebar_action.unwrap() {
+            SidebarAction::CreateBranch(id, _) => {
+                assert_eq!(id, conversation_id);
+            },
+            _ => panic!("Expected CreateBranch action"),
+        }
+    }
+    
+    #[test]
+    fn test_branch_suggestion_dismiss() {
+        let config = SidebarConfig::default();
+        let mut sidebar = ConversationSidebar::new(config);
+        
+        let conversation_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        
+        let suggestion = BranchSuggestion {
+            message_id,
+            confidence: 0.8,
+            reason: crate::agent::conversation::branching::BranchReason::ErrorRecovery,
+            suggested_title: "Error Recovery".to_string(),
+            success_probability: Some(0.6),
+            context: crate::agent::conversation::branching::BranchContext {
+                relevant_messages: vec![],
+                trigger_keywords: vec!["error".to_string()],
+                conversation_state: crate::agent::conversation::branching::ConversationState::ErrorState,
+                project_context: None,
+                mentioned_tools: vec![],
+            },
+        };
+        
+        sidebar.update_branch_suggestions(conversation_id, vec![suggestion]);
+        
+        // Test dismissing suggestion
+        let action = BranchSuggestionAction::DismissSuggestion {
+            conversation_id,
+            message_id,
+        };
+        
+        let sidebar_action = sidebar.handle_branch_suggestion_action(action);
+        assert!(sidebar_action.is_some());
+        
+        match sidebar_action.unwrap() {
+            SidebarAction::DismissBranchSuggestion(conv_id, msg_id) => {
+                assert_eq!(conv_id, conversation_id);
+                assert_eq!(msg_id, message_id);
+            },
+            _ => panic!("Expected DismissBranchSuggestion action"),
+        }
     }
 } 
