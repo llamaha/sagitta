@@ -6,6 +6,7 @@ use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;
 use crate::agent::conversation::types::ProjectType;
+use crate::agent::conversation::analytics::AnalyticsReport;
 use std::path::PathBuf;
 
 /// Panel type enum for tracking which panel is currently open
@@ -697,6 +698,22 @@ pub struct AnalyticsPanel {
     pub conversation_summaries: std::collections::HashMap<String, ConversationAnalytics>,
     pub time_filter: TimeFilter,
     pub selected_conversation_id: Option<String>,
+    
+    // Phase 7 enhancements
+    /// Comprehensive analytics report from ConversationAnalyticsManager
+    pub analytics_report: Option<AnalyticsReport>,
+    
+    /// Date range filter for analytics data
+    pub date_range_filter: DateRangeFilter,
+    
+    /// Project filter for analytics data
+    pub project_filter: ProjectFilter,
+    
+    /// Whether to show detailed success metrics
+    pub show_success_details: bool,
+    
+    /// Active tab in the analytics dashboard
+    pub active_tab: AnalyticsTab,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -707,6 +724,43 @@ pub enum TimeFilter {
     AllTime,
 }
 
+/// Date range filter for analytics
+#[derive(Debug, Clone, PartialEq)]
+pub enum DateRangeFilter {
+    Last7Days,
+    Last30Days,
+    Last90Days,
+    AllTime,
+}
+
+/// Project filter for analytics
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProjectFilter {
+    All,
+    Specific(ProjectType),
+}
+
+/// Analytics dashboard tabs
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalyticsTab {
+    Overview,
+    Success,
+    Efficiency,
+    Patterns,
+    Projects,
+    Trends,
+}
+
+/// Actions that can be triggered from the analytics panel
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnalyticsAction {
+    SwitchToSuccessMode,
+    RefreshAnalytics,
+    ExportReport,
+    FilterByProject(ProjectType),
+    FilterByDateRange(DateRangeFilter),
+}
+
 impl AnalyticsPanel {
     pub fn new() -> Self {
         Self {
@@ -715,11 +769,51 @@ impl AnalyticsPanel {
             conversation_summaries: std::collections::HashMap::new(),
             time_filter: TimeFilter::AllTime,
             selected_conversation_id: None,
+            analytics_report: None,
+            date_range_filter: DateRangeFilter::Last30Days,
+            project_filter: ProjectFilter::All,
+            show_success_details: false,
+            active_tab: AnalyticsTab::Overview,
         }
     }
 
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
+    }
+
+    /// Set the comprehensive analytics report
+    pub fn set_analytics_report(&mut self, report: Option<AnalyticsReport>) {
+        self.analytics_report = report;
+    }
+
+    /// Toggle success details display
+    pub fn toggle_success_details(&mut self) {
+        self.show_success_details = !self.show_success_details;
+    }
+
+    /// Handle success rate click to switch to success mode
+    pub fn handle_success_rate_click(&self) -> Option<AnalyticsAction> {
+        Some(AnalyticsAction::SwitchToSuccessMode)
+    }
+
+    /// Handle refresh request
+    pub fn handle_refresh_request(&self) -> Option<AnalyticsAction> {
+        Some(AnalyticsAction::RefreshAnalytics)
+    }
+
+    /// Handle export request
+    pub fn handle_export_request(&self) -> Option<AnalyticsAction> {
+        if self.analytics_report.is_some() {
+            Some(AnalyticsAction::ExportReport)
+        } else {
+            None
+        }
+    }
+
+    /// Reset filters to default values
+    pub fn reset_filters(&mut self) {
+        self.project_filter = ProjectFilter::All;
+        // Keep date_range_filter as is since it has a reasonable default
     }
 
     pub fn add_usage_entry(&mut self, entry: TokenUsageEntry) {
@@ -760,194 +854,850 @@ impl AnalyticsPanel {
             .collect()
     }
 
-    pub fn render(&mut self, ctx: &egui::Context, theme: AppTheme) {
+    pub fn render(&mut self, ctx: &egui::Context, theme: AppTheme) -> Option<AnalyticsAction> {
         if !self.visible {
-            return;
+            return None;
         }
 
-        Window::new("📊 Analytics Panel")
-            .default_width(600.0)
-            .default_height(400.0)
+        let mut action = None;
+
+        Window::new("📊 Conversation Analytics Dashboard")
+            .default_width(800.0)
+            .default_height(600.0)
             .resizable(true)
             .frame(egui::Frame::none().fill(theme.panel_background()))
             .show(ctx, |ui| {
-                ui.vertical_centered_justified(|ui| {
-                     ui.heading("Token Usage & Cost Analytics");
-                });
-                ui.separator();
-
-                // Add some dummy data for now if empty
-                if self.all_usage_entries.is_empty() && ui.button("Add Dummy Data").clicked() {
-                    self.add_usage_entry(TokenUsageEntry::new("conv_1".to_string(), "gemini-1.5-flash".to_string(), 1500, 3000));
-                    let mut entry2 = TokenUsageEntry::new("conv_1".to_string(), "gemini-1.5-pro".to_string(), 200, 500);
-                    entry2.timestamp = std::time::SystemTime::now() - std::time::Duration::from_secs(3700); // > 1 hour ago
-                    self.add_usage_entry(entry2);
-                    self.add_usage_entry(TokenUsageEntry::new("conv_2".to_string(), "gemini-1.5-flash".to_string(), 800, 1200));
-                }
-                
+                // Header with title and controls
                 ui.horizontal(|ui| {
-                    ui.label("Filter by time:");
-                    if ui.selectable_value(&mut self.time_filter, TimeFilter::LastHour, "Last Hour").clicked() {};
-                    if ui.selectable_value(&mut self.time_filter, TimeFilter::Last24Hours, "Last 24h").clicked() {};
-                    if ui.selectable_value(&mut self.time_filter, TimeFilter::Last7Days, "Last 7d").clicked() {};
-                    if ui.selectable_value(&mut self.time_filter, TimeFilter::AllTime, "All Time").clicked() {};
+                    ui.heading("Conversation Analytics Dashboard");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("🔄 Refresh").clicked() {
+                            action = self.handle_refresh_request();
+                        }
+                        if ui.button("📤 Export").clicked() {
+                            action = self.handle_export_request();
+                        }
+                    });
                 });
                 ui.separator();
 
-                let filtered_entries = self.get_filtered_entries();
-                let total_input_tokens: u32 = filtered_entries.iter().map(|e| e.input_tokens).sum();
-                let total_output_tokens: u32 = filtered_entries.iter().map(|e| e.output_tokens).sum();
-                let total_cost: f64 = filtered_entries.iter().map(|e| e.cost).sum();
-                
-                ui.heading("Overall Summary (Filtered)");
-                ui.label(format!("Total API Calls: {}", filtered_entries.len()));
-                ui.label(format!("Total Input Tokens: {}", total_input_tokens));
-                ui.label(format!("Total Output Tokens: {}", total_output_tokens));
-                ui.label(format!("Total Combined Tokens: {}", total_input_tokens + total_output_tokens));
-                ui.label(format!("Estimated Total Cost: ${:.6}", total_cost));
-                ui.label(RichText::new(format!("(Prices based on Gemini 1.5 Flash: Input ${}/1M, Output ${}/1M tokens)", GEMINI_1_5_FLASH_INPUT_COST_PER_MILLION_TOKENS, GEMINI_1_5_FLASH_OUTPUT_COST_PER_MILLION_TOKENS)).small().weak());
-                
+                // Filters section
+                ui.horizontal(|ui| {
+                    ui.label("Filters:");
+                    
+                    // Date range filter
+                    ComboBox::from_label("Date Range")
+                        .selected_text(format!("{:?}", self.date_range_filter))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.date_range_filter, DateRangeFilter::Last7Days, "Last 7 Days");
+                            ui.selectable_value(&mut self.date_range_filter, DateRangeFilter::Last30Days, "Last 30 Days");
+                            ui.selectable_value(&mut self.date_range_filter, DateRangeFilter::Last90Days, "Last 90 Days");
+                            ui.selectable_value(&mut self.date_range_filter, DateRangeFilter::AllTime, "All Time");
+                        });
+
+                    // Project filter
+                    ComboBox::from_label("Project")
+                        .selected_text(match &self.project_filter {
+                            ProjectFilter::All => "All Projects".to_string(),
+                            ProjectFilter::Specific(project_type) => format!("{:?}", project_type),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::All, "All Projects");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Rust), "Rust");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Python), "Python");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::JavaScript), "JavaScript");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::TypeScript), "TypeScript");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Go), "Go");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Java), "Java");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::CSharp), "C#");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Cpp), "C++");
+                        });
+
+                    if ui.button("Reset Filters").clicked() {
+                        self.reset_filters();
+                    }
+                });
                 ui.separator();
 
-                let mut new_selected_id: Option<String> = None;
-                let mut clear_selection = false;
+                // Tab navigation
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Overview, "📊 Overview");
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Success, "🎯 Success");
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Efficiency, "⚡ Efficiency");
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Patterns, "🔍 Patterns");
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Projects, "📁 Projects");
+                    ui.selectable_value(&mut self.active_tab, AnalyticsTab::Trends, "📈 Trends");
+                });
+                ui.separator();
 
-                if let Some(selected_id_val) = &self.selected_conversation_id {
-                    let current_selected_id = selected_id_val.clone();
-
-                    // --- Detailed Conversation View ---
-                    ui.heading(format!("Details for Conversation: {}", current_selected_id));
-                    if ui.button("⬅ Back to Summary").clicked() {
-                        clear_selection = true;
-                    }
-                    ui.separator();
-
-                    let entries_for_selected_convo: Vec<&TokenUsageEntry> = self.all_usage_entries
-                        .iter()
-                        .filter(|e| e.conversation_id == current_selected_id)
-                        .collect();
-
-                    if entries_for_selected_convo.is_empty() {
-                        ui.label("No token usage entries found for this conversation.");
-                    } else {
-                        ScrollArea::vertical().show(ui, |ui| {
-                            egui::Grid::new(format!("details_{}", current_selected_id)).striped(true).show(ui, |ui| {
-                                // Header
-                                ui.label(RichText::new("Time").strong());
-                                ui.label(RichText::new("Model").strong());
-                                ui.label(RichText::new("Input Tokens").strong());
-                                ui.label(RichText::new("Output Tokens").strong());
-                                ui.label(RichText::new("Cost").strong());
-                                ui.end_row();
-
-                                for entry in entries_for_selected_convo {
-                                    let timestamp_str = chrono::DateTime::<chrono::Utc>::from(entry.timestamp)
-                                        .format("%H:%M:%S").to_string();
-                                    ui.label(timestamp_str);
-                                    ui.label(&entry.model_name);
-                                    ui.label(entry.input_tokens.to_string());
-                                    ui.label(entry.output_tokens.to_string());
-                                    ui.label(format!("${:.6}", entry.cost));
-                                    ui.end_row();
+                // Content area with scrolling
+                ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(report) = self.analytics_report.clone() {
+                        match self.active_tab {
+                            AnalyticsTab::Overview => {
+                                if let Some(overview_action) = self.render_overview_tab(ui, &report, theme) {
+                                    action = Some(overview_action);
                                 }
-                            });
+                            },
+                            AnalyticsTab::Success => {
+                                if let Some(success_action) = self.render_success_tab(ui, &report, theme) {
+                                    action = Some(success_action);
+                                }
+                            },
+                            AnalyticsTab::Efficiency => {
+                                self.render_efficiency_tab(ui, &report, theme);
+                            },
+                            AnalyticsTab::Patterns => {
+                                self.render_patterns_tab(ui, &report, theme);
+                            },
+                            AnalyticsTab::Projects => {
+                                self.render_projects_tab(ui, &report, theme);
+                            },
+                            AnalyticsTab::Trends => {
+                                self.render_trends_tab(ui, &report, theme);
+                            },
+                        }
+                    } else {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(50.0);
+                            ui.label("📊 No analytics data available");
+                            ui.label("Click 'Refresh' to generate analytics report");
+                            ui.add_space(20.0);
+                            if ui.button("🔄 Generate Analytics").clicked() {
+                                action = self.handle_refresh_request();
+                            }
                         });
                     }
-                } else {
-                    // --- Conversation Summary View ---
-                    ui.heading("Conversations Summary (All Time)");
-                    
-                    ScrollArea::vertical().show(ui, |ui| {
-                        if self.conversation_summaries.is_empty() {
-                            ui.label("No conversation data yet.");
-                        } else {
-                            let mut conv_summaries_vec: Vec<_> = self.conversation_summaries.values().cloned().collect();
-                            conv_summaries_vec.sort_by(|a,b| b.last_updated.cmp(&a.last_updated));
+                });
 
-                            for summary in conv_summaries_vec {
-                                ui.group(|ui| {
-                                    ui.label(RichText::new(format!("Conversation ID: {}", summary.id)).strong());
-                                    ui.label(format!("  Entries: {}", summary.entry_count));
-                                    ui.label(format!("  Total Input Tokens: {}", summary.total_input_tokens));
-                                    ui.label(format!("  Total Output Tokens: {}", summary.total_output_tokens));
-                                    ui.label(format!("  Total Cost: ${:.6}", summary.total_cost));
-                                    if ui.button("View Details").clicked() {
-                                        new_selected_id = Some(summary.id.clone());
-                                    }
-                                });
+                // Legacy token usage section (collapsible)
+                ui.separator();
+                ui.collapsing("💰 Token Usage & Cost (Legacy)", |ui| {
+                    self.render_legacy_token_usage(ui, theme);
+                });
+            });
+
+        action
+    }
+
+    /// Render the legacy token usage section
+    fn render_legacy_token_usage(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        // Add some dummy data for now if empty
+        if self.all_usage_entries.is_empty() && ui.button("Add Dummy Data").clicked() {
+            self.add_usage_entry(TokenUsageEntry::new("conv_1".to_string(), "gemini-1.5-flash".to_string(), 1500, 3000));
+            let mut entry2 = TokenUsageEntry::new("conv_1".to_string(), "gemini-1.5-pro".to_string(), 200, 500);
+            entry2.timestamp = std::time::SystemTime::now() - std::time::Duration::from_secs(3700); // > 1 hour ago
+            self.add_usage_entry(entry2);
+            self.add_usage_entry(TokenUsageEntry::new("conv_2".to_string(), "gemini-1.5-flash".to_string(), 800, 1200));
+        }
+        
+        ui.horizontal(|ui| {
+            ui.label("Filter by time:");
+            if ui.selectable_value(&mut self.time_filter, TimeFilter::LastHour, "Last Hour").clicked() {};
+            if ui.selectable_value(&mut self.time_filter, TimeFilter::Last24Hours, "Last 24h").clicked() {};
+            if ui.selectable_value(&mut self.time_filter, TimeFilter::Last7Days, "Last 7d").clicked() {};
+            if ui.selectable_value(&mut self.time_filter, TimeFilter::AllTime, "All Time").clicked() {};
+        });
+        ui.separator();
+
+        let filtered_entries = self.get_filtered_entries();
+        let total_input_tokens: u32 = filtered_entries.iter().map(|e| e.input_tokens).sum();
+        let total_output_tokens: u32 = filtered_entries.iter().map(|e| e.output_tokens).sum();
+        let total_cost: f64 = filtered_entries.iter().map(|e| e.cost).sum();
+        
+        ui.heading("Overall Summary (Filtered)");
+        ui.label(format!("Total API Calls: {}", filtered_entries.len()));
+        ui.label(format!("Total Input Tokens: {}", total_input_tokens));
+        ui.label(format!("Total Output Tokens: {}", total_output_tokens));
+        ui.label(format!("Total Combined Tokens: {}", total_input_tokens + total_output_tokens));
+        ui.label(format!("Estimated Total Cost: ${:.6}", total_cost));
+        ui.label(RichText::new(format!("(Prices based on Gemini 1.5 Flash: Input ${}/1M, Output ${}/1M tokens)", GEMINI_1_5_FLASH_INPUT_COST_PER_MILLION_TOKENS, GEMINI_1_5_FLASH_OUTPUT_COST_PER_MILLION_TOKENS)).small().weak());
+        
+        ui.separator();
+
+        let mut new_selected_id: Option<String> = None;
+        let mut clear_selection = false;
+
+        if let Some(selected_id_val) = &self.selected_conversation_id {
+            let current_selected_id = selected_id_val.clone();
+
+            // --- Detailed Conversation View ---
+            ui.heading(format!("Details for Conversation: {}", current_selected_id));
+            if ui.button("⬅ Back to Summary").clicked() {
+                clear_selection = true;
+            }
+            ui.separator();
+
+            let entries_for_selected_convo: Vec<&TokenUsageEntry> = self.all_usage_entries
+                .iter()
+                .filter(|e| e.conversation_id == current_selected_id)
+                .collect();
+
+            if entries_for_selected_convo.is_empty() {
+                ui.label("No token usage entries found for this conversation.");
+            } else {
+                ScrollArea::vertical().show(ui, |ui| {
+                    egui::Grid::new(format!("details_{}", current_selected_id)).striped(true).show(ui, |ui| {
+                        // Header
+                        ui.label(RichText::new("Time").strong());
+                        ui.label(RichText::new("Model").strong());
+                        ui.label(RichText::new("Input Tokens").strong());
+                        ui.label(RichText::new("Output Tokens").strong());
+                        ui.label(RichText::new("Cost").strong());
+                        ui.end_row();
+
+                        for entry in entries_for_selected_convo {
+                            let timestamp_str = chrono::DateTime::<chrono::Utc>::from(entry.timestamp)
+                                .format("%H:%M:%S").to_string();
+                            ui.label(timestamp_str);
+                            ui.label(&entry.model_name);
+                            ui.label(entry.input_tokens.to_string());
+                            ui.label(entry.output_tokens.to_string());
+                            ui.label(format!("${:.6}", entry.cost));
+                            ui.end_row();
+                        }
+                    });
+                });
+            }
+        } else {
+            // --- Conversation Summary View ---
+            ui.heading("Conversations Summary (All Time)");
+            
+            ScrollArea::vertical().show(ui, |ui| {
+                if self.conversation_summaries.is_empty() {
+                    ui.label("No conversation data yet.");
+                } else {
+                    let mut conv_summaries_vec: Vec<_> = self.conversation_summaries.values().cloned().collect();
+                    conv_summaries_vec.sort_by(|a,b| b.last_updated.cmp(&a.last_updated));
+
+                    for summary in conv_summaries_vec {
+                        ui.group(|ui| {
+                            ui.label(RichText::new(format!("Conversation ID: {}", summary.id)).strong());
+                            ui.label(format!("  Entries: {}", summary.entry_count));
+                            ui.label(format!("  Total Input Tokens: {}", summary.total_input_tokens));
+                            ui.label(format!("  Total Output Tokens: {}", summary.total_output_tokens));
+                            ui.label(format!("  Total Cost: ${:.6}", summary.total_cost));
+                            if ui.button("View Details").clicked() {
+                                new_selected_id = Some(summary.id.clone());
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
+        if clear_selection {
+            self.selected_conversation_id = None;
+        } else if let Some(id_to_select) = new_selected_id {
+            self.selected_conversation_id = Some(id_to_select);
+        }
+
+         ui.separator();
+         // Placeholder for future: Most Used Models, Charts, etc.
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.heading("Visualizations");
+        ui.add_space(5.0);
+
+        // --- Tokens Over Time Line Chart ---
+        ui.collapsing("Tokens Over Time", |ui| {
+            let filtered_entries = self.get_filtered_entries();
+            let line_points: PlotPoints = filtered_entries.iter()
+                .map(|entry| {
+                    let timestamp_secs = entry.timestamp
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs_f64();
+                    [timestamp_secs, (entry.input_tokens + entry.output_tokens) as f64]
+                })
+                .collect();
+            
+            let line = Line::new(line_points).name("Total Tokens");
+            Plot::new("tokens_over_time_plot")
+                .legend(Legend::default())
+                .height(200.0)
+                .x_axis_formatter(|mark, _bounds_or_ctx| {
+                    // Format timestamp (seconds since epoch) to a readable time string
+                    let timestamp_secs = mark.value;
+                    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp_secs as i64, 0)
+                        .unwrap_or_default(); 
+                    datetime.format("%H:%M").to_string()
+                })
+                .show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+        });
+
+        // --- Cost Per Conversation Bar Chart ---
+        ui.collapsing("Cost Per Conversation", |ui| {
+            let mut bars: Vec<Bar> = Vec::new();
+            let mut conv_ids: Vec<String> = self.conversation_summaries.keys().cloned().collect();
+            conv_ids.sort(); // Sort for consistent bar order
+
+            for (i, conv_id) in conv_ids.iter().enumerate() {
+                if let Some(summary) = self.conversation_summaries.get(conv_id) {
+                    bars.push(Bar::new(i as f64 + 0.5, summary.total_cost).width(0.95).name(format!("{}", &conv_id[..conv_id.len().min(10)]))); // Truncate name for legend
+                }
+            }
+
+            let chart = BarChart::new(bars)
+                .color(theme.accent_color())
+                .name("Conversation Cost");
+
+            Plot::new("cost_per_conversation_plot")
+                .legend(Legend::default())
+                .height(200.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.bar_chart(chart);
+                });
+        });
+    }
+
+    /// Render the overview tab
+    fn render_overview_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) -> Option<AnalyticsAction> {
+        let mut action = None;
+        
+        ui.heading("📊 Overview");
+        ui.add_space(10.0);
+        
+        // Key metrics cards
+        ui.horizontal(|ui| {
+            // Total conversations card
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Total Conversations").strong());
+                    ui.label(RichText::new(format!("{}", report.overall_metrics.total_conversations))
+                        .size(24.0).color(theme.accent_color()));
+                });
+            });
+            
+            // Success rate card
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Success Rate").strong());
+                    let success_rate = report.success_metrics.overall_success_rate * 100.0;
+                    let success_color = if success_rate >= 80.0 {
+                        Color32::from_rgb(0, 200, 0)
+                    } else if success_rate >= 60.0 {
+                        Color32::from_rgb(255, 165, 0)
+                    } else {
+                        Color32::from_rgb(255, 100, 100)
+                    };
+                    
+                    if ui.add(Button::new(RichText::new(format!("{:.1}%", success_rate))
+                        .size(24.0).color(success_color))).clicked() {
+                        action = self.handle_success_rate_click();
+                    }
+                });
+            });
+            
+            // Completion rate card
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Completion Rate").strong());
+                    ui.label(RichText::new(format!("{:.1}%", report.overall_metrics.completion_rate * 100.0))
+                        .size(24.0).color(theme.accent_color()));
+                });
+            });
+            
+            // Average duration card
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Avg Duration").strong());
+                    ui.label(RichText::new(format!("{:.1} min", report.overall_metrics.avg_duration_minutes))
+                        .size(24.0).color(theme.accent_color()));
+                });
+            });
+        });
+        
+        ui.add_space(20.0);
+        
+        // Activity overview
+        ui.heading("Activity Overview");
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(format!("📝 Total Messages: {}", report.overall_metrics.total_messages));
+                ui.label(format!("🌳 Total Branches: {}", report.overall_metrics.total_branches));
+                ui.label(format!("📍 Total Checkpoints: {}", report.overall_metrics.total_checkpoints));
+                ui.label(format!("💬 Avg Messages/Conv: {:.1}", report.overall_metrics.avg_messages_per_conversation));
+            });
+            
+            ui.separator();
+            
+            ui.vertical(|ui| {
+                ui.label("🕐 Peak Activity Hours:");
+                let peak_hours: Vec<String> = report.overall_metrics.peak_activity_hours
+                    .iter()
+                    .map(|h| format!("{}:00", h))
+                    .collect();
+                ui.label(peak_hours.join(", "));
+            });
+        });
+        
+        ui.add_space(20.0);
+        
+        // Project distribution chart
+        if !report.overall_metrics.project_type_distribution.is_empty() {
+            ui.heading("Project Distribution");
+            
+            let mut bars: Vec<Bar> = Vec::new();
+            let mut project_types: Vec<_> = report.overall_metrics.project_type_distribution.iter().collect();
+            project_types.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count descending
+            
+            for (i, (project_type, count)) in project_types.iter().enumerate() {
+                bars.push(Bar::new(i as f64 + 0.5, **count as f64)
+                    .width(0.8)
+                    .name(format!("{:?}", project_type)));
+            }
+            
+            let chart = BarChart::new(bars)
+                .color(theme.accent_color())
+                .name("Conversations by Project Type");
+            
+            Plot::new("project_distribution_plot")
+                .legend(Legend::default())
+                .height(200.0)
+                .show(ui, |plot_ui| {
+                    plot_ui.bar_chart(chart);
+                });
+        }
+        
+        action
+    }
+
+    /// Render the success tab
+    fn render_success_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) -> Option<AnalyticsAction> {
+        let mut action = None;
+        
+        ui.horizontal(|ui| {
+            ui.heading("🎯 Success Metrics");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(if self.show_success_details { "Hide Details" } else { "Show Details" }).clicked() {
+                    self.toggle_success_details();
+                }
+                if ui.button("📊 Switch to Success Mode").clicked() {
+                    action = self.handle_success_rate_click();
+                }
+            });
+        });
+        ui.add_space(10.0);
+        
+        // Overall success metrics
+        ui.group(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Overall Success Rate").strong());
+                let success_rate = report.success_metrics.overall_success_rate * 100.0;
+                ui.label(RichText::new(format!("{:.1}%", success_rate)).size(20.0));
+                
+                if self.show_success_details {
+                    ui.separator();
+                    ui.label("Success by conversation length:");
+                    for (length, rate) in &report.success_metrics.success_by_length {
+                        ui.label(format!("  {} messages: {:.1}%", length, rate * 100.0));
+                    }
+                }
+            });
+        });
+        
+        ui.add_space(15.0);
+        
+        // Success by project type
+        if !report.success_metrics.success_by_project_type.is_empty() {
+            ui.heading("Success by Project Type");
+            
+            let mut project_success: Vec<_> = report.success_metrics.success_by_project_type.iter().collect();
+            project_success.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+            
+            for (project_type, success_rate) in project_success {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{:?}:", project_type));
+                    let rate_percent = success_rate * 100.0;
+                    let color = if rate_percent >= 80.0 {
+                        Color32::from_rgb(0, 200, 0)
+                    } else if rate_percent >= 60.0 {
+                        Color32::from_rgb(255, 165, 0)
+                    } else {
+                        Color32::from_rgb(255, 100, 100)
+                    };
+                    ui.colored_label(color, format!("{:.1}%", rate_percent));
+                });
+            }
+        }
+        
+        ui.add_space(15.0);
+        
+        // Success patterns
+        if !report.success_metrics.successful_patterns.is_empty() {
+            ui.heading("Successful Patterns");
+            for pattern in &report.success_metrics.successful_patterns {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&pattern.name).strong());
+                        ui.label(&pattern.description);
+                        ui.label(format!("Success Rate: {:.1}%", pattern.success_rate * 100.0));
+                        ui.label(format!("Frequency: {}", pattern.frequency));
+                    });
+                });
+            }
+        }
+        
+        // Failure points
+        if !report.success_metrics.failure_points.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("Common Failure Points");
+            for failure_point in &report.success_metrics.failure_points {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.colored_label(Color32::from_rgb(255, 100, 100), &failure_point.description);
+                        ui.label(format!("Frequency: {}", failure_point.frequency));
+                        ui.label(format!("Context: {}", failure_point.context));
+                        
+                        if !failure_point.mitigations.is_empty() {
+                            ui.label("Suggested mitigations:");
+                            for mitigation in &failure_point.mitigations {
+                                ui.label(format!("  • {}", mitigation));
                             }
                         }
                     });
-                }
-
-                if clear_selection {
-                    self.selected_conversation_id = None;
-                } else if let Some(id_to_select) = new_selected_id {
-                    self.selected_conversation_id = Some(id_to_select);
-                }
-
-                 ui.separator();
-                 // Placeholder for future: Most Used Models, Charts, etc.
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.heading("Visualizations");
-                ui.add_space(5.0);
-
-                // --- Tokens Over Time Line Chart ---
-                ui.collapsing("Tokens Over Time", |ui| {
-                    let filtered_entries = self.get_filtered_entries();
-                    let line_points: PlotPoints = filtered_entries.iter()
-                        .map(|entry| {
-                            let timestamp_secs = entry.timestamp
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs_f64();
-                            [timestamp_secs, (entry.input_tokens + entry.output_tokens) as f64]
-                        })
-                        .collect();
-                    
-                    let line = Line::new(line_points).name("Total Tokens");
-                    Plot::new("tokens_over_time_plot")
-                        .legend(Legend::default())
-                        .height(200.0)
-                        .x_axis_formatter(|mark, _bounds_or_ctx| {
-                            // Format timestamp (seconds since epoch) to a readable time string
-                            let timestamp_secs = mark.value;
-                            let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp_secs as i64, 0)
-                                .unwrap_or_default(); 
-                            datetime.format("%H:%M").to_string()
-                        })
-                        .show(ui, |plot_ui| {
-                            plot_ui.line(line);
-                        });
                 });
+            }
+        }
+        
+        action
+    }
 
-                // --- Cost Per Conversation Bar Chart ---
-                ui.collapsing("Cost Per Conversation", |ui| {
-                    let mut bars: Vec<Bar> = Vec::new();
-                    let mut conv_ids: Vec<String> = self.conversation_summaries.keys().cloned().collect();
-                    conv_ids.sort(); // Sort for consistent bar order
+    /// Render the efficiency tab
+    fn render_efficiency_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+        ui.heading("⚡ Efficiency Metrics");
+        ui.add_space(10.0);
+        
+        // Key efficiency metrics
+        ui.horizontal(|ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Avg Resolution Time").strong());
+                    ui.label(RichText::new(format!("{:.1} min", report.efficiency_metrics.avg_resolution_time))
+                        .size(18.0).color(theme.accent_color()));
+                });
+            });
+            
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Branching Efficiency").strong());
+                    ui.label(RichText::new(format!("{:.1}%", report.efficiency_metrics.branching_efficiency * 100.0))
+                        .size(18.0).color(theme.accent_color()));
+                });
+            });
+            
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Checkpoint Utilization").strong());
+                    ui.label(RichText::new(format!("{:.1}%", report.efficiency_metrics.checkpoint_utilization * 100.0))
+                        .size(18.0).color(theme.accent_color()));
+                });
+            });
+        });
+        
+        ui.add_space(20.0);
+        
+        // Context switching metrics
+        ui.heading("Context Management");
+        ui.label(format!("Average context switches per conversation: {:.1}", 
+            report.efficiency_metrics.context_switches_per_conversation));
+        
+        ui.add_space(15.0);
+        
+        // Resource utilization
+        ui.heading("Resource Utilization");
+        let resource_util = &report.efficiency_metrics.resource_utilization;
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(format!("Memory Usage: {:.1} MB", resource_util.avg_memory_usage));
+                ui.label(format!("Storage Efficiency: {:.1}%", resource_util.storage_efficiency * 100.0));
+                ui.label(format!("Clustering Efficiency: {:.1}%", resource_util.clustering_efficiency * 100.0));
+            });
+            
+            ui.separator();
+            
+            ui.vertical(|ui| {
+                ui.label("Search Performance:");
+                ui.label(format!("  Avg Time: {:.1}ms", resource_util.search_performance.avg_search_time_ms));
+                ui.label(format!("  Accuracy: {:.1}%", resource_util.search_performance.accuracy_rate * 100.0));
+            });
+        });
+        
+        // Efficient patterns
+        if !report.efficiency_metrics.efficient_patterns.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("Efficient Patterns");
+            for pattern in &report.efficiency_metrics.efficient_patterns {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&pattern.name).strong());
+                        ui.label(format!("Efficiency Score: {:.1}%", pattern.efficiency_score * 100.0));
+                        
+                        if !pattern.characteristics.is_empty() {
+                            ui.label("Characteristics:");
+                            for characteristic in &pattern.characteristics {
+                                ui.label(format!("  • {}", characteristic));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+    }
 
-                    for (i, conv_id) in conv_ids.iter().enumerate() {
-                        if let Some(summary) = self.conversation_summaries.get(conv_id) {
-                            bars.push(Bar::new(i as f64 + 0.5, summary.total_cost).width(0.95).name(format!("{}", &conv_id[..conv_id.len().min(10)]))); // Truncate name for legend
+    /// Render the patterns tab
+    fn render_patterns_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) {
+        ui.heading("🔍 Pattern Analysis");
+        ui.add_space(10.0);
+        
+        // Common flows
+        if !report.patterns.common_flows.is_empty() {
+            ui.heading("Common Conversation Flows");
+            for flow in &report.patterns.common_flows {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&flow.name).strong());
+                        ui.label(format!("Average Duration: {:.1} min", flow.avg_duration));
+                        
+                        if !flow.states.is_empty() {
+                            ui.label("Flow States:");
+                            for state in &flow.states {
+                                ui.label(format!("  → {}", state));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        
+        // Recurring themes
+        if !report.patterns.recurring_themes.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("Recurring Themes");
+            for theme in &report.patterns.recurring_themes {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&theme.name).strong());
+                        ui.label(format!("({})", theme.frequency));
+                    });
+                    
+                    if !theme.keywords.is_empty() {
+                        ui.label(format!("Keywords: {}", theme.keywords.join(", ")));
+                    }
+                });
+            }
+        }
+        
+        // Temporal patterns
+        if !report.patterns.temporal_patterns.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("Temporal Patterns");
+            for pattern in &report.patterns.temporal_patterns {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&pattern.name).strong());
+                        ui.label(&pattern.time_characteristics);
+                        
+                        if !pattern.peak_periods.is_empty() {
+                            ui.label(format!("Peak Periods: {}", pattern.peak_periods.join(", ")));
+                        }
+                    });
+                });
+            }
+        }
+        
+        // Behavior patterns
+        if !report.patterns.behavior_patterns.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("User Behavior Patterns");
+            for pattern in &report.patterns.behavior_patterns {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&pattern.name).strong());
+                        ui.label(&pattern.description);
+                        ui.label(format!("Frequency: {}", pattern.frequency));
+                        ui.label(format!("Success Impact: {:.1}%", pattern.success_impact * 100.0));
+                    });
+                });
+            }
+        }
+        
+        // Anomalies
+        if !report.patterns.anomalies.is_empty() {
+            ui.add_space(15.0);
+            ui.heading("Detected Anomalies");
+            for anomaly in &report.patterns.anomalies {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.colored_label(Color32::from_rgb(255, 165, 0), 
+                            RichText::new(&anomaly.anomaly_type).strong());
+                        ui.label(&anomaly.description);
+                        ui.label(format!("Severity: {:?}", anomaly.severity));
+                        
+                        if !anomaly.investigation_steps.is_empty() {
+                            ui.label("Investigation Steps:");
+                            for step in &anomaly.investigation_steps {
+                                ui.label(format!("  • {}", step));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    /// Render the projects tab
+    fn render_projects_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+        ui.heading("📁 Project Insights");
+        ui.add_space(10.0);
+        
+        if report.project_insights.is_empty() {
+            ui.label("No project-specific insights available.");
+            return;
+        }
+        
+        for insight in &report.project_insights {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    // Project header
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{:?}", insight.project_type)).strong().size(16.0));
+                        ui.label(format!("({} conversations)", insight.conversation_count));
+                        
+                        let success_rate = insight.success_rate * 100.0;
+                        let color = if success_rate >= 80.0 {
+                            Color32::from_rgb(0, 200, 0)
+                        } else if success_rate >= 60.0 {
+                            Color32::from_rgb(255, 165, 0)
+                        } else {
+                            Color32::from_rgb(255, 100, 100)
+                        };
+                        ui.colored_label(color, format!("Success: {:.1}%", success_rate));
+                    });
+                    
+                    ui.separator();
+                    
+                    // Common topics
+                    if !insight.common_topics.is_empty() {
+                        ui.label("Common Topics:");
+                        ui.label(format!("  {}", insight.common_topics.join(", ")));
+                    }
+                    
+                    // Typical patterns
+                    if !insight.typical_patterns.is_empty() {
+                        ui.label("Typical Patterns:");
+                        for pattern in &insight.typical_patterns {
+                            ui.label(format!("  • {}", pattern));
                         }
                     }
-
-                    let chart = BarChart::new(bars)
-                        .color(theme.accent_color())
-                        .name("Conversation Cost");
-
-                    Plot::new("cost_per_conversation_plot")
-                        .legend(Legend::default())
-                        .height(200.0)
-                        .show(ui, |plot_ui| {
-                            plot_ui.bar_chart(chart);
-                        });
+                    
+                    // Recommendations
+                    if !insight.recommendations.is_empty() {
+                        ui.label("Recommendations:");
+                        for recommendation in &insight.recommendations {
+                            ui.colored_label(theme.accent_color(), format!("  → {}", recommendation));
+                        }
+                    }
                 });
-
             });
+            
+            ui.add_space(10.0);
+        }
+    }
+
+    /// Render the trends tab
+    fn render_trends_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+        ui.heading("📈 Trending Topics");
+        ui.add_space(10.0);
+        
+        if report.trending_topics.is_empty() {
+            ui.label("No trending topics available.");
+            return;
+        }
+        
+        for topic in &report.trending_topics {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    // Topic name and trend indicator
+                    ui.label(RichText::new(&topic.topic).strong().size(14.0));
+                    
+                    let (trend_icon, trend_color) = match topic.trend {
+                        crate::agent::conversation::analytics::TrendDirection::Growing => ("📈", Color32::from_rgb(0, 200, 0)),
+                        crate::agent::conversation::analytics::TrendDirection::Stable => ("➡️", Color32::from_rgb(100, 100, 100)),
+                        crate::agent::conversation::analytics::TrendDirection::Declining => ("📉", Color32::from_rgb(255, 100, 100)),
+                    };
+                    ui.colored_label(trend_color, trend_icon);
+                    
+                    ui.label(format!("({} occurrences)", topic.frequency));
+                    
+                    // Success rate
+                    let success_rate = topic.success_rate * 100.0;
+                    let success_color = if success_rate >= 80.0 {
+                        Color32::from_rgb(0, 200, 0)
+                    } else if success_rate >= 60.0 {
+                        Color32::from_rgb(255, 165, 0)
+                    } else {
+                        Color32::from_rgb(255, 100, 100)
+                    };
+                    ui.colored_label(success_color, format!("Success: {:.1}%", success_rate));
+                });
+                
+                // Associated project types
+                if !topic.project_types.is_empty() {
+                    ui.label(format!("Projects: {}", 
+                        topic.project_types.iter()
+                            .map(|pt| format!("{:?}", pt))
+                            .collect::<Vec<_>>()
+                            .join(", ")));
+                }
+            });
+            
+            ui.add_space(8.0);
+        }
+        
+        ui.add_space(15.0);
+        
+        // Recommendations
+        if !report.recommendations.is_empty() {
+            ui.heading("💡 Recommendations");
+            
+            for recommendation in &report.recommendations {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        // Priority and category
+                        ui.horizontal(|ui| {
+                            let priority_color = match recommendation.priority {
+                                crate::agent::conversation::analytics::Priority::High => Color32::from_rgb(255, 100, 100),
+                                crate::agent::conversation::analytics::Priority::Medium => Color32::from_rgb(255, 165, 0),
+                                crate::agent::conversation::analytics::Priority::Low => Color32::from_rgb(100, 100, 100),
+                                crate::agent::conversation::analytics::Priority::Critical => Color32::from_rgb(255, 0, 0),
+                            };
+                            ui.colored_label(priority_color, format!("{:?} Priority", recommendation.priority));
+                            ui.label(format!("({:?})", recommendation.category));
+                        });
+                        
+                        // Description and impact
+                        ui.label(RichText::new(&recommendation.description).strong());
+                        ui.label(format!("Expected Impact: {}", recommendation.expected_impact));
+                        ui.label(format!("Difficulty: {:?}", recommendation.difficulty));
+                        
+                        // Evidence
+                        if !recommendation.evidence.is_empty() {
+                            ui.label("Evidence:");
+                            for evidence in &recommendation.evidence {
+                                ui.label(format!("  • {}", evidence));
+                            }
+                        }
+                    });
+                });
+                
+                ui.add_space(8.0);
+            }
+        }
     }
 }
 
@@ -1085,5 +1835,334 @@ mod tests {
         panel_manager.close_all_panels();
         assert!(!panel_manager.create_project_panel.visible);
         assert_eq!(panel_manager.active_panel, ActivePanel::None);
+    }
+
+    // ===== Phase 7 Analytics Dashboard Tests =====
+
+    #[test]
+    fn test_analytics_panel_enhanced_initialization() {
+        let panel = AnalyticsPanel::new();
+        assert!(!panel.visible);
+        assert!(panel.all_usage_entries.is_empty());
+        assert!(panel.conversation_summaries.is_empty());
+        assert_eq!(panel.time_filter, TimeFilter::AllTime);
+        assert!(panel.selected_conversation_id.is_none());
+        
+        // Test new fields for Phase 7
+        assert!(panel.analytics_report.is_none());
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last30Days);
+        assert_eq!(panel.project_filter, ProjectFilter::All);
+        assert!(!panel.show_success_details);
+        assert_eq!(panel.active_tab, AnalyticsTab::Overview);
+    }
+
+    #[test]
+    fn test_analytics_panel_set_analytics_report() {
+        let mut panel = AnalyticsPanel::new();
+        
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report.clone()));
+        
+        assert!(panel.analytics_report.is_some());
+        let stored_report = panel.analytics_report.as_ref().unwrap();
+        assert_eq!(stored_report.overall_metrics.total_conversations, 10);
+        assert_eq!(stored_report.success_metrics.overall_success_rate, 0.75);
+    }
+
+    #[test]
+    fn test_analytics_panel_date_range_filtering() {
+        let mut panel = AnalyticsPanel::new();
+        
+        // Test different date range filters
+        panel.date_range_filter = DateRangeFilter::Last7Days;
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last7Days);
+        
+        panel.date_range_filter = DateRangeFilter::Last30Days;
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last30Days);
+        
+        panel.date_range_filter = DateRangeFilter::Last90Days;
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last90Days);
+        
+        panel.date_range_filter = DateRangeFilter::AllTime;
+        assert_eq!(panel.date_range_filter, DateRangeFilter::AllTime);
+    }
+
+    #[test]
+    fn test_analytics_panel_project_filtering() {
+        let mut panel = AnalyticsPanel::new();
+        
+        // Test different project filters
+        panel.project_filter = ProjectFilter::All;
+        assert_eq!(panel.project_filter, ProjectFilter::All);
+        
+        panel.project_filter = ProjectFilter::Specific(ProjectType::Rust);
+        assert_eq!(panel.project_filter, ProjectFilter::Specific(ProjectType::Rust));
+        
+        panel.project_filter = ProjectFilter::Specific(ProjectType::Python);
+        assert_eq!(panel.project_filter, ProjectFilter::Specific(ProjectType::Python));
+    }
+
+    #[test]
+    fn test_analytics_panel_tab_switching() {
+        let mut panel = AnalyticsPanel::new();
+        
+        // Test tab switching
+        panel.active_tab = AnalyticsTab::Overview;
+        assert_eq!(panel.active_tab, AnalyticsTab::Overview);
+        
+        panel.active_tab = AnalyticsTab::Success;
+        assert_eq!(panel.active_tab, AnalyticsTab::Success);
+        
+        panel.active_tab = AnalyticsTab::Efficiency;
+        assert_eq!(panel.active_tab, AnalyticsTab::Efficiency);
+        
+        panel.active_tab = AnalyticsTab::Patterns;
+        assert_eq!(panel.active_tab, AnalyticsTab::Patterns);
+        
+        panel.active_tab = AnalyticsTab::Projects;
+        assert_eq!(panel.active_tab, AnalyticsTab::Projects);
+        
+        panel.active_tab = AnalyticsTab::Trends;
+        assert_eq!(panel.active_tab, AnalyticsTab::Trends);
+    }
+
+    #[test]
+    fn test_analytics_panel_success_details_toggle() {
+        let mut panel = AnalyticsPanel::new();
+        
+        assert!(!panel.show_success_details);
+        
+        panel.toggle_success_details();
+        assert!(panel.show_success_details);
+        
+        panel.toggle_success_details();
+        assert!(!panel.show_success_details);
+    }
+
+    #[test]
+    fn test_analytics_panel_link_to_success_mode() {
+        let panel = AnalyticsPanel::new();
+        
+        let action = panel.handle_success_rate_click();
+        assert_eq!(action, Some(AnalyticsAction::SwitchToSuccessMode));
+    }
+
+    #[test]
+    fn test_analytics_panel_refresh_analytics() {
+        let panel = AnalyticsPanel::new();
+        
+        let action = panel.handle_refresh_request();
+        assert_eq!(action, Some(AnalyticsAction::RefreshAnalytics));
+    }
+
+    #[test]
+    fn test_analytics_panel_export_report() {
+        let mut panel = AnalyticsPanel::new();
+        
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report));
+        
+        let action = panel.handle_export_request();
+        assert_eq!(action, Some(AnalyticsAction::ExportReport));
+    }
+
+    #[test]
+    fn test_analytics_panel_filter_combinations() {
+        let mut panel = AnalyticsPanel::new();
+        
+        // Test combining different filters
+        panel.date_range_filter = DateRangeFilter::Last30Days;
+        panel.project_filter = ProjectFilter::Specific(ProjectType::Rust);
+        
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last30Days);
+        assert_eq!(panel.project_filter, ProjectFilter::Specific(ProjectType::Rust));
+        
+        // Test filter reset
+        panel.reset_filters();
+        assert_eq!(panel.date_range_filter, DateRangeFilter::Last30Days); // Default
+        assert_eq!(panel.project_filter, ProjectFilter::All);
+    }
+
+    #[test]
+    fn test_analytics_panel_metrics_display() {
+        let mut panel = AnalyticsPanel::new();
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report));
+        
+        // Test that metrics are properly accessible
+        let report = panel.analytics_report.as_ref().unwrap();
+        assert_eq!(report.overall_metrics.total_conversations, 10);
+        assert_eq!(report.overall_metrics.total_messages, 150);
+        assert_eq!(report.overall_metrics.completion_rate, 0.8);
+        assert_eq!(report.success_metrics.overall_success_rate, 0.75);
+        assert_eq!(report.efficiency_metrics.avg_resolution_time, 25.5);
+    }
+
+    #[test]
+    fn test_analytics_panel_project_insights_display() {
+        let mut panel = AnalyticsPanel::new();
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report));
+        
+        let report = panel.analytics_report.as_ref().unwrap();
+        assert_eq!(report.project_insights.len(), 2);
+        assert_eq!(report.project_insights[0].project_type, ProjectType::Rust);
+        assert_eq!(report.project_insights[0].conversation_count, 6);
+        assert_eq!(report.project_insights[0].success_rate, 0.8);
+    }
+
+    #[test]
+    fn test_analytics_panel_trending_topics_display() {
+        let mut panel = AnalyticsPanel::new();
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report));
+        
+        let report = panel.analytics_report.as_ref().unwrap();
+        assert_eq!(report.trending_topics.len(), 2);
+        assert_eq!(report.trending_topics[0].topic, "Async Programming");
+        assert_eq!(report.trending_topics[0].frequency, 15);
+    }
+
+    #[test]
+    fn test_analytics_panel_recommendations_display() {
+        let mut panel = AnalyticsPanel::new();
+        let report = create_test_analytics_report();
+        panel.set_analytics_report(Some(report));
+        
+        let report = panel.analytics_report.as_ref().unwrap();
+        assert_eq!(report.recommendations.len(), 2);
+        assert!(report.recommendations[0].description.contains("completion rate"));
+    }
+
+    // Helper function to create test analytics report
+    fn create_test_analytics_report() -> AnalyticsReport {
+        use crate::agent::conversation::analytics::*;
+        use std::collections::HashMap;
+        use chrono::{Utc, Duration};
+        
+        let now = Utc::now();
+        let period = (now - Duration::days(30), now);
+        
+        let mut project_type_distribution = HashMap::new();
+        project_type_distribution.insert(ProjectType::Rust, 6);
+        project_type_distribution.insert(ProjectType::Python, 4);
+        
+        let overall_metrics = OverallMetrics {
+            total_conversations: 10,
+            total_messages: 150,
+            avg_messages_per_conversation: 15.0,
+            total_branches: 25,
+            total_checkpoints: 12,
+            completion_rate: 0.8,
+            avg_duration_minutes: 45.0,
+            peak_activity_hours: vec![9, 10, 14, 15],
+            project_type_distribution,
+        };
+        
+        let mut success_by_project_type = HashMap::new();
+        success_by_project_type.insert(ProjectType::Rust, 0.8);
+        success_by_project_type.insert(ProjectType::Python, 0.7);
+        
+        let success_metrics = SuccessMetrics {
+            overall_success_rate: 0.75,
+            success_by_project_type,
+            success_by_length: vec![(5, 0.6), (10, 0.75), (15, 0.85)],
+            successful_patterns: vec![],
+            failure_points: vec![],
+            success_indicators: vec![],
+        };
+        
+        let efficiency_metrics = EfficiencyMetrics {
+            avg_resolution_time: 25.5,
+            branching_efficiency: 0.68,
+            checkpoint_utilization: 0.45,
+            context_switches_per_conversation: 2.3,
+            efficient_patterns: vec![],
+            resource_utilization: ResourceUtilization {
+                avg_memory_usage: 1024.0,
+                storage_efficiency: 0.85,
+                search_performance: SearchPerformance {
+                    avg_search_time_ms: 150.0,
+                    accuracy_rate: 0.92,
+                    common_patterns: vec!["keyword search".to_string()],
+                },
+                clustering_efficiency: 0.78,
+            },
+        };
+        
+        let patterns = PatternAnalysis {
+            common_flows: vec![],
+            recurring_themes: vec![],
+            temporal_patterns: vec![],
+            behavior_patterns: vec![],
+            anomalies: vec![],
+        };
+        
+        let project_insights = vec![
+            ProjectInsight {
+                project_type: ProjectType::Rust,
+                conversation_count: 6,
+                success_rate: 0.8,
+                common_topics: vec!["async".to_string(), "ownership".to_string()],
+                typical_patterns: vec!["error handling".to_string()],
+                recommendations: vec!["more examples".to_string()],
+            },
+            ProjectInsight {
+                project_type: ProjectType::Python,
+                conversation_count: 4,
+                success_rate: 0.7,
+                common_topics: vec!["data science".to_string(), "web dev".to_string()],
+                typical_patterns: vec!["debugging".to_string()],
+                recommendations: vec!["better docs".to_string()],
+            },
+        ];
+        
+        let trending_topics = vec![
+            TrendingTopic {
+                topic: "Async Programming".to_string(),
+                frequency: 15,
+                trend: TrendDirection::Growing,
+                project_types: vec![ProjectType::Rust, ProjectType::JavaScript],
+                success_rate: 0.82,
+            },
+            TrendingTopic {
+                topic: "Error Handling".to_string(),
+                frequency: 12,
+                trend: TrendDirection::Stable,
+                project_types: vec![ProjectType::Rust, ProjectType::Python],
+                success_rate: 0.78,
+            },
+        ];
+        
+        let recommendations = vec![
+            Recommendation {
+                category: RecommendationCategory::UserExperience,
+                priority: Priority::High,
+                description: "Improve conversation completion rate".to_string(),
+                expected_impact: "Increase user satisfaction".to_string(),
+                difficulty: Difficulty::Medium,
+                evidence: vec!["Current rate: 80%".to_string()],
+            },
+            Recommendation {
+                category: RecommendationCategory::Efficiency,
+                priority: Priority::Medium,
+                description: "Optimize branching efficiency".to_string(),
+                expected_impact: "Faster problem resolution".to_string(),
+                difficulty: Difficulty::Hard,
+                evidence: vec!["Current efficiency: 68%".to_string()],
+            },
+        ];
+        
+        AnalyticsReport {
+            generated_at: now,
+            period,
+            overall_metrics,
+            success_metrics,
+            efficiency_metrics,
+            patterns,
+            project_insights,
+            trending_topics,
+            recommendations,
+        }
     }
 } 

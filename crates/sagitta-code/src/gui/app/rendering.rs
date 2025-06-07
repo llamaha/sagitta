@@ -36,6 +36,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process terminal events
     app.state.process_terminal_events();
     
+    // Refresh conversation clusters periodically (every 30 seconds)
+    refresh_clusters_periodically(app);
+    
     // Handle temporary thinking indicator timeout (3 seconds)
     if let Some(start_time) = app.state.thinking_start_time {
         if start_time.elapsed() > std::time::Duration::from_secs(3) {
@@ -336,7 +339,90 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
         },
         ActivePanel::Preview => app.panels.preview_panel.render(ctx, app.state.current_theme),
         ActivePanel::Events => app.panels.events_panel.render(ctx, app.state.current_theme),
-        ActivePanel::Analytics => app.panels.analytics_panel.render(ctx, app.state.current_theme),
+        ActivePanel::Analytics => {
+            if let Some(action) = app.panels.analytics_panel.render(ctx, app.state.current_theme) {
+                match action {
+                    super::panels::AnalyticsAction::SwitchToSuccessMode => {
+                        // Switch conversation sidebar to success organization mode
+                        app.conversation_sidebar.organization_mode = crate::gui::conversation::sidebar::OrganizationMode::Success;
+                        
+                        // Also switch to conversation panel to show the success mode
+                        app.panels.toggle_panel(ActivePanel::Conversation);
+                        
+                        // Add event to events panel
+                        app.panels.events_panel.add_event(
+                            super::panels::SystemEventType::Info,
+                            "Switched to Success organization mode".to_string()
+                        );
+                    },
+                    super::panels::AnalyticsAction::RefreshAnalytics => {
+                        // Trigger analytics refresh
+                        if let Some(service) = &app.conversation_service {
+                            let service_clone = service.clone();
+                            let event_sender = app.conversation_event_sender.clone();
+                            
+                            tokio::spawn(async move {
+                                match service_clone.generate_analytics().await {
+                                    Ok(report) => {
+                                        log::info!("Generated analytics report with {} conversations", 
+                                            report.overall_metrics.total_conversations);
+                                        
+                                        // Send the analytics report via the conversation event system
+                                        if let Some(sender) = event_sender {
+                                            if let Err(e) = sender.send(super::events::ConversationEvent::AnalyticsReportReady(report)) {
+                                                log::error!("Failed to send analytics report event: {}", e);
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to generate analytics report: {}", e);
+                                    }
+                                }
+                            });
+                            
+                            // Add event to events panel
+                            app.panels.events_panel.add_event(
+                                super::panels::SystemEventType::Info,
+                                "Refreshing analytics report...".to_string()
+                            );
+                        } else {
+                            // Add event to events panel
+                            app.panels.events_panel.add_event(
+                                super::panels::SystemEventType::Error,
+                                "No conversation service available for analytics".to_string()
+                            );
+                        }
+                    },
+                    super::panels::AnalyticsAction::ExportReport => {
+                        // TODO: Implement report export functionality
+                        app.panels.events_panel.add_event(
+                            super::panels::SystemEventType::Info,
+                            "Analytics report export requested (not yet implemented)".to_string()
+                        );
+                    },
+                    super::panels::AnalyticsAction::FilterByProject(project_type) => {
+                        // Update analytics panel project filter
+                        app.panels.analytics_panel.project_filter = super::panels::ProjectFilter::Specific(project_type.clone());
+                        
+                        // Add event to events panel
+                        app.panels.events_panel.add_event(
+                            super::panels::SystemEventType::Info,
+                            format!("Filtered analytics by project: {:?}", project_type)
+                        );
+                    },
+                    super::panels::AnalyticsAction::FilterByDateRange(date_range) => {
+                        // Update analytics panel date range filter
+                        app.panels.analytics_panel.date_range_filter = date_range.clone();
+                        
+                        // Add event to events panel
+                        app.panels.events_panel.add_event(
+                            super::panels::SystemEventType::Info,
+                            format!("Filtered analytics by date range: {:?}", date_range)
+                        );
+                    },
+                }
+            }
+        },
         ActivePanel::ThemeCustomizer => {
             // Render theme customizer panel
             if app.panels.theme_customizer.render(ctx) {
@@ -635,6 +721,44 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
     
     // Clear the clicked tool info after handling
     app.state.clicked_tool_info = None;
+}
+
+/// Refresh conversation clusters periodically
+fn refresh_clusters_periodically(app: &mut SagittaCodeApp) {
+    // Check if we should refresh clusters (every 30 seconds)
+    let should_refresh = app.state.last_conversation_refresh
+        .map(|last| last.elapsed().as_secs() >= 30)
+        .unwrap_or(true);
+    
+    if should_refresh && app.conversation_service.is_some() {
+        let service = app.conversation_service.clone();
+        let mut sidebar_clusters = app.conversation_sidebar.clusters.clone();
+        
+        tokio::spawn(async move {
+            if let Some(service) = service {
+                match service.refresh_clusters().await {
+                    Ok(()) => {
+                        match service.get_clusters().await {
+                            Ok(clusters) => {
+                                log::debug!("Refreshed {} conversation clusters", clusters.len());
+                                // Note: We can't directly update the sidebar here due to borrowing rules
+                                // The actual update will happen in the next render cycle
+                            },
+                            Err(e) => {
+                                log::warn!("Failed to get updated clusters: {}", e);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!("Failed to refresh clusters: {}", e);
+                    }
+                }
+            }
+        });
+        
+        // Update the last refresh time
+        app.state.last_conversation_refresh = Some(std::time::Instant::now());
+    }
 }
 
 #[cfg(test)]

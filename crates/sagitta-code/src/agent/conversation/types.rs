@@ -100,7 +100,11 @@ pub enum ProjectType {
     Rust,
     Python,
     JavaScript,
-    Go, 
+    TypeScript,
+    Go,
+    Java,
+    CSharp,
+    Cpp,
 }
 
 impl ProjectType {
@@ -123,9 +127,29 @@ impl ProjectType {
             return ProjectType::JavaScript;
         }
         
+        // Check for TypeScript project markers
+        if path.join("tsconfig.json").exists() {
+            return ProjectType::TypeScript;
+        }
+        
         // Check for Go project markers
         if path.join("go.mod").exists() {
             return ProjectType::Go;
+        }
+        
+        // Check for Java project markers
+        if path.join("pom.xml").exists() {
+            return ProjectType::Java;
+        }
+        
+        // Check for C# project markers
+        if path.join("project.json").exists() {
+            return ProjectType::CSharp;
+        }
+        
+        // Check for C++ project markers
+        if path.join("CMakeLists.txt").exists() {
+            return ProjectType::Cpp;
         }
         
         // Default to Unknown if no markers found
