@@ -680,23 +680,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
 
             if requested_tool_calls.is_empty() {
                 // LLM provided text and/or no tool calls. This is where a summary of *previously* executed tools might be sent.
-                let mut final_message_to_user_parts: Vec<String> = Vec::new();
-                let mut will_prompt_llm_what_next = false;
                 let mut nudge_performed_this_iteration = false;
-
-                // Remove duplicate summary generation - summaries are now handled immediately after tool execution
-                // if let Some(ref tools_result_to_summarize) = pending_tool_summary_info {
-                //     if !tools_result_to_summarize.tool_results.is_empty() {
-                //         let tool_summary_text = generate_tool_summary(&tools_result_to_summarize.tool_results);
-                //         if !tool_summary_text.is_empty() {
-                //             final_message_to_user_parts.push(tool_summary_text);
-                //         }
-                //         will_prompt_llm_what_next = true; 
-                //     }
-                //     pending_tool_summary_info = None; 
-                // }
-                
-                let mut final_message_str = final_message_to_user_parts.join(" ");
 
                 // NEW: Check for task completion BEFORE intent analysis
                 // This ensures completion detection runs even when LLM provides final answer
@@ -775,7 +759,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                     }
                 }
 
-                // Analyze intent of the LLM's text response to decide on loop continuation and "What next?"
+                // Analyze intent of the LLM's text response to decide on loop continuation
                 // CRITICAL FIX: Prevent duplicate intent analysis of the same content
                 let should_analyze_intent = if let Some(ref last_content) = last_analyzed_content {
                     last_content != &current_llm_text_response
@@ -806,16 +790,10 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                             DetectedIntent::ProvidesFinalAnswer | DetectedIntent::StatesInabilityToProceed => {
                                 loop_should_break = true;
                                 break_reason = format!("LLM intent ({:?}) indicates completion.", intent_val);
-                                will_prompt_llm_what_next = false; 
                             }
                             DetectedIntent::AsksClarifyingQuestion | DetectedIntent::RequestsMoreInput | DetectedIntent::GeneralConversation => {
-                                will_prompt_llm_what_next = true; 
-                                loop_should_break = iteration == self.config.max_iterations - 1;
-                                if loop_should_break {
-                                    break_reason = "Max iterations reached after conversational turn.".to_string();
-                                } else {
-                                   break_reason = format!("LLM intent ({:?}) indicates user input needed.", intent_val);
-                                }
+                                loop_should_break = true; // Break the loop and let the user respond
+                                break_reason = format!("LLM intent ({:?}) indicates user input needed.", intent_val);
                             }
                             DetectedIntent::ProvidesPlanWithoutExplicitAction => {
                                 if iteration < self.config.max_iterations - 1 {
@@ -832,21 +810,18 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                                         true,
                                         None
                                     ));
-                                    will_prompt_llm_what_next = false;
                                     current_llm_text_response.clear();
                                     nudge_performed_this_iteration = true;
                                 } else {
                                     tracing::warn!(%session_id, iteration, "Max iterations reached, cannot nudge LLM for plan execution.");
                                     loop_should_break = true;
                                     break_reason = "Max iterations reached after LLM provided plan.".to_string();
-                                    will_prompt_llm_what_next = false;
                                 }
                             }
                             DetectedIntent::Ambiguous => {
                                 tracing::warn!(%session_id, iteration, "LLM response intent is ambiguous.");
                                 loop_should_break = true;
                                 break_reason = "LLM response intent ambiguous, requires clarification.".to_string();
-                                will_prompt_llm_what_next = true;
                             }
                         }
                     }
@@ -854,64 +829,27 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         tracing::error!(%session_id, iteration, "Intent analysis failed: {:?}. Terminating loop.", e);
                         loop_should_break = true;
                         break_reason = format!("Intent analysis failed: {}", e);
-                        will_prompt_llm_what_next = false;
                     }
                 }
                 
-                // "What would you like to do next?" logic block
-                if will_prompt_llm_what_next {
-                    let what_next_q = " What would you like to do next?".to_string();
-                    
-                    // final_message_str was built from final_message_to_user_parts.
-                    // If a nudge cleared current_llm_text_response, that change is not yet reflected in final_message_str.
-                    // This is acceptable for the llm_conversation_history, as the LLM should see its own plan text followed by the nudge.
-                    // However, the user-facing message (if sent) should not contain the plan if a nudge occurred.
-
-                    if !final_message_str.is_empty() && !final_message_str.ends_with(['.', '?', '!']) {
-                        final_message_str.push('.');
-                    }
-                    final_message_str = format!("{} {}", final_message_str, what_next_q).trim().to_string();
-                    
-                    // Add "What next?" to LLM history for its *next* turn if the loop isn't breaking for other reasons.
-                    if !loop_should_break || iteration < self.config.max_iterations - 1 {
-                         llm_conversation_history.push(LlmMessage {
-                            role: "user".to_string(), 
-                            parts: vec![LlmMessagePart::Text(what_next_q.clone())],
-                        });
-                    }
-                }
-
-                // Guard the actual sending of the message to the user/stream
-                if !nudge_performed_this_iteration {
-                    // If a nudge was performed, current_llm_text_response (the plan) was cleared before this point.
-                    // We need to construct the message to send to the user without the original plan text if a nudge happened.
-                    // However, the !nudge_performed_this_iteration guard means we only enter here if no nudge happened.
-                    // So, final_message_str as it was (potentially including what_next_q) is what we want to send.
-                    if !final_message_str.is_empty() {
-                        let final_chunk = crate::streaming::StreamChunk {
-                            id: Uuid::new_v4(),
-                            data: final_message_str.clone().into_bytes(), // Send the final_message_str
-                            chunk_type: "text".to_string(),
-                            is_final: true,
-                            priority: 0,
-                            created_at: Instant::now(),
-                            metadata: HashMap::new(),
-                        };
-                        if stream_handler.handle_chunk(final_chunk).await.is_err() {
-                            tracing::warn!(%session_id, "Stream handler failed to process final message chunk.");
-                        }
+                // Send the LLM's response directly to the user without adding hardcoded follow-up questions
+                if !nudge_performed_this_iteration && !current_llm_text_response.is_empty() && !text_was_streamed {
+                    let final_chunk = crate::streaming::StreamChunk {
+                        id: Uuid::new_v4(),
+                        data: current_llm_text_response.clone().into_bytes(),
+                        chunk_type: "text".to_string(),
+                        is_final: true,
+                        priority: 0,
+                        created_at: Instant::now(),
+                        metadata: HashMap::new(),
+                    };
+                    if stream_handler.handle_chunk(final_chunk).await.is_err() {
+                        tracing::warn!(%session_id, "Stream handler failed to process final message chunk.");
                     }
                 }
                 
-                // Determine if loop should break based on empty responses, considering nudge
-                let effective_final_message_for_check = if nudge_performed_this_iteration { 
-                    String::new() // If nudge, no message was sent to user, so treat as empty for this check
-                } else { 
-                    final_message_str.clone() // Otherwise, use what might have been sent
-                };
-
                 // If no nudge was performed in this iteration, and LLM gave no text, no tools, and no pending summary, then terminate.
-                if !nudge_performed_this_iteration && current_llm_text_response.is_empty() && pending_tool_summary_info.is_none() && effective_final_message_for_check.is_empty() {
+                if !nudge_performed_this_iteration && current_llm_text_response.is_empty() && pending_tool_summary_info.is_none() {
                     tracing::info!(%session_id, iteration, "LLM provided no text, no tools, and no pending summary (and no nudge performed). Terminating.");
                     loop_should_break = true;
                     break_reason = "LLM provided no further response or action.".to_string();
@@ -930,7 +868,6 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                     state.set_completed(actual_success, break_reason); 
                     break;
                 }
-
             } else {
               // Tool calls were requested, proceed to execute them
               tracing::debug!(%session_id, iteration, "LLM requested {} tool calls. Proceeding to execution.", requested_tool_calls.len());
@@ -1027,7 +964,12 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   llm_conversation_history.push(LlmMessage {
                       role: "user".to_string(),
                       parts: vec![LlmMessagePart::Text(
-                          "Analyze the tool output above and provide a complete answer to the user's question. If the task is complete, clearly state the results. If more actions are needed, call another tool.".to_string()
+                          "Analyze the tool output above and respond in one of two ways:
+
+1. If you believe the task is finished, write a concise summary of what you accomplished and your final answer.
+2. If you have concrete ideas for next steps, briefly summarize your progress and ask the user whether they would like you to continue with those specific steps.
+
+Do not ask open-ended 'how can I help' questions; propose specific next actions instead. Always provide a clear wrap-up of your work.".to_string()
                       )],
                   });
               }
@@ -1140,7 +1082,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
 // This is a basic implementation. It can be made more sophisticated.
 fn generate_tool_summary(tool_results: &HashMap<String, crate::orchestration::ToolExecutionResult>) -> String {
     if tool_results.is_empty() {
-        return String::new(); // Return empty if no tools, so "What next?" is the only message.
+        return String::new(); // Return empty if no tools
     }
 
     let mut successful_summaries = Vec::new();
@@ -1209,10 +1151,10 @@ fn generate_tool_summary(tool_results: &HashMap<String, crate::orchestration::To
 
     if parts.is_empty() {
         // Should not happen if tool_results was not empty, but as a safeguard
-        "The requested actions were processed.\n\n".to_string()
+        "The requested actions were processed.".to_string()
     } else {
-        // Add proper spacing and newlines to prevent concatenation issues
-        format!("Okay, I've finished those tasks. {}\n\n", parts.join(". "))
+        // Simple summary without hardcoded follow-up questions
+        format!("Tool execution summary: {}", parts.join(". "))
     }
 }
 
@@ -1825,7 +1767,7 @@ mod tests {
         assert!(!summary_events.is_empty(), "Expected at least one Summary event to be emitted");
         
         if let ReasoningEvent::Summary { content, .. } = &summary_events[0] {
-            assert!(content.contains("Okay, I've finished those tasks"), "Summary should contain expected text");
+            assert!(content.contains("Tool execution summary"), "Summary should contain expected text");
             assert!(content.contains("another_tool"), "Summary should mention the executed tool");
         } else {
             panic!("Expected Summary event");
@@ -2075,5 +2017,52 @@ mod tests {
         let events = event_emitter.get_events().await;
         let tool_events: Vec<_> = events.iter().filter(|e| matches!(e, ReasoningEvent::ToolExecutionCompleted { .. })).collect();
         assert!(!tool_events.is_empty(), "Should emit tool execution completed events");
+    }
+
+    #[tokio::test]
+    async fn test_llm_generated_wrap_up_without_hardcoded_follow_up() {
+        // Test that LLM-generated wrap-ups work without hardcoded "What would you like to do next?"
+        let config = default_config_for_test();
+        
+        // Mock LLM that provides a wrap-up with specific follow-up question
+        let mock_llm_responses = vec![
+            vec![
+                Ok(LlmStreamChunk::Text { 
+                    content: "I've completed the search and found 3 relevant repositories. Here's a summary of what I accomplished:\n\n1. Searched for Rust web frameworks\n2. Found actix-web, warp, and rocket repositories\n3. Analyzed their popularity and features\n\nWould you like me to add one of these repositories to our system for further analysis?".to_string(), 
+                    is_final: true 
+                })
+            ]
+        ];
+        
+        let mock_llm = Arc::new(MockLlmClient::new(mock_llm_responses));
+        let mock_intent_analyzer = Arc::new(MockIntentAnalyzer::new(DetectedIntent::RequestsMoreInput));
+        
+        let mut engine = ReasoningEngine::new(config, mock_llm, mock_intent_analyzer).await.unwrap();
+        
+        let messages = vec![
+            LlmMessage {
+                role: "user".to_string(),
+                parts: vec![LlmMessagePart::Text("Search for Rust web frameworks".to_string())],
+            }
+        ];
+        
+        let tool_executor = Arc::new(MockToolExecutor::new());
+        let event_emitter = Arc::new(MockEventEmitter::new());
+        let stream_handler = Arc::new(MockStreamHandler::new());
+        
+        let result = engine.process(messages, tool_executor, event_emitter, stream_handler.clone()).await;
+        
+        assert!(result.is_ok());
+        let state = result.unwrap();
+        assert!(state.is_successful());
+        
+        // Verify the response contains the LLM's wrap-up and specific follow-up question
+        let chunks = stream_handler.get_chunks_as_string().await;
+        assert!(chunks.contains("Here's a summary of what I accomplished"));
+        assert!(chunks.contains("Would you like me to add one of these repositories"));
+        
+        // Verify it does NOT contain the old hardcoded follow-up
+        assert!(!chunks.contains("What would you like to do next?"));
+        assert!(!chunks.contains("I am here to assist you"));
     }
 }

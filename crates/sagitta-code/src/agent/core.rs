@@ -128,7 +128,14 @@ EXAMPLES OF MULTI-STEP TASKS:
 - "Find information about X, then add the repository and search its code" = 3+ tool calls minimum
 - "Look up X online, then add it to our system and analyze it" = 3+ tool calls minimum
 
-Remember: Your goal is to be thorough, communicative, and complete the user's full request while keeping them informed of your progress at each step. ALWAYS start with acknowledgment and a plan before executing any tools."#;
+CRITICAL INSTRUCTIONS FOR WRAP-UP AND FOLLOW-UP:
+- ALWAYS end your responses with a clear wrap-up of what you accomplished
+- If you believe the task is finished, write a concise summary of what you accomplished and your final answer
+- If you have concrete ideas for next steps, briefly summarize your progress and ask the user whether they would like you to continue with those specific steps
+- Do NOT ask open-ended 'how can I help' questions; propose specific next actions instead
+- Examples of good follow-up questions: "Would you like me to analyze the error handling patterns in this codebase?" or "Should I search for similar implementations in other repositories?"
+
+Remember: Your goal is to be thorough, communicative, and complete the user's full request while keeping them informed of your progress at each step. ALWAYS start with acknowledgment and a plan before executing any tools, and ALWAYS end with a clear wrap-up."#;
 
 /// Helper function to convert AgentMessages to ReasoningEngine's LlmMessages
 fn convert_agent_messages_to_reasoning_llm_messages(
