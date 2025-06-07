@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::agent::conversation::types::{ConversationSummary, ProjectContext, ProjectType};
-use crate::gui::SagittaCodeAppState;
+use crate::gui::app::AppState;
 use crate::gui::theme::AppTheme;
 use crate::project::workspace::types::ProjectWorkspace;
 
@@ -450,8 +450,8 @@ impl ConversationStarter {
         Ok(())
     }
     
-    /// Generate context suggestions based on current workspace and intent
-    pub fn generate_context_suggestions(&mut self, app_state: &SagittaCodeAppState) -> Result<()> {
+    /// Generate context suggestions based on current application state
+    pub fn generate_context_suggestions(&mut self, app_state: &AppState) -> Result<()> {
         self.suggested_context.clear();
         
         // Add recent conversations as context
@@ -490,7 +490,7 @@ impl ConversationStarter {
     }
     
     /// Render the conversation starter UI
-    pub fn render(&mut self, ui: &mut Ui, app_state: &mut SagittaCodeAppState, theme: &AppTheme) -> Result<Option<StarterAction>> {
+    pub fn render(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) -> Result<Option<StarterAction>> {
         if !self.visible {
             return Ok(None);
         }
