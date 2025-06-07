@@ -17,6 +17,7 @@ use crate::repo_helpers::get_collection_name;
 use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_CHUNK_CONTENT};
+use sagitta_embed::{ProcessedChunk, EmbeddingProcessor};
 // --- End imports --- 
 
 /// Performs semantic search against a specific repository collection in Qdrant.
@@ -115,3 +116,14 @@ where
 }
 
 // search_semantic function was implemented here. 
+
+/// Search module providing vector store traits and search utilities.
+///
+/// This module contains the central vector store trait that can be used
+/// by GUI components and analytics without pulling in all of sagitta-search.
+
+pub mod vector_store;
+
+pub use vector_store::{VectorStore, VectorStoreError, UpsertResult, CollectionConfig, DistanceMetric, VectorPoint, SearchQuery, CollectionInfo, CollectionStatus, ScrollResult};
+// Re-export SearchResult with a different name to avoid conflict
+pub use vector_store::SearchResult as VectorSearchResult; 

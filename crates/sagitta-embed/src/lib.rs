@@ -14,17 +14,18 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use sagitta_embed::{EmbeddingHandler, EmbeddingConfig, EmbeddingModelType};
+//! use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 //! use std::path::PathBuf;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = EmbeddingConfig::new_onnx(
 //!     PathBuf::from("model.onnx"),
 //!     PathBuf::from("tokenizer.json")
 //! );
 //!
-//! let handler = EmbeddingHandler::new(&config)?;
-//! let embeddings = handler.embed(&["Hello world", "Rust programming"])?;
+//! let pool = EmbeddingPool::with_configured_sessions(config)?;
+//! let embeddings = pool.embed_texts_async(&["Hello world", "Rust programming"]).await?;
 //! println!("Generated {} embeddings", embeddings.len());
 //! # Ok(())
 //! # }

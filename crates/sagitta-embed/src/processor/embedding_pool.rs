@@ -1,7 +1,7 @@
 //! Embedding pool implementation for controlled GPU memory usage with optimized CPU threading.
 
 use crate::error::{Result, SagittaEmbedError};
-use crate::processor::{EmbeddingProcessor, ProcessedChunk, EmbeddedChunk, ProcessingConfig};
+use crate::processor::{EmbeddingProcessor, ProcessedChunk, EmbeddedChunk, ProcessingConfig, ChunkMetadata};
 use crate::provider::EmbeddingProvider;
 use crate::config::EmbeddingConfig;
 use std::sync::Arc;
@@ -77,6 +77,45 @@ impl EmbeddingPool {
     pub fn with_configured_sessions(embedding_config: EmbeddingConfig) -> Result<Self> {
         let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
         Self::new(processing_config, embedding_config)
+    }
+
+    /// Simple async function to embed raw text strings.
+    /// This provides a convenient API for embedding text without needing to create ProcessedChunk objects.
+    /// 
+    /// # Arguments
+    /// * `texts` - Vector of text strings to embed
+    /// 
+    /// # Returns
+    /// * `Result<Vec<Vec<f32>>>` - Vector of embedding vectors with consistent output shape
+    pub async fn embed_texts_async(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Convert texts to ProcessedChunks
+        let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
+            ProcessedChunk {
+                content: text.to_string(),
+                metadata: ChunkMetadata {
+                    file_path: std::path::PathBuf::from("text_input"),
+                    start_line: 0,
+                    end_line: 0,
+                    language: "text".to_string(),
+                    file_extension: "txt".to_string(),
+                    element_type: "text".to_string(),
+                    context: None,
+                },
+                id: format!("text_{}", i),
+            }
+        }).collect();
+
+        // Process chunks and extract embeddings
+        let embedded_chunks = self.process_chunks(chunks).await?;
+        let embeddings = embedded_chunks.into_iter()
+            .map(|chunk| chunk.embedding)
+            .collect();
+
+        Ok(embeddings)
     }
 
     /// Get or create an embedding model instance from the pool.

@@ -68,6 +68,8 @@ pub mod constants;
 pub mod edit;
 /// Implementation of search functionality.
 pub mod search_impl;
+/// Search module providing vector store traits and utilities.
+pub mod search;
 /// Caching mechanisms, primarily for embeddings.
 pub mod cache; // Added cache module
 /// Core logic for indexing repositories and files.
@@ -103,6 +105,8 @@ pub use qdrant_client_trait::QdrantClientTrait;
 pub use constants::*;
 pub use cache::EmbeddingCache; // Added cache re-export
 pub use snippet_extractor::extract_snippet;
+// Re-export search module types
+pub use search::{VectorStore, VectorStoreError, VectorSearchResult, UpsertResult, CollectionConfig, DistanceMetric, VectorPoint, SearchQuery, CollectionInfo, CollectionStatus, ScrollResult};
 
 // Re-export core functionalities
 // pub use indexing::index_paths; // Removed - indexing mod not directly exposed
@@ -116,7 +120,7 @@ pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo
 pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 
 // Re-export qdrant types needed by mcp or other crates
-pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
+pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo as QdrantCollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
 
 // Additional re-exports for enhanced repository functionality
 pub use config::{get_config_path, ManagedRepositories};
