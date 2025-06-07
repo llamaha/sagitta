@@ -543,6 +543,9 @@ impl CommandExecutor for LocalExecutor {
         // Read output streams concurrently
         let mut stdout_closed = false;
         let mut stderr_closed = false;
+        let mut process_exited = false;
+        let mut exit_code = 0;
+        let mut execution_time = start_time.elapsed();
         
         loop {
             tokio::select! {
@@ -587,42 +590,18 @@ impl CommandExecutor for LocalExecutor {
                     }
                 }
                 // Also wait for the process to complete
-                status = child.wait() => {
+                status = child.wait(), if !process_exited => {
                     match status {
                         Ok(exit_status) => {
-                            let exit_code = exit_status.code().unwrap_or(-1);
-                            let execution_time = start_time.elapsed();
+                            exit_code = exit_status.code().unwrap_or(-1);
+                            execution_time = start_time.elapsed();
+                            process_exited = true;
                             
                             // Send exit event
                             let exit_event = StreamEvent::Exit { code: exit_code };
                             if let Err(_) = event_sender.send(exit_event).await {
                                 log::warn!("Failed to send exit event");
                             }
-                            
-                            // Write audit log
-                            let audit_entry = AuditLogEntry {
-                                timestamp: Utc::now(),
-                                user: std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()),
-                                working_directory: working_dir.clone(),
-                                command: command_parts,
-                                exit_code: Some(exit_code),
-                                duration_ms: execution_time.as_millis() as u64,
-                                prompted: needs_approval,
-                                approved_by: if needs_approval { Some("user".to_string()) } else { None },
-                            };
-                            
-                            if let Err(e) = self.write_audit_log(&audit_entry).await {
-                                log::warn!("Failed to write audit log: {}", e);
-                            }
-                            
-                            return Ok(ShellExecutionResult {
-                                exit_code,
-                                stdout: stdout_output,
-                                stderr: stderr_output,
-                                execution_time_ms: execution_time.as_millis() as u64,
-                                container_image: "local".to_string(), // No container used
-                                timed_out: false, // TODO: Implement timeout support
-                            });
                         }
                         Err(e) => {
                             return Err(SagittaCodeError::ToolError(format!("Failed to wait for command: {}", e)));
@@ -631,24 +610,10 @@ impl CommandExecutor for LocalExecutor {
                 }
             }
             
-            // Break if both streams are closed
-            if stdout_closed && stderr_closed {
+            // Exit the loop when both streams are closed and process has exited
+            if stdout_closed && stderr_closed && process_exited {
                 break;
             }
-        }
-        
-        // This should not be reached since we return from the process completion above
-        // But just in case, wait for the process and return
-        let status = child.wait().await
-            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to wait for command: {}", e)))?;
-        
-        let exit_code = status.code().unwrap_or(-1);
-        let execution_time = start_time.elapsed();
-        
-        // Send exit event
-        let exit_event = StreamEvent::Exit { code: exit_code };
-        if let Err(_) = event_sender.send(exit_event).await {
-            log::warn!("Failed to send exit event");
         }
         
         // Write audit log
@@ -837,6 +802,9 @@ mod tests {
         
         let result = executor.execute(&params).await.unwrap();
         assert_eq!(result.exit_code, 0);
-        assert!(result.stdout.contains("hello"));
+        // Be more flexible with output checking - trim whitespace and check for content
+        let stdout_trimmed = result.stdout.trim();
+        assert!(stdout_trimmed.contains("hello"), 
+               "Expected stdout to contain 'hello', but got: '{}'", result.stdout);
     }
 } 
