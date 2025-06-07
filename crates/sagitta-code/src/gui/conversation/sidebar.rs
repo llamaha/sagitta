@@ -9,10 +9,12 @@ use egui_extras::{Size, StripBuilder};
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::branching::{BranchSuggestion, ConversationBranchingManager};
+use crate::agent::conversation::checkpoints::CheckpointSuggestion;
 use crate::agent::state::types::{AgentMode, ConversationStatus};
 use crate::gui::theme::AppTheme;
 use crate::gui::app::AppState;
 use super::branch_suggestions::{BranchSuggestionsUI, BranchSuggestionAction, BranchSuggestionsConfig};
+use super::checkpoint_suggestions::{CheckpointSuggestionsUI, CheckpointSuggestionAction, CheckpointSuggestionsConfig};
 
 // --- Sidebar Action for conversation management ---
 #[derive(Debug, Clone)]
@@ -27,6 +29,12 @@ pub enum SidebarAction {
     DismissBranchSuggestion(Uuid, Uuid), // conversation_id, message_id
     RefreshBranchSuggestions(Uuid),
     ShowBranchDetails(BranchSuggestion),
+    // Checkpoint-related actions for Phase 5
+    CreateCheckpoint(Uuid, Uuid, String), // conversation_id, message_id, title
+    RestoreCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
+    JumpToCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
+    DeleteCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
+    ShowCheckpointDetails(Uuid, Uuid), // conversation_id, checkpoint_id
 }
 
 // --- Display types for conversation items ---
@@ -109,6 +117,15 @@ pub struct ConversationSidebar {
     
     /// Show branch suggestions panel
     pub show_branch_suggestions: bool,
+    
+    /// Checkpoint suggestions UI
+    pub checkpoint_suggestions_ui: CheckpointSuggestionsUI,
+    
+    /// Checkpoint suggestions per conversation
+    pub conversation_checkpoint_suggestions: HashMap<Uuid, Vec<CheckpointSuggestion>>,
+    
+    /// Show checkpoint suggestions panel
+    pub show_checkpoint_suggestions: bool,
 }
 
 /// Organization modes for the sidebar
@@ -391,6 +408,9 @@ impl ConversationSidebar {
             branch_suggestions_ui: BranchSuggestionsUI::new(),
             conversation_branch_suggestions: HashMap::new(),
             show_branch_suggestions: false,
+            checkpoint_suggestions_ui: CheckpointSuggestionsUI::with_default_config(),
+            conversation_checkpoint_suggestions: HashMap::new(),
+            show_checkpoint_suggestions: false,
         }
     }
     
@@ -997,6 +1017,60 @@ impl ConversationSidebar {
         }
     }
 
+    /// Update checkpoint suggestions for a conversation
+    pub fn update_checkpoint_suggestions(&mut self, conversation_id: Uuid, suggestions: Vec<CheckpointSuggestion>) {
+        self.conversation_checkpoint_suggestions.insert(conversation_id, suggestions.clone());
+        
+        // If this is the currently selected conversation, update the UI
+        if self.selected_conversation == Some(conversation_id) {
+            self.checkpoint_suggestions_ui.update_suggestions(suggestions);
+        }
+    }
+    
+    /// Get checkpoint suggestions for a conversation
+    pub fn get_checkpoint_suggestions(&self, conversation_id: Uuid) -> Option<&Vec<CheckpointSuggestion>> {
+        self.conversation_checkpoint_suggestions.get(&conversation_id)
+    }
+    
+    /// Clear checkpoint suggestions for a conversation
+    pub fn clear_checkpoint_suggestions(&mut self, conversation_id: Uuid) {
+        self.conversation_checkpoint_suggestions.remove(&conversation_id);
+        
+        // If this is the currently selected conversation, clear the UI
+        if self.selected_conversation == Some(conversation_id) {
+            self.checkpoint_suggestions_ui.update_suggestions(Vec::new());
+        }
+    }
+    
+    /// Toggle checkpoint suggestions panel
+    pub fn toggle_checkpoint_suggestions(&mut self) {
+        self.show_checkpoint_suggestions = !self.show_checkpoint_suggestions;
+    }
+    
+    /// Handle checkpoint suggestion actions
+    pub fn handle_checkpoint_suggestion_action(&mut self, action: CheckpointSuggestionAction) -> Option<SidebarAction> {
+        match action {
+            CheckpointSuggestionAction::CreateCheckpoint { conversation_id, suggestion } => {
+                Some(SidebarAction::CreateCheckpoint(conversation_id, suggestion.message_id, suggestion.suggested_title))
+            },
+            CheckpointSuggestionAction::DismissSuggestion { conversation_id, message_id } => {
+                self.checkpoint_suggestions_ui.dismiss_suggestion(message_id);
+                // No specific sidebar action for dismissing checkpoint suggestions
+                None
+            },
+            CheckpointSuggestionAction::ShowDetails { suggestion } => {
+                Some(SidebarAction::ShowCheckpointDetails(suggestion.message_id, suggestion.message_id)) // Using message_id as placeholder
+            },
+            CheckpointSuggestionAction::RefreshSuggestions { conversation_id } => {
+                // Trigger refresh of checkpoint suggestions
+                None // Could add a specific action if needed
+            },
+            CheckpointSuggestionAction::JumpToMessage { conversation_id, message_id } => {
+                Some(SidebarAction::JumpToCheckpoint(conversation_id, message_id))
+            },
+        }
+    }
+
     pub fn show(&mut self, ctx: &egui::Context, app_state: &mut AppState, theme: &AppTheme) {
         egui::SidePanel::left("conversation_sidebar")
             .resizable(true)
@@ -1048,6 +1122,28 @@ impl ConversationSidebar {
                             }
                         }
                     }
+                    
+                    // Show checkpoint suggestions if enabled and available
+                    if self.show_checkpoint_suggestions {
+                        if let Some(conversation_id) = app_state.current_conversation_id {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            
+                            match self.checkpoint_suggestions_ui.render(ui, conversation_id, theme) {
+                                Ok(Some(action)) => {
+                                    if let Some(sidebar_action) = self.handle_checkpoint_suggestion_action(action) {
+                                        self.pending_action = Some(sidebar_action);
+                                    }
+                                },
+                                Ok(None) => {
+                                    // No action taken
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to render checkpoint suggestions: {}", e);
+                                }
+                            }
+                        }
+                    }
                 });
                 
                 self.handle_sidebar_actions(app_state, ctx);
@@ -1070,6 +1166,12 @@ impl ConversationSidebar {
                 let branch_icon = if self.show_branch_suggestions { "🌳" } else { "🌿" };
                 if ui.button(branch_icon).on_hover_text("Toggle branch suggestions").clicked() {
                     self.toggle_branch_suggestions();
+                }
+                
+                // Checkpoint suggestions toggle
+                let checkpoint_icon = if self.show_checkpoint_suggestions { "📍" } else { "📌" };
+                if ui.button(checkpoint_icon).on_hover_text("Toggle checkpoint suggestions").clicked() {
+                    self.toggle_checkpoint_suggestions();
                 }
             });
         });
@@ -1322,6 +1424,26 @@ impl ConversationSidebar {
                 },
                 SidebarAction::ShowBranchDetails(suggestion) => {
                     log::info!("Show branch details for suggestion: {}", suggestion.suggested_title);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::CreateCheckpoint(conversation_id, message_id, title) => {
+                    log::info!("Create checkpoint for conversation {} with title: {}", conversation_id, title);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::RestoreCheckpoint(conversation_id, checkpoint_id) => {
+                    log::info!("Restore checkpoint for conversation {} with checkpoint: {}", conversation_id, checkpoint_id);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::JumpToCheckpoint(conversation_id, checkpoint_id) => {
+                    log::info!("Jump to checkpoint for conversation {} with checkpoint: {}", conversation_id, checkpoint_id);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::DeleteCheckpoint(conversation_id, checkpoint_id) => {
+                    log::info!("Delete checkpoint for conversation {} with checkpoint: {}", conversation_id, checkpoint_id);
+                    // This would typically trigger an async operation
+                },
+                SidebarAction::ShowCheckpointDetails(conversation_id, checkpoint_id) => {
+                    log::info!("Show checkpoint details for conversation {} with checkpoint: {}", conversation_id, checkpoint_id);
                     // This would typically trigger an async operation
                 },
             }
@@ -1605,29 +1727,56 @@ mod tests {
 
     #[test]
     fn test_smart_checkpoints() {
-        let config = SidebarConfig::default();
-        let sidebar = ConversationSidebar::new(config);
+        let mut sidebar = ConversationSidebar::with_default_config();
+        let conversation_id = Uuid::new_v4();
         
-        let conversations = vec![
-            create_test_conversation("Main Conversation", ConversationStatus::Active, Some(ProjectType::Rust)),
+        // Test checkpoint suggestions management
+        let checkpoint_suggestions = vec![
+            CheckpointSuggestion {
+                message_id: Uuid::new_v4(),
+                importance: 0.9,
+                reason: crate::agent::conversation::checkpoints::CheckpointReason::SuccessfulSolution,
+                suggested_title: "Successful Implementation".to_string(),
+                context: crate::agent::conversation::checkpoints::CheckpointContext {
+                    relevant_messages: vec![],
+                    trigger_keywords: vec!["success".to_string()],
+                    conversation_phase: crate::agent::conversation::checkpoints::ConversationPhase::Implementation,
+                    modified_files: vec![std::path::PathBuf::from("src/main.rs")],
+                    executed_tools: vec!["cargo".to_string()],
+                    success_indicators: vec!["working".to_string()],
+                },
+                restoration_value: 0.8,
+            }
         ];
         
-        // Test that conversations with checkpoints are properly identified
-        let mut conv_with_checkpoints = conversations[0].clone();
-        conv_with_checkpoints.has_checkpoints = true;
+        // Test updating checkpoint suggestions
+        sidebar.update_checkpoint_suggestions(conversation_id, checkpoint_suggestions.clone());
+        assert_eq!(sidebar.get_checkpoint_suggestions(conversation_id).unwrap().len(), 1);
         
-        let filtered = sidebar.apply_filters(&[conv_with_checkpoints.clone()]);
-        assert_eq!(filtered.len(), 1);
+        // Test clearing checkpoint suggestions
+        sidebar.clear_checkpoint_suggestions(conversation_id);
+        assert!(sidebar.get_checkpoint_suggestions(conversation_id).is_none());
         
-        // Test checkpoint filter
-        let mut sidebar_with_checkpoint_filter = sidebar.clone();
-        sidebar_with_checkpoint_filter.filters.checkpoints_only = true;
-        let filtered = sidebar_with_checkpoint_filter.apply_filters(&[conv_with_checkpoints]);
-        assert_eq!(filtered.len(), 1);
+        // Test toggle functionality
+        assert!(!sidebar.show_checkpoint_suggestions);
+        sidebar.toggle_checkpoint_suggestions();
+        assert!(sidebar.show_checkpoint_suggestions);
         
-        // Test that conversations without checkpoints are filtered out
-        let filtered = sidebar_with_checkpoint_filter.apply_filters(&conversations);
-        assert_eq!(filtered.len(), 0);
+        // Test checkpoint suggestion actions
+        let action = CheckpointSuggestionAction::CreateCheckpoint {
+            conversation_id,
+            suggestion: checkpoint_suggestions[0].clone(),
+        };
+        
+        let sidebar_action = sidebar.handle_checkpoint_suggestion_action(action);
+        assert!(sidebar_action.is_some());
+        
+        if let Some(SidebarAction::CreateCheckpoint(conv_id, msg_id, title)) = sidebar_action {
+            assert_eq!(conv_id, conversation_id);
+            assert_eq!(title, "Successful Implementation");
+        } else {
+            panic!("Expected CreateCheckpoint action");
+        }
     }
 
     #[test]

@@ -131,6 +131,35 @@ pub enum AgentEvent {
         result: serde_json::Value,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
+
+    // Checkpoint-related events for Phase 5 - Smart Checkpoints
+    /// A checkpoint was created
+    CheckpointCreated {
+        conversation_id: Uuid,
+        checkpoint_id: Uuid,
+        message_id: Uuid,
+        title: String,
+        auto_generated: bool,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+
+    /// A checkpoint suggestion is available
+    CheckpointSuggested {
+        conversation_id: Uuid,
+        message_id: Uuid,
+        suggestion_title: String,
+        importance: f32,
+        reason: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+
+    /// A checkpoint was restored
+    CheckpointRestored {
+        conversation_id: Uuid,
+        checkpoint_id: Uuid,
+        title: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 /// Event handler for agent events

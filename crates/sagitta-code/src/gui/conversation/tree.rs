@@ -608,6 +608,34 @@ pub struct Bounds {
     pub max_y: f32,
 }
 
+/// Actions that can be triggered from the conversation tree
+#[derive(Debug, Clone)]
+pub enum TreeAction {
+    /// Select a node
+    SelectNode(NodeId),
+    
+    /// Jump to a message
+    JumpToMessage(Uuid),
+    
+    /// Create a branch from a message
+    CreateBranch(Uuid),
+    
+    /// Create a checkpoint at a message
+    CreateCheckpoint(Uuid),
+    
+    /// Restore from a checkpoint
+    RestoreCheckpoint(Uuid),
+    
+    /// Delete a checkpoint
+    DeleteCheckpoint(Uuid),
+    
+    /// Show checkpoint details
+    ShowCheckpointDetails(Uuid),
+    
+    /// Expand/collapse a node
+    ToggleExpansion(NodeId),
+}
+
 impl ConversationTree {
     /// Create a new conversation tree
     pub fn new(config: TreeConfig) -> Self {
@@ -1138,6 +1166,212 @@ impl ConversationTree {
     /// Get current configuration
     pub fn get_config(&self) -> &TreeConfig {
         &self.config
+    }
+    
+    /// Render the conversation tree with UI interactions
+    pub fn render(&mut self, ui: &mut egui::Ui, theme: &crate::gui::theme::AppTheme) -> Result<Option<TreeAction>> {
+        use egui::{Color32, Pos2, Rect, Stroke, Vec2};
+        
+        let mut action = None;
+        
+        if let Some(ref layout) = self.layout_cache {
+            // Draw connections first (behind nodes)
+            for connection in &layout.connections {
+                self.draw_connection(ui.painter(), connection, theme);
+            }
+            
+            // Draw nodes and handle interactions
+            for node in &layout.nodes {
+                let node_rect = Rect::from_min_size(
+                    Pos2::new(node.position.x, node.position.y),
+                    Vec2::new(node.size.width, node.size.height),
+                );
+                
+                // Check for mouse interactions
+                let response = ui.allocate_rect(node_rect, egui::Sense::click());
+                
+                // Handle left click
+                if response.clicked() {
+                    action = Some(TreeAction::SelectNode(node.id.clone()));
+                }
+                
+                // Handle right click for context menu
+                if response.secondary_clicked() {
+                    action = self.show_context_menu(ui, &node.id);
+                }
+                
+                // Draw the node
+                self.draw_node(ui.painter(), node, theme, response.hovered());
+            }
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.label("No conversation loaded");
+            });
+        }
+        
+        Ok(action)
+    }
+    
+    /// Show context menu for a node
+    fn show_context_menu(&self, ui: &mut egui::Ui, node_id: &NodeId) -> Option<TreeAction> {
+        let mut action = None;
+        
+        ui.menu_button("⋮", |ui| {
+            match node_id {
+                NodeId::Message(message_id) => {
+                    if ui.button("📍 Create Checkpoint").clicked() {
+                        action = Some(TreeAction::CreateCheckpoint(*message_id));
+                        ui.close_menu();
+                    }
+                    if ui.button("🌳 Create Branch").clicked() {
+                        action = Some(TreeAction::CreateBranch(*message_id));
+                        ui.close_menu();
+                    }
+                    if ui.button("🔗 Jump to Message").clicked() {
+                        action = Some(TreeAction::JumpToMessage(*message_id));
+                        ui.close_menu();
+                    }
+                },
+                NodeId::Checkpoint(checkpoint_id) => {
+                    if ui.button("🔄 Restore Checkpoint").clicked() {
+                        action = Some(TreeAction::RestoreCheckpoint(*checkpoint_id));
+                        ui.close_menu();
+                    }
+                    if ui.button("ℹ️ Show Details").clicked() {
+                        action = Some(TreeAction::ShowCheckpointDetails(*checkpoint_id));
+                        ui.close_menu();
+                    }
+                    if ui.button("🗑️ Delete Checkpoint").clicked() {
+                        action = Some(TreeAction::DeleteCheckpoint(*checkpoint_id));
+                        ui.close_menu();
+                    }
+                },
+                NodeId::BranchMessage(branch_id, message_id) => {
+                    if ui.button("📍 Create Checkpoint").clicked() {
+                        action = Some(TreeAction::CreateCheckpoint(*message_id));
+                        ui.close_menu();
+                    }
+                    if ui.button("🔗 Jump to Message").clicked() {
+                        action = Some(TreeAction::JumpToMessage(*message_id));
+                        ui.close_menu();
+                    }
+                },
+                NodeId::BranchRoot(branch_id) => {
+                    if ui.button("🌳 Expand/Collapse").clicked() {
+                        action = Some(TreeAction::ToggleExpansion(node_id.clone()));
+                        ui.close_menu();
+                    }
+                },
+            }
+        });
+        
+        action
+    }
+    
+    /// Draw a connection between nodes
+    fn draw_connection(&self, painter: &egui::Painter, connection: &TreeConnection, theme: &crate::gui::theme::AppTheme) {
+        use egui::{Color32, Pos2, Stroke};
+        
+        let color = match connection.connection_type {
+            ConnectionType::Sequential => theme.accent_color(),
+            ConnectionType::Branch => theme.success_color(),
+            ConnectionType::Checkpoint => Color32::from_rgb(245, 166, 35), // Orange for checkpoints
+            ConnectionType::Merge => theme.warning_color(),
+            ConnectionType::Jump => theme.error_color(),
+        };
+        
+        let stroke = Stroke::new(connection.style.width, color);
+        
+        if connection.path.len() >= 2 {
+            for i in 0..connection.path.len() - 1 {
+                let from = Pos2::new(connection.path[i].x, connection.path[i].y);
+                let to = Pos2::new(connection.path[i + 1].x, connection.path[i + 1].y);
+                painter.line_segment([from, to], stroke);
+            }
+        }
+    }
+    
+    /// Draw a node
+    fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, theme: &crate::gui::theme::AppTheme, hovered: bool) {
+        use egui::{Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
+        
+        let rect = Rect::from_min_size(
+            Pos2::new(node.position.x, node.position.y),
+            Vec2::new(node.size.width, node.size.height),
+        );
+        
+        // Determine colors based on node type and state
+        let (bg_color, border_color) = match node.display.node_type {
+            NodeType::UserMessage => (Color32::from_rgb(70, 130, 180), Color32::from_rgb(100, 149, 237)),
+            NodeType::AssistantMessage => (Color32::from_rgb(60, 179, 113), Color32::from_rgb(144, 238, 144)),
+            NodeType::SystemMessage => (Color32::from_rgb(128, 128, 128), Color32::from_rgb(169, 169, 169)),
+            NodeType::BranchPoint => (Color32::from_rgb(255, 165, 0), Color32::from_rgb(255, 140, 0)),
+            NodeType::Checkpoint => (Color32::from_rgb(245, 166, 35), Color32::from_rgb(255, 215, 0)),
+            NodeType::MergePoint => (Color32::from_rgb(147, 112, 219), Color32::from_rgb(186, 85, 211)),
+        };
+        
+        let final_bg_color = if node.selected {
+            Color32::from_rgb(255, 107, 53) // Orange for selected
+        } else if hovered {
+            bg_color.gamma_multiply(1.2)
+        } else {
+            bg_color
+        };
+        
+        let final_border_color = if node.highlighted {
+            Color32::YELLOW
+        } else {
+            border_color
+        };
+        
+        // Draw node background
+        painter.rect_filled(rect, Rounding::same(4), final_bg_color);
+        
+        // Draw node border
+        painter.rect_stroke(rect, Rounding::same(4), Stroke::new(2.0, final_border_color), egui::StrokeKind::Outside);
+        
+        // Draw node label
+        let text_color = Color32::WHITE;
+        let font_id = FontId::proportional(12.0);
+        
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &node.display.label,
+            font_id,
+            text_color,
+        );
+        
+        // Draw indicators
+        for (i, indicator) in node.display.indicators.iter().enumerate() {
+            let indicator_pos = match indicator.position {
+                IndicatorPosition::TopLeft => rect.min + Vec2::new(2.0, 2.0),
+                IndicatorPosition::TopRight => rect.min + Vec2::new(rect.width() - 12.0, 2.0),
+                IndicatorPosition::BottomLeft => rect.min + Vec2::new(2.0, rect.height() - 12.0),
+                IndicatorPosition::BottomRight => rect.min + Vec2::new(rect.width() - 12.0, rect.height() - 12.0),
+                IndicatorPosition::Center => rect.center(),
+            };
+            
+            painter.text(
+                indicator_pos,
+                egui::Align2::LEFT_TOP,
+                &indicator.display,
+                FontId::proportional(10.0),
+                Color32::WHITE,
+            );
+        }
+        
+        // Draw subtitle if present
+        if let Some(ref subtitle) = node.display.subtitle {
+            let subtitle_pos = rect.min + Vec2::new(4.0, rect.height() - 14.0);
+            painter.text(
+                subtitle_pos,
+                egui::Align2::LEFT_TOP,
+                subtitle,
+                FontId::proportional(8.0),
+                Color32::LIGHT_GRAY,
+            );
+        }
     }
 }
 
