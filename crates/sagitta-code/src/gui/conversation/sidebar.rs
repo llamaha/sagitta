@@ -8,17 +8,41 @@ use egui_extras::{Size, StripBuilder};
 
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::conversation::clustering::ConversationCluster;
-use crate::agent::state::types::AgentMode;
-use crate::agent::state::types::ConversationStatus;
+use crate::agent::state::types::{AgentMode, ConversationStatus};
 use crate::gui::theme::AppTheme;
+use crate::gui::app::AppState;
 
-// --- Minimal Placeholder definitions --- 
-#[derive(Debug, Clone, Default)] pub struct SagittaCodeAppState { pub current_conversation_id: Option<Uuid>, pub editing_conversation_id: Option<Uuid>, pub sidebar_action: Option<SidebarAction>, pub conversation_list: Vec<ConversationSummary>, pub show_clustered_conversations: bool, pub current_agent_mode: AgentMode, pub target_conversation_id: Option<Uuid>}
-impl SagittaCodeAppState { pub fn switch_to_conversation(&mut self, _id: Uuid) {} }
-#[derive(Debug, Clone)] pub enum SidebarAction { RequestDeleteConversation(Uuid), RenameConversation(Uuid, String) }
-#[derive(Debug, Clone, Default)] pub struct DisplayIndicator { pub display: String, pub color: Option<Color32>}
-#[derive(Debug, Clone, Default)] pub struct ConversationDisplayDetails { pub title: String, pub time_display: String, pub indicators: Vec<DisplayIndicator>}
-#[derive(Debug, Clone)] pub struct DisplayConversationItem { pub summary: ConversationSummary, pub display: ConversationDisplayDetails, pub preview: Option<String>}
+// --- Sidebar Action for conversation management ---
+#[derive(Debug, Clone)]
+pub enum SidebarAction {
+    RequestDeleteConversation(Uuid),
+    RenameConversation(Uuid, String),
+    SwitchToConversation(Uuid),
+    CreateNewConversation,
+    RefreshConversations,
+}
+
+// --- Display types for conversation items ---
+#[derive(Debug, Clone, Default)]
+pub struct DisplayIndicator {
+    pub display: String,
+    pub color: Option<Color32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ConversationDisplayDetails {
+    pub title: String,
+    pub time_display: String,
+    pub indicators: Vec<DisplayIndicator>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayConversationItem {
+    pub summary: ConversationSummary,
+    pub display: ConversationDisplayDetails,
+    pub preview: Option<String>,
+}
+
 fn get_status_icon(status: ConversationStatus) -> String {
     match status {
         ConversationStatus::Active => "▶".to_string(),
@@ -28,7 +52,6 @@ fn get_status_icon(status: ConversationStatus) -> String {
         ConversationStatus::Summarizing => "⏳".to_string(),
     }
 }
-// --- End Placeholder definitions ---
 
 /// Conversation sidebar component for smart organization
 #[derive(Clone)]
@@ -56,6 +79,20 @@ pub struct ConversationSidebar {
     
     /// Edit buffer
     pub edit_buffer: String,
+    
+    /// Pending action to be processed
+    pub pending_action: Option<SidebarAction>,
+    
+    /// Currently editing conversation ID
+    pub editing_conversation_id: Option<Uuid>,
+    
+    /// Show filters panel
+    pub show_filters: bool,
+    
+    /// Filter flags for quick access
+    pub filter_active: bool,
+    pub filter_completed: bool,
+    pub filter_archived: bool,
 }
 
 /// Organization modes for the sidebar
@@ -329,6 +366,12 @@ impl ConversationSidebar {
             config,
             clusters: Vec::new(),
             edit_buffer: String::new(),
+            pending_action: None,
+            editing_conversation_id: None,
+            show_filters: false,
+            filter_active: false,
+            filter_completed: false,
+            filter_archived: false,
         }
     }
     
@@ -886,67 +929,279 @@ impl ConversationSidebar {
         self.config = config;
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, app_state: &mut SagittaCodeAppState, theme: &AppTheme) {
+    pub fn show(&mut self, ctx: &egui::Context, app_state: &mut AppState, theme: &AppTheme) {
         egui::SidePanel::left("conversation_sidebar")
             .resizable(true)
-            .default_width(250.0)
+            .default_width(300.0)
             .show(ctx, |ui| {
                 self.render_header(ui, app_state, theme);
                 self.render_search_bar(ui, app_state);
                 ui.separator();
 
                 ScrollArea::vertical().show(ui, |ui| {
-                    if app_state.show_clustered_conversations && !self.clusters.is_empty() {
-                        for cluster in &self.clusters {
-                            render_cluster_item(ui, cluster, app_state, theme);
-                        }
-                    } else {
-                        let grouped_conversations = self.group_conversations(&app_state.conversation_list);
-                        for (_group_key, conv_items) in grouped_conversations {
-                            for conv_item in conv_items {
-                                ui.push_id(format!("conv_item_{}", conv_item.summary.id), |ui| {
-                                    let is_current_chat = app_state.current_conversation_id == Some(conv_item.summary.id);
-                                    let is_editing_this = app_state.editing_conversation_id == Some(conv_item.summary.id);
-                                    
-                                    render_conversation_list_item(
-                                        ui, 
-                                        &conv_item, 
-                                        app_state, 
-                                        theme, 
-                                        is_current_chat, 
-                                        is_editing_this, 
-                                        &mut self.edit_buffer,
-                                        ctx 
-                                    );
-                                });
+                    // Use the sophisticated organization system
+                    match self.organize_conversations(&app_state.conversation_list, Some(&self.clusters)) {
+                        Ok(organized) => {
+                            // Display organized groups
+                            for group in &organized.groups {
+                                self.render_conversation_group(ui, group, app_state, theme);
                             }
+                            
+                            // Show organization info
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.label(format!("📊 Showing {} of {} conversations", organized.filtered_count, organized.total_count));
+                        },
+                        Err(e) => {
+                            log::error!("Failed to organize conversations: {}", e);
+                            // Fallback to simple list
+                            self.render_simple_conversation_list(ui, app_state, theme);
                         }
                     }
                 });
+                
                 self.handle_sidebar_actions(app_state, ctx);
             });
     }
 
-    // Stubs for missing methods
-    fn render_header(&mut self, _ui: &mut Ui, _app_state: &mut SagittaCodeAppState, _theme: &AppTheme) { /* Placeholder */ }
-    fn render_search_bar(&mut self, _ui: &mut Ui, _app_state: &mut SagittaCodeAppState) { /* Placeholder */ }
-    fn group_conversations(&self, conv_list: &[ConversationSummary]) -> HashMap<String, Vec<DisplayConversationItem>> {
-        let mut map = HashMap::new();
-        let items = conv_list.iter().map(|summary| DisplayConversationItem {
-            summary: summary.clone(),
-            display: ConversationDisplayDetails { title: summary.title.clone(), time_display: "-".to_string(), indicators: vec![] },
-            preview: None,
-        }).collect();
-        map.insert("All".to_string(), items);
-        map
+    // Render the header with organization mode selector
+    fn render_header(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) {
+        ui.horizontal(|ui| {
+            ui.heading("💬 Conversations");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button("🔄").on_hover_text("Refresh conversations").clicked() {
+                    // Trigger refresh action
+                    self.pending_action = Some(SidebarAction::RefreshConversations);
+                }
+                if ui.button("➕").on_hover_text("New conversation").clicked() {
+                    self.pending_action = Some(SidebarAction::CreateNewConversation);
+                }
+            });
+        });
+        
+        ui.add_space(4.0);
+        
+        // Organization mode selector
+        ui.horizontal(|ui| {
+            ui.label("📋 Organize by:");
+            ComboBox::from_id_source("organization_mode")
+                .selected_text(self.organization_mode_display_name())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Recency, "📅 Recency");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Project, "📁 Project");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Status, "📊 Status");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Clusters, "🔗 Clusters");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Tags, "🏷️ Tags");
+                    ui.selectable_value(&mut self.organization_mode, OrganizationMode::Success, "✅ Success");
+                });
+        });
     }
-    fn handle_sidebar_actions(&mut self, _app_state: &mut SagittaCodeAppState, _ctx: &egui::Context) { /* Placeholder */ }
+
+    // Render search bar and filters
+    fn render_search_bar(&mut self, ui: &mut Ui, app_state: &mut AppState) {
+        ui.horizontal(|ui| {
+            let search_text = self.search_query.get_or_insert_with(String::new);
+            ui.label("🔍");
+            if ui.add(TextEdit::singleline(search_text).hint_text("Search conversations...")).changed() {
+                // Search query changed, will be applied in organize_conversations
+            }
+            
+            if ui.button("🎛️").on_hover_text("Filters").clicked() {
+                self.show_filters = !self.show_filters;
+            }
+        });
+        
+        // Show filters if enabled
+        if self.show_filters {
+            ui.collapsing("Filters", |ui| {
+                self.render_filters(ui);
+            });
+        }
+    }
+
+    // Render filter controls
+    fn render_filters(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Status:");
+            ui.checkbox(&mut self.filter_active, "Active");
+            ui.checkbox(&mut self.filter_completed, "Completed");
+            ui.checkbox(&mut self.filter_archived, "Archived");
+        });
+        
+        ui.horizontal(|ui| {
+            ui.label("Features:");
+            ui.checkbox(&mut self.filters.branches_only, "Has branches");
+            ui.checkbox(&mut self.filters.checkpoints_only, "Has checkpoints");
+            ui.checkbox(&mut self.filters.favorites_only, "Favorites only");
+        });
+    }
+
+    // Render a conversation group
+    fn render_conversation_group(&mut self, ui: &mut Ui, group: &ConversationGroup, app_state: &mut AppState, theme: &AppTheme) {
+        let group_id = group.id.clone();
+        let is_expanded = self.expanded_groups.contains(&group_id);
+        
+        // Group header with expand/collapse
+        ui.horizontal(|ui| {
+            let expand_icon = if is_expanded { "▼" } else { "▶" };
+            let header_text = format!("{} {} ({})", expand_icon, group.name, group.metadata.count);
+            
+            if ui.button(header_text).clicked() {
+                self.toggle_group(&group_id);
+            }
+            
+            // Show group statistics
+            if group.metadata.statistics.active_count > 0 {
+                ui.label(format!("🟢 {}", group.metadata.statistics.active_count));
+            }
+            if group.metadata.statistics.completed_count > 0 {
+                ui.label(format!("✅ {}", group.metadata.statistics.completed_count));
+            }
+            
+            // Show average success rate if available
+            if let Some(success_rate) = group.metadata.avg_success_rate {
+                ui.label(format!("📈 {:.1}%", success_rate * 100.0));
+            }
+        });
+        
+        // Show conversations in group if expanded
+        if is_expanded {
+            ui.indent(&group_id, |ui| {
+                for conv_item in &group.conversations {
+                    self.render_conversation_item(ui, conv_item, app_state, theme);
+                }
+            });
+        }
+        
+        ui.add_space(4.0);
+    }
+
+    // Render a single conversation item
+    fn render_conversation_item(&mut self, ui: &mut Ui, conv_item: &ConversationItem, app_state: &mut AppState, theme: &AppTheme) {
+        let is_current = app_state.current_conversation_id == Some(conv_item.summary.id);
+        let is_editing = self.editing_conversation_id == Some(conv_item.summary.id);
+        
+        ui.horizontal(|ui| {
+            // Status indicator
+            let status_icon = match conv_item.display.status_indicator {
+                StatusIndicator::Active => "🟢",
+                StatusIndicator::Paused => "⏸️",
+                StatusIndicator::Completed => "✅",
+                StatusIndicator::Failed => "❌",
+                StatusIndicator::Archived => "📦",
+                StatusIndicator::Branched => "🌿",
+                StatusIndicator::Checkpointed => "📍",
+            };
+            
+            if is_editing {
+                let response = ui.add(TextEdit::singleline(&mut self.edit_buffer)
+                    .desired_width(f32::INFINITY));
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.pending_action = Some(SidebarAction::RenameConversation(conv_item.summary.id, self.edit_buffer.clone()));
+                    self.editing_conversation_id = None;
+                }
+            } else {
+                let label_text = format!("{} {} {}", status_icon, conv_item.display.title, conv_item.display.time_display);
+                if ui.selectable_label(is_current, label_text).on_hover_text(&conv_item.display.title).clicked() {
+                    self.pending_action = Some(SidebarAction::SwitchToConversation(conv_item.summary.id));
+                }
+            }
+
+            if !is_editing {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("🗑").on_hover_text("Delete conversation").clicked() {
+                        self.pending_action = Some(SidebarAction::RequestDeleteConversation(conv_item.summary.id));
+                    }
+                    if ui.button("✏").on_hover_text("Rename conversation").clicked() {
+                        self.edit_buffer = conv_item.summary.title.clone();
+                        self.editing_conversation_id = Some(conv_item.summary.id);
+                    }
+                });
+            }
+        });
+
+        // Show visual indicators
+        if !conv_item.display.indicators.is_empty() {
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                for indicator in &conv_item.display.indicators {
+                    ui.label(&indicator.display);
+                }
+            });
+        }
+
+        // Show preview if available
+        if let Some(ref preview) = conv_item.preview {
+            ui.indent(format!("{}_preview", conv_item.summary.id), |ui| {
+                ui.label(RichText::new(preview).small().weak());
+            });
+        }
+    }
+
+    // Fallback simple conversation list
+    fn render_simple_conversation_list(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) {
+        for summary in &app_state.conversation_list {
+            let is_current = app_state.current_conversation_id == Some(summary.id);
+            let status_icon = get_status_icon(summary.status.clone());
+            
+            ui.horizontal(|ui| {
+                let label_text = format!("{} {}", status_icon, summary.title);
+                if ui.selectable_label(is_current, label_text).clicked() {
+                    self.pending_action = Some(SidebarAction::SwitchToConversation(summary.id));
+                }
+            });
+        }
+    }
+
+    // Handle sidebar actions
+    fn handle_sidebar_actions(&mut self, app_state: &mut AppState, _ctx: &egui::Context) {
+        if let Some(action) = self.pending_action.take() {
+            match action {
+                SidebarAction::SwitchToConversation(id) => {
+                    app_state.current_conversation_id = Some(id);
+                    // Find and set the conversation title
+                    if let Some(summary) = app_state.conversation_list.iter().find(|s| s.id == id) {
+                        app_state.current_conversation_title = Some(summary.title.clone());
+                    }
+                },
+                SidebarAction::CreateNewConversation => {
+                    // This would typically trigger an async operation
+                    log::info!("Create new conversation requested");
+                },
+                SidebarAction::RefreshConversations => {
+                    app_state.set_conversation_loading(true);
+                    log::info!("Refresh conversations requested");
+                },
+                SidebarAction::RequestDeleteConversation(id) => {
+                    log::info!("Delete conversation {} requested", id);
+                    // This would typically show a confirmation dialog
+                },
+                SidebarAction::RenameConversation(id, new_name) => {
+                    log::info!("Rename conversation {} to '{}'", id, new_name);
+                    // This would typically trigger an async operation
+                },
+            }
+        }
+    }
+
+    // Helper method to get organization mode display name
+    fn organization_mode_display_name(&self) -> &str {
+        match self.organization_mode {
+            OrganizationMode::Recency => "📅 Recency",
+            OrganizationMode::Project => "📁 Project", 
+            OrganizationMode::Status => "📊 Status",
+            OrganizationMode::Clusters => "🔗 Clusters",
+            OrganizationMode::Tags => "🏷️ Tags",
+            OrganizationMode::Success => "✅ Success",
+            OrganizationMode::Custom(ref name) => name,
+        }
+    }
 }
 
 fn render_conversation_list_item(
     ui: &mut Ui,
     conv_item: &DisplayConversationItem,
-    app_state: &mut SagittaCodeAppState,
+    app_state: &mut AppState,
     _theme: &AppTheme, // theme might not be needed
     is_current: bool,
     is_editing: bool,
@@ -1007,7 +1262,7 @@ fn render_conversation_list_item(
 fn render_cluster_item(
     ui: &mut Ui,
     cluster: &ConversationCluster,
-    app_state: &mut SagittaCodeAppState, 
+    app_state: &mut AppState, 
     _theme: &AppTheme,
 ) {
     ui.push_id(format!("cluster_{}", cluster.id), |ui| {
