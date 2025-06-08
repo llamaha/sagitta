@@ -42,6 +42,10 @@ pub enum ConversationEvent {
     },
     ConversationCreated(uuid::Uuid),
     ConversationSwitched(uuid::Uuid),
+    ConversationMessagesLoaded {
+        conversation_id: uuid::Uuid,
+        messages: Vec<crate::agent::message::types::AgentMessage>,
+    },
     AnalyticsReportReady(crate::agent::conversation::analytics::AnalyticsReport),
 }
 
@@ -575,6 +579,10 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
                 // Force refresh to update current conversation display
                 force_refresh_conversation_data(app);
             },
+            ConversationEvent::ConversationMessagesLoaded { conversation_id, messages } => {
+                log::info!("Conversation messages loaded for conversation {}", conversation_id);
+                app.handle_conversation_messages(conversation_id, messages);
+            },
             ConversationEvent::AnalyticsReportReady(report) => {
                 log::info!("Received AnalyticsReportReady event");
                 // Handle the report
@@ -694,6 +702,9 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
     app.state.messages.clear();
     app.state.conversation_data_loading = true;
     
+    // Clear chat manager messages for the new conversation
+    app.chat_manager.clear_all_messages();
+    
     // Update sidebar selection
     app.conversation_sidebar.select_conversation(Some(conversation_id));
     
@@ -714,6 +725,15 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
                         conversation.title, conversation.messages.len());
                     
                     if let Some(sender) = sender {
+                        // Send the messages to be loaded into the chat UI
+                        if let Err(e) = sender.send(ConversationEvent::ConversationMessagesLoaded {
+                            conversation_id,
+                            messages: conversation.messages,
+                        }) {
+                            log::error!("Failed to send ConversationMessagesLoaded event: {}", e);
+                        }
+                        
+                        // Also send the switched event for other UI updates
                         if let Err(e) = sender.send(ConversationEvent::ConversationSwitched(conversation_id)) {
                             log::error!("Failed to send ConversationSwitched event: {}", e);
                         }
@@ -929,12 +949,20 @@ impl SagittaCodeApp {
         log::info!("Received {} checkpoint suggestions for conversation {}", suggestions.len(), conversation_id);
         
         // Update the sidebar with checkpoint suggestions
-        self.conversation_sidebar.update_checkpoint_suggestions(conversation_id, suggestions);
+        self.conversation_sidebar.update_checkpoint_suggestions(conversation_id, suggestions.clone());
         
         // If this is the current conversation, enable checkpoint suggestions panel
         if self.state.current_conversation_id == Some(conversation_id) {
             self.conversation_sidebar.show_checkpoint_suggestions = true;
+            // Also set the UI as visible
+            self.conversation_sidebar.checkpoint_suggestions_ui.set_visible(true);
         }
+        
+        // Add event to events panel for debugging
+        self.panels.events_panel.add_event(
+            SystemEventType::Info,
+            format!("Found {} checkpoint suggestions for conversation", suggestions.len())
+        );
     }
 
     /// Handle branch suggestions
@@ -947,6 +975,29 @@ impl SagittaCodeApp {
         // If this is the current conversation, enable branch suggestions panel
         if self.state.current_conversation_id == Some(conversation_id) {
             self.conversation_sidebar.show_branch_suggestions = true;
+        }
+    }
+
+    /// Handle conversation messages loaded from service
+    pub fn handle_conversation_messages(&mut self, conversation_id: uuid::Uuid, messages: Vec<crate::agent::message::types::AgentMessage>) {
+        log::info!("Loading {} messages for conversation {} into chat UI", messages.len(), conversation_id);
+        
+        // Only load messages if this is still the current conversation
+        if self.state.current_conversation_id == Some(conversation_id) {
+            // Convert agent messages to streaming messages and add them to chat manager
+            for agent_message in messages {
+                let chat_message = make_chat_message_from_agent_message(&agent_message);
+                let streaming_message: StreamingMessage = chat_message.into();
+                self.chat_manager.add_complete_message(streaming_message);
+            }
+            
+            log::info!("Successfully loaded {} messages into chat UI for conversation {}", 
+                self.chat_manager.get_all_messages().len(), conversation_id);
+            
+            // Clear loading state
+            self.state.conversation_data_loading = false;
+        } else {
+            log::warn!("Conversation {} is no longer current, skipping message loading", conversation_id);
         }
     }
 }

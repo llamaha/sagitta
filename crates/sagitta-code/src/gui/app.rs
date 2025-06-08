@@ -23,10 +23,12 @@ use crate::agent::events::AgentEvent;
 use crate::agent::conversation::service::ConversationService;
 use crate::agent::conversation::clustering::ConversationClusteringManager;
 use crate::agent::conversation::analytics::{ConversationAnalyticsManager, AnalyticsConfig};
-use crate::agent::conversation::manager::ConversationManagerImpl;
+use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
 use crate::project::workspace::manager::{WorkspaceManager, WorkspaceManagerImpl};
+use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
+use crate::llm::title::TitleGenerator;
 
 // Import the modularized components
 mod panels;
@@ -233,13 +235,40 @@ impl SagittaCodeApp {
         };
         drop(config_guard);
         
-        let persistence = Box::new(DiskConversationPersistence::new(storage_path).await?);
+        let persistence = Box::new(DiskConversationPersistence::new(storage_path.clone()).await?);
         
         // Create search engine
         let search_engine = Box::new(TextConversationSearchEngine::new());
         
         // Create conversation manager
         let conversation_manager = Arc::new(ConversationManagerImpl::new(persistence, search_engine).await?);
+        
+        // Try to create and add tagging pipeline and title generator
+        let conversation_manager_with_features = {
+            // Create a new manager instance for adding features
+            let mut manager_impl = ConversationManagerImpl::new(
+                Box::new(DiskConversationPersistence::new(storage_path.clone()).await?),
+                Box::new(TextConversationSearchEngine::new())
+            ).await?;
+            
+            // Try to add tagging pipeline
+            if let Ok(tagging_pipeline) = self.try_create_tagging_pipeline(conversation_manager.clone()).await {
+                log::info!("Tagging pipeline initialized for conversation service");
+                manager_impl = manager_impl.with_tagging_pipeline(Arc::new(tagging_pipeline));
+            } else {
+                log::warn!("Failed to initialize tagging pipeline - auto-tagging will be disabled");
+            }
+            
+            // Try to add title generator
+            if let Ok(title_generator) = self.try_create_title_generator().await {
+                log::info!("Title generator initialized for conversation service");
+                manager_impl = manager_impl.with_title_generator(Arc::new(title_generator));
+            } else {
+                log::warn!("Failed to initialize title generator - auto-titling will be disabled");
+            }
+            
+            Arc::new(manager_impl) as Arc<dyn ConversationManager>
+        };
         
         // Try to create clustering manager (optional, requires Qdrant)
         let clustering_manager = match self.try_create_clustering_manager().await {
@@ -255,7 +284,7 @@ impl SagittaCodeApp {
         
         // Create conversation service
         let service = ConversationService::new(
-            conversation_manager,
+            conversation_manager_with_features,
             clustering_manager,
             analytics_manager,
         );
@@ -266,6 +295,27 @@ impl SagittaCodeApp {
         self.refresh_conversation_clusters().await?;
         
         Ok(())
+    }
+    
+    /// Try to create a tagging pipeline (may fail if dependencies are not available)
+    async fn try_create_tagging_pipeline(&self, conversation_manager: Arc<dyn ConversationManager>) -> Result<TaggingPipeline> {
+        use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
+        
+        // Create a basic tagging pipeline with default configuration
+        let config = TaggingPipelineConfig {
+            auto_apply_enabled: true,
+            auto_apply_threshold: 0.7,
+            max_tags_per_conversation: 10,
+            tag_on_creation: false, // Don't tag empty conversations
+            tag_on_update: true,
+            min_messages_for_tagging: 2, // Start tagging after 2 messages
+            preserve_manual_tags: true,
+        };
+        
+        // Create a basic pipeline without embedding-based suggestions for now
+        let pipeline = TaggingPipeline::new(config, conversation_manager);
+        
+        Ok(pipeline)
     }
     
     /// Try to create clustering manager (may fail if Qdrant is not available)
@@ -351,6 +401,24 @@ impl SagittaCodeApp {
         } else {
             None
         }
+    }
+
+    /// Try to create a title generator (may fail if dependencies are not available)
+    async fn try_create_title_generator(&self) -> Result<TitleGenerator> {
+        use crate::llm::title::{TitleGenerator, TitleGeneratorConfig};
+        
+        // Create a basic title generator with default configuration
+        let config = TitleGeneratorConfig {
+            max_title_length: 50,
+            min_messages_for_generation: 2,
+            use_embeddings: false, // Disable embeddings for now
+            fallback_prefix: "Conversation".to_string(),
+        };
+        
+        // Create a basic title generator without LLM for now (rule-based only)
+        let generator = TitleGenerator::new(config);
+        
+        Ok(generator)
     }
 }
 

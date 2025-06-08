@@ -162,12 +162,17 @@ impl StreamingChatManager {
         all_messages
     }
     
-    /// Clear all messages
-    pub fn clear(&self) {
-        let mut messages = self.messages.lock().unwrap();
-        let mut active_streams = self.active_streams.lock().unwrap();
-        messages.clear();
-        active_streams.clear();
+    /// Clear all messages (for conversation switching)
+    pub fn clear_all_messages(&self) {
+        {
+            let mut messages = self.messages.lock().unwrap();
+            messages.clear();
+        }
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            active_streams.clear();
+        }
+        log::info!("StreamingChatManager: Cleared all messages and active streams");
     }
     
     /// Update a tool call result by tool_call_id (more precise than by tool name)
