@@ -182,6 +182,20 @@ impl ConversationService {
         self.manager.get_conversation(conversation_id).await
     }
     
+    /// List conversations
+    pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
+        self.get_summaries().await
+    }
+    
+    /// Rename a conversation
+    pub async fn rename_conversation(&self, conversation_id: Uuid, new_title: String) -> Result<()> {
+        if let Some(mut conversation) = self.manager.get_conversation(conversation_id).await? {
+            conversation.title = new_title;
+            self.update_conversation(conversation).await?;
+        }
+        Ok(())
+    }
+    
     /// Generate analytics report
     pub async fn generate_analytics(&self) -> Result<AnalyticsReport> {
         let summaries = self.get_summaries().await?;

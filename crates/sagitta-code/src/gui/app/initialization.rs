@@ -67,8 +67,8 @@ pub fn get_default_conversation_storage_path() -> PathBuf {
 }
 
 /// Configure theme from config
-pub fn configure_theme_from_config(app: &mut SagittaCodeApp) {
-    match app.config.ui.theme.as_str() {
+pub async fn configure_theme_from_config(app: &mut SagittaCodeApp) {
+    match app.config.lock().await.ui.theme.as_str() {
         "light" => app.state.current_theme = AppTheme::Light,
         "dark" | _ => app.state.current_theme = AppTheme::Dark, // Default to Dark
     }
@@ -173,10 +173,11 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_handler_arc.clone()));
 
     // Configure theme
-    configure_theme_from_config(app);
+    configure_theme_from_config(app).await;
     
     // Create LLM client
-    let llm_client = create_llm_client(&app.config).map_err(|e| {
+    let config_guard = app.config.lock().await;
+    let llm_client = create_llm_client(&*config_guard).map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
             format!("CRITICAL: Failed to initialize LLM Client (Gemini): {}. Agent is disabled.", e),
@@ -184,6 +185,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         app.chat_manager.add_complete_message(error_message);
         e
     })?;
+    drop(config_guard);
 
     // Initialize Qdrant client
     let qdrant_client = create_qdrant_client(&core_config).await.map_err(|e| {
@@ -330,11 +332,14 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // --- End Qdrant tool collection population ---
 
     // Create conversation persistence
-    let persistence = create_conversation_persistence(&app.config).await?;
+    let config_guard = app.config.lock().await;
+    let persistence = create_conversation_persistence(&*config_guard).await?;
+    let config_clone = config_guard.clone();
+    drop(config_guard);
     let search_engine: Box<dyn ConversationSearchEngine> = Box::new(TextConversationSearchEngine::new());
 
     let agent_result = Agent::new(
-        app.config.as_ref().clone(), 
+        config_clone, 
         tool_registry.clone(), // tool_registry is now defined
         embedding_provider_adapter.clone(), // Use the adapter instead of raw pool
         persistence, // Pass concrete persistence
@@ -364,6 +369,17 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             let event_receiver = agent.subscribe();
             app.agent = Some(Arc::new(agent));
             app.agent_event_receiver = Some(event_receiver);
+            
+            // Initialize conversation service for the sidebar
+            if let Err(e) = app.initialize_conversation_service().await {
+                log::warn!("Failed to initialize conversation service: {}. Conversation sidebar features may be limited.", e);
+                app.panels.events_panel.add_event(
+                    super::SystemEventType::Info,
+                    format!("Conversation service initialization failed: {}", e)
+                );
+            } else {
+                log::info!("Conversation service initialized successfully");
+            }
             
             // Initial conversation data load
             app.refresh_conversation_data();
@@ -409,8 +425,8 @@ mod tests {
         assert!(path.is_absolute() || path.starts_with("."));
     }
 
-    #[test]
-    fn test_configure_theme_from_config() {
+    #[tokio::test]
+    async fn test_configure_theme_from_config() {
         let app_config = CoreAppConfig::default();
         let repo_manager = Arc::new(tokio::sync::Mutex::new(
             RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
@@ -427,7 +443,7 @@ mod tests {
             RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone.clone())))
         ));
         let mut app_light = SagittaCodeApp::new(repo_manager_light, sagitta_config_light, app_config_clone);
-        configure_theme_from_config(&mut app_light);
+        configure_theme_from_config(&mut app_light).await;
         assert_eq!(app_light.state.current_theme, AppTheme::Light);
         
         // Test dark theme
@@ -438,7 +454,7 @@ mod tests {
             RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone2.clone())))
         ));
         let mut app_dark = SagittaCodeApp::new(repo_manager_dark, sagitta_config_dark, app_config_clone2);
-        configure_theme_from_config(&mut app_dark);
+        configure_theme_from_config(&mut app_dark).await;
         assert_eq!(app_dark.state.current_theme, AppTheme::Dark);
         
         // Test default (unknown theme defaults to dark)
@@ -449,7 +465,7 @@ mod tests {
             RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config_clone3.clone())))
         ));
         let mut app_unknown = SagittaCodeApp::new(repo_manager_unknown, sagitta_config_unknown, app_config_clone3);
-        configure_theme_from_config(&mut app_unknown);
+        configure_theme_from_config(&mut app_unknown).await;
         assert_eq!(app_unknown.state.current_theme, AppTheme::Dark);
     }
 
@@ -577,8 +593,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_initialization_helper_functions_isolation() {
+    #[tokio::test]
+    async fn test_initialization_helper_functions_isolation() {
         // Test that helper functions are properly isolated and testable
         
         // Test default path generation
@@ -606,7 +622,7 @@ mod tests {
         sagitta_config2.ui.theme = "light".to_string();
         
         let mut app2 = SagittaCodeApp::new(repo_manager2, sagitta_config2, app_config2);
-        configure_theme_from_config(&mut app2);
+        configure_theme_from_config(&mut app2).await;
         
         // Theme should be updated to light
         assert_eq!(app2.state.current_theme, AppTheme::Light);

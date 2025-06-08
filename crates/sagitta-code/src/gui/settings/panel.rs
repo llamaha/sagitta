@@ -392,7 +392,13 @@ impl SettingsPanel {
     
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
-        let sagitta_code_config = self.sagitta_code_config.blocking_lock().clone();
+        let sagitta_code_config = match self.sagitta_code_config.try_lock() {
+            Ok(config) => config.clone(),
+            Err(_) => {
+                log::warn!("Failed to acquire config lock, using default");
+                SagittaCodeConfig::default()
+            }
+        };
         SagittaCodeConfig {
             gemini: GeminiConfig {
                 api_key: if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) },

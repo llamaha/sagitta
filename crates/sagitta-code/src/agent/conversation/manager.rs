@@ -12,6 +12,7 @@ use super::types::{
 };
 use super::persistence::ConversationPersistence;
 use super::search::ConversationSearchEngine;
+use super::tagging::{TaggingPipeline, TaggingPipelineConfig, TaggingResult, TagMetadata, TagSuggestion};
 use crate::agent::state::types::ConversationStatus;
 use crate::agent::conversation::types::BranchStatus;
 use crate::agent::events::AgentEvent;
@@ -55,6 +56,15 @@ pub trait ConversationManager: Send + Sync {
     
     /// Archive old conversations based on criteria
     async fn archive_conversations(&self, criteria: ArchiveCriteria) -> Result<usize>;
+    
+    /// Get tag suggestions for a conversation
+    async fn get_tag_suggestions(&self, conversation_id: Uuid) -> Result<Vec<TagSuggestion>>;
+    
+    /// Get tag metadata for a conversation
+    async fn get_tag_metadata(&self, conversation_id: Uuid) -> Result<Vec<TagMetadata>>;
+    
+    /// Manually trigger tagging for a conversation
+    async fn retag_conversation(&self, conversation_id: Uuid) -> Result<TaggingResult>;
 }
 
 /// Implementation of the conversation manager
@@ -67,6 +77,9 @@ pub struct ConversationManagerImpl {
     
     /// Search engine
     search_engine: Box<dyn ConversationSearchEngine>,
+    
+    /// Tagging pipeline
+    tagging_pipeline: Option<Arc<TaggingPipeline>>,
     
     /// Whether to auto-save changes
     auto_save: bool,
@@ -110,6 +123,7 @@ impl ConversationManagerImpl {
             conversations: Arc::new(RwLock::new(HashMap::new())),
             persistence,
             search_engine,
+            tagging_pipeline: None,
             auto_save: true,
         };
         
@@ -123,6 +137,17 @@ impl ConversationManagerImpl {
     pub fn with_auto_save(mut self, auto_save: bool) -> Self {
         self.auto_save = auto_save;
         self
+    }
+    
+    /// Set the tagging pipeline
+    pub fn with_tagging_pipeline(mut self, pipeline: Arc<TaggingPipeline>) -> Self {
+        self.tagging_pipeline = Some(pipeline);
+        self
+    }
+    
+    /// Get the tagging pipeline if available
+    pub fn tagging_pipeline(&self) -> Option<Arc<TaggingPipeline>> {
+        self.tagging_pipeline.clone()
     }
     
     /// Load all conversations from persistence into memory
@@ -143,6 +168,22 @@ impl ConversationManagerImpl {
     async fn maybe_save_conversation(&self, conversation: &Conversation) -> Result<()> {
         if self.auto_save {
             self.persistence.save_conversation(conversation).await?;
+        }
+        Ok(())
+    }
+    
+    /// Run tagging pipeline on a conversation if enabled
+    async fn maybe_tag_conversation(&self, conversation_id: Uuid) -> Result<()> {
+        if let Some(ref pipeline) = self.tagging_pipeline {
+            match pipeline.process_conversation(conversation_id).await {
+                Ok(result) => {
+                    log::debug!("Tagged conversation {}: applied {} tags, rejected {} tags", 
+                        conversation_id, result.tags_applied.len(), result.tags_rejected.len());
+                }
+                Err(e) => {
+                    log::warn!("Failed to tag conversation {}: {}", conversation_id, e);
+                }
+            }
         }
         Ok(())
     }
@@ -185,6 +226,15 @@ impl ConversationManager for ConversationManagerImpl {
         // Index for search
         self.search_engine.index_conversation(&conversation).await?;
         
+        // Run tagging pipeline (async, don't block on it)
+        if let Some(pipeline) = self.tagging_pipeline.clone() {
+            tokio::spawn(async move {
+                if let Err(e) = pipeline.process_conversation(id).await {
+                    log::warn!("Failed to tag new conversation {}: {}", id, e);
+                }
+            });
+        }
+        
         Ok(id)
     }
     
@@ -207,6 +257,15 @@ impl ConversationManager for ConversationManagerImpl {
         
         // Update search index
         self.search_engine.index_conversation(&conversation).await?;
+        
+        // Run tagging pipeline (async, don't block on it)
+        if let Some(pipeline) = self.tagging_pipeline.clone() {
+            tokio::spawn(async move {
+                if let Err(e) = pipeline.process_conversation(id).await {
+                    log::warn!("Failed to tag updated conversation {}: {}", id, e);
+                }
+            });
+        }
         
         Ok(())
     }
@@ -442,6 +501,42 @@ impl ConversationManager for ConversationManagerImpl {
         }
         
         Ok(to_archive.len())
+    }
+    
+    async fn get_tag_suggestions(&self, conversation_id: Uuid) -> Result<Vec<TagSuggestion>> {
+        if let Some(ref pipeline) = self.tagging_pipeline {
+            // Get the UI state which contains suggestions
+            let ui_state = pipeline.get_ui_state(conversation_id).await;
+            Ok(ui_state.get_state().suggestions.iter()
+                .filter(|s| matches!(s.action, super::tagging::TagAction::Pending))
+                .map(|s| s.suggestion.clone())
+                .collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+    
+    async fn get_tag_metadata(&self, conversation_id: Uuid) -> Result<Vec<TagMetadata>> {
+        if let Some(ref pipeline) = self.tagging_pipeline {
+            Ok(pipeline.get_tag_metadata(conversation_id).await)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+    
+    async fn retag_conversation(&self, conversation_id: Uuid) -> Result<TaggingResult> {
+        if let Some(ref pipeline) = self.tagging_pipeline {
+            pipeline.process_conversation(conversation_id).await
+        } else {
+            // Return empty result if no pipeline
+            Ok(TaggingResult {
+                conversation_id,
+                suggestions_generated: Vec::new(),
+                tags_applied: Vec::new(),
+                tags_rejected: Vec::new(),
+                metadata: Vec::new(),
+            })
+        }
     }
 }
 

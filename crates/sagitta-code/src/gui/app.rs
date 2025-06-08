@@ -30,7 +30,8 @@ use crate::project::workspace::manager::{WorkspaceManager, WorkspaceManagerImpl}
 
 // Import the modularized components
 mod panels;
-mod events;
+use super::conversation;
+pub mod events;
 mod tool_formatting;
 mod state;
 mod rendering;
@@ -38,6 +39,7 @@ mod initialization;
 
 // Re-export types and functions from modules
 pub use panels::*;
+pub use conversation::*;
 pub use events::*;
 pub use tool_formatting::*;
 pub use state::*;
@@ -70,7 +72,7 @@ pub struct SagittaCodeApp {
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     conversation_sidebar: ConversationSidebar,
-    config: Arc<SagittaCodeConfig>,
+    config: Arc<Mutex<SagittaCodeConfig>>,
     app_core_config: Arc<AppConfig>,
     
     // Workspace Manager
@@ -140,7 +142,7 @@ impl SagittaCodeApp {
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),
-            config: sagitta_code_config_arc,
+            config: Arc::new(Mutex::new(sagitta_code_config)),
             app_core_config: app_core_config_arc,
             workspace_manager,
             
@@ -195,6 +197,14 @@ impl SagittaCodeApp {
         events::handle_state_change(self, state);
     }
 
+    /// Backwards compatibility for tests that still use handle_llm_chunk
+    pub fn handle_llm_chunk(&mut self, content: String, is_final: bool, ctx: &Context) {
+        // This is a temporary measure to get tests to pass.
+        // The tests should be refactored to use handle_agent_event.
+        use crate::agent::events::AgentEvent;
+        self.handle_agent_event(AgentEvent::LlmChunk { content, is_final }, ctx);
+    }
+
     /// Render the application UI
     pub fn render(&mut self, ctx: &Context) {
         rendering::render(self, ctx);
@@ -214,46 +224,46 @@ impl SagittaCodeApp {
 
     /// Initialize conversation service with clustering support
     pub async fn initialize_conversation_service(&mut self) -> Result<()> {
-        if let Some(agent) = &self.agent {
-            // Create persistence layer
-            let storage_path = std::env::var("CONVERSATION_STORAGE_PATH")
-                .unwrap_or_else(|_| {
-                    let mut path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                    path.push("conversations");
-                    path.to_string_lossy().to_string()
-                });
-            let persistence = Box::new(DiskConversationPersistence::new(std::path::PathBuf::from(storage_path)).await?);
-            
-            // Create search engine
-            let search_engine = Box::new(TextConversationSearchEngine::new());
-            
-            // Create conversation manager
-            let conversation_manager = Arc::new(ConversationManagerImpl::new(persistence, search_engine).await?);
-            
-            // Try to create clustering manager (optional, requires Qdrant)
-            let clustering_manager = match self.try_create_clustering_manager().await {
-                Ok(manager) => Some(manager),
-                Err(e) => {
-                    log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
-                    None
-                }
-            };
-            
-            // Create analytics manager
-            let analytics_manager = ConversationAnalyticsManager::new(AnalyticsConfig::default());
-            
-            // Create conversation service
-            let service = ConversationService::new(
-                conversation_manager,
-                clustering_manager,
-                analytics_manager,
-            );
-            
-            self.conversation_service = Some(Arc::new(service));
-            
-            // Initial refresh of conversation data
-            self.refresh_conversation_clusters().await?;
-        }
+        // Create persistence layer using the same path logic as initialization
+        let config_guard = self.config.lock().await;
+        let storage_path = if let Some(path) = &config_guard.conversation.storage_path {
+            path.clone()
+        } else {
+            initialization::get_default_conversation_storage_path()
+        };
+        drop(config_guard);
+        
+        let persistence = Box::new(DiskConversationPersistence::new(storage_path).await?);
+        
+        // Create search engine
+        let search_engine = Box::new(TextConversationSearchEngine::new());
+        
+        // Create conversation manager
+        let conversation_manager = Arc::new(ConversationManagerImpl::new(persistence, search_engine).await?);
+        
+        // Try to create clustering manager (optional, requires Qdrant)
+        let clustering_manager = match self.try_create_clustering_manager().await {
+            Ok(manager) => Some(manager),
+            Err(e) => {
+                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                None
+            }
+        };
+        
+        // Create analytics manager
+        let analytics_manager = ConversationAnalyticsManager::new(AnalyticsConfig::default());
+        
+        // Create conversation service
+        let service = ConversationService::new(
+            conversation_manager,
+            clustering_manager,
+            analytics_manager,
+        );
+        
+        self.conversation_service = Some(Arc::new(service));
+        
+        // Initial refresh of conversation data
+        self.refresh_conversation_clusters().await?;
         
         Ok(())
     }
@@ -263,8 +273,10 @@ impl SagittaCodeApp {
         use qdrant_client::Qdrant;
         use sagitta_search::EmbeddingPool;
         
-        // Try to connect to Qdrant
-        let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| "http://localhost:6333".to_string());
+        // Try to connect to Qdrant using the configured URL
+        let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| {
+            self.app_core_config.qdrant_url.clone()
+        });
         let qdrant_client = Arc::new(Qdrant::from_url(&qdrant_url).build()?);
         
         // Create embedding pool
@@ -292,6 +304,10 @@ impl SagittaCodeApp {
             self.conversation_sidebar.clusters = clusters;
             
             log::info!("Updated conversation sidebar with {} clusters", self.conversation_sidebar.clusters.len());
+
+            // After refresh, send an event to update conversation list in AppState
+            let convos = service.list_conversations().await?;
+            self.app_event_sender.send(AppEvent::RefreshConversationList)?;
         }
         
         Ok(())

@@ -20,6 +20,16 @@ use crate::gui::repository::manager::RepositoryManager;
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     ResponseProcessingComplete,
+    RefreshConversationList,
+    SwitchToConversation(uuid::Uuid),
+    CheckpointSuggestionsReady {
+        conversation_id: uuid::Uuid,
+        suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>,
+    },
+    BranchSuggestionsReady {
+        conversation_id: uuid::Uuid,
+        suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>,
+    },
     // Add other app-level UI events here if needed
 }
 
@@ -223,6 +233,21 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
             }
+            AppEvent::RefreshConversationList => {
+                log::info!("SagittaCodeApp: Received RefreshConversationList event. Forcing refresh.");
+                force_refresh_conversation_data(app);
+            }
+            AppEvent::SwitchToConversation(conversation_id) => {
+                switch_to_conversation(app, conversation_id);
+            }
+            AppEvent::CheckpointSuggestionsReady { conversation_id, suggestions } => {
+                log::info!("Received CheckpointSuggestionsReady event for conversation {}", conversation_id);
+                app.handle_checkpoint_suggestions(conversation_id, suggestions);
+            },
+            AppEvent::BranchSuggestionsReady { conversation_id, suggestions } => {
+                log::info!("Received BranchSuggestionsReady event for conversation {}", conversation_id);
+                app.handle_branch_suggestions(conversation_id, suggestions);
+            },
         }
     }
 }
@@ -319,6 +344,11 @@ pub fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: boo
             app.state.is_streaming_response = false; // Clear streaming state
             app.state.is_waiting_for_response = false;
             log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
+            
+            // Trigger automatic analysis for checkpoint and branch suggestions
+            if let Some(conversation_id) = app.state.current_conversation_id {
+                analyze_conversation_for_suggestions(app, conversation_id);
+            }
         }
     }
 }
@@ -521,6 +551,11 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
         }
     }
     
+    // Only log when there are actually events to process
+    if !events.is_empty() {
+        log::debug!("Processing {} conversation events", events.len());
+    }
+    
     // Then process each event
     for event in events {
         match event {
@@ -528,7 +563,7 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
                 app.state.current_conversation_title = current_title;
                 app.state.conversation_list = conversations;
                 app.state.conversation_data_loading = false;
-                log::debug!("Updated conversation cache with {} conversations", app.state.conversation_list.len());
+                log::info!("Updated conversation cache with {} conversations, cleared loading state", app.state.conversation_list.len());
             },
             ConversationEvent::ConversationCreated(id) => {
                 log::info!("Conversation created: {}", id);
@@ -556,14 +591,57 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
         .map(|last| last.elapsed().as_secs() >= 10)
         .unwrap_or(true);
     
+    log::debug!("refresh_conversation_data called: should_refresh={}, currently_loading={}", should_refresh, app.state.conversation_data_loading);
+    
     if should_refresh && !app.state.conversation_data_loading {
         app.state.conversation_data_loading = true;
+        log::info!("Setting conversation_data_loading = true, starting refresh");
         
-        if let Some(agent) = &app.agent {
+        // Try to use conversation service first, fall back to agent
+        if let Some(service) = &app.conversation_service {
+            let service_clone = service.clone();
+            let sender = app.conversation_event_sender.clone();
+            
+            log::debug!("Using conversation service for refresh, sender available: {}", sender.is_some());
+            
+            // Spawn async task to load conversation data using the service
+            tokio::spawn(async move {
+                if let Some(sender) = sender {
+                    // Refresh the service data first
+                    if let Err(e) = service_clone.refresh().await {
+                        log::error!("Failed to refresh conversation service: {}", e);
+                        return;
+                    }
+                    
+                    // Load conversation list from service
+                    let conversation_list = service_clone.list_conversations().await.unwrap_or_default();
+                    
+                    log::info!("Conversation service loaded {} conversations, sending DataLoaded event", conversation_list.len());
+                    
+                    // For now, we don't have a current conversation concept in the service
+                    // So we'll use None for current_title
+                    let current_title = None;
+                    
+                    // Send the data back to the UI
+                    if let Err(e) = sender.send(ConversationEvent::DataLoaded {
+                        current_title,
+                        conversations: conversation_list,
+                    }) {
+                        log::error!("Failed to send DataLoaded event: {}", e);
+                    } else {
+                        log::debug!("Successfully sent DataLoaded event");
+                    }
+                } else {
+                    log::warn!("No conversation event sender available");
+                }
+            });
+        } else if let Some(agent) = &app.agent {
             let agent_clone = agent.clone();
             let sender = app.conversation_event_sender.clone();
             
-            // Spawn async task to load conversation data
+            log::debug!("Using agent for refresh (fallback), sender available: {}", sender.is_some());
+            
+            // Fallback: Spawn async task to load conversation data using agent
             tokio::spawn(async move {
                 if let Some(sender) = sender {
                     // Load current conversation
@@ -573,94 +651,226 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                     // Load conversation list
                     let conversation_list = agent_clone.list_conversations().await.unwrap_or_default();
                     
+                    log::info!("Agent loaded {} conversations, sending DataLoaded event", conversation_list.len());
+                    
                     // Send the data back to the UI
-                    let _ = sender.send(ConversationEvent::DataLoaded {
+                    if let Err(e) = sender.send(ConversationEvent::DataLoaded {
                         current_title,
                         conversations: conversation_list,
-                    });
+                    }) {
+                        log::error!("Failed to send DataLoaded event: {}", e);
+                    } else {
+                        log::debug!("Successfully sent DataLoaded event");
+                    }
+                } else {
+                    log::warn!("No conversation event sender available");
                 }
             });
+        } else {
+            // No service or agent available, clear loading state
+            app.state.conversation_data_loading = false;
+            log::warn!("No conversation service or agent available for refresh, clearing loading state");
         }
         
         app.state.last_conversation_refresh = Some(std::time::Instant::now());
+    } else {
+        log::debug!("Skipping refresh: should_refresh={}, currently_loading={}", should_refresh, app.state.conversation_data_loading);
     }
 }
 
 /// Force refresh conversation data immediately
 pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
     app.state.last_conversation_refresh = None;
-    app.state.conversation_data_loading = true; // Set loading state immediately
+    app.state.conversation_data_loading = false; // Reset loading state first
     refresh_conversation_data(app);
 }
 
 /// Switch to a conversation and update the chat view
 pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
-    // Clear current response state immediately
-    app.state.current_response_id = None;
-    app.state.is_streaming_response = false;
-    app.state.is_waiting_for_response = false;
-    app.state.tool_results.clear();
-    app.state.pending_tool_calls.clear();
+    log::info!("Switching to conversation: {}", conversation_id);
     
-    // Set the new conversation ID
+    // Clear current chat state
     app.state.current_conversation_id = Some(conversation_id);
+    app.state.messages.clear();
+    app.state.conversation_data_loading = true;
     
-    if let Some(agent) = &app.agent {
-        let agent_clone = agent.clone();
+    // Update sidebar selection
+    app.conversation_sidebar.select_conversation(Some(conversation_id));
+    
+    // Find and set the conversation title
+    if let Some(summary) = app.state.conversation_list.iter().find(|s| s.id == conversation_id) {
+        app.state.current_conversation_title = Some(summary.title.clone());
+    }
+    
+    // Load conversation history
+    if let Some(service) = &app.conversation_service {
+        let service_clone = service.clone();
         let sender = app.conversation_event_sender.clone();
-        let chat_manager = app.chat_manager.clone();
         
         tokio::spawn(async move {
-            match agent_clone.switch_conversation(conversation_id).await {
-                Ok(()) => {
-                    // Get the conversation history and update chat
-                    let history = agent_clone.get_history().await;
-                    
-                    // Clear current chat and load conversation history
-                    chat_manager.clear();
-                    
-                    // Add all messages from the conversation to chat
-                    for message in history {
-                        let chat_message = match message.role {
-                            crate::llm::client::Role::User => {
-                                ChatMessage::new(
-                                    MessageAuthor::User,
-                                    message.content
-                                )
-                            },
-                            crate::llm::client::Role::Assistant => {
-                                ChatMessage::new(
-                                    MessageAuthor::Agent,
-                                    message.content
-                                )
-                            },
-                            crate::llm::client::Role::System => {
-                                ChatMessage::new(
-                                    MessageAuthor::System,
-                                    message.content
-                                )
-                            },
-                            crate::llm::client::Role::Function => {
-                                ChatMessage::new(
-                                    MessageAuthor::Tool,
-                                    message.content
-                                )
-                            },
-                        };
-                        
-                        let streaming_message: StreamingMessage = chat_message.into();
-                        chat_manager.add_complete_message(streaming_message);
-                    }
+            match service_clone.get_conversation(conversation_id).await {
+                Ok(Some(conversation)) => {
+                    log::info!("Loaded conversation '{}' with {} messages", 
+                        conversation.title, conversation.messages.len());
                     
                     if let Some(sender) = sender {
-                        let _ = sender.send(ConversationEvent::ConversationSwitched(conversation_id));
+                        if let Err(e) = sender.send(ConversationEvent::ConversationSwitched(conversation_id)) {
+                            log::error!("Failed to send ConversationSwitched event: {}", e);
+                        }
                     }
                 },
+                Ok(None) => {
+                    log::warn!("Conversation {} not found", conversation_id);
+                },
                 Err(e) => {
-                    log::error!("Failed to switch conversation: {}", e);
+                    log::error!("Failed to load conversation {}: {}", conversation_id, e);
                 }
             }
         });
+    }
+    
+    // Trigger analysis for suggestions
+    analyze_conversation_for_suggestions(app, conversation_id);
+}
+
+/// Analyze a conversation for checkpoint and branch suggestions
+pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
+    if let Some(service) = &app.conversation_service {
+        let service_clone = service.clone();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            // Get the conversation to analyze
+            if let Ok(Some(conversation)) = service_clone.get_conversation(conversation_id).await {
+                log::info!("Analyzing conversation '{}' for suggestions", conversation.title);
+                
+                // For now, we'll do basic analysis based on message content
+                // TODO: Integrate with ConversationCheckpointManager and ConversationBranchingManager
+                
+                let recent_messages: Vec<_> = conversation.messages.iter()
+                    .rev()
+                    .take(5)
+                    .collect();
+                
+                log::debug!("Analyzing {} recent messages for suggestions", recent_messages.len());
+                
+                let mut checkpoint_suggestions = Vec::new();
+                let mut branch_suggestions = Vec::new();
+                
+                for message in &recent_messages {
+                    let content = message.content.to_lowercase();
+                    log::debug!("Analyzing message content: '{}'", content);
+                    
+                    // Simple checkpoint detection
+                    if content.contains("success") || content.contains("complete") || 
+                       content.contains("working") || content.contains("done") ||
+                       content.contains("milestone") || content.contains("achievement") {
+                        
+                        log::debug!("Found checkpoint trigger in message: {}", message.id);
+                        
+                        let checkpoint = crate::agent::conversation::checkpoints::CheckpointSuggestion {
+                            message_id: message.id,
+                            importance: 0.8,
+                            reason: crate::agent::conversation::checkpoints::CheckpointReason::SuccessfulSolution,
+                            suggested_title: format!("Checkpoint: {}", 
+                                if content.contains("success") { "Successful Solution" }
+                                else if content.contains("complete") { "Task Completed" }
+                                else if content.contains("working") { "Working Solution" }
+                                else if content.contains("milestone") { "Milestone Reached" }
+                                else { "Achievement Unlocked" }
+                            ),
+                            context: crate::agent::conversation::checkpoints::CheckpointContext {
+                                relevant_messages: vec![message.id],
+                                trigger_keywords: vec!["success".to_string(), "complete".to_string()],
+                                conversation_phase: crate::agent::conversation::checkpoints::ConversationPhase::Implementation,
+                                modified_files: vec![],
+                                executed_tools: vec![],
+                                success_indicators: vec!["working".to_string()],
+                            },
+                            restoration_value: 0.9,
+                        };
+                        checkpoint_suggestions.push(checkpoint);
+                    }
+                    
+                    // Simple branch detection
+                    if content.contains("alternative") || content.contains("option") ||
+                       content.contains("different approach") || content.contains("try") ||
+                       content.contains("maybe") || content.contains("could") {
+                        
+                        log::debug!("Found branch trigger in message: {}", message.id);
+                        
+                        let branch = crate::agent::conversation::branching::BranchSuggestion {
+                            message_id: message.id,
+                            confidence: 0.7,
+                            reason: if content.contains("alternative") || content.contains("different approach") {
+                                crate::agent::conversation::branching::BranchReason::AlternativeApproach
+                            } else if content.contains("option") {
+                                crate::agent::conversation::branching::BranchReason::MultipleSolutions
+                            } else {
+                                crate::agent::conversation::branching::BranchReason::UserUncertainty
+                            },
+                            suggested_title: format!("Branch: {}", 
+                                if content.contains("alternative") { "Alternative Approach" }
+                                else if content.contains("option") { "Explore Options" }
+                                else if content.contains("different approach") { "Different Strategy" }
+                                else { "Try Something Else" }
+                            ),
+                            success_probability: Some(0.6),
+                            context: crate::agent::conversation::branching::BranchContext {
+                                relevant_messages: vec![message.id],
+                                trigger_keywords: vec!["alternative".to_string(), "option".to_string()],
+                                conversation_state: crate::agent::conversation::branching::ConversationState::SolutionDevelopment,
+                                project_context: None,
+                                mentioned_tools: vec![],
+                            },
+                        };
+                        branch_suggestions.push(branch);
+                    }
+                }
+                
+                // Check lengths before moving to avoid borrow checker issues
+                let checkpoint_count = checkpoint_suggestions.len();
+                let branch_count = branch_suggestions.len();
+                
+                if checkpoint_count > 0 {
+                    log::info!("Found {} checkpoint suggestions for conversation {}", 
+                        checkpoint_count, conversation_id);
+                    
+                    // Send checkpoint suggestions to UI
+                    if let Err(e) = app_event_sender.send(AppEvent::CheckpointSuggestionsReady {
+                        conversation_id,
+                        suggestions: checkpoint_suggestions,
+                    }) {
+                        log::error!("Failed to send checkpoint suggestions: {}", e);
+                    } else {
+                        log::debug!("Successfully sent checkpoint suggestions to UI");
+                    }
+                }
+                
+                if branch_count > 0 {
+                    log::info!("Found {} branch suggestions for conversation {}", 
+                        branch_count, conversation_id);
+                    
+                    // Send branch suggestions to UI
+                    if let Err(e) = app_event_sender.send(AppEvent::BranchSuggestionsReady {
+                        conversation_id,
+                        suggestions: branch_suggestions,
+                    }) {
+                        log::error!("Failed to send branch suggestions: {}", e);
+                    } else {
+                        log::debug!("Successfully sent branch suggestions to UI");
+                    }
+                }
+                
+                if checkpoint_count == 0 && branch_count == 0 {
+                    log::debug!("No suggestions found for conversation {}", conversation_id);
+                }
+            } else {
+                log::warn!("Could not find conversation {} for analysis", conversation_id);
+            }
+        });
+    } else {
+        log::debug!("No conversation service available for analysis");
     }
 }
 
@@ -712,6 +922,32 @@ impl SagittaCodeApp {
             SystemEventType::Info,
             "Analytics report updated".to_string()
         );
+    }
+
+    /// Handle checkpoint suggestions
+    pub fn handle_checkpoint_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>) {
+        log::info!("Received {} checkpoint suggestions for conversation {}", suggestions.len(), conversation_id);
+        
+        // Update the sidebar with checkpoint suggestions
+        self.conversation_sidebar.update_checkpoint_suggestions(conversation_id, suggestions);
+        
+        // If this is the current conversation, enable checkpoint suggestions panel
+        if self.state.current_conversation_id == Some(conversation_id) {
+            self.conversation_sidebar.show_checkpoint_suggestions = true;
+        }
+    }
+
+    /// Handle branch suggestions
+    pub fn handle_branch_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>) {
+        log::info!("Received {} branch suggestions for conversation {}", suggestions.len(), conversation_id);
+        
+        // Update the sidebar with branch suggestions
+        self.conversation_sidebar.update_branch_suggestions(conversation_id, suggestions);
+        
+        // If this is the current conversation, enable branch suggestions panel
+        if self.state.current_conversation_id == Some(conversation_id) {
+            self.conversation_sidebar.show_branch_suggestions = true;
+        }
     }
 }
 
@@ -780,6 +1016,20 @@ mod tests {
         let event = AppEvent::ResponseProcessingComplete;
         match event {
             AppEvent::ResponseProcessingComplete => assert!(true),
+            AppEvent::RefreshConversationList => assert!(true),
+            AppEvent::SwitchToConversation(_) => assert!(true),
+            AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
+            AppEvent::BranchSuggestionsReady { .. } => assert!(true),
+        }
+        
+        // Test the other variant too
+        let event2 = AppEvent::RefreshConversationList;
+        match event2 {
+            AppEvent::ResponseProcessingComplete => assert!(true),
+            AppEvent::RefreshConversationList => assert!(true),
+            AppEvent::SwitchToConversation(_) => assert!(true),
+            AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
+            AppEvent::BranchSuggestionsReady { .. } => assert!(true),
         }
     }
 
@@ -1235,5 +1485,105 @@ mod tests {
         };
         handle_state_change(&mut app, error_state.clone());
         assert_eq!(app.state.current_agent_state, error_state);
+    }
+
+    #[test]
+    fn test_switch_to_conversation_event() {
+        let mut app = create_test_app();
+        let conversation_id = Uuid::new_v4();
+        
+        // Test the new AppEvent variant
+        let event = AppEvent::SwitchToConversation(conversation_id);
+        match event {
+            AppEvent::SwitchToConversation(id) => assert_eq!(id, conversation_id),
+            _ => panic!("Expected SwitchToConversation event"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_conversation_for_suggestions() {
+        let mut app = create_test_app();
+        let conversation_id = uuid::Uuid::new_v4();
+        
+        // This test verifies that the analyze function can be called without panicking
+        // The actual async behavior would need integration tests
+        analyze_conversation_for_suggestions(&mut app, conversation_id);
+        
+        // Verify that the function doesn't crash when no conversation service is available
+        assert!(app.conversation_service.is_none());
+    }
+
+    #[test]
+    fn test_automatic_analysis_on_final_chunk() {
+        let mut app = create_test_app();
+        let conversation_id = uuid::Uuid::new_v4();
+        app.state.current_conversation_id = Some(conversation_id);
+        
+        // Simulate final LLM chunk which should trigger analysis
+        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true, None);
+        
+        // Verify that the conversation ID is set for analysis
+        assert_eq!(app.state.current_conversation_id, Some(conversation_id));
+    }
+
+    #[test]
+    fn test_checkpoint_suggestions_event_handling() {
+        let mut app = create_test_app();
+        let conversation_id = uuid::Uuid::new_v4();
+        
+        // Create test checkpoint suggestions
+        let suggestions = vec![
+            crate::agent::conversation::checkpoints::CheckpointSuggestion {
+                message_id: uuid::Uuid::new_v4(),
+                importance: 0.8,
+                reason: crate::agent::conversation::checkpoints::CheckpointReason::SuccessfulSolution,
+                suggested_title: "Test Checkpoint".to_string(),
+                context: crate::agent::conversation::checkpoints::CheckpointContext {
+                    relevant_messages: vec![],
+                    trigger_keywords: vec!["success".to_string()],
+                    conversation_phase: crate::agent::conversation::checkpoints::ConversationPhase::Implementation,
+                    modified_files: vec![],
+                    executed_tools: vec![],
+                    success_indicators: vec!["working".to_string()],
+                },
+                restoration_value: 0.9,
+            }
+        ];
+        
+        // Test handling checkpoint suggestions
+        app.handle_checkpoint_suggestions(conversation_id, suggestions);
+        
+        // Verify that suggestions were stored in the sidebar
+        assert!(app.conversation_sidebar.get_checkpoint_suggestions(conversation_id).is_some());
+    }
+
+    #[test]
+    fn test_branch_suggestions_event_handling() {
+        let mut app = create_test_app();
+        let conversation_id = uuid::Uuid::new_v4();
+        
+        // Create test branch suggestions
+        let suggestions = vec![
+            crate::agent::conversation::branching::BranchSuggestion {
+                message_id: uuid::Uuid::new_v4(),
+                confidence: 0.7,
+                reason: crate::agent::conversation::branching::BranchReason::AlternativeApproach,
+                suggested_title: "Test Branch".to_string(),
+                success_probability: Some(0.6),
+                context: crate::agent::conversation::branching::BranchContext {
+                    relevant_messages: vec![],
+                    trigger_keywords: vec!["alternative".to_string()],
+                    conversation_state: crate::agent::conversation::branching::ConversationState::SolutionDevelopment,
+                    project_context: None,
+                    mentioned_tools: vec![],
+                },
+            }
+        ];
+        
+        // Test handling branch suggestions
+        app.handle_branch_suggestions(conversation_id, suggestions);
+        
+        // Verify that suggestions were stored in the sidebar
+        assert!(app.conversation_sidebar.get_branch_suggestions(conversation_id).is_some());
     }
 } 

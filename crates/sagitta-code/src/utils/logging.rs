@@ -61,6 +61,11 @@ pub fn init_logger() {
     builder.filter_module("mio", LevelFilter::Warn);
     builder.filter_module("tokio_util", LevelFilter::Warn);
     
+    // Reduce noise from embedding processing - these log on every embedding operation
+    builder.filter_module("sagitta_embed", LevelFilter::Warn);
+    builder.filter_module("sagitta_embed::processor", LevelFilter::Warn);
+    builder.filter_module("sagitta_embed::processor::embedding_pool", LevelFilter::Warn);
+    
     // Reduce egui noise - these modules log on every frame/panel refresh
     builder.filter_module("egui", LevelFilter::Warn);
     builder.filter_module("egui_winit", LevelFilter::Warn);

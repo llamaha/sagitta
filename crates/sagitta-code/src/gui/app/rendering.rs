@@ -36,7 +36,7 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process terminal events
     app.state.process_terminal_events();
     
-    // Refresh conversation clusters periodically (every 30 seconds)
+    // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
     
     // Handle temporary thinking indicator timeout (3 seconds)
@@ -116,7 +116,13 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     }
     
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
-    if app.config.conversation.sidebar.enable_keyboard_shortcuts {
+    let enable_shortcuts = {
+        match app.config.try_lock() {
+            Ok(config_guard) => config_guard.conversation.sidebar.enable_keyboard_shortcuts,
+            Err(_) => false, // Default to false if lock fails
+        }
+    };
+    if enable_shortcuts {
         if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.ctrl) {
             // Ctrl+1: Switch to Recency mode
             app.conversation_sidebar.set_organization_mode(
@@ -473,10 +479,10 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 if let Some(agent) = &app.agent {
                     let config = app.config.clone();
                     tokio::spawn(async move {
-                        let mut config_guard = config.as_ref().clone();
+                        let mut config_guard = config.lock().await;
                         config_guard.ui.theme = "custom".to_string();
                         
-                        if let Err(err) = crate::config::save_config(&config_guard) {
+                        if let Err(err) = crate::config::save_config(&*config_guard) {
                             log::error!("Failed to save custom theme config: {}", err);
                         }
                     });
@@ -531,7 +537,10 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
         ActivePanel::Conversation => {
             // Use the sophisticated ConversationSidebar component instead of basic UI
             let theme = app.state.current_theme;
-            app.conversation_sidebar.show(ctx, &mut app.state, &theme);
+            let conversation_service = app.get_conversation_service();
+            let app_event_sender = app.app_event_sender.clone();
+            let sagitta_config = app.config.clone();
+            app.conversation_sidebar.show(ctx, &mut app.state, &theme, conversation_service, app_event_sender, sagitta_config);
         },
         ActivePanel::None => {
             // When no panel is active, ensure all panels are closed
@@ -568,7 +577,13 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.separator();
                 
                 // Phase 10: Organization mode shortcuts
-                if app.config.conversation.sidebar.enable_keyboard_shortcuts {
+                let enable_shortcuts = {
+                    match app.config.try_lock() {
+                        Ok(config_guard) => config_guard.conversation.sidebar.enable_keyboard_shortcuts,
+                        Err(_) => false, // Default to false if lock fails
+                    }
+                };
+                if enable_shortcuts {
                     ui.label(egui::RichText::new("Conversation Organization:").color(theme.accent_color()).strong());
                     ui.label(egui::RichText::new("Ctrl + 1: Recency Mode").color(theme.text_color()));
                     ui.label(egui::RichText::new("Ctrl + 2: Project Mode").color(theme.text_color()));
@@ -778,17 +793,22 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
 
 /// Refresh conversation clusters periodically
 fn refresh_clusters_periodically(app: &mut SagittaCodeApp) {
-    // Check if we should refresh clusters (every 30 seconds)
+    // Skip clustering if conversation service is not available or clustering failed to initialize
+    if app.conversation_service.is_none() {
+        return;
+    }
+    
+    // Check if we should refresh clusters (every 5 minutes instead of 30 seconds)
     let should_refresh = app.state.last_conversation_refresh
-        .map(|last| last.elapsed().as_secs() >= 30)
+        .map(|last| last.elapsed().as_secs() >= 300) // Changed from 30 to 300 seconds (5 minutes)
         .unwrap_or(true);
     
-    if should_refresh && app.conversation_service.is_some() {
+    if should_refresh {
         let service = app.conversation_service.clone();
-        let mut sidebar_clusters = app.conversation_sidebar.clusters.clone();
         
         tokio::spawn(async move {
             if let Some(service) = service {
+                // Only attempt clustering if we have a clustering manager
                 match service.refresh_clusters().await {
                     Ok(()) => {
                         match service.get_clusters().await {
@@ -798,12 +818,12 @@ fn refresh_clusters_periodically(app: &mut SagittaCodeApp) {
                                 // The actual update will happen in the next render cycle
                             },
                             Err(e) => {
-                                log::warn!("Failed to get updated clusters: {}", e);
+                                log::debug!("No clusters available (clustering disabled): {}", e);
                             }
                         }
                     },
                     Err(e) => {
-                        log::warn!("Failed to refresh clusters: {}", e);
+                        log::debug!("Clustering not available: {}", e);
                     }
                 }
             }

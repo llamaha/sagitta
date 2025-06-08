@@ -93,67 +93,141 @@ pub struct ProjectContext {
     pub settings: HashMap<String, Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Hash, Copy)] // Added Copy
+/// Project type enumeration for different programming languages and contexts
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub enum ProjectType {
-    #[default]
-    Unknown,
+    /// Rust programming language projects
     Rust,
+    /// Python programming language projects  
     Python,
+    /// JavaScript programming language projects
     JavaScript,
+    /// TypeScript programming language projects
     TypeScript,
+    /// Go programming language projects
     Go,
-    Java,
-    CSharp,
-    Cpp,
+    /// Ruby programming language projects
+    Ruby,
+    /// Markdown documentation projects
+    Markdown,
+    /// YAML configuration projects
+    Yaml,
+    /// HTML web projects
+    Html,
+    /// Mixed or unknown project type
+    Unknown,
+}
+
+impl Default for ProjectType {
+    fn default() -> Self {
+        ProjectType::Unknown
+    }
 }
 
 impl ProjectType {
-    pub fn detect_from_path(path: &std::path::Path) -> Self {
-        // Check for Rust project markers
+    /// Detect project type from file extension
+    pub fn from_extension(extension: &str) -> Self {
+        match extension.to_lowercase().as_str() {
+            "rs" => ProjectType::Rust,
+            "py" => ProjectType::Python,
+            "js" | "jsx" => ProjectType::JavaScript,
+            "ts" | "tsx" => ProjectType::TypeScript,
+            "go" => ProjectType::Go,
+            "rb" => ProjectType::Ruby,
+            "md" => ProjectType::Markdown,
+            "yaml" | "yml" => ProjectType::Yaml,
+            "html" => ProjectType::Html,
+            _ => ProjectType::Unknown,
+        }
+    }
+    
+    /// Detect project type from project name or path
+    pub fn from_project_name(name: &str) -> Self {
+        let name_lower = name.to_lowercase();
+        
+        if name_lower.contains("rust") || name_lower.contains("cargo") || name_lower.ends_with(".rs") {
+            ProjectType::Rust
+        } else if name_lower.contains("python") || name_lower.contains("py") || name_lower.ends_with(".py") {
+            ProjectType::Python
+        } else if name_lower.contains("javascript") || name_lower.contains("js") || name_lower.contains("node") || name_lower.ends_with(".js") || name_lower.ends_with(".jsx") {
+            ProjectType::JavaScript
+        } else if name_lower.contains("typescript") || name_lower.contains("ts") || name_lower.ends_with(".ts") || name_lower.ends_with(".tsx") {
+            ProjectType::TypeScript
+        } else if name_lower.contains("go") || name_lower.ends_with(".go") {
+            ProjectType::Go
+        } else if name_lower.contains("ruby") || name_lower.contains("rb") || name_lower.ends_with(".rb") {
+            ProjectType::Ruby
+        } else if name_lower.contains("markdown") || name_lower.contains("md") || name_lower.ends_with(".md") {
+            ProjectType::Markdown
+        } else if name_lower.contains("yaml") || name_lower.contains("yml") || name_lower.ends_with(".yaml") || name_lower.ends_with(".yml") {
+            ProjectType::Yaml
+        } else if name_lower.contains("html") || name_lower.ends_with(".html") {
+            ProjectType::Html
+        } else {
+            ProjectType::Unknown
+        }
+    }
+    
+    /// Detect project type from directory contents by checking for project files
+    pub fn from_directory(path: &std::path::Path) -> Self {
+        // Check for project-specific files in order of specificity
         if path.join("Cargo.toml").exists() {
-            return ProjectType::Rust;
+            ProjectType::Rust
+        } else if path.join("package.json").exists() {
+            // Check if it's TypeScript by looking for tsconfig.json or .ts files
+            if path.join("tsconfig.json").exists() {
+                ProjectType::TypeScript
+            } else {
+                // Check for .ts files in common directories
+                let ts_dirs = ["src", "lib", "app", "."];
+                for dir in &ts_dirs {
+                    let dir_path = path.join(dir);
+                    if dir_path.exists() {
+                        if let Ok(entries) = std::fs::read_dir(&dir_path) {
+                            for entry in entries.flatten() {
+                                if let Some(name) = entry.file_name().to_str() {
+                                    if name.ends_with(".ts") || name.ends_with(".tsx") {
+                                        return ProjectType::TypeScript;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ProjectType::JavaScript
+            }
+        } else if path.join("requirements.txt").exists() || 
+                  path.join("pyproject.toml").exists() || 
+                  path.join("setup.py").exists() ||
+                  path.join("Pipfile").exists() {
+            ProjectType::Python
+        } else if path.join("go.mod").exists() {
+            ProjectType::Go
+        } else if path.join("Gemfile").exists() {
+            ProjectType::Ruby
+        } else {
+            // Check for dominant file types in the directory
+            let mut file_counts = std::collections::HashMap::new();
+            
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        if let Some(ext) = name.split('.').last() {
+                            let project_type = Self::from_extension(ext);
+                            if project_type != ProjectType::Unknown {
+                                *file_counts.entry(project_type).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Return the most common project type, or Unknown if none found
+            file_counts.into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(project_type, _)| project_type)
+                .unwrap_or(ProjectType::Unknown)
         }
-        
-        // Check for Python project markers
-        if path.join("pyproject.toml").exists() || 
-           path.join("setup.py").exists() || 
-           path.join("requirements.txt").exists() ||
-           path.join("Pipfile").exists() {
-            return ProjectType::Python;
-        }
-        
-        // Check for JavaScript/Node.js project markers
-        if path.join("package.json").exists() {
-            return ProjectType::JavaScript;
-        }
-        
-        // Check for TypeScript project markers
-        if path.join("tsconfig.json").exists() {
-            return ProjectType::TypeScript;
-        }
-        
-        // Check for Go project markers
-        if path.join("go.mod").exists() {
-            return ProjectType::Go;
-        }
-        
-        // Check for Java project markers
-        if path.join("pom.xml").exists() {
-            return ProjectType::Java;
-        }
-        
-        // Check for C# project markers
-        if path.join("project.json").exists() {
-            return ProjectType::CSharp;
-        }
-        
-        // Check for C++ project markers
-        if path.join("CMakeLists.txt").exists() {
-            return ProjectType::Cpp;
-        }
-        
-        // Default to Unknown if no markers found
-        ProjectType::Unknown
     }
 }
 

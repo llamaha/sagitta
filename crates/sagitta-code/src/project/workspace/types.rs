@@ -82,7 +82,7 @@ impl ProjectWorkspace {
     /// Create a new workspace
     pub fn new(name: String, project_path: PathBuf) -> Self {
         let now = Utc::now();
-        let project_type = ProjectType::detect_from_path(&project_path);
+        let project_type = ProjectType::from_directory(&project_path);
         
         Self {
             id: Uuid::new_v4(),

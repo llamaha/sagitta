@@ -155,7 +155,7 @@ async fn test_app_streaming_message_behavior() {
     
     // Simulate Sagitta Code starting to respond to first message
     let response_id_1 = app.chat_manager.start_agent_response();
-    app.current_response_id = Some(response_id_1.clone());
+    app.state.current_response_id = Some(response_id_1.clone());
     
     // Simulate streaming chunks for first response
     app.handle_llm_chunk("Rust is a systems".to_string(), false, &ctx);
@@ -163,7 +163,7 @@ async fn test_app_streaming_message_behavior() {
     app.handle_llm_chunk(" that focuses on safety.".to_string(), true, &ctx);
     
     // First response should be complete now
-    assert!(app.current_response_id.is_none(), "current_response_id should be cleared after final chunk");
+    assert!(app.state.current_response_id.is_none(), "current_response_id should be cleared after final chunk");
     
     // 2. User sends second message
     app.chat_input_buffer = "Can you give me an example?".to_string();
@@ -177,7 +177,7 @@ async fn test_app_streaming_message_behavior() {
     
     // CRITICAL: Sagitta Code should start a NEW response, not reuse the old one
     let response_id_2 = app.chat_manager.start_agent_response();
-    app.current_response_id = Some(response_id_2.clone());
+    app.state.current_response_id = Some(response_id_2.clone());
     
     // The new response ID should be different from the first one
     assert_ne!(response_id_1, response_id_2, "Second response should have different ID");
@@ -259,21 +259,21 @@ async fn test_sagitta_code_message_overwriting_exact_scenario() {
     app.chat_manager.add_user_message("What is Rust?".to_string());
     
     // 2. Sagitta Code starts streaming first response
-    app.current_response_id = None; // Ensure clean state
+    app.state.current_response_id = None; // Ensure clean state
     app.handle_llm_chunk("Rust is a systems".to_string(), false, &ctx);
-    let first_response_id = app.current_response_id.clone();
+    let first_response_id = app.state.current_response_id.clone();
     app.handle_llm_chunk(" programming language".to_string(), false, &ctx);
     app.handle_llm_chunk(" that focuses on safety.".to_string(), true, &ctx);
     
     // At this point, current_response_id should be None (cleared after final chunk)
-    assert!(app.current_response_id.is_none(), "current_response_id should be cleared after first response");
+    assert!(app.state.current_response_id.is_none(), "current_response_id should be cleared after first response");
     
     // 3. User asks second question
     app.chat_manager.add_user_message("Can you give me an example?".to_string());
     
     // 4. Sagitta Code starts streaming second response - THIS SHOULD CREATE A NEW MESSAGE
     app.handle_llm_chunk("Here's a simple".to_string(), false, &ctx);
-    let second_response_id = app.current_response_id.clone();
+    let second_response_id = app.state.current_response_id.clone();
     app.handle_llm_chunk(" Rust example:".to_string(), false, &ctx);
     app.handle_llm_chunk("\n\nfn main() { println!(\"Hello!\"); }".to_string(), true, &ctx);
     
@@ -332,10 +332,10 @@ async fn test_exact_user_conversation_scenario() {
     app.chat_manager.add_user_message(user_msg_1);
     
     // CRITICAL: Force clear current_response_id (this is what the fix does)
-    if let Some(old_response_id) = app.current_response_id.take() {
+    if let Some(old_response_id) = app.state.current_response_id.take() {
         app.chat_manager.finish_streaming(&old_response_id);
     }
-    app.current_response_id = None;
+    app.state.current_response_id = None;
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
@@ -347,7 +347,7 @@ async fn test_exact_user_conversation_scenario() {
     app.handle_llm_chunk("THINKING: I should respond helpfully to this greeting".to_string(), false, &ctx); 
     
     // NOW check the response ID
-    let first_response_id = app.current_response_id.clone(); 
+    let first_response_id = app.state.current_response_id.clone(); 
     assert!(first_response_id.is_some(), "Should have created response ID for first message after first chunk");
     
     // Simulate the long response about being a code assistant
@@ -356,7 +356,7 @@ async fn test_exact_user_conversation_scenario() {
     app.handle_llm_chunk(" I can help you understand and work with code repositories.".to_string(), true, &ctx);
     
     // First response should be complete now
-    assert!(app.current_response_id.is_none(), "current_response_id should be cleared after first response");
+    assert!(app.state.current_response_id.is_none(), "current_response_id should be cleared after first response");
     
     // 4. User says "tell me a joke"
     app.chat_input_buffer = "tell me a joke".to_string();
@@ -367,10 +367,10 @@ async fn test_exact_user_conversation_scenario() {
     app.chat_manager.add_user_message(user_msg_2);
     
     // CRITICAL: Force clear current_response_id (this is what the fix does)
-    if let Some(old_response_id) = app.current_response_id.take() {
+    if let Some(old_response_id) = app.state.current_response_id.take() {
         app.chat_manager.finish_streaming(&old_response_id);
     }
-    app.current_response_id = None;
+    app.state.current_response_id = None;
     app.chat_input_buffer.clear();
     app.chat_on_submit = false;
     
@@ -382,7 +382,7 @@ async fn test_exact_user_conversation_scenario() {
     app.handle_llm_chunk("THINKING: I'm thinking of a joke to respond to the request".to_string(), false, &ctx);
 
     // NOW check the second response ID
-    let second_response_id = app.current_response_id.clone();
+    let second_response_id = app.state.current_response_id.clone();
     assert!(second_response_id.is_some(), "Should have created response ID for second message after first chunk");
     assert_ne!(first_response_id.as_ref().unwrap(), second_response_id.as_ref().unwrap(), "Second response ID should be different from first"); // Compare actual IDs
 

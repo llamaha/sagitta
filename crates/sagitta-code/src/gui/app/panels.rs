@@ -188,7 +188,7 @@ impl CreateProjectPanel {
                                     
                                     let final_project_type = if self.auto_detect_type {
                                         let path = PathBuf::from(&self.project_path);
-                                        ProjectType::detect_from_path(&path)
+                                        ProjectType::from_project_name(&self.project_path)
                                     } else {
                                         self.project_type
                                     };
@@ -908,9 +908,10 @@ impl AnalyticsPanel {
                             ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::JavaScript), "JavaScript");
                             ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::TypeScript), "TypeScript");
                             ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Go), "Go");
-                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Java), "Java");
-                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::CSharp), "C#");
-                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Cpp), "C++");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Ruby), "Ruby");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Markdown), "Markdown");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Yaml), "YAML");
+                            ui.selectable_value(&mut self.project_filter, ProjectFilter::Specific(ProjectType::Html), "HTML");
                         });
 
                     if ui.button("Reset Filters").clicked() {

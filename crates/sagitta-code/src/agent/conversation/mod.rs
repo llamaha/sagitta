@@ -1,6 +1,7 @@
 pub mod analytics;
 pub mod branching;
 pub mod checkpoints;
+pub mod cluster_namer;
 pub mod clustering;
 pub mod manager;
 pub mod navigation;
@@ -21,6 +22,7 @@ pub use manager::{ConversationManager, ConversationManagerImpl};
 pub use analytics::*;
 pub use branching::*;
 pub use checkpoints::*;
+pub use cluster_namer::*;
 pub use clustering::*;
 pub use navigation::*;
 pub use persistence::*;

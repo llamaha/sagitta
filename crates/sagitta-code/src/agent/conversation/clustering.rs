@@ -8,6 +8,7 @@ use uuid::Uuid;
 use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, SearchPoints}};
 use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
 use crate::agent::conversation::types::ProjectType;
+use crate::agent::conversation::cluster_namer::{ClusterNamer, ClusterNamerConfig};
 
 use super::types::{Conversation, ConversationSummary};
 
@@ -24,6 +25,9 @@ pub struct ConversationClusteringManager {
     
     /// Clustering parameters
     config: ClusteringConfig,
+    
+    /// Cluster namer for generating descriptive names
+    cluster_namer: Option<ClusterNamer>,
 }
 
 /// Configuration for conversation clustering
@@ -168,6 +172,7 @@ impl ConversationClusteringManager {
             embedding_handler,
             collection_name,
             config,
+            cluster_namer: None,
         })
     }
     
@@ -178,6 +183,20 @@ impl ConversationClusteringManager {
         collection_name: String,
     ) -> Result<Self> {
         Self::new(qdrant_client, embedding_handler, collection_name, ClusteringConfig::default()).await
+    }
+    
+    /// Set the cluster namer for generating descriptive names
+    pub fn with_cluster_namer(mut self, cluster_namer: ClusterNamer) -> Self {
+        self.cluster_namer = Some(cluster_namer);
+        self
+    }
+    
+    /// Set the cluster namer with LLM client
+    pub fn with_llm_cluster_namer(mut self, llm_client: Arc<dyn crate::llm::client::LlmClient>) -> Self {
+        let cluster_namer = ClusterNamer::new(ClusterNamerConfig::default())
+            .with_llm_client(llm_client);
+        self.cluster_namer = Some(cluster_namer);
+        self
     }
     
     /// Extract clustering features from a conversation
@@ -493,8 +512,22 @@ impl ConversationClusteringManager {
             .map(|(tag, _)| tag)
             .collect();
         
-        // Generate cluster title
-        let title = self.generate_cluster_title(&member_indices, conversations, &common_tags);
+        // Determine dominant project type
+        let mut project_type_counts: HashMap<Option<ProjectType>, usize> = HashMap::new();
+        for &i in &member_indices {
+            if let Some(ref project_name) = conversations[i].project_name {
+                // Simple heuristic to determine project type from name
+                let project_type = self.infer_project_type_from_name(project_name);
+                *project_type_counts.entry(Some(project_type)).or_insert(0) += 1;
+            } else {
+                *project_type_counts.entry(None).or_insert(0) += 1;
+            }
+        }
+        
+        let dominant_project_type = project_type_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .and_then(|(project_type, _)| project_type);
         
         // Calculate time range
         let mut min_time = conversations[member_indices[0]].created_at;
@@ -505,16 +538,61 @@ impl ConversationClusteringManager {
             max_time = max_time.max(conversations[i].last_active);
         }
         
-        Ok(ConversationCluster {
+        // Create initial cluster with placeholder title
+        let mut cluster = ConversationCluster {
             id: Uuid::new_v4(),
-            title,
+            title: "Placeholder".to_string(), // Will be replaced
             conversation_ids,
             centroid: Vec::new(), // TODO: Calculate actual centroid
             cohesion_score,
             common_tags,
-            dominant_project_type: None, // TODO: Determine dominant project type
+            dominant_project_type,
             time_range: (min_time, max_time),
-        })
+        };
+        
+        // Generate cluster title using ClusterNamer if available
+        let title = if let Some(ref cluster_namer) = self.cluster_namer {
+            match cluster_namer.generate_cluster_name(&cluster, conversations).await {
+                Ok(generated_title) => generated_title,
+                Err(e) => {
+                    eprintln!("Failed to generate cluster name: {}", e);
+                    self.generate_cluster_title(&member_indices, conversations, &cluster.common_tags)
+                }
+            }
+        } else {
+            // Fall back to the original method
+            self.generate_cluster_title(&member_indices, conversations, &cluster.common_tags)
+        };
+        
+        cluster.title = title;
+        Ok(cluster)
+    }
+    
+    /// Infer project type from project name (simple heuristic)
+    fn infer_project_type_from_name(&self, project_name: &str) -> ProjectType {
+        let name_lower = project_name.to_lowercase();
+        
+        if name_lower.contains("rust") || name_lower.contains("cargo") || name_lower.ends_with(".rs") {
+            ProjectType::Rust
+        } else if name_lower.contains("python") || name_lower.contains("py") || name_lower.ends_with(".py") {
+            ProjectType::Python
+        } else if name_lower.contains("javascript") || name_lower.contains("js") || name_lower.contains("node") || name_lower.ends_with(".js") || name_lower.ends_with(".jsx") {
+            ProjectType::JavaScript
+        } else if name_lower.contains("typescript") || name_lower.contains("ts") || name_lower.ends_with(".ts") || name_lower.ends_with(".tsx") {
+            ProjectType::TypeScript
+        } else if name_lower.contains("go") || name_lower.contains("golang") || name_lower.ends_with(".go") {
+            ProjectType::Go
+        } else if name_lower.contains("ruby") || name_lower.contains("rb") || name_lower.ends_with(".rb") {
+            ProjectType::Ruby
+        } else if name_lower.contains("markdown") || name_lower.contains("md") || name_lower.ends_with(".md") {
+            ProjectType::Markdown
+        } else if name_lower.contains("yaml") || name_lower.contains("yml") || name_lower.ends_with(".yaml") || name_lower.ends_with(".yml") {
+            ProjectType::Yaml
+        } else if name_lower.contains("html") || name_lower.ends_with(".html") {
+            ProjectType::Html
+        } else {
+            ProjectType::Unknown
+        }
     }
     
     /// Generate a descriptive title for a cluster
@@ -608,6 +686,32 @@ impl ConversationClusteringManager {
     /// Get current clustering configuration
     pub fn get_config(&self) -> &ClusteringConfig {
         &self.config
+    }
+    
+    /// Finalize clusters by ensuring all have proper names
+    pub async fn finalize_clusters(&self, mut clusters: Vec<ConversationCluster>, conversations: &[ConversationSummary]) -> Result<Vec<ConversationCluster>> {
+        if let Some(ref cluster_namer) = self.cluster_namer {
+            for cluster in &mut clusters {
+                // Only regenerate if the title looks like a placeholder or is generic
+                if cluster.title.starts_with("Cluster") || 
+                   cluster.title.starts_with("Placeholder") ||
+                   cluster.title.contains("Conversations") && cluster.title.len() < 20 {
+                    
+                    match cluster_namer.generate_cluster_name(cluster, conversations).await {
+                        Ok(new_title) => {
+                            if !new_title.is_empty() && new_title.len() > 3 {
+                                cluster.title = new_title;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to finalize cluster name for {}: {}", cluster.id, e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(clusters)
     }
 }
 

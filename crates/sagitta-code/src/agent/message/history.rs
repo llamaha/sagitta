@@ -423,7 +423,7 @@ impl ConversationAwareHistoryManager {
         
         // Detect and set project context
         if let Ok(current_dir) = std::env::current_dir() {
-            let project_type = ProjectType::detect_from_path(&current_dir);
+            let project_type = ProjectType::from_project_name(&current_dir.to_string_lossy());
             let project_name = current_dir.file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.to_string());

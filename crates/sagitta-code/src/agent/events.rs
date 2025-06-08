@@ -160,6 +160,44 @@ pub enum AgentEvent {
         title: String,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
+
+    // Conversation lifecycle events for Phase 11a - Status Lifecycle
+    /// A conversation was completed
+    ConversationCompleted {
+        conversation_id: Uuid,
+    },
+
+    /// A conversation is being summarized
+    ConversationSummarizing {
+        conversation_id: Uuid,
+    },
+
+    /// A conversation status was updated
+    ConversationUpdated {
+        conversation_id: Uuid,
+        old_status: ConversationStatus,
+        new_status: ConversationStatus,
+    },
+
+    // Branch-related events for Phase 11e - Branch Actions
+    /// A branch suggestion is available
+    BranchSuggested {
+        conversation_id: Uuid,
+        parent_message_id: Option<Uuid>,
+        suggestion_title: String,
+        confidence: f32,
+        reason: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+
+    /// A branch was created
+    BranchCreated {
+        conversation_id: Uuid,
+        branch_id: Uuid,
+        title: String,
+        parent_message_id: Option<Uuid>,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 /// Event handler for agent events

@@ -1,6 +1,7 @@
 pub mod suggester;
 pub mod rules;
 pub mod ui;
+pub mod pipeline;
 
 // Core types
 use serde::{Deserialize, Serialize};
@@ -135,6 +136,7 @@ impl TagSuggestionWithAction {
 pub use suggester::{TagSuggester, TagSuggesterConfig, TagCorpusEntry};
 pub use rules::{RuleBasedTagger, TagRule, TagRuleType};
 pub use ui::{TagManagementUI, TagUIState, TagUIAction};
+pub use pipeline::{TaggingPipeline, TaggingPipelineConfig, TaggingResult, TagMetadata, TaggingPipelineBuilder};
 
 #[cfg(test)]
 mod tests {
