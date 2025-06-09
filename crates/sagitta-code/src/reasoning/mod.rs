@@ -22,9 +22,16 @@ use tokio::sync::mpsc;
 
 use crate::{agent::events::AgentEvent, tools::{registry::ToolRegistry, types::Tool}, llm::client::{MessagePart, StreamChunk as SagittaCodeStreamChunk}, utils::errors::SagittaCodeError};
 
+#[derive(Clone)]
 pub struct AgentToolExecutor {
     tool_registry: Arc<ToolRegistry>,
     terminal_event_sender: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+    /// Phase 1 Fix: Event sender for feedback to LLM
+    event_sender: Option<broadcast::Sender<AgentEvent>>,
+    /// Phase 1 Fix: Loop detection - track tool call history
+    recent_tool_calls: Arc<tokio::sync::Mutex<Vec<(String, Value, std::time::Instant)>>>,
+    /// Phase 1 Fix: Maximum identical tool calls before triggering loop detection
+    max_identical_calls: usize,
 }
 
 impl AgentToolExecutor {
@@ -32,12 +39,152 @@ impl AgentToolExecutor {
         Self { 
             tool_registry,
             terminal_event_sender: None,
+            event_sender: None,
+            recent_tool_calls: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            max_identical_calls: 3,
         }
     }
     
     /// Set the terminal event sender for streaming shell execution
     pub fn set_terminal_event_sender(&mut self, sender: tokio::sync::mpsc::Sender<StreamEvent>) {
         self.terminal_event_sender = Some(sender);
+    }
+    
+    /// Phase 1 Fix: Set the event sender for LLM feedback
+    pub fn set_event_sender(&mut self, sender: broadcast::Sender<AgentEvent>) {
+        self.event_sender = Some(sender);
+    }
+    
+    /// Phase 1 Fix: Check for infinite loops in tool calling
+    async fn check_loop_detection(&self, tool_name: &str, args: &Value) -> bool {
+        let mut recent_calls = self.recent_tool_calls.lock().await;
+        let now = std::time::Instant::now();
+        let current_call = (tool_name.to_string(), args.clone(), now);
+        
+        // Clean up old calls (older than 30 seconds)
+        recent_calls.retain(|(_, _, timestamp)| now.duration_since(*timestamp).as_secs() < 30);
+        
+        // Check for identical calls
+        let identical_count = recent_calls
+            .iter()
+            .filter(|(name, call_args, _)| {
+                name == tool_name && call_args == args
+            })
+            .count();
+        
+        // Add current call to history
+        recent_calls.push(current_call);
+        
+        // Keep only recent calls (last 10) - fix borrow checker issue
+        if recent_calls.len() > 10 {
+            let len = recent_calls.len();
+            recent_calls.drain(0..len - 10);
+        }
+        
+        identical_count >= self.max_identical_calls
+    }
+    
+    /// Phase 1 Fix: Surface error feedback to LLM via event system
+    async fn surface_error_to_llm(&self, tool_name: &str, error_message: &str, error_code: &str) {
+        if let Some(ref event_sender) = self.event_sender {
+            // Create a helpful error message for the LLM
+            let llm_feedback = match error_code {
+                "invalid_parameters" => {
+                    format!("⚠️ Tool '{}' failed: {}. Please check the required parameters and try again with the correct values.", tool_name, error_message)
+                }
+                "tool_not_found" => {
+                    format!("⚠️ Tool '{}' not found. Please check the tool name and available tools.", tool_name)
+                }
+                "execution_error" => {
+                    format!("⚠️ Tool '{}' execution failed: {}. Please analyze the error and try a different approach.", tool_name, error_message)
+                }
+                "loop_detected" => {
+                    format!("🔄 Loop detected: Tool '{}' has been called repeatedly with the same parameters. Please try a different approach or ask for clarification.", tool_name)
+                }
+                _ => {
+                    format!("❌ Tool '{}' error: {}", tool_name, error_message)
+                }
+            };
+            
+            // Send as both a streaming chunk and an event
+            let _ = event_sender.send(AgentEvent::LlmChunk {
+                content: format!("\n{}\n\n", llm_feedback),
+                is_final: false,
+            });
+            
+            let _ = event_sender.send(AgentEvent::Error(error_message.to_string()));
+        }
+    }
+    
+    /// Phase 1 Fix: Validate tool parameters against the tool's JSON schema
+    async fn validate_tool_parameters(&self, tool_name: &str, args: &Value) -> Result<(), String> {
+        // Get the tool definition to access its parameter schema
+        let tool_definitions = self.tool_registry.get_definitions().await;
+        let tool_def = tool_definitions
+            .iter()
+            .find(|def| def.name == tool_name)
+            .ok_or_else(|| format!("Tool '{}' not found in registry", tool_name))?;
+
+        // Check required fields
+        if let Some(required_fields) = tool_def.parameters.get("required").and_then(|r| r.as_array()) {
+            for required_field in required_fields {
+                if let Some(field_name) = required_field.as_str() {
+                    if !args.get(field_name).is_some() {
+                        return Err(format!("Missing required parameter: '{}'", field_name));
+                    }
+                }
+            }
+        }
+
+        // Check oneOf constraints (like add_repository requiring either url OR local_path)
+        if let Some(one_of) = tool_def.parameters.get("oneOf").and_then(|o| o.as_array()) {
+            let mut satisfied_constraint = false;
+            
+            for constraint in one_of {
+                if let Some(required_in_constraint) = constraint.get("required").and_then(|r| r.as_array()) {
+                    let all_fields_present = required_in_constraint
+                        .iter()
+                        .all(|field| {
+                            field.as_str()
+                                .map(|field_name| args.get(field_name).is_some())
+                                .unwrap_or(false)
+                        });
+                    
+                    if all_fields_present {
+                        satisfied_constraint = true;
+                        break;
+                    }
+                }
+            }
+            
+            if !satisfied_constraint {
+                // Build helpful error message for oneOf constraints
+                let constraint_descriptions: Vec<String> = one_of
+                    .iter()
+                    .filter_map(|constraint| {
+                        constraint.get("required")
+                            .and_then(|r| r.as_array())
+                            .map(|fields| {
+                                let field_names: Vec<String> = fields
+                                    .iter()
+                                    .filter_map(|f| f.as_str().map(|s| s.to_string()))
+                                    .collect();
+                                field_names.join(" AND ")
+                            })
+                    })
+                    .collect();
+                
+                return Err(format!(
+                    "Must satisfy one of these parameter combinations: {}",
+                    constraint_descriptions.join(" OR ")
+                ));
+            }
+        }
+
+        // TODO: Add more sophisticated schema validation here (types, formats, etc.)
+        // For now, basic required fields and oneOf validation should catch most issues
+
+        Ok(())
     }
     
     /// Execute shell command with streaming when terminal sender is available
@@ -152,6 +299,41 @@ impl AgentToolExecutor {
 #[async_trait]
 impl ToolExecutor for AgentToolExecutor {
     async fn execute_tool(&self, name: &str, args: Value) -> ReasoningEngineResult<ToolResult> {
+        // Phase 1 Fix: Check for infinite loops first
+        if self.check_loop_detection(name, &args).await {
+            self.surface_error_to_llm(name, "Tool called repeatedly with same parameters", "loop_detected").await;
+            return Ok(ToolResult {
+                success: false,
+                data: Value::Null,
+                error: Some("Loop detected: this tool has been called repeatedly with the same parameters. Please try a different approach.".to_string()),
+                execution_time_ms: 0,
+                metadata: {
+                    let mut meta = HashMap::new();
+                    meta.insert("error_code".to_string(), Value::String("loop_detected".to_string()));
+                    meta
+                },
+            });
+        }
+
+        // Phase 1 Fix: Add parameter validation before tool execution
+        if let Err(validation_error) = self.validate_tool_parameters(name, &args).await {
+            let error_message = format!("Parameter validation failed: {}", validation_error);
+            self.surface_error_to_llm(name, &error_message, "invalid_parameters").await;
+            
+            return Ok(ToolResult {
+                success: false,
+                data: Value::Null,
+                error: Some(error_message),
+                execution_time_ms: 0,
+                metadata: {
+                    let mut meta = HashMap::new();
+                    meta.insert("error_code".to_string(), Value::String("invalid_parameters".to_string()));
+                    meta.insert("validation_error".to_string(), Value::String(validation_error));
+                    meta
+                },
+            });
+        }
+
         // Special handling for shell_execution when terminal streaming is available
         if name == "shell_execution" && self.terminal_event_sender.is_some() {
             return self.execute_streaming_shell_tool(name, args).await;
@@ -161,7 +343,17 @@ impl ToolExecutor for AgentToolExecutor {
             .tool_registry
             .get(name)
             .await
-            .ok_or_else(|| ReasoningError::tool_execution(name.to_string(), "Tool not found".to_string()))?;
+            .ok_or_else(|| {
+                // Surface tool not found error to LLM
+                tokio::spawn({
+                    let executor = self.clone();
+                    let tool_name = name.to_string();
+                    async move {
+                        executor.surface_error_to_llm(&tool_name, "Tool not found in registry", "tool_not_found").await;
+                    }
+                });
+                ReasoningError::tool_execution(name.to_string(), "Tool not found".to_string())
+            })?;
 
         match tool.execute(args.clone()).await {
             Ok(sagitta_code_tool_result) => {
@@ -182,19 +374,32 @@ impl ToolExecutor for AgentToolExecutor {
                             metadata: HashMap::new(),
                         })
                     },
-                    crate::tools::types::ToolResult::Error { error: msg } => Ok(ToolResult { 
-                        success: false,
-                        data: Value::Null,
-                        error: Some(msg),
-                        execution_time_ms: 0, // Placeholder for duration
-                        metadata: HashMap::new(),
-                    }),
+                    crate::tools::types::ToolResult::Error { error: msg } => {
+                        // Phase 1 Fix: Surface execution errors to LLM
+                        self.surface_error_to_llm(name, &msg, "execution_error").await;
+                        
+                        Ok(ToolResult { 
+                            success: false,
+                            data: Value::Null,
+                            error: Some(msg),
+                            execution_time_ms: 0, // Placeholder for duration
+                            metadata: {
+                                let mut meta = HashMap::new();
+                                meta.insert("error_code".to_string(), Value::String("execution_error".to_string()));
+                                meta
+                            },
+                        })
+                    },
                 }
             }
             Err(sagitta_code_error) => {
+                // Phase 1 Fix: Surface system errors to LLM
+                let error_msg = sagitta_code_error.to_string();
+                self.surface_error_to_llm(name, &error_msg, "system_error").await;
+                
                 Err(ReasoningError::tool_execution(
                     name.to_string(),
-                    sagitta_code_error.to_string(),
+                    error_msg,
                 ))
             }
         }
@@ -274,7 +479,7 @@ impl EventEmitter for AgentEventEmitter {
             }
             ReasoningEvent::ToolExecutionCompleted { session_id: _, tool_name, success, duration_ms } => {
                 // Emit streaming text for tool execution completion
-                let status_icon = if success { "[DONE]" } else { "[FAIL]" };
+                let status_icon = if success { "✅" } else { "❌" };
                 self.emit_streaming_text(
                     format!("\n{} Tool **{}** completed in {}ms\n\n", status_icon, tool_name, duration_ms),
                     false
@@ -608,6 +813,56 @@ mod tests {
                 assert!(success);
             }
             _ => panic!("Expected ReasoningCompleted event, got: {:?}", received_event),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tool_execution_completed_icons() {
+        let (sender, mut receiver) = broadcast::channel(100);
+        let emitter = AgentEventEmitter::new(sender);
+
+        let session_id = Uuid::new_v4();
+        let tool_name = "test_tool";
+
+        // Emit a successful ToolExecutionCompleted event
+        let success_event = ReasoningEvent::ToolExecutionCompleted {
+            session_id,
+            tool_name: tool_name.to_string(),
+            success: true,
+            duration_ms: 42,
+        };
+
+        emitter.emit_event(success_event).await.unwrap();
+
+        // Expect an LlmChunk with the ✅ icon and without the old [DONE] text
+        let received_event = receiver.recv().await.expect("Should receive an event");
+
+        match received_event {
+            AgentEvent::LlmChunk { content, .. } => {
+                assert!(content.contains("✅"), "Content should contain success icon");
+                assert!(!content.contains("[DONE]"), "Content should not contain old [DONE] tag");
+            }
+            _ => panic!("Expected LlmChunk event"),
+        }
+
+        // Emit a failed ToolExecutionCompleted event
+        let fail_event = ReasoningEvent::ToolExecutionCompleted {
+            session_id,
+            tool_name: tool_name.to_string(),
+            success: false,
+            duration_ms: 50,
+        };
+
+        emitter.emit_event(fail_event).await.unwrap();
+
+        let received_event = receiver.recv().await.expect("Should receive an event");
+
+        match received_event {
+            AgentEvent::LlmChunk { content, .. } => {
+                assert!(content.contains("❌"), "Content should contain failure icon");
+                assert!(!content.contains("[FAIL]"), "Content should not contain old [FAIL] tag");
+            }
+            _ => panic!("Expected LlmChunk event"),
         }
     }
 } 

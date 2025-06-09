@@ -2,6 +2,7 @@
 
 Sagitta is a semantic code search and AI development toolkit. This workspace contains multiple crates that work together to provide powerful code analysis, search, and AI-assisted development capabilities.
 
+<!-- Do not update this file unless specifically asked to do so -->
 ## Crates
 
 ### Core Libraries

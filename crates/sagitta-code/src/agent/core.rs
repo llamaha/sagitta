@@ -22,6 +22,7 @@ use crate::agent::state::types::{AgentState, AgentMode, ConversationStatus, Agen
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
+use crate::agent::conversation::context_manager::ConversationContextManager;
 use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::config::types::SagittaCodeConfig;
@@ -236,6 +237,9 @@ pub struct Agent {
     
     /// Terminal event sender for streaming shell execution
     terminal_event_sender: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<StreamEvent>>>>,
+    
+    /// Phase 3: Conversation context manager for intelligent flow management
+    context_manager: Arc<ConversationContextManager>,
 }
 
 impl Agent {
@@ -320,6 +324,20 @@ impl Agent {
         ).await
         .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
         debug!("Conversation-aware history manager created.");
+        
+        // Get current conversation ID for context manager
+        let current_conversation_id = if let Ok(Some(conversation)) = history_manager.get_current_conversation().await {
+            conversation.id
+        } else {
+            // Create a new conversation and get its ID
+            let new_id = Uuid::new_v4();
+            info!("No current conversation found, will use new ID for context manager: {}", new_id);
+            new_id
+        };
+        
+        // Create conversation context manager for Phase 3 features
+        let context_manager = Arc::new(ConversationContextManager::new(current_conversation_id));
+        debug!("Conversation context manager created for conversation: {}", current_conversation_id);
 
         // Create shared loop break flag
         let loop_break_requested_initial = Arc::new(tokio::sync::Mutex::new(false));
@@ -377,6 +395,7 @@ impl Agent {
             recovery_manager: Arc::new(RecoveryManager::new(RecoveryConfig::default(), Arc::new(state_manager_instance), event_sender.clone())),
             reasoning_state_cache: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             terminal_event_sender: Arc::new(tokio::sync::Mutex::new(None)),
+            context_manager,
         };
         
         // Start event listeners
@@ -472,6 +491,10 @@ impl Agent {
             tool_executor_adapter.set_terminal_event_sender(terminal_sender);
             log::debug!("Configured AgentToolExecutor with terminal event sender for streaming shell execution");
         }
+        
+        // Phase 1 Fix: Configure event sender for LLM feedback
+        tool_executor_adapter.set_event_sender(self.event_sender.clone());
+        log::debug!("Configured AgentToolExecutor with event sender for LLM feedback");
         
         let tool_executor_adapter = Arc::new(tool_executor_adapter);
         let event_emitter_adapter = Arc::new(AgentEventEmitter::new(self.event_sender.clone()));
@@ -865,8 +888,8 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         }
                     }
                     SagittaCodeMessagePart::ToolCall { tool_call_id: _tool_call_id, name, parameters: _params, .. } => {
-                        // Emit a descriptive text chunk for tool calls
-                        let tool_description = format!("\n\n[TOOL] Executing tool (core.rs): **{}**\n", name);
+                        // Use emoji icon for tool execution log message to improve visual clarity in GUI
+                        let tool_description = format!("\n\n🔧 Executing tool: **{}**\n", name);
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: tool_description,
                             is_final: false, // Tool calls are never final
@@ -875,9 +898,9 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         }
                     }
                     _ => {
-                        // For other types, send a generic chunk event
+                        // For other types, send a generic processing indicator with emoji
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
-                            content: "[Processing...]".to_string(),
+                            content: "⏳ Processing...".to_string(),
                             is_final: chunk.is_final,
                         }) {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for other type: {}", e);

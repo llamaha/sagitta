@@ -685,7 +685,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
             
             // Tool name as clickable button
             let tool_button = ui.add(
-                egui::Button::new(RichText::new(&tool_call.name).size(11.0))
+                egui::Button::new(RichText::new(&tool_call.name).color(app_theme.tool_color()).size(11.0))
                     .fill(app_theme.button_background())
                     .stroke(Stroke::new(0.5, app_theme.border_color()))
                     .rounding(CornerRadius::same(4))

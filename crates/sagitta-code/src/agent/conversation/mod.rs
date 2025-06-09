@@ -3,6 +3,7 @@ pub mod branching;
 pub mod checkpoints;
 pub mod cluster_namer;
 pub mod clustering;
+pub mod context_manager;
 pub mod manager;
 pub mod navigation;
 pub mod persistence;
@@ -19,6 +20,14 @@ pub use types::{
     ProjectContext, ContextSnapshot, WorkspaceSettings,
 };
 pub use manager::{ConversationManager, ConversationManagerImpl};
+pub use context_manager::{
+    ConversationContextManager, ConversationContext, FailureRecord, FailureType,
+    MultiTurnPlan, PlanStep, StepStatus, StepAttempt, StepAttemptResult,
+    PlanCheckpoint, ProgressTracker, ProgressMilestone, FrustrationMetrics,
+    FrustrationIndicator, FrustrationIndicatorType, SuccessContext,
+    ConversationFlowState, ProactiveAssistanceRecommendation, ConversationInsights,
+    PlanStatus, ProgressSummary,
+};
 pub use analytics::*;
 pub use branching::*;
 pub use checkpoints::*;
