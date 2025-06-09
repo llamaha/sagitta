@@ -914,14 +914,9 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::ToolCall: {}", e);
                         }
                         
-                        // Also send a text chunk for backward compatibility
-                        let tool_description = format!("\n\n🔧 Executing tool: **{}**\n", name);
-                        if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
-                            content: tool_description,
-                            is_final: false, // Tool calls are never final
-                        }) {
-                            log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for tool call: {}", e);
-                        }
+                        // NOTE: Removed "🔧 Executing tool" text chunks
+                        // The GUI handles tool calls via the ToolCall event and shows them as clickable cards
+                        // Text chunks for tool execution are redundant
                     }
                     SagittaCodeMessagePart::ToolResult { tool_call_id, name, result } => {
                         // CRITICAL FIX: Emit proper ToolCallComplete event for GUI tool card connection
@@ -970,9 +965,9 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::ToolCallComplete: {}", e);
                         }
                         
-                        // NOTE: Removed duplicate text chunk emission for tool results
+                        // NOTE: Removed text chunk emission for tool results
                         // The GUI handles tool results via the ToolCallComplete event and creates clickable cards
-                        // Adding text chunks here would create duplicate output in the chat
+                        // Tool completion messages are redundant since we show status icons
                     }
                     _ => {
                         // For other types, send a generic processing indicator with emoji

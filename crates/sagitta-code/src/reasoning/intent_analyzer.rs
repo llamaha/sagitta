@@ -161,11 +161,29 @@ impl IntentAnalyzer for SagittaCodeIntentAnalyzer {
                                     text.contains("repository_map") ||
                                     text.contains("targeted_view") ||
                                     text.contains("view_file") ||
-                                    text.contains("search_code") ||
-                                    text.contains("add_repository") ||
-                                    text.contains("sync_repository") ||
-                                    text.contains("To help you") ||
-                                    text.contains("I can help");
+                                    text.contains("search_repositories") ||
+                                    text.contains("web_search") ||
+                                    text.contains("search_code");
+
+        // Check for continuation questions that should be treated as plans to continue working
+        let asks_to_continue = text.contains("Would you like me to continue") ||
+                               text.contains("Should I proceed") ||
+                               text.contains("Would you like me to proceed") ||
+                               text.contains("My next step is to") ||
+                               text.contains("My next steps are to") ||
+                               text.contains("proceed with the next step") ||
+                               text.contains("continue with") ||
+                               text.contains("next, I'll") ||
+                               text.contains("then, I'll") ||
+                               text.contains("now I'll") ||
+                               text.contains("let me proceed") ||
+                               text.contains("I'll proceed");
+
+        // CRITICAL: If this is a continuation question, treat it as a plan that should continue
+        if asks_to_continue && !is_intermediate_summary {
+            log::debug!("IntentAnalyzer: Detected continuation question, treating as ProvidesPlanWithoutExplicitAction");
+            return Ok(DetectedIntent::ProvidesPlanWithoutExplicitAction);
+        }
 
         // ENHANCED: Detect plan continuation statements (should continue execution, not request input)
         let is_plan_continuation = text.contains("Now I'll") ||

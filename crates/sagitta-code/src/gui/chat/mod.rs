@@ -113,11 +113,29 @@ impl StreamingChatManager {
     /// Add a tool call to a streaming message
     pub fn add_tool_call(&self, message_id: &str, tool_call: ToolCall) {
         log::info!("StreamingChatManager::add_tool_call CALLED for message_id: '{}', tool_name: '{}', args: '{}'", message_id, tool_call.name, tool_call.arguments.chars().take(100).collect::<String>());
-        let mut active_streams = self.active_streams.lock().unwrap();
-        if let Some(message) = active_streams.get_mut(message_id) {
-            message.add_tool_call(tool_call);
-        } else {
-            log::warn!("StreamingChatManager::add_tool_call - NO active stream found for message_id: '{}'", message_id);
+        
+        // INLINE APPROACH: Add tool call directly to the current agent message
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            if let Some(current_message) = active_streams.get_mut(message_id) {
+                // Add the tool call directly to the current agent message
+                current_message.add_tool_call(tool_call);
+                log::info!("StreamingChatManager::add_tool_call - Added tool call inline to agent message");
+            } else {
+                log::warn!("StreamingChatManager::add_tool_call - NO active stream found for message_id: '{}'", message_id);
+                
+                // Fallback: Check if the message is in completed messages and add tool call there
+                let mut messages = self.messages.lock().unwrap();
+                for message in messages.iter_mut().rev() {
+                    if message.id == message_id && message.author == MessageAuthor::Agent {
+                        message.add_tool_call(tool_call);
+                        log::info!("StreamingChatManager::add_tool_call - Added tool call to completed agent message");
+                        return;
+                    }
+                }
+                
+                log::warn!("StreamingChatManager::add_tool_call - Could not find message with ID: '{}'", message_id);
+            }
         }
     }
     
@@ -309,7 +327,7 @@ mod tests {
         manager.append_content(&agent_id, "whatever you need. What specifically ".to_string());
         manager.append_content(&agent_id, "would you like assistance with?".to_string());
         
-        // Add a tool call
+        // Add a tool call (should be inline within the agent message)
         let tool_call = ToolCall {
             name: "web_search".to_string(),
             arguments: r#"{"query": "help assistance"}"#.to_string(),
@@ -324,11 +342,15 @@ mod tests {
         // Get all messages
         let messages = manager.get_all_messages();
         
+        // Should have 2 messages: user and agent (tool call is inline within agent message)
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].author, MessageAuthor::User);
         assert_eq!(messages[1].author, MessageAuthor::Agent);
         assert!(messages[1].is_complete());
+        
+        // Tool call should be inline within the agent message
         assert!(!messages[1].tool_calls.is_empty());
+        assert_eq!(messages[1].tool_calls[0].name, "web_search");
     }
     
     #[test]

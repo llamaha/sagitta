@@ -5524,6 +5524,7 @@ dependencies = [
  "sagitta-search",
  "serde",
  "serde_json",
+ "sha1",
  "similar",
  "syntect",
  "tempfile",

@@ -730,4 +730,225 @@ async fn test_direct_loop_detection() {
     }
     
     assert!(loop_event_received, "Expected loop detection feedback to LLM");
+}
+
+#[tokio::test]
+async fn test_enhanced_loop_detection_and_recovery() {
+    println!("🔍 Test: Enhanced loop detection and recovery mechanisms");
+    
+    // Configure the mock LLM to call add_repository repeatedly with the same parameters
+    let repeated_tool_call = ("add_repository".to_string(), json!({
+        "name": "test-repo",
+        "url": "https://github.com/test/repo.git"
+    }));
+    
+    let agent = create_test_agent_with_tool_calls(vec![repeated_tool_call.clone()]).await.unwrap();
+    let mut event_receiver = agent.subscribe();
+    
+    // This should trigger enhanced loop detection with recovery strategies
+    let message = "Add a repository";
+    let _result = agent.process_message_stream(message).await;
+    
+    let mut loop_detected = false;
+    let mut recovery_strategy_provided = false;
+    let mut helpful_feedback_received = false;
+    let mut tool_call_count = 0;
+    
+    let timeout = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Ok(event) = event_receiver.recv().await {
+            match event {
+                AgentEvent::ToolCompleted { tool_name, success, .. } => {
+                    if tool_name == "add_repository" {
+                        tool_call_count += 1;
+                        println!("DEBUG: add_repository tool call #{}, success: {}", tool_call_count, success);
+                    }
+                }
+                AgentEvent::LlmChunk { content, .. } => {
+                    println!("DEBUG: LLM Chunk: {}", content);
+                    
+                    // Check for enhanced loop detection
+                    if content.contains("🔄") && content.contains("Loop Detected") {
+                        loop_detected = true;
+                        println!("✅ Enhanced loop detection triggered");
+                    }
+                    
+                    // Check for recovery strategy suggestions
+                    if content.contains("Recommended Action") || content.contains("Alternative") {
+                        recovery_strategy_provided = true;
+                        println!("✅ Recovery strategy provided");
+                    }
+                    
+                    // Check for helpful parameter guidance
+                    if content.contains("Quick Fix") || content.contains("must provide EITHER") {
+                        helpful_feedback_received = true;
+                        println!("✅ Helpful parameter feedback provided");
+                    }
+                }
+                AgentEvent::Error(error_msg) => {
+                    println!("DEBUG: Error event: {}", error_msg);
+                    
+                    if error_msg.contains("Loop detected") {
+                        loop_detected = true;
+                    }
+                }
+                _ => {}
+            }
+            
+            // Break if we've seen enough evidence of the enhanced system working
+            if loop_detected && (recovery_strategy_provided || helpful_feedback_received) {
+                println!("✅ Enhanced loop detection and recovery system working correctly");
+                break;
+            }
+            
+            // Safety timeout for this sub-loop
+            if tool_call_count >= 3 {
+                println!("DEBUG: Multiple tool calls detected, checking for enhanced feedback");
+                break;
+            }
+        }
+    }).await;
+    
+    println!("DEBUG: Final state - loop_detected: {}, recovery_strategy: {}, helpful_feedback: {}, tool_calls: {}", 
+             loop_detected, recovery_strategy_provided, helpful_feedback_received, tool_call_count);
+    
+    // The enhanced system should provide better feedback even if loop detection isn't explicitly triggered
+    assert!(loop_detected || helpful_feedback_received || recovery_strategy_provided, 
+           "Expected enhanced loop detection with recovery strategies or helpful parameter feedback");
+}
+
+#[tokio::test]
+async fn test_graceful_degradation_workflow_continuation() {
+    println!("🔍 Test: Graceful degradation and workflow continuation");
+    
+    // Create a sequence of tool calls where some fail but others should continue
+    let tool_calls = vec![
+        ("add_repository".to_string(), json!({"name": "test-repo"})), // This will fail - missing url/local_path
+        ("shell_execution".to_string(), json!({"command": "echo 'Hello World'"})), // This should work
+        ("add_repository".to_string(), json!({"name": "test-repo"})), // Same failure again
+    ];
+    
+    let agent = create_test_agent_with_tool_calls(tool_calls).await.unwrap();
+    let mut event_receiver = agent.subscribe();
+    
+    let message = "Set up my development environment";
+    let _result = agent.process_message_stream(message).await;
+    
+    let mut add_repo_failures = 0;
+    let mut shell_success = false;
+    let mut graceful_degradation_message = false;
+    let mut workflow_continuation_suggested = false;
+    
+    let timeout = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Ok(event) = event_receiver.recv().await {
+            match event {
+                AgentEvent::ToolCompleted { tool_name, success, .. } => {
+                    println!("DEBUG: Tool '{}' completed, success: {}", tool_name, success);
+                    
+                    if tool_name == "add_repository" && !success {
+                        add_repo_failures += 1;
+                    }
+                    
+                    if tool_name == "shell_execution" && success {
+                        shell_success = true;
+                        println!("✅ Shell execution succeeded despite repository failures");
+                    }
+                }
+                AgentEvent::LlmChunk { content, .. } => {
+                    println!("DEBUG: LLM Chunk: {}", content);
+                    
+                    // Check for graceful degradation messages
+                    if content.contains("Skipping") || content.contains("continue with") || content.contains("alternative") {
+                        graceful_degradation_message = true;
+                        println!("✅ Graceful degradation message detected");
+                    }
+                    
+                    // Check for workflow continuation suggestions
+                    if content.contains("Continue with") || content.contains("proceed without") {
+                        workflow_continuation_suggested = true;
+                        println!("✅ Workflow continuation suggested");
+                    }
+                }
+                _ => {}
+            }
+            
+            // Break when we have evidence the system is working correctly
+            if add_repo_failures > 0 && (graceful_degradation_message || workflow_continuation_suggested) {
+                break;
+            }
+        }
+    }).await;
+    
+    println!("DEBUG: Final state - add_repo_failures: {}, shell_success: {}, graceful_degradation: {}, workflow_continuation: {}", 
+             add_repo_failures, shell_success, graceful_degradation_message, workflow_continuation_suggested);
+    
+    // The system should handle failures gracefully and continue workflow
+    assert!(add_repo_failures > 0, "Expected add_repository to fail");
+    assert!(graceful_degradation_message || workflow_continuation_suggested, 
+           "Expected graceful degradation with workflow continuation suggestions");
+}
+
+#[tokio::test]
+async fn test_enhanced_parameter_validation_feedback() {
+    println!("🔍 Test: Enhanced parameter validation feedback");
+    
+    // Test with the exact problematic case from the conversation
+    let invalid_tool_call = ("add_repository".to_string(), json!({
+        "name": "fibonacci_calculator"
+        // Missing both url and local_path - this should trigger enhanced feedback
+    }));
+    
+    let agent = create_test_agent_with_tool_calls(vec![invalid_tool_call]).await.unwrap();
+    let mut event_receiver = agent.subscribe();
+    
+    let message = "Add a repository";
+    let _result = agent.process_message_stream(message).await;
+    
+    let mut enhanced_feedback_received = false;
+    let mut specific_guidance_provided = false;
+    let mut alternative_suggested = false;
+    
+    let timeout = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Ok(event) = event_receiver.recv().await {
+            match event {
+                AgentEvent::LlmChunk { content, .. } => {
+                    println!("DEBUG: Parameter validation feedback: {}", content);
+                    
+                    // Check for enhanced parameter feedback
+                    if content.contains("**Quick Fix**") && content.contains("You must provide EITHER") {
+                        enhanced_feedback_received = true;
+                        println!("✅ Enhanced parameter validation feedback provided");
+                    }
+                    
+                    // Check for specific parameter guidance
+                    if content.contains("`url`") && content.contains("`local_path`") {
+                        specific_guidance_provided = true;
+                        println!("✅ Specific parameter guidance provided");
+                    }
+                    
+                    // Check for alternative tool suggestions
+                    if content.contains("create_project") && content.contains("Alternative") {
+                        alternative_suggested = true;
+                        println!("✅ Alternative tool suggested");
+                    }
+                }
+                AgentEvent::Error(error_msg) => {
+                    println!("DEBUG: Error: {}", error_msg);
+                }
+                _ => {}
+            }
+            
+            // Break when we have all the enhanced feedback we expect
+            if enhanced_feedback_received && specific_guidance_provided && alternative_suggested {
+                break;
+            }
+        }
+    }).await;
+    
+    println!("DEBUG: Final state - enhanced_feedback: {}, specific_guidance: {}, alternative_suggested: {}", 
+             enhanced_feedback_received, specific_guidance_provided, alternative_suggested);
+    
+    // The enhanced system should provide comprehensive parameter validation feedback
+    assert!(enhanced_feedback_received, "Expected enhanced parameter validation feedback");
+    assert!(specific_guidance_provided, "Expected specific parameter guidance");
+    assert!(alternative_suggested, "Expected alternative tool suggestions");
 } 

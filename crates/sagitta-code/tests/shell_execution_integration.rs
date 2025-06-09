@@ -5,6 +5,7 @@ use serde_json::json;
 use std::time::Instant;
 use tempfile::TempDir;
 use tokio;
+use std::collections::HashMap;
 
 /// Integration test for shell execution functionality
 /// Run with: cargo test --test shell_execution_integration -- --nocapture
@@ -16,11 +17,22 @@ async fn test_shell_execution_integration() {
     
     // Create the tool with custom config that uses our temp directory as the base
     let config = LocalExecutorConfig {
-        repositories_base_path: temp_dir.path().to_path_buf(),
+        base_dir: temp_dir.path().to_path_buf(),
         approval_policy: ApprovalPolicy::Auto,
         allow_automatic_tool_install: false,
         cpu_limit_seconds: None,
         memory_limit_mb: None,
+        execution_dir: temp_dir.path().to_path_buf(),
+        enable_approval_flow: false,
+        audit_log_path: None,
+        max_execution_time_seconds: 300,
+        allowed_commands: None,
+        blocked_commands: None,
+        auto_approve_safe_commands: true,
+        allowed_paths: vec![],
+        shell_override: None,
+        env_vars: HashMap::new(),
+        timeout_seconds: 300,
     };
     let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
     
@@ -179,11 +191,22 @@ async fn test_shell_execution_integration() {
     // Test 6: Test with custom executor configuration
     println!("\n6. Testing custom executor configuration...");
     let custom_config = LocalExecutorConfig {
-        repositories_base_path: temp_dir.path().to_path_buf(),
+        base_dir: temp_dir.path().to_path_buf(),
         approval_policy: ApprovalPolicy::Auto,
         allow_automatic_tool_install: false,
         cpu_limit_seconds: None,
         memory_limit_mb: None,
+        execution_dir: temp_dir.path().to_path_buf(),
+        enable_approval_flow: false,
+        audit_log_path: None,
+        max_execution_time_seconds: 300,
+        allowed_commands: None,
+        blocked_commands: None,
+        auto_approve_safe_commands: true,
+        allowed_paths: vec![],
+        shell_override: None,
+        env_vars: HashMap::new(),
+        timeout_seconds: 300,
     };
     
     let custom_tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), custom_config);
@@ -227,11 +250,22 @@ async fn test_timeout_scenarios() {
     
     // Create the tool with custom config that uses our temp directory as the base
     let config = LocalExecutorConfig {
-        repositories_base_path: temp_dir.path().to_path_buf(),
+        base_dir: temp_dir.path().to_path_buf(),
         approval_policy: ApprovalPolicy::Auto,
         allow_automatic_tool_install: false,
         cpu_limit_seconds: None,
         memory_limit_mb: None,
+        execution_dir: temp_dir.path().to_path_buf(),
+        enable_approval_flow: false,
+        audit_log_path: None,
+        max_execution_time_seconds: 300,
+        allowed_commands: None,
+        blocked_commands: None,
+        auto_approve_safe_commands: true,
+        allowed_paths: vec![],
+        shell_override: None,
+        env_vars: HashMap::new(),
+        timeout_seconds: 300,
     };
     let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
     
@@ -312,11 +346,22 @@ async fn test_performance() {
     
     // Create the tool with custom config that uses our temp directory as the base
     let config = LocalExecutorConfig {
-        repositories_base_path: temp_dir.path().to_path_buf(),
+        base_dir: temp_dir.path().to_path_buf(),
         approval_policy: ApprovalPolicy::Auto,
         allow_automatic_tool_install: false,
         cpu_limit_seconds: None,
         memory_limit_mb: None,
+        execution_dir: temp_dir.path().to_path_buf(),
+        enable_approval_flow: false,
+        audit_log_path: None,
+        max_execution_time_seconds: 300,
+        allowed_commands: None,
+        blocked_commands: None,
+        auto_approve_safe_commands: true,
+        allowed_paths: vec![],
+        shell_override: None,
+        env_vars: HashMap::new(),
+        timeout_seconds: 300,
     };
     let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
     

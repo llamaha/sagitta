@@ -173,9 +173,66 @@ impl Tool for EditTool {
     }
     
     async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
+        // Phase 6: Add logging to capture parameter sets Gemini sends
+        log::info!("EditTool::execute - Parameters received from LLM: {}", serde_json::to_string_pretty(&parameters).unwrap_or_else(|_| format!("{:?}", parameters)));
+        
         // Parse parameters
-        let params: EditParams = serde_json::from_value(parameters)
-            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to parse edit parameters: {}", e)))?;
+        let mut params: EditParams = serde_json::from_value(parameters.clone())
+            .map_err(|e| {
+                log::error!("EditTool::execute - Failed to parse parameters: {}. Parameters were: {}", e, serde_json::to_string_pretty(&parameters).unwrap_or_else(|_| format!("{:?}", parameters)));
+                SagittaCodeError::ToolError(format!("Failed to parse edit parameters: {}", e))
+            })?;
+        
+        // Phase 6: Additional parameter validation and normalization
+        if params.line_start == 0 {
+            log::warn!("EditTool::execute - Parameter normalization: line_start was 0, converting to 1 (1-indexed)");
+            params.line_start = 1;
+        }
+        
+        if params.line_end == 0 {
+            log::warn!("EditTool::execute - Parameter normalization: line_end was 0, converting to 1 (1-indexed)");
+            params.line_end = 1;
+        }
+        
+        if params.line_start > params.line_end {
+            log::warn!("EditTool::execute - Parameter normalization: line_start ({}) > line_end ({}), swapping values", params.line_start, params.line_end);
+            let temp = params.line_start;
+            params.line_start = params.line_end;
+            params.line_end = temp;
+        }
+        
+        // First check if the file exists to get line count for normalization
+        let repo_manager = self.repo_manager.lock().await;
+        let repositories = repo_manager.list_repositories().await
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories for normalization: {}", e)))?;
+        
+        let repo_config = repositories.iter()
+            .find(|r| r.name == params.repository_name)
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.repository_name)))?;
+        
+        let full_path = PathBuf::from(&repo_config.local_path).join(&params.file_path);
+        
+        if full_path.exists() {
+            let file_content = fs::read_to_string(&full_path)
+                .map_err(|e| SagittaCodeError::ToolError(format!("Failed to read file for normalization: {}", e)))?;
+            let file_line_count = file_content.lines().count();
+            
+            // Phase 6: Auto-normalize parameters if end_line > file_len, clamp to file length
+            if params.line_end > file_line_count {
+                log::warn!("EditTool::execute - Parameter normalization: end_line ({}) > file length ({}), clamping to file length", params.line_end, file_line_count);
+                params.line_end = file_line_count;
+            }
+            
+            // Phase 6: If line_start > file_len, adjust to last line
+            if params.line_start > file_line_count {
+                log::warn!("EditTool::execute - Parameter normalization: start_line ({}) > file length ({}), adjusting to file length", params.line_start, file_line_count);
+                params.line_start = file_line_count;
+                params.line_end = file_line_count;
+            }
+            
+            log::info!("EditTool::execute - After normalization: start_line={}, end_line={}, file_length={}", params.line_start, params.line_end, file_line_count);
+        }
+        drop(repo_manager); // Release lock before async operation
         
         // Validate content size to prevent streaming buffer issues
         if params.content.len() > MAX_CONTENT_SIZE {
@@ -188,6 +245,7 @@ impl Tool for EditTool {
         // Perform the edit
         match self.perform_edit(&params).await {
             Ok(message) => {
+                log::info!("EditTool::execute - Edit successful: {}", message);
                 Ok(ToolResult::Success(serde_json::json!({
                     "message": message,
                     "repository_name": params.repository_name,
@@ -198,6 +256,7 @@ impl Tool for EditTool {
                 })))
             },
             Err(e) => {
+                log::error!("EditTool::execute - Edit failed: {}", e);
                 Err(e)
             }
         }

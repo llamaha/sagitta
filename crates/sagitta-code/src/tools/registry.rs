@@ -62,7 +62,18 @@ impl ToolRegistry {
     /// Get a tool by name
     pub async fn get(&self, name: &str) -> Option<BoxedTool> {
         let tools = self.tools.read().await;
-        tools.get(name).cloned()
+        let tool = tools.get(name).cloned();
+        
+        // Phase 6: Add logging for edit_file tool to capture parameter sets Gemini sends
+        if name == "edit_file" {
+            if tool.is_some() {
+                log::info!("ToolRegistry::get - edit_file tool requested and found");
+            } else {
+                log::warn!("ToolRegistry::get - edit_file tool requested but NOT found in registry");
+            }
+        }
+        
+        tool
     }
     
     /// Get all tool definitions

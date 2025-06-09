@@ -381,6 +381,18 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             status: MessageStatus::Streaming,
         };
         app.chat_manager.add_tool_call(response_id, view_tool_call);
+    } else {
+        // No active response ID; attach tool call to the most recent agent message (fallback)
+        let all_messages = app.chat_manager.get_all_messages();
+        if let Some(last_agent_msg) = all_messages.iter().rev().find(|m| m.author == MessageAuthor::Agent) {
+            let view_tool_call = ViewToolCall {
+                name: tool_call.name.clone(),
+                arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+                result: None,
+                status: MessageStatus::Streaming,
+            };
+            app.chat_manager.add_tool_call(&last_agent_msg.id, view_tool_call);
+        }
     }
     
     // Optionally show detailed arguments in the preview pane if needed

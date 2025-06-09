@@ -1221,7 +1221,8 @@ impl ReasoningState {
         // NEW: Check for complex task patterns that inherently require multiple steps
         let complex_task_patterns = [
             "improve", "help me", "create a solution", "analyze", "research",
-            "best approach", "error handling", "optimization", "review"
+            "best approach", "error handling", "optimization", "review",
+            "add", "create", "build", "implement", "write", "test", "fix"
         ];
         
         let has_explicit_multistep = multistep_indicators.iter().any(|indicator| request_lower.contains(indicator));
@@ -1297,7 +1298,8 @@ impl ReasoningState {
     fn requires_solution_creation(&self, request: &str) -> bool {
         let solution_creation_indicators = [
             "improve", "help me", "create", "solution", "approach", "fix",
-            "error handling", "best practices", "optimization", "enhance"
+            "error handling", "best practices", "optimization", "enhance",
+            "add", "test", "build", "implement", "write", "develop"
         ];
         
         solution_creation_indicators.iter().any(|indicator| request.contains(indicator))

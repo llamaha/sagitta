@@ -687,7 +687,7 @@ impl ToolOrchestrator {
                     event_emitter.emit_event(ReasoningEvent::ToolExecutionCompleted {
                         session_id: Uuid::new_v4(), // TODO: Use orchestration ID
                         tool_name: request.tool_name.clone(),
-                        success: true,
+                        success: tool_result.success,
                         duration_ms: execution_time.as_millis() as u64,
                     }).await?;
                     

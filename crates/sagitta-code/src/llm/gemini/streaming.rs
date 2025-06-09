@@ -788,6 +788,8 @@ mod tests {
             match chunk.part {
                 MessagePart::ToolCall { name, .. } => {
                     assert_eq!(name, "web_search");
+                    // CRITICAL: Tool calls should NEVER be marked as final, even with STOP finish reason
+                    assert!(!chunk.is_final, "Tool call chunk was incorrectly marked as final!");
                 },
                 _ => panic!("Expected ToolCall part"),
             }
@@ -836,6 +838,8 @@ mod tests {
             match chunk.part {
                 MessagePart::Text { text } => {
                     assert_eq!(text, "This is the final response.");
+                    // CRITICAL: Text chunks with STOP finish reason SHOULD be marked as final
+                    assert!(chunk.is_final, "Text chunk with STOP finish reason should be marked as final!");
                 },
                 _ => panic!("Expected Text part"),
             }
@@ -1156,6 +1160,74 @@ mod tests {
         };
         
         assert_eq!(stream.max_buffer_size, custom_buffer_size);
+    }
+
+    #[test]
+    fn test_mixed_text_and_tool_call_response() {
+        // Test that when a response has both text and tool call, only the final part should be final
+        let response = GeminiResponse {
+            candidates: vec![Candidate {
+                content: Content {
+                    parts: vec![
+                        Part {
+                            text: Some("I'll help you create a Rust project. Let me start by creating it...".to_string()),
+                            function_call: None,
+                            function_response: None,
+                            thought: None,
+                        },
+                        Part {
+                            text: None,
+                            function_call: Some(FunctionCall {
+                                name: "shell_execution".to_string(),
+                                args: json!({"command": "cargo new fibonacci_calculator"}),
+                            }),
+                            function_response: None,
+                            thought: None,
+                        }
+                    ],
+                    role: "model".to_string(),
+                },
+                finish_reason: Some("STOP".to_string()),
+                safety_ratings: vec![],
+                grounding_metadata: None,
+            }],
+            usage_metadata: None,
+            prompt_feedback: None,
+        };
+
+        let stream = GeminiStream {
+            response: Box::pin(futures_util::stream::empty()),
+            buffer: String::new(),
+            chunk_queue: VecDeque::new(),
+            done: false,
+            model_name: String::new(),
+            max_buffer_size: 1024 * 1024,
+        };
+
+        let result = stream.convert_response_to_chunks(&response);
+
+        assert!(result.is_ok());
+        let chunks = result.unwrap();
+        
+        assert_eq!(chunks.len(), 2, "Should have 2 chunks: text + tool call");
+        
+        // First chunk should be text and NOT final
+        match &chunks[0].part {
+            MessagePart::Text { text } => {
+                assert!(text.contains("I'll help you create"));
+                assert!(!chunks[0].is_final, "First text chunk should NOT be final when followed by tool call!");
+            },
+            _ => panic!("Expected first chunk to be text"),
+        }
+        
+        // Second chunk should be tool call and NOT final
+        match &chunks[1].part {
+            MessagePart::ToolCall { name, .. } => {
+                assert_eq!(name, "shell_execution");
+                assert!(!chunks[1].is_final, "Tool call should NOT be final!");
+            },
+            _ => panic!("Expected second chunk to be tool call"),
+        }
     }
 }
 
