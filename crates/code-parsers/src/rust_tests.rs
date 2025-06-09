@@ -2,8 +2,8 @@
 #[cfg(test)]
 mod tests {
     // Use super::... to access items from the parent syntax module
-    use crate::syntax::parser::{CodeChunk, SyntaxParser};
-    use crate::syntax::rust::RustParser;
+    use crate::parser::{CodeChunk, SyntaxParser};
+    use crate::rust::RustParser;
     use anyhow::Result;
 
     // Helper function to create a parser instance

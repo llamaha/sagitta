@@ -61,7 +61,9 @@ pub mod qdrant_client_trait;
 /// Low-level Qdrant client operations.
 pub mod qdrant_ops;
 /// Code parsing and chunking logic for different languages.
-pub mod syntax;
+pub mod syntax {
+    pub use code_parsers::*;
+}
 /// Shared constants used across the library.
 pub mod constants;
 /// Code editing and validation logic.

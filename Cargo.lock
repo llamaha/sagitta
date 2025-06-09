@@ -1070,6 +1070,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "code-parsers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger 0.11.8",
+ "lazy_static",
+ "log",
+ "regex",
+ "tempfile",
+ "tree-sitter 0.22.6",
+ "tree-sitter-go",
+ "tree-sitter-html",
+ "tree-sitter-javascript",
+ "tree-sitter-markdown",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5414,6 +5437,7 @@ dependencies = [
  "bincode",
  "chrono",
  "clap",
+ "code-parsers",
  "colored",
  "crossbeam-channel",
  "ctrlc",
@@ -5592,6 +5616,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "code-parsers",
  "colored",
  "dirs",
  "env_logger 0.11.8",
@@ -5624,9 +5649,7 @@ dependencies = [
  "tracing",
  "tree-sitter 0.22.6",
  "tree-sitter-go",
- "tree-sitter-html",
  "tree-sitter-javascript",
- "tree-sitter-markdown",
  "tree-sitter-md",
  "tree-sitter-python",
  "tree-sitter-ruby",

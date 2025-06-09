@@ -1,6 +1,6 @@
 use anyhow::Result;
-use sagitta_search::syntax::markdown::MarkdownParser;
-use sagitta_search::syntax::parser::SyntaxParser;
+use code_parsers::markdown::MarkdownParser;
+use code_parsers::parser::SyntaxParser;
 
 #[cfg(test)]
 mod tests {

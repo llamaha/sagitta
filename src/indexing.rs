@@ -178,7 +178,7 @@ pub async fn index_paths<
 
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
-        let chunks = syntax::get_chunks(file_path)
+        let chunks = crate::syntax::get_chunks(file_path)
             .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {
@@ -418,7 +418,7 @@ pub async fn index_repo_files<
 
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
-        let chunks = syntax::get_chunks(file_path)
+        let chunks = crate::syntax::get_chunks(file_path)
             .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {

@@ -1,0 +1,32 @@
+[package]
+name = "code-parsers"
+version = "0.1.0"
+edition = "2021"
+description = "Code parsing and chunking logic for different programming languages"
+license = "MIT"
+
+[dependencies]
+# Tree-sitter core and language grammars
+tree-sitter = "0.22.6"
+tree-sitter-python = "0.21.0"
+tree-sitter-rust = "0.21.0"
+tree-sitter-javascript = "0.21.0"
+tree-sitter-typescript = "0.21.0"
+tree-sitter-markdown = "^0.7.0"
+tree-sitter-html = "0.20.3"
+tree-sitter-ruby = "0.21.0"
+tree-sitter-go = "0.21.0"
+tree-sitter-md = "0.2.3"
+tree-sitter-yaml = "0.6.1"
+
+# Utilities
+lazy_static = "1.4.0"
+regex = "1.10.3"
+log = "0.4.21"
+anyhow = "1.0"
+
+[dev-dependencies]
+# For testing
+env_logger = "0.11"
+tempfile = "3.10.1"
+anyhow = "1.0" 

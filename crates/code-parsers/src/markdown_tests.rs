@@ -2,8 +2,8 @@
 #[cfg(test)]
 mod tests {
     // Adjust import paths
-    use crate::syntax::parser::SyntaxParser;
-    use crate::syntax::markdown::{MarkdownParser, MAX_SECTION_SIZE}; // Import constant
+    use crate::parser::SyntaxParser;
+    use crate::markdown::{MarkdownParser, MAX_SECTION_SIZE}; // Import constant
     use anyhow::Result;
 
     fn create_parser() -> MarkdownParser {

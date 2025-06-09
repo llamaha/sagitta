@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod fallback_tests {
     // Use crate::syntax::get_chunks as it's defined in the parent module's mod.rs
-    use crate::syntax::get_chunks;
+    use crate::get_chunks;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

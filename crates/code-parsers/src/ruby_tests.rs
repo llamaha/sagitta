@@ -3,7 +3,7 @@
 mod tests {
     // Use super::... to access items from the parent syntax module
     
-    use crate::syntax::ruby::RubyParser; // Corrected import
+    use crate::ruby::RubyParser;
     
 
     // Helper function to create a parser instance

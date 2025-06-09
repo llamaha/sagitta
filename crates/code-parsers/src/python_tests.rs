@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::syntax::parser::{CodeChunk, SyntaxParser};
-    use crate::syntax::python::PythonParser;
+    use crate::parser::{CodeChunk, SyntaxParser};
+    use crate::python::PythonParser;
     use anyhow::Result;
 
     fn create_parser() -> PythonParser {
