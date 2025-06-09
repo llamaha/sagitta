@@ -1,17 +1,26 @@
-# `sagitta-search`
+# Sagitta
 
-`sagitta-search` is a library for semantic code search, providing the core functionalities for indexing codebases, generating embeddings, and performing similarity searches. It is designed to be the engine behind tools like `sagitta-cli`.
+Sagitta is a semantic code search and AI development toolkit. This workspace contains multiple crates that work together to provide powerful code analysis, search, and AI-assisted development capabilities.
 
-This repository also contains:
-- [`crates/sagitta-cli`](./crates/sagitta-cli/README.md): A command-line interface for `sagitta-search`.
-- [`crates/sagitta-mcp`](./crates/sagitta-mcp/README.md): A server component (MCP) for `sagitta-search`.
-- [`crates/git-manager`](./crates/git-manager/README.md): Centralized git operations with branch management and automatic resync capabilities.
-- [`crates/sagitta-code`](./crates/sagitta-code/README.md): AI agent with conversation management and repository integration.
-- [`crates/sagitta-embed`](./crates/sagitta-embed/README.md): High-performance, thread-safe embedding generation library with ONNX model support.
-- [`crates/reasoning-engine`](./crates/reasoning-engine/README.md): Advanced reasoning and orchestration engine for AI workflows.
-- [`crates/repo-mapper`](./crates/repo-mapper/README.md): Repository structure analysis and mapping utilities.
+## Crates
 
-**Note:** This tool is under development and not ready for production use.
+### Core Libraries
+
+- **[`sagitta-search`](./crates/sagitta-search/)** - Core semantic search engine with indexing, embedding generation, and vector similarity search
+- **[`sagitta-embed`](./crates/sagitta-embed/)** - High-performance embedding generation with ONNX model support and thread-safe pooling
+- **[`git-manager`](./crates/git-manager/)** - Git operations with branch management and automatic resync capabilities
+- **[`code-parsers`](./crates/code-parsers/)** - Language-specific code parsing and analysis utilities
+- **[`repo-mapper`](./crates/repo-mapper/)** - Repository structure analysis and mapping
+- **[`reasoning-engine`](./crates/reasoning-engine/)** - AI reasoning and orchestration engine
+- **[`terminal-stream`](./crates/terminal-stream/)** - Terminal streaming and interaction utilities
+
+### Applications
+
+- **[`sagitta-cli`](./crates/sagitta-cli/)** - Command-line interface for semantic code search and repository management
+- **[`sagitta-mcp`](./crates/sagitta-mcp/)** - Model Context Protocol server for IDE and tool integration
+- **[`sagitta-code`](./crates/sagitta-code/)** - AI coding assistant with conversation management and repository integration
+
+**Note:** This toolkit is under development and not ready for production use.
 
 ## Performance
 

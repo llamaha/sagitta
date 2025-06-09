@@ -1,11 +1,7 @@
-[package]
-name = "sagitta_search"
-version = "0.1.0"
-edition = "2021"
-
 [workspace]
 members = [
-    ".", "crates/sagitta-code",
+    "crates/sagitta-search",
+    "crates/sagitta-code",
     "crates/sagitta-cli",
     "crates/sagitta-mcp",
     "crates/sagitta-embed",
@@ -15,109 +11,4 @@ members = [
     "crates/terminal-stream",
     "crates/code-parsers"
 ]
-resolver = "2"
-
-# Add features needed by moved modules
-[features]
-default = ["onetime_rayon", "ort"]
-onetime_rayon = ["dep:rayon"]
-onnx = ["ort"]
-cuda = ["ort/cuda"]
-
-[dependencies]
-anyhow = "1.0"
-async-trait = "0.1"
-colored = "2.1.0"
-env_logger = "0.11"
-filetime = "0.2"
-glob = "0.3.1" # Added glob
-# indicatif = "0.17.8" # Removed for new progress reporting
-log = "0.4.21"
-# qdrant-client = { version = "1.8.0", features = ["serde", "tonic-tls"] } # Keeping commented for now
-qdrant-client = { version = "1.14.0", features = ["serde"] } # Update to 1.14.0
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-# tokio = { version = "1", features = ["full"] }
-tokio = { version = "1.38.0", features = ["full"] } # Ensure full features for async runtime
-walkdir = "2.5.0"
-uuid = { version = "1.8", features = ["v4"] } # Added uuid
-futures = "0.3" # Moved futures to main dependencies
-chrono = { version = "0.4.38", features = ["serde"] } # Keep this one
-dirs = "5.0.1" # Added dirs
-toml = "0.8.13" # Added toml
-sha2 = "0.10" # Added for branch-aware collection naming
-
-# Add dependencies needed by error.rs
-git2 = "0.18.3" # Added git2
-
-# Add dependency for onetime_rayon feature
-rayon = { version = "1.10.0", optional = true }
-
-# Add dependency for ort feature
-ort = { version = "2.0.0-rc.9", default-features = false, optional = true, features = ["download-binaries"] }
-
-# Dependencies for embedding/provider/onnx.rs
-tokenizers = { version = "0.21.1" }
-ndarray = { version = "0.16" }
-
-# Add sagitta-embed dependency
-sagitta-embed = { path = "crates/sagitta-embed", features = ["onnx"] }
-
-# Dependencies for repo_add / repo_helpers
-clap = { version = "4.5.7", features = ["derive"] } # For AddRepoArgs
-tracing = "0.1"
-
-# Code parsing functionality (moved to separate crate)
-code-parsers = { path = "crates/code-parsers" }
-
-# --- Dependencies for edit module ---
-regex = "1.10.3"
-tempfile = "3.10.1" # Moved from dev-dependencies
-tree-sitter = "0.22.6"
-tree-sitter-rust = "0.21.0"
-tree-sitter-python = "0.21.0"
-tree-sitter-javascript = "0.21.0"
-tree-sitter-typescript = "0.21.0"
-tree-sitter-go = "0.21.0"
-tree-sitter-ruby = "0.21.0"
-tree-sitter-yaml = "0.6.1"
-tree-sitter-md = "0.2.3"
-# --- End dependencies for edit module ---
-
-# Dependencies for tokenizer
-lazy_static = "1.4.0"
-
-num_cpus = "1.16"
-
-# futures = "0.3" # Removed duplicate - Moved futures to main dependencies
-# chrono = { version = "0.4.38", features = ["serde"] } # Removed this one
-
-# walkdir = "2.5.0" # Removed this one
-
-# Dependencies needed for debug script
-git-manager = { path = "crates/git-manager" }
-pathdiff = "0.2"
-
-[dev-dependencies] # Add dev dependencies if needed for tests in core
-# tempfile = "3.10.1" # Moved to main dependencies
-# serde_json = "1.0.117" # This was in core's dev-deps, but tempfile was more important if it was only one. Let's keep dev-deps minimal for root for now.
-mockall = "0.12.1"
-git2 = "0.18.3" # Also add as dev-dependency for tests
-
-# Added from old root Cargo.toml for tests/
-assert_cmd = "2.0"
-predicates = "3.1"
-tempfile = "3" # For tests that use tempfile directly
-anyhow = "1.0" # For test error handling
-test-log = "0.2"
-# qdrant-client, serde, serde_json, toml are already in [dependencies] or covered
-
-# Logging
-tracing = "0.1"
-
-# Path handling
-pathdiff = "0.2"
-
-# For debugging
-env_logger = "0.11"
+resolver = "2" 

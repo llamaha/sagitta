@@ -5465,7 +5465,7 @@ dependencies = [
  "rayon",
  "regex",
  "sagitta-embed",
- "sagitta_search",
+ "sagitta-search",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5521,7 +5521,7 @@ dependencies = [
  "reqwest 0.11.27",
  "rfd",
  "sagitta-embed",
- "sagitta_search",
+ "sagitta-search",
  "serde",
  "serde_json",
  "similar",
@@ -5592,7 +5592,7 @@ dependencies = [
  "repo-mapper",
  "reqwest 0.11.27",
  "sagitta-embed",
- "sagitta_search",
+ "sagitta-search",
  "serde",
  "serde_json",
  "tempfile",
@@ -5608,7 +5608,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sagitta_search"
+name = "sagitta-search"
 version = "0.1.0"
 dependencies = [
  "anyhow",

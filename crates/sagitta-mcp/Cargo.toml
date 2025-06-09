@@ -12,7 +12,7 @@ name = "sagitta-mcp"
 path = "src/main.rs"
 
 [dependencies]
-sagitta_search = { path = "../../", features = ["onnx"] }
+sagitta-search = { path = "../sagitta-search", features = ["onnx"] }
 sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 repo-mapper = { path = "../repo-mapper" }
 git-manager = { path = "../git-manager" }
@@ -59,7 +59,7 @@ mockall = "0.12" # Or the latest version
 rand = "0.8" # Add rand dependency
 env_logger = "0.10" # Added for logging tests
 # Add core dependency with features needed for tests
-sagitta_search = { path = "../../", features = ["onnx"] }
+sagitta-search = { path = "../sagitta-search", features = ["onnx"] }
 serde_json = "1.0"
 tower = { version = "0.4", features = ["full"] }
 # Add other dev dependencies as needed

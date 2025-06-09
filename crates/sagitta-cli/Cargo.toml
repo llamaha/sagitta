@@ -42,7 +42,7 @@ cuda = ["ort/cuda"]
 
 [dependencies]
 git-manager = { path = "../git-manager" }
-sagitta_search = { path = "../../" }
+sagitta-search = { path = "../sagitta-search" }
 sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 code-parsers = { path = "../code-parsers" }
 
