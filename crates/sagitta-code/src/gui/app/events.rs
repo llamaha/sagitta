@@ -368,18 +368,9 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
     // Store pending tool call in state
     app.state.pending_tool_calls.push_back(tool_call.clone());
     
-    // Always create a chat message for the tool call
-    let tool_call_message = format!("🔧 Calling tool: {}\nArguments: {}", 
-        tool_call.name, 
-        serde_json::to_string_pretty(&tool_call.arguments).unwrap_or_default()
-    );
-    
-    let streaming_message = StreamingMessage::from_text(
-        MessageAuthor::Agent, 
-        tool_call_message
-    );
-    
-    app.chat_manager.add_complete_message(streaming_message);
+    // REMOVED: No longer create duplicate chat messages for tool calls
+    // The tool calls are already displayed as clickable tool call cards
+    // via the AgentEvent::ToolCall event processing and the 🔧 Executing tool: text
     
     // Add tool call to the current streaming message if one exists
     if let Some(ref response_id) = app.state.current_response_id {
@@ -428,20 +419,6 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     };
     
     let is_success = matches!(result, crate::tools::types::ToolResult::Success(_));
-    
-    // Always create a chat message for the tool result
-    let result_message = if is_success {
-        format!("✅ Tool result from {}: {}", tool_name, result_string)
-    } else {
-        format!("❌ Tool error from {}: {}", tool_name, result_string)
-    };
-    
-    let streaming_message = StreamingMessage::from_text(
-        MessageAuthor::Tool, 
-        result_message
-    );
-    
-    app.chat_manager.add_complete_message(streaming_message);
     
     // Update tool call status in the streaming chat manager
     // Try to update by tool_call_id first (most precise)
@@ -1325,13 +1302,6 @@ mod tests {
         app.state.add_tool_result(tool_call_id.clone(), "pending".to_string());
         
         handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name.clone(), result);
-        
-        // Should add tool result message
-        let messages = app.chat_manager.get_all_messages();
-        assert_eq!(messages.len(), 1);
-        let message = &messages[0];
-        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Tool);
-        assert!(message.content.contains("Search results"));
         
         // Should update tool results
         let stored_result = app.state.tool_results.get(&tool_call_id);

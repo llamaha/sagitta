@@ -9,4 +9,5 @@ pub mod code_edit;
 pub mod shell_execution;
 pub mod local_executor;
 pub mod analyze_input;
+pub mod command_risk_analyzer;
 

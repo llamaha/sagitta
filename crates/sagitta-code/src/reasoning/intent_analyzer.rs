@@ -158,36 +158,43 @@ impl IntentAnalyzer for SagittaCodeIntentAnalyzer {
         let is_intermediate_summary = text.contains("I've finished those tasks") ||
                                     text.contains("Successfully completed:") ||
                                     text.contains("What would you like to do next?") ||
-                                    text.contains("Now I'll") ||
-                                    text.contains("Next, I'll") ||
-                                    text.contains("Following that") ||
-                                    text.contains("After that") ||
-                                    text.contains("Then I'll") ||
-                                    text.contains("Let me") ||
-                                    text.contains("I'll now") ||
-                                    text.contains("I'll proceed") ||
-                                    text.contains("I'll continue") ||
-                                    text.contains("Moving on") ||
                                     text.contains("repository_map") ||
                                     text.contains("targeted_view") ||
                                     text.contains("view_file") ||
                                     text.contains("search_code") ||
                                     text.contains("add_repository") ||
                                     text.contains("sync_repository") ||
-                                    text.contains("I need to") ||
-                                    text.contains("I should") ||
-                                    text.contains("I will") ||
-                                    text.contains("Let me start by") ||
-                                    text.contains("First, I'll") ||
                                     text.contains("To help you") ||
-                                    text.contains("I can help") ||
-                                    text.contains("Here's what I'll do") ||
-                                    text.contains("My approach will be") ||
-                                    text.contains("I'll help you with that");
+                                    text.contains("I can help");
+
+        // ENHANCED: Detect plan continuation statements (should continue execution, not request input)
+        let is_plan_continuation = text.contains("Now I'll") ||
+                                 text.contains("Next, I'll") ||
+                                 text.contains("Following that") ||
+                                 text.contains("After that") ||
+                                 text.contains("Then I'll") ||
+                                 text.contains("Let me") ||
+                                 text.contains("I'll now") ||
+                                 text.contains("I'll proceed") ||
+                                 text.contains("I'll continue") ||
+                                 text.contains("Moving on") ||
+                                 text.contains("I need to") ||
+                                 text.contains("I should") ||
+                                 text.contains("I will") ||
+                                 text.contains("Let me start by") ||
+                                 text.contains("First, I'll") ||
+                                 text.contains("Here's what I'll do") ||
+                                 text.contains("My approach will be") ||
+                                 text.contains("I'll help you with that");
 
         if is_intermediate_summary {
             debug!("SagittaCodeIntentAnalyzer: Detected intermediate summary, returning RequestsMoreInput to continue processing.");
             return Ok(DetectedIntent::RequestsMoreInput);
+        }
+
+        if is_plan_continuation {
+            debug!("SagittaCodeIntentAnalyzer: Detected plan continuation, returning ProvidesPlanWithoutExplicitAction to continue execution.");
+            return Ok(DetectedIntent::ProvidesPlanWithoutExplicitAction);
         }
 
         // Check for explicit completion indicators - be more strict about what constitutes completion

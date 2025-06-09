@@ -567,17 +567,17 @@ fn render_single_message_content(
         ui.add_space(2.0); // Reduced spacing
     }
     
-    // Tool calls (if any) - render as compact cards
+    // Main message content first (this contains the conversation flow)
+    if !message.content.is_empty() {
+        render_message_content_compact(ui, message, &bg_color, max_width, app_theme);
+    }
+    
+    // Tool calls (if any) - render inline after the main content
     if !message.tool_calls.is_empty() {
+        ui.add_space(1.0); // Small spacing before tool calls
         if let Some(tool_info) = render_tool_calls_compact(ui, &message.tool_calls, &bg_color, max_width, app_theme) {
             clicked_tool = Some(tool_info);
         }
-        ui.add_space(1.0); // Reduced spacing between tool calls
-    }
-    
-    // Main message content
-    if !message.content.is_empty() {
-        render_message_content_compact(ui, message, &bg_color, max_width, app_theme);
     }
     
     clicked_tool
@@ -669,46 +669,47 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
     let mut clicked_tool_result = None;
     
     for tool_call in tool_calls {
-        ui.horizontal(|ui| {
-            // Tool icon with status color
-            let (status_icon, status_color) = match tool_call.status {
-                MessageStatus::Complete => (symbols::get_success_symbol(), app_theme.success_color()),
-                MessageStatus::Error(_) => (symbols::get_error_symbol(), app_theme.error_color()),
-                MessageStatus::Streaming => ("⟳", app_theme.streaming_color()),
-                MessageStatus::Thinking => ("💭", app_theme.thinking_indicator_color()),
-                _ => (symbols::get_tool_symbol(), app_theme.hint_text_color()),
-            };
-            
-            ui.label(RichText::new(symbols::get_tool_symbol()).size(12.0));
-            ui.label(RichText::new(status_icon).color(status_color).size(10.0));
-            ui.add_space(4.0);
-            
-            // Tool name as clickable button
-            let tool_button = ui.add(
-                egui::Button::new(RichText::new(&tool_call.name).color(app_theme.tool_color()).size(11.0))
-                    .fill(app_theme.button_background())
-                    .stroke(Stroke::new(0.5, app_theme.border_color()))
-                    .rounding(CornerRadius::same(4))
-            );
-            
-            if tool_button.clicked() {
-                clicked_tool_result = Some((tool_call.name.clone(), tool_call.arguments.clone()));
-            }
-        }); // End of horizontal layout for tool name and icon
-
-        // Render the tool result as a clickable component if available
+        // Only show the tool result as an inline preview link if there's a result
         if let Some(result) = &tool_call.result {
-            if !result.trim().is_empty() { // Only render if there's actual content
-                ui.add_space(4.0); // Space before the result content
+            if !result.trim().is_empty() {
+                ui.horizontal(|ui| {
+                    // Tool completion status and name
+                    let (_status_icon, _status_color) = match tool_call.status {
+                        MessageStatus::Complete => (symbols::get_success_symbol(), app_theme.success_color()),
+                        MessageStatus::Error(_) => (symbols::get_error_symbol(), app_theme.error_color()),
+                        _ => (symbols::get_tool_symbol(), app_theme.hint_text_color()),
+                    };
+                    
+                    // Only show the wrench icon, not the status icon
+                    ui.label(RichText::new(symbols::get_tool_symbol()).size(12.0));
+                    ui.add_space(4.0);
+                    
+                    // Tool name
+                    ui.label(RichText::new(&tool_call.name).color(app_theme.tool_color()).size(11.0));
+                    ui.add_space(8.0);
+                    
+                    // Simple preview link
+                    let preview_link = ui.link(RichText::new("preview").color(app_theme.accent_color()).size(11.0));
+                    
+                    if preview_link.clicked() {
+                        // Determine display title based on tool type
+                        let is_shell_result = tool_call.name.contains("shell") || tool_call.name.contains("execution") ||
+                                             result.contains("stdout") || result.contains("stderr") ||
+                                             result.contains("exit_code");
+                        
+                        let display_title = if is_shell_result {
+                            format!("{} - Terminal Output", tool_call.name)
+                        } else {
+                            format!("{} - Result", tool_call.name)
+                        };
+                        
+                        clicked_tool_result = Some((display_title, result.clone()));
+                    }
+                });
                 
-                // Use the new tool result rendering function
-                if let Some(tool_result_click) = render_tool_result_compact(ui, &tool_call.name, result, bg_color, max_width, app_theme) {
-                    clicked_tool_result = Some(tool_result_click);
-                }
+                ui.add_space(2.0); // Small spacing between tool results
             }
         }
-        
-        ui.add_space(1.0); // Reduced spacing between tool calls
     }
     
     clicked_tool_result
@@ -747,224 +748,6 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
             );
             ui.add(egui::Spinner::new().size(12.0).color(cursor_color));
         });
-    }
-}
-
-/// Render tool result as a compact, clickable summary
-fn render_tool_result_compact(ui: &mut Ui, tool_name: &str, result_data: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
-    let mut clicked_tool_result = None;
-    
-    ui.horizontal(|ui| {
-        ui.set_max_width(max_width - 20.0);
-        
-        // Tool result icon
-        ui.label(RichText::new("📊").size(12.0));
-        ui.add_space(4.0);
-        
-        // Determine if this is a shell execution result that should open in terminal
-        let is_shell_result = tool_name.contains("shell") || tool_name.contains("execution") || 
-                             result_data.contains("stdout") || result_data.contains("stderr") ||
-                             result_data.contains("exit_code");
-        
-        // Create a summary of the result for display
-        let summary = create_tool_result_summary(tool_name, result_data);
-        
-        // Clickable result summary button
-        let result_button = ui.add(
-            egui::Button::new(RichText::new(format!("{} Result: {}", tool_name, summary)).size(11.0))
-                .fill(app_theme.tool_result_background())
-                .stroke(Stroke::new(0.5, app_theme.border_color()))
-                .rounding(CornerRadius::same(4))
-        );
-        
-        if result_button.clicked() {
-            // Return the tool result data with a special marker for UI handling
-            let display_title = if is_shell_result {
-                format!("{} - Terminal Output", tool_name)
-            } else {
-                format!("{} - Result", tool_name)
-            };
-            clicked_tool_result = Some((display_title, result_data.to_string()));
-        }
-        
-        // Show a small preview of the result type
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let preview_text = if is_shell_result {
-                "🖥️ Terminal"
-            } else if result_data.len() > 200 {
-                "📄 View Details"
-            } else {
-                "👁️ Preview"
-            };
-            ui.label(RichText::new(preview_text).size(9.0).color(app_theme.hint_text_color()));
-        });
-    });
-    
-    clicked_tool_result
-}
-
-/// Create a concise summary of tool result data for display
-fn create_tool_result_summary(tool_name: &str, result_data: &str) -> String {
-    // Try to parse as JSON first
-    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(result_data) {
-        // Handle shell execution results
-        if let Some(obj) = json_value.as_object() {
-            if let (Some(exit_code), Some(stdout)) = (
-                obj.get("exit_code").and_then(|v| v.as_i64()),
-                obj.get("stdout").and_then(|v| v.as_str())
-            ) {
-                if exit_code == 0 {
-                    if stdout.trim().is_empty() {
-                        return "completed successfully".to_string();
-                    } else if stdout.len() > 50 {
-                        return format!("completed ({}+ chars output)", stdout.len());
-                    } else {
-                        return format!("completed: {}", stdout.trim());
-                    }
-                } else {
-                    return format!("failed (exit code {})", exit_code);
-                }
-            }
-            
-            // Handle other structured results
-            if let Some(status) = obj.get("status").and_then(|v| v.as_str()) {
-                return status.to_string();
-            }
-            
-            if let Some(message) = obj.get("message").and_then(|v| v.as_str()) {
-                return if message.len() > 50 {
-                    format!("{}...", &message[..47])
-                } else {
-                    message.to_string()
-                };
-            }
-            
-            // Generic object summary
-            return format!("{} fields", obj.len());
-        }
-        
-        // Handle arrays
-        if let Some(arr) = json_value.as_array() {
-            return format!("{} items", arr.len());
-        }
-        
-        // Handle simple values
-        if let Some(s) = json_value.as_str() {
-            return if s.len() > 50 {
-                format!("{}...", &s[..47])
-            } else {
-                s.to_string()
-            };
-        }
-    }
-    
-    // Fallback for non-JSON data
-    if result_data.len() > 50 {
-        format!("{}...", &result_data[..47])
-    } else {
-        result_data.to_string()
-    }
-}
-
-const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
-const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
-const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
-
-/// Render mixed content (text + code blocks) compactly
-fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
-    if let Some((old_content, new_content, language)) = detect_diff_content(content) {
-        // Render diff header
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("🔄").size(12.0));
-            ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
-            if let Some(lang) = &language {
-                ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
-            }
-            
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let copy_button = egui::Button::new("📋")
-                    .fill(app_theme.input_background())
-                    .stroke(Stroke::new(1.0, app_theme.border_color()))
-                    .rounding(CornerRadius::same(4));
-                
-                if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
-                    let diff_text = format!("--- Original\n+++ Modified\n{}", 
-                        similar::TextDiff::from_lines(&old_content, &new_content)
-                            .unified_diff()
-                            .context_radius(3)
-                            .to_string()
-                    );
-                    ui.output_mut(|o| o.copied_text = diff_text);
-                }
-            });
-        });
-        ui.add_space(2.0);
-
-        let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME; // Use the constant
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
-            Layout::top_down(Align::Min).with_cross_align(Align::Min),
-            |ui_for_diff_frame| {
-                Frame::none()
-                    .fill(app_theme.code_background())
-                    .inner_margin(Vec2::new(8.0, 6.0))
-                    .rounding(CornerRadius::same(4))
-                    .stroke(Stroke::new(0.5, app_theme.border_color()))
-                    .show(ui_for_diff_frame, |frame_content_ui| {
-                        render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
-                    });
-            }
-        );
-        return;
-    }
-    
-    let parts: Vec<&str> = content.split("```").collect();
-    for (i, part) in parts.iter().enumerate() {
-        if i % 2 == 0 {
-            if !part.is_empty() {
-                if let Some((old_content, new_content, language)) = detect_diff_content(part) {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("🔄").size(12.0));
-                        ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
-                        if let Some(lang) = &language {
-                            ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let copy_button = egui::Button::new("📋")
-                                .fill(app_theme.input_background())
-                                .stroke(Stroke::new(1.0, app_theme.border_color()))
-                                .rounding(CornerRadius::same(4));
-                            if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
-                                let diff_text = format!("--- Original\n+++ Modified\n{}", 
-                                    similar::TextDiff::from_lines(&old_content, &new_content)
-                                        .unified_diff().context_radius(3).to_string());
-                                ui.output_mut(|o| o.copied_text = diff_text);
-                            }
-                        });
-                    });
-                    ui.add_space(2.0);
-                    let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME; // Use the constant
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
-                        Layout::top_down(Align::Min).with_cross_align(Align::Min),
-                        |ui_for_diff_frame| {
-                            Frame::none()
-                                .fill(app_theme.code_background())
-                                .inner_margin(Vec2::new(8.0, 6.0))
-                                .rounding(CornerRadius::same(4))
-                                .stroke(Stroke::new(0.5, app_theme.border_color()))
-                                .show(ui_for_diff_frame, |frame_content_ui| {
-                                    render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
-                                });
-                        }
-                    );
-                } else {
-                    render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
-                }
-            }
-        } else {
-            render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
-        }
     }
 }
 
@@ -1551,6 +1334,109 @@ fn is_reasoning_engine_summary_message(text: &str) -> bool {
     text.contains("What would you like to do next?")
 }
 
+/// Constants for diff rendering
+const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
+const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
+const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
+
+/// Render mixed content (text + code blocks) compactly
+fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+    if let Some((old_content, new_content, language)) = detect_diff_content(content) {
+        // Render diff header
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("🔄").size(12.0));
+            ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
+            if let Some(lang) = &language {
+                ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+            }
+            
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let copy_button = egui::Button::new("📋")
+                    .fill(app_theme.input_background())
+                    .stroke(Stroke::new(1.0, app_theme.border_color()))
+                    .rounding(CornerRadius::same(4));
+                
+                if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
+                    let diff_text = format!("--- Original\n+++ Modified\n{}", 
+                        similar::TextDiff::from_lines(&old_content, &new_content)
+                            .unified_diff()
+                            .context_radius(3)
+                            .to_string()
+                    );
+                    ui.output_mut(|o| o.copied_text = diff_text);
+                }
+            });
+        });
+        ui.add_space(2.0);
+
+        let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME;
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
+            Layout::top_down(Align::Min).with_cross_align(Align::Min),
+            |ui_for_diff_frame| {
+                Frame::none()
+                    .fill(app_theme.code_background())
+                    .inner_margin(Vec2::new(8.0, 6.0))
+                    .rounding(CornerRadius::same(4))
+                    .stroke(Stroke::new(0.5, app_theme.border_color()))
+                    .show(ui_for_diff_frame, |frame_content_ui| {
+                        render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
+                    });
+            }
+        );
+        return;
+    }
+    
+    let parts: Vec<&str> = content.split("```").collect();
+    for (i, part) in parts.iter().enumerate() {
+        if i % 2 == 0 {
+            if !part.is_empty() {
+                if let Some((old_content, new_content, language)) = detect_diff_content(part) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("🔄").size(12.0));
+                        ui.label(RichText::new("Diff").monospace().color(app_theme.hint_text_color()).size(10.0));
+                        if let Some(lang) = &language {
+                            ui.label(RichText::new(format!("({})", lang)).monospace().color(app_theme.hint_text_color()).size(9.0));
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let copy_button = egui::Button::new("📋")
+                                .fill(app_theme.input_background())
+                                .stroke(Stroke::new(1.0, app_theme.border_color()))
+                                .rounding(CornerRadius::same(4));
+                            if ui.add(copy_button).on_hover_text("Copy diff").clicked() {
+                                let diff_text = format!("--- Original\n+++ Modified\n{}", 
+                                    similar::TextDiff::from_lines(&old_content, &new_content)
+                                        .unified_diff().context_radius(3).to_string());
+                                ui.output_mut(|o| o.copied_text = diff_text);
+                            }
+                        });
+                    });
+                    ui.add_space(2.0);
+                    let desired_min_height_for_diff_component = MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), desired_min_height_for_diff_component),
+                        Layout::top_down(Align::Min).with_cross_align(Align::Min),
+                        |ui_for_diff_frame| {
+                            Frame::none()
+                                .fill(app_theme.code_background())
+                                .inner_margin(Vec2::new(8.0, 6.0))
+                                .rounding(CornerRadius::same(4))
+                                .stroke(Stroke::new(0.5, app_theme.border_color()))
+                                .show(ui_for_diff_frame, |frame_content_ui| {
+                                    render_code_diff(frame_content_ui, &old_content, &new_content, language.as_deref(), bg_color, frame_content_ui.available_width(), app_theme);
+                                });
+                        }
+                    );
+                } else {
+                    render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
+                }
+            }
+        } else {
+            render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1712,11 +1598,6 @@ index 1234567..abcdefg 100644
         assert_ne!(MessageType::Normal, MessageType::Summary);
     }
 
-    // Define constants related to diff rendering to make them testable
-    const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
-    const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
-    const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
-
     #[test]
     fn test_diff_rendering_constants() {
         // Test the threshold for when a diff becomes collapsible
@@ -1730,6 +1611,133 @@ index 1234567..abcdefg 100644
         // Test the minimum height allocated for the frame containing a diff view
         // This is used in render_mixed_content_compact
         assert_eq!(MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME, 400.0, "Minimum allocated height for a diff component's frame should be 400.0 px.");
+    }
+
+    #[test]
+    fn test_tool_result_summary_generation() {
+        // Test different types of tool results generate appropriate summaries
+        
+        // Shell execution result
+        let shell_result = r#"{
+            "exit_code": 0,
+            "stdout": "     Created binary (application) `fibonacci_calculator` package\n",
+            "stderr": "",
+            "execution_time_ms": 156,
+            "container_image": "local",
+            "timed_out": false
+        }"#;
+        let summary = extract_tool_result_summary(shell_result);
+        assert!(summary.contains("Created") || summary.contains("fields"));
+        
+        // File search result
+        let file_result = r#"{"files": ["main.rs", "lib.rs"], "query": "fn main"}"#;
+        let summary = extract_tool_result_summary(file_result);
+        assert!(summary.contains("2 items") || summary.contains("fields"));
+        
+        // Web search result  
+        let web_result = r#"{"query": "rust fibonacci", "source_count": 5}"#;
+        let summary = extract_tool_result_summary(web_result);
+        assert!(summary.contains("2 fields") || summary.contains("rust fibonacci"));
+    }
+
+    #[test]
+    fn test_is_tool_result_message_detection() {
+        // Test that different tool result formats are properly detected
+        
+        // Standard tool result format
+        assert!(is_tool_result_message("Tool 'shell_execution' result: {\"exit_code\": 0}"));
+        
+        // JSON-only format (should also be detected)
+        assert!(is_tool_result_message("{\"exit_code\": 0, \"stdout\": \"output\"}"));
+        
+        // Large content format 
+        let large_content = "x".repeat(1000);
+        assert!(is_tool_result_message(&format!("{{\"data\": \"{}\"}}", large_content)));
+        
+        // Non-tool result messages
+        assert!(!is_tool_result_message("This is just a regular message"));
+        assert!(!is_tool_result_message("Some JSON: {\"key\": \"value\"}"));
+    }
+
+    #[test]
+    fn test_tool_call_structure() {
+        // Test that ToolCall structure works correctly
+        let tool_call = ToolCall {
+            name: "shell_execution".to_string(),
+            arguments: r#"{"command": "cargo new fibonacci_calculator"}"#.to_string(),
+            result: Some(r#"{
+                "exit_code": 0,
+                "stdout": "Created binary package",
+                "stderr": "",
+                "execution_time_ms": 150,
+                "container_image": "local",
+                "timed_out": false
+            }"#.to_string()),
+            status: MessageStatus::Complete,
+        };
+        
+        assert_eq!(tool_call.name, "shell_execution");
+        assert!(tool_call.arguments.contains("cargo new"));
+        assert!(tool_call.result.is_some());
+        assert!(matches!(tool_call.status, MessageStatus::Complete));
+        
+        // Verify the result can be parsed as JSON
+        let result_json: serde_json::Value = serde_json::from_str(tool_call.result.as_ref().unwrap()).unwrap();
+        assert_eq!(result_json["exit_code"], 0);
+        assert!(result_json["stdout"].as_str().unwrap().contains("Created"));
+    }
+
+    #[test]
+    fn test_tool_result_click_data_structure() {
+        // Test that tool result data structure is correct for different tool types
+        
+        // Shell execution result
+        let shell_result = r#"{
+            "exit_code": 0,
+            "stdout": "Created binary package",
+            "stderr": "",
+            "execution_time_ms": 156,
+            "container_image": "local",
+            "timed_out": false
+        }"#;
+        
+        // Verify JSON parsing works
+        let json_value: serde_json::Value = serde_json::from_str(shell_result).unwrap();
+        assert!(json_value.is_object());
+        assert_eq!(json_value["exit_code"], 0);
+        assert!(json_value["stdout"].as_str().unwrap().contains("Created"));
+        
+        // File search result
+        let file_result = r#"{"files": ["main.rs", "lib.rs"], "query": "fn main"}"#;
+        let json_value: serde_json::Value = serde_json::from_str(file_result).unwrap();
+        assert!(json_value.is_object());
+        assert!(json_value["files"].is_array());
+        assert_eq!(json_value["query"], "fn main");
+    }
+
+    #[test]
+    fn test_shell_execution_result_detection() {
+        // Test that shell execution results are properly identified
+        let shell_result = r#"{
+            "exit_code": 0,
+            "stdout": "Created binary package",
+            "stderr": "",
+            "execution_time_ms": 156,
+            "container_image": "local",
+            "timed_out": false
+        }"#;
+        
+        // Check detection logic used in render_tool_result_compact
+        let is_shell_result = shell_result.contains("stdout") || 
+                             shell_result.contains("stderr") ||
+                             shell_result.contains("exit_code");
+        
+        assert!(is_shell_result, "Shell execution result should be detected");
+        
+        // Test with tool name
+        let tool_name = "shell_execution";
+        let is_shell_by_name = tool_name.contains("shell") || tool_name.contains("execution");
+        assert!(is_shell_by_name, "Shell tool should be detected by name");
     }
 }
 

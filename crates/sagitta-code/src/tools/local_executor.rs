@@ -9,9 +9,12 @@ use tokio::sync::mpsc;
 use terminal_stream::events::StreamEvent;
 use chrono::{DateTime, Utc};
 use serde_json;
+use uuid;
 
 use crate::tools::shell_execution::{ShellExecutionParams, ShellExecutionResult};
 use crate::utils::errors::SagittaCodeError;
+use crate::tools::command_risk_analyzer::{CommandRiskAnalyzer, CommandRiskLevel};
+use sagitta_embed::EmbeddingConfig;
 
 /// Approval policy for command execution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +48,7 @@ pub enum CommandClass {
 #[derive(Debug, Clone)]
 pub struct LocalExecutorConfig {
     /// Base directory for spatial containment
-    pub repositories_base_path: PathBuf,
+    pub base_dir: PathBuf,
     /// Approval policy for commands
     pub approval_policy: ApprovalPolicy,
     /// Whether to allow automatic tool installation
@@ -54,18 +57,116 @@ pub struct LocalExecutorConfig {
     pub cpu_limit_seconds: Option<u64>,
     /// Memory limit in MB (optional)
     pub memory_limit_mb: Option<u64>,
+    pub execution_dir: PathBuf,
+    pub enable_approval_flow: bool,
+    pub audit_log_path: Option<PathBuf>,
+    pub max_execution_time_seconds: u64,
+    pub allowed_commands: Option<Vec<String>>,
+    pub blocked_commands: Option<Vec<String>>,
+    pub auto_approve_safe_commands: bool,
+    pub allowed_paths: Vec<PathBuf>,
+    pub shell_override: Option<String>,
+    pub env_vars: HashMap<String, String>,
+    pub timeout_seconds: u64,
 }
 
 impl Default for LocalExecutorConfig {
     fn default() -> Self {
         Self {
-            repositories_base_path: std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from(".")),
+            base_dir: PathBuf::from("."),
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
             memory_limit_mb: None,
+            execution_dir: PathBuf::from("."),
+            enable_approval_flow: true,
+            audit_log_path: None,
+            max_execution_time_seconds: 300,
+            allowed_commands: None,
+            blocked_commands: None,
+            auto_approve_safe_commands: true,
+            allowed_paths: vec![],
+            shell_override: None,
+            env_vars: HashMap::new(),
+            timeout_seconds: 300,
         }
+    }
+}
+
+impl LocalExecutorConfig {
+    /// Set embedding config for command risk analysis (separate method since it can't be serialized)
+    pub fn with_embedding_config(mut self, config: sagitta_embed::EmbeddingConfig) -> (Self, sagitta_embed::EmbeddingConfig) {
+        (self, config)
+    }
+
+    /// Resolve a path relative to the base directory and check if it's allowed
+    pub fn resolve_and_check(&self, path: &Path) -> Result<PathBuf, SagittaCodeError> {
+        let target_path = if path.is_absolute() {
+            // For absolute paths, use as-is
+            path.to_path_buf()
+        } else {
+            // For relative paths, join with the repositories base path
+            self.base_dir.join(path)
+        };
+
+        // Try to canonicalize the path if it exists, otherwise use the path as-is
+        let canonical_path = if target_path.exists() {
+            target_path.canonicalize()
+                .map_err(|e| SagittaCodeError::ToolError(
+                    format!("Failed to canonicalize path '{}': {}", target_path.display(), e)
+                ))?
+        } else {
+            // For non-existent paths, we still need to validate they would be within bounds
+            // Use the non-canonical path for validation
+            target_path.clone()
+        };
+
+        // Ensure the path is within our base directory for spatial containment
+        // For non-canonical paths, we need to check if the path would resolve within bounds
+        let base_canonical = self.base_dir.canonicalize()
+            .map_err(|e| SagittaCodeError::ToolError(
+                format!("Failed to canonicalize base path '{}': {}", 
+                    self.base_dir.display(), e)
+            ))?;
+
+        // Check if the path is within the base directory
+        let is_within_base = if canonical_path.exists() {
+            // For existing paths, use the canonical form
+            canonical_path.starts_with(&base_canonical)
+        } else {
+            // For non-existing paths, check if the target path starts with base
+            // This handles cases where intermediate directories don't exist yet
+            target_path.starts_with(&self.base_dir) ||
+            // Also try with canonical base in case of symlinks in base path
+            target_path.starts_with(&base_canonical)
+        };
+
+        if !is_within_base {
+            return Err(SagittaCodeError::ToolError(
+                format!(
+                    "Path '{}' is outside the allowed base directory '{}'. All operations must stay within the repository base path for security.",
+                    canonical_path.display(),
+                    self.base_dir.display()
+                )
+            ));
+        }
+
+        // Forbid certain system-critical directories
+        let forbidden_paths = [
+            "/", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc", 
+            "/boot", "/root", "/proc", "/sys", "/dev"
+        ];
+        
+        let path_str = canonical_path.to_string_lossy();
+        for forbidden in &forbidden_paths {
+            if path_str == *forbidden || path_str.starts_with(&format!("{}/", forbidden)) {
+                return Err(SagittaCodeError::ToolError(
+                    format!("Execution in system directory '{}' is forbidden for security reasons", path_str)
+                ));
+            }
+        }
+
+        Ok(canonical_path)
     }
 }
 
@@ -113,92 +214,36 @@ pub trait CommandExecutor: Send + Sync {
 #[derive(Debug)]
 pub struct LocalExecutor {
     config: LocalExecutorConfig,
+    risk_analyzer: Option<CommandRiskAnalyzer>,
 }
 
 impl LocalExecutor {
-    /// Create a new local executor with the given config
     pub fn new(config: LocalExecutorConfig) -> Self {
-        Self { config }
+        Self::new_with_embedding_config(config, None)
     }
 
-    /// Create a local executor with default config
-    pub fn with_default_config() -> Self {
-        Self::new(LocalExecutorConfig::default())
+    pub fn new_with_embedding_config(config: LocalExecutorConfig, embedding_config: Option<sagitta_embed::EmbeddingConfig>) -> Self {
+        let risk_analyzer = if config.auto_approve_safe_commands {
+            match CommandRiskAnalyzer::new(embedding_config) {
+                Ok(analyzer) => Some(analyzer),
+                Err(e) => {
+                    log::warn!("Failed to initialize command risk analyzer: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Self {
+            config,
+            risk_analyzer,
+        }
     }
 
     /// Get a reference to the executor configuration (for testing)
     pub fn config(&self) -> &LocalExecutorConfig {
         &self.config
-    }
-
-    /// Resolve and validate a working directory path
-    pub fn resolve_and_check(&self, path: &Path) -> Result<PathBuf, SagittaCodeError> {
-        let target_path = if path.is_absolute() {
-            // For absolute paths, use as-is
-            path.to_path_buf()
-        } else {
-            // For relative paths, join with the repositories base path
-            self.config.repositories_base_path.join(path)
-        };
-
-        // Try to canonicalize the path if it exists, otherwise use the path as-is
-        let canonical_path = if target_path.exists() {
-            target_path.canonicalize()
-                .map_err(|e| SagittaCodeError::ToolError(
-                    format!("Failed to canonicalize path '{}': {}", target_path.display(), e)
-                ))?
-        } else {
-            // For non-existent paths, we still need to validate they would be within bounds
-            // Use the non-canonical path for validation
-            target_path.clone()
-        };
-
-        // Ensure the path is within our base directory for spatial containment
-        // For non-canonical paths, we need to check if the path would resolve within bounds
-        let base_canonical = self.config.repositories_base_path.canonicalize()
-            .map_err(|e| SagittaCodeError::ToolError(
-                format!("Failed to canonicalize base path '{}': {}", 
-                    self.config.repositories_base_path.display(), e)
-            ))?;
-
-        // Check if the path is within the base directory
-        let is_within_base = if canonical_path.exists() {
-            // For existing paths, use the canonical form
-            canonical_path.starts_with(&base_canonical)
-        } else {
-            // For non-existing paths, check if the target path starts with base
-            // This handles cases where intermediate directories don't exist yet
-            target_path.starts_with(&self.config.repositories_base_path) ||
-            // Also try with canonical base in case of symlinks in base path
-            target_path.starts_with(&base_canonical)
-        };
-
-        if !is_within_base {
-            return Err(SagittaCodeError::ToolError(
-                format!(
-                    "Path '{}' is outside the allowed base directory '{}'. All operations must stay within the repository base path for security.",
-                    canonical_path.display(),
-                    self.config.repositories_base_path.display()
-                )
-            ));
-        }
-
-        // Forbid certain system-critical directories
-        let forbidden_paths = [
-            "/", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc", 
-            "/boot", "/root", "/proc", "/sys", "/dev"
-        ];
-        
-        let path_str = canonical_path.to_string_lossy();
-        for forbidden in &forbidden_paths {
-            if path_str == *forbidden || path_str.starts_with(&format!("{}/", forbidden)) {
-                return Err(SagittaCodeError::ToolError(
-                    format!("Execution in system directory '{}' is forbidden for security reasons", path_str)
-                ));
-            }
-        }
-
-        Ok(canonical_path)
     }
 
     /// Classify a command based on its safety
@@ -265,6 +310,24 @@ impl LocalExecutor {
 
     /// Check if a tool is available and provide installation advice if not
     pub async fn check_tool_availability(&self, tool_name: &str) -> Result<bool, MissingToolAdvice> {
+        // Fast-path: treat common shell built-ins as always available. These commands are
+        // provided by the user's interactive shell and therefore do not live on the
+        // filesystem, so utilities like `which`/`where` will fail to locate them even
+        // though they are perfectly usable when the command string is executed via
+        // the system shell (e.g. `sh -c "cd /tmp && ls"`).
+        // Keeping this list small and focused helps avoid false-positives while still
+        // eliminating the noisy "Required tool is missing" messages for ubiquitous
+        // built-ins such as `cd`.
+        const SHELL_BUILTINS: &[&str] = &[
+            "cd", "alias", "echo", "printf", "pwd", "set", "unset", "export", "time", "history",
+            "true", "false", "test", "trap", "exit", "shift", "read", "getopts", "times", "ulimit",
+            "umask",
+        ];
+
+        if SHELL_BUILTINS.contains(&tool_name) {
+            return Ok(true);
+        }
+
         // Try to find the tool using 'which' (Unix) or 'where' (Windows)
         let check_cmd = if cfg!(windows) { "where" } else { "which" };
         
@@ -395,7 +458,7 @@ impl LocalExecutor {
 
     /// Write an audit log entry
     async fn write_audit_log(&self, entry: &AuditLogEntry) -> Result<(), SagittaCodeError> {
-        let audit_file = self.config.repositories_base_path.join(".sagitta_audit.log");
+        let audit_file = self.config.base_dir.join(".sagitta_audit.log");
         
         let json_line = serde_json::to_string(entry)
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to serialize audit entry: {}", e)))?;
@@ -498,9 +561,9 @@ impl CommandExecutor for LocalExecutor {
         
         // Resolve and validate working directory
         let working_dir = if let Some(ref wd) = params.working_directory {
-            self.resolve_and_check(wd)?
+            self.config.resolve_and_check(wd)?
         } else {
-            self.config.repositories_base_path.clone()
+            self.config.base_dir.clone()
         };
         
         // Create the command
@@ -575,7 +638,14 @@ impl CommandExecutor for LocalExecutor {
                             stderr_output.push_str(&line);
                             stderr_output.push('\n');
                             
-                            let stderr_event = StreamEvent::Stderr { content: line };
+                            // Improved stderr classification - not all stderr is errors
+                            let is_actual_error = classify_stderr_as_error(&line);
+                            let stderr_event = if is_actual_error {
+                                StreamEvent::Stderr { content: line }
+                            } else {
+                                // Treat as informational output (e.g., cargo/npm progress messages)
+                                StreamEvent::Stdout { content: line }
+                            };
                             if let Err(_) = event_sender.send(stderr_event).await {
                                 log::warn!("Failed to send stderr event");
                             }
@@ -643,6 +713,48 @@ impl CommandExecutor for LocalExecutor {
     }
 }
 
+/// Classify stderr output to determine if it's actually an error or just informational
+fn classify_stderr_as_error(line: &str) -> bool {
+    let line_lower = line.to_lowercase();
+    
+    // Known non-error patterns that appear on stderr
+    let info_patterns = vec![
+        "creating binary", "creating library", "package",
+        "compiling", "downloading", "updating", "installed",
+        "note:", "help:", "see more", "documentation",
+        "warning:", "info:", "building", "finished",
+        "running", "test result:", "doc-tests",
+        "generated", "copied", "moved", "completed",
+        "progress:", "status:", "installing", "configured"
+    ];
+    
+    // Check if this looks like an informational message
+    for pattern in &info_patterns {
+        if line_lower.contains(pattern) {
+            return false; // Not an error, just informational
+        }
+    }
+    
+    // Actual error patterns
+    let error_patterns = vec![
+        "error:", "failed", "panic", "abort", "fatal",
+        "exception", "segmentation fault", "access denied",
+        "permission denied", "cannot", "unable to", "not found",
+        "syntax error", "parse error", "compilation error"
+    ];
+    
+    // Check if this looks like an actual error
+    for pattern in &error_patterns {
+        if line_lower.contains(pattern) {
+            return true; // This is likely an actual error
+        }
+    }
+    
+    // Default: if we're not sure, treat as non-error
+    // This reduces false positives for build tools that use stderr for progress
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,11 +763,22 @@ mod tests {
     fn create_test_config() -> (LocalExecutorConfig, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let config = LocalExecutorConfig {
-            repositories_base_path: temp_dir.path().to_path_buf(),
+            base_dir: temp_dir.path().to_path_buf(),
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
             memory_limit_mb: None,
+            execution_dir: temp_dir.path().to_path_buf(),
+            enable_approval_flow: true,
+            audit_log_path: None,
+            max_execution_time_seconds: 300,
+            allowed_commands: None,
+            blocked_commands: None,
+            auto_approve_safe_commands: true,
+            allowed_paths: vec![],
+            shell_override: None,
+            env_vars: HashMap::new(),
+            timeout_seconds: 300,
         };
         (config, temp_dir)
     }
@@ -689,7 +812,7 @@ mod tests {
         // Test valid path within base
         let valid_path = temp_dir.path().join("subdir");
         std::fs::create_dir_all(&valid_path).unwrap();
-        assert!(executor.resolve_and_check(&valid_path).is_ok());
+        assert!(executor.config().resolve_and_check(&valid_path).is_ok());
         
         // Test invalid path outside base (this will fail because we can't create paths outside temp_dir easily in test)
         // We'll test the error condition in integration tests
@@ -703,38 +826,38 @@ mod tests {
         // Test 1: Valid existing absolute path within base
         let valid_absolute = temp_dir.path().join("existing_subdir");
         std::fs::create_dir_all(&valid_absolute).unwrap();
-        let result = executor.resolve_and_check(&valid_absolute);
+        let result = executor.config().resolve_and_check(&valid_absolute);
         assert!(result.is_ok(), "Valid absolute path should be accepted: {:?}", result);
         
         // Test 2: Valid relative path within base (existing)
         let valid_relative_existing = Path::new("existing_subdir");
-        let result = executor.resolve_and_check(valid_relative_existing);
+        let result = executor.config().resolve_and_check(valid_relative_existing);
         assert!(result.is_ok(), "Valid relative path to existing dir should be accepted: {:?}", result);
         
         // Test 3: Valid relative path within base (non-existing)
         let valid_relative_nonexisting = Path::new("nonexisting_subdir");
-        let result = executor.resolve_and_check(valid_relative_nonexisting);
+        let result = executor.config().resolve_and_check(valid_relative_nonexisting);
         assert!(result.is_ok(), "Valid relative path to non-existing dir should be accepted: {:?}", result);
         
         // Test 4: Relative path with traversal that stays within base
         let safe_traversal = Path::new("existing_subdir/../other_dir");
-        let result = executor.resolve_and_check(safe_traversal);
+        let result = executor.config().resolve_and_check(safe_traversal);
         assert!(result.is_ok(), "Safe path traversal within base should be accepted: {:?}", result);
         
         // Test 5: Relative path with traversal that escapes base (should fail)
         let escape_attempt = Path::new("../../../etc");
-        let result = executor.resolve_and_check(escape_attempt);
+        let result = executor.config().resolve_and_check(escape_attempt);
         assert!(result.is_err(), "Path traversal escaping base should be rejected");
         
         // Test 6: Absolute path to system directory (should fail)
         let system_path = Path::new("/etc");
-        let result = executor.resolve_and_check(system_path);
+        let result = executor.config().resolve_and_check(system_path);
         assert!(result.is_err(), "System directory access should be rejected");
         
         // Test 7: Relative path to forbidden directory name (should fail if it resolves to system dir)
         // This test might not fail in temp dir context, but we test the logic
         let forbidden_relative = Path::new("etc");
-        let result = executor.resolve_and_check(forbidden_relative);
+        let result = executor.config().resolve_and_check(forbidden_relative);
         // This should succeed in temp dir context since it's temp_dir/etc, not /etc
         assert!(result.is_ok(), "Relative path to 'etc' within base should be ok in temp context");
     }
@@ -746,22 +869,22 @@ mod tests {
         
         // Test empty relative path (should resolve to base)
         let empty_path = Path::new("");
-        let result = executor.resolve_and_check(empty_path);
+        let result = executor.config().resolve_and_check(empty_path);
         assert!(result.is_ok(), "Empty path should resolve to base directory");
         
         // Test current directory reference
         let current_dir = Path::new(".");
-        let result = executor.resolve_and_check(current_dir);
+        let result = executor.config().resolve_and_check(current_dir);
         assert!(result.is_ok(), "Current directory reference should be valid");
         
         // Test nested relative path
         let nested_path = Path::new("level1/level2/level3");
-        let result = executor.resolve_and_check(nested_path);
+        let result = executor.config().resolve_and_check(nested_path);
         assert!(result.is_ok(), "Nested relative path should be valid");
         
         // Test path with multiple traversals that end up in base
         let complex_traversal = Path::new("subdir/../subdir2/../final");
-        let result = executor.resolve_and_check(complex_traversal);
+        let result = executor.config().resolve_and_check(complex_traversal);
         assert!(result.is_ok(), "Complex traversal ending in base should be valid");
     }
 
@@ -806,5 +929,15 @@ mod tests {
         let stdout_trimmed = result.stdout.trim();
         assert!(stdout_trimmed.contains("hello"), 
                "Expected stdout to contain 'hello', but got: '{}'", result.stdout);
+    }
+
+    #[tokio::test]
+    async fn test_builtin_tool_availability() {
+        let (config, _temp_dir) = create_test_config();
+        let executor = LocalExecutor::new(config);
+
+        // `cd` is a POSIX shell builtin – availability check should treat it as present.
+        let ok = executor.check_tool_availability("cd").await;
+        assert!(ok.is_ok() && ok.unwrap(), "Shell built-in 'cd' should be treated as available");
     }
 } 

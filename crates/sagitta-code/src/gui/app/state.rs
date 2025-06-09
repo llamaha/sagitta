@@ -254,10 +254,10 @@ impl AppState {
                 let _ = self.terminal_widget.add_event(&event);
             }
             
-            // Auto-open terminal panel when first events arrive
-            if received_any_event && !self.show_terminal {
-                log::info!("Auto-opening terminal panel due to incoming events");
-                self.show_terminal = true;
+            // Terminal is now only opened when user clicks the preview link
+            // This prevents unwanted terminal popups during tool execution
+            if received_any_event {
+                log::debug!("Processed terminal events (terminal will open only when user clicks preview)");
             }
         }
     }
@@ -622,46 +622,22 @@ mod tests {
     }
 
     #[test]
-    fn test_process_terminal_events_auto_opens_panel() {
+    fn test_process_terminal_events_no_auto_open() {
         let mut state = AppState::new();
         
-        // Initially terminal should be closed
+        // Initially terminal should be hidden
         assert!(!state.show_terminal);
         
-        // Get the sender to simulate incoming events
-        let sender = state.get_terminal_event_sender().unwrap();
+        // Send a terminal event
+        if let Some(sender) = state.terminal_event_sender.clone() {
+            let _ = sender.try_send(StreamEvent::stdout(None, "test output".to_string()));
+        }
         
-        // Send a test event
-        let test_event = terminal_stream::events::StreamEvent::stdout(None, "Test output".to_string());
-        sender.try_send(test_event).unwrap();
-        
-        // Process events - should auto-open terminal
+        // Process events - should NOT auto-open terminal anymore
         state.process_terminal_events();
         
-        // Terminal should now be visible
-        assert!(state.show_terminal);
-    }
-
-    #[test]
-    fn test_process_terminal_events_no_auto_open_when_already_open() {
-        let mut state = AppState::new();
-        state.show_terminal = true; // Terminal already open
-        
-        // Mock terminal events
-        if let Some(mut receiver) = state.terminal_event_receiver.take() {
-            // Simulate events in the receiver
-            let (sender, new_receiver) = mpsc::channel(1000);
-            state.terminal_event_receiver = Some(new_receiver);
-            
-            // Send a test event using the correct StreamEvent structure
-            let _ = sender.try_send(StreamEvent::stdout(None, "test output".to_string()));
-            drop(sender);
-            
-            state.process_terminal_events();
-            
-            // Terminal should remain open (no change)
-            assert!(state.show_terminal);
-        }
+        // Terminal should remain hidden (only opens when user clicks preview)
+        assert!(!state.show_terminal);
     }
 
     #[test]

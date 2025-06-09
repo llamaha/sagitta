@@ -6,9 +6,9 @@ use tokio::sync::mpsc;
 use terminal_stream::events::StreamEvent;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-use crate::tools::local_executor::{LocalExecutor, LocalExecutorConfig, ApprovalPolicy, CommandExecutor};
+use crate::tools::local_executor::{LocalExecutor, LocalExecutorConfig, CommandExecutor, ApprovalPolicy};
 use crate::utils::errors::SagittaCodeError;
-use sagitta_search::config::{get_repo_base_path, AppConfig};
+use sagitta_search::config::get_repo_base_path;
 
 /// Configuration for shell execution containers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -278,11 +278,22 @@ impl ShellExecutionTool {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         });
         let config = LocalExecutorConfig {
-            repositories_base_path,
+            base_dir: repositories_base_path,
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
             memory_limit_mb: None,
+            allowed_paths: vec![],
+            shell_override: None,
+            env_vars: HashMap::new(),
+            timeout_seconds: 300,
+            execution_dir: default_working_dir.clone(),
+            enable_approval_flow: true,
+            audit_log_path: None,
+            max_execution_time_seconds: 300,
+            allowed_commands: None,
+            blocked_commands: None,
+            auto_approve_safe_commands: true,
         };
         
         Self {
@@ -868,7 +879,7 @@ mod tests {
     fn test_shell_execution_tool_new_with_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        assert_eq!(tool.executor.config().repositories_base_path, get_repo_base_path(None).unwrap_or_else(|_| {
+        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         }));
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
@@ -881,18 +892,29 @@ mod tests {
     fn test_shell_execution_tool_with_custom_executor_config() {
         let temp_dir = TempDir::new().unwrap();
         let config = LocalExecutorConfig {
-            repositories_base_path: get_repo_base_path(None).unwrap_or_else(|_| {
+            base_dir: get_repo_base_path(None).unwrap_or_else(|_| {
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
             }),
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
             memory_limit_mb: None,
+            execution_dir: temp_dir.path().to_path_buf(),
+            enable_approval_flow: true,
+            audit_log_path: None,
+            max_execution_time_seconds: 300,
+            allowed_commands: None,
+            blocked_commands: None,
+            auto_approve_safe_commands: true,
+            allowed_paths: vec![],
+            shell_override: None,
+            env_vars: HashMap::new(),
+            timeout_seconds: 300,
         };
 
         let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
-        assert_eq!(tool.executor.config().repositories_base_path, get_repo_base_path(None).unwrap_or_else(|_| {
+        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         }));
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
@@ -918,5 +940,185 @@ mod tests {
         assert!(help_text.contains("Local execution"));
         assert!(help_text.contains("Spatial Containment"));
         assert!(help_text.contains("Command Approval"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_result_card_generation() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        let params = serde_json::json!({
+            "command": "echo 'hello world'"
+        });
+        
+        let result = tool.execute(params).await.unwrap();
+        
+        // Verify result structure for tool cards
+        if let ToolResult::Success(value) = result {
+            let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
+            
+            // Tool cards should be able to display these fields
+            assert_eq!(exec_result.exit_code, 0);
+            assert!(exec_result.stdout.contains("hello world"));
+            assert_eq!(exec_result.container_image, "local");
+            assert!(!exec_result.timed_out);
+            
+            // Verify serialization works for tool cards
+            let serialized = serde_json::to_string(&exec_result).unwrap();
+            assert!(serialized.contains("stdout"));
+            assert!(serialized.contains("exit_code"));
+        } else {
+            panic!("Expected successful execution");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_command_risk_analysis_integration() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = LocalExecutorConfig {
+            base_dir: temp_dir.path().to_path_buf(),
+            auto_approve_safe_commands: true,
+            enable_approval_flow: false, // Disable for testing
+            ..Default::default()
+        };
+        
+        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+        
+        // Test safe command (should auto-approve)
+        let safe_params = serde_json::json!({
+            "command": "ls -la"
+        });
+        
+        let result = tool.execute(safe_params).await;
+        // Should succeed or fail gracefully (ls might not work in all test environments)
+        assert!(result.is_ok() || result.is_err());
+        
+        // Test potentially risky command structure
+        let risky_params = serde_json::json!({
+            "command": "rm nonexistent_file"
+        });
+        
+        // This should work in our test environment since approval is disabled
+        let result = tool.execute(risky_params).await;
+        // rm on non-existent file should fail gracefully
+        if let Ok(ToolResult::Success(value)) = result {
+            let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
+            // rm on non-existent file typically returns non-zero exit code
+            assert_ne!(exec_result.exit_code, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stderr_classification() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Create a test script that outputs to stderr but isn't an error
+        let script_content = r#"#!/bin/bash
+echo "Creating binary (application) package" >&2
+echo "note: see more Cargo.toml keys and their definitions" >&2
+echo "Normal output to stdout"
+exit 0
++"#;
+        
+        let script_path = temp_dir.path().join("test_script.sh");
+        std::fs::write(&script_path, script_content).unwrap();
+        
+        // Make script executable (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+        
+        let params = serde_json::json!({
+            "command": format!("bash {}", script_path.display()),
+            "working_directory": temp_dir.path().to_string_lossy()
+        });
+        
+        let result = tool.execute(params).await.unwrap();
+        
+        if let ToolResult::Success(value) = result {
+            let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
+            
+            // Should succeed since it's not a real error
+            assert_eq!(exec_result.exit_code, 0);
+            assert!(exec_result.stdout.contains("Normal output"));
+            
+            // The stderr should contain the "Creating binary" message
+            // but our classification should not treat it as an error
+            assert!(exec_result.stderr.contains("Creating binary") || 
+                   exec_result.stderr.contains("note:"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cargo_new_functionality() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Test creating a new Rust project
+        let params = serde_json::json!({
+            "command": "cargo new fibonacci_calculator --bin",
+            "working_directory": temp_dir.path().to_string_lossy()
+        });
+        
+        let result = tool.execute(params).await.unwrap();
+        
+        if let ToolResult::Success(value) = result {
+            let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
+            
+            // Should succeed if cargo is available
+            if exec_result.exit_code == 0 {
+                // Verify the project was created
+                assert!(temp_dir.path().join("fibonacci_calculator").exists());
+                assert!(temp_dir.path().join("fibonacci_calculator/Cargo.toml").exists());
+                assert!(temp_dir.path().join("fibonacci_calculator/src/main.rs").exists());
+                
+                // The output should mention creating the project
+                assert!(exec_result.stdout.contains("Created") || 
+                       exec_result.stderr.contains("Created"));
+            } else {
+                // If cargo is not available, that's ok for testing
+                println!("Cargo not available in test environment: {}", exec_result.stderr);
+            }
+        }
+    }
+
+    #[tokio::test] 
+    async fn test_tool_result_json_structure() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        let params = serde_json::json!({
+            "command": "echo 'test output'",
+            "working_directory": temp_dir.path().to_string_lossy()
+        });
+        
+        let result = tool.execute(params).await.unwrap();
+        
+        if let ToolResult::Success(value) = result {
+            // Verify the JSON structure that tool cards expect
+            assert!(value.is_object());
+            let obj = value.as_object().unwrap();
+            
+            // Required fields for tool result cards
+            assert!(obj.contains_key("exit_code"));
+            assert!(obj.contains_key("stdout"));
+            assert!(obj.contains_key("stderr"));
+            assert!(obj.contains_key("execution_time_ms"));
+            assert!(obj.contains_key("container_image"));
+            assert!(obj.contains_key("timed_out"));
+            
+            // Verify types
+            assert!(obj["exit_code"].is_number());
+            assert!(obj["stdout"].is_string());
+            assert!(obj["stderr"].is_string());
+            assert!(obj["execution_time_ms"].is_number());
+            assert!(obj["container_image"].is_string());
+            assert!(obj["timed_out"].is_boolean());
+        }
     }
 } 

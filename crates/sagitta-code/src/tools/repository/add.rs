@@ -88,7 +88,7 @@ impl Tool for AddRepositoryTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "add_repository".to_string(),
-            description: "Add a new repository to the management system. Can add either a remote Git repository by URL or a local repository by path.".to_string(),
+            description: "Add an EXISTING repository to the management system for code analysis and search. This tool does NOT create new projects - it registers existing Git repositories or local directories containing code. Use this when you need to analyze code in a repository that already exists either locally or remotely. You must provide either 'url' (for remote Git repos) OR 'local_path' (for local directories), never both.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
             parameters: serde_json::json!({
@@ -96,19 +96,19 @@ impl Tool for AddRepositoryTool {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Unique name for the repository"
+                        "description": "Unique name for the repository in the system (will be used for future references)"
                     },
                     "url": {
                         "type": "string",
-                        "description": "Git URL for remote repository (HTTPS or SSH)"
+                        "description": "Git URL for remote repository (HTTPS or SSH format, e.g., 'https://github.com/user/repo.git'). Use this for repositories on GitHub, GitLab, etc."
                     },
                     "branch": {
                         "type": "string",
-                        "description": "Optional branch to checkout (defaults to main/master)"
+                        "description": "Optional branch to checkout (defaults to main/master). Only used with 'url' parameter."
                     },
                     "local_path": {
                         "type": "string",
-                        "description": "Path to existing local repository (alternative to URL)"
+                        "description": "Absolute path to an existing local directory containing code (e.g., '/home/user/projects/myproject'). Use this for repositories that already exist on the local filesystem."
                     }
                 },
                 "required": ["name"],
@@ -178,7 +178,7 @@ mod tests {
         let definition = tool.definition();
         
         assert_eq!(definition.name, "add_repository");
-        assert!(definition.description.contains("Add a new repository"));
+        assert!(definition.description.contains("Add an EXISTING repository"));
         assert_eq!(definition.category, ToolCategory::Repository);
         assert!(!definition.is_required);
         

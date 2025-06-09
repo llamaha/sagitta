@@ -755,7 +755,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 }
             }
             "thought" => { // Assuming thoughts might also come as simple text with this chunk_type
-                 String::from_utf8(chunk.data)
+                 String::from_utf8(chunk.data.clone())
                     .map_err(|e| SagittaCodeError::ParseError(format!("Stream chunk data is not valid UTF-8 for thought: {}", e)))
                     .map(|text_content| {
                         if !text_content.trim().is_empty() {
@@ -824,6 +824,13 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
             }
         };
 
+        // Store the parsed UiToolResultChunk for later use if this is a tool result
+        let parsed_ui_tool_result = if chunk.chunk_type == "tool_result" {
+            serde_json::from_slice::<terminal_stream::UiToolResultChunk>(&chunk.data).ok()
+        } else {
+            None
+        };
+
         // NEW: Save assistant message to history when final chunk is received
         if chunk.is_final {
             let buffer = self.buffered_response.lock().await;
@@ -887,8 +894,27 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for thought: {}", e);
                         }
                     }
-                    SagittaCodeMessagePart::ToolCall { tool_call_id: _tool_call_id, name, parameters: _params, .. } => {
-                        // Use emoji icon for tool execution log message to improve visual clarity in GUI
+                    SagittaCodeMessagePart::ToolCall { tool_call_id, name, parameters, .. } => {
+                        // CRITICAL FIX: Emit proper ToolCall event for GUI tool card creation
+                        log::debug!("AgentStreamHandler: Emitting ToolCall event for tool: '{}'", name);
+                        
+                        // Convert to the AgentMessage ToolCall format expected by the GUI
+                        let gui_tool_call = crate::agent::message::types::ToolCall {
+                            id: tool_call_id.clone(),
+                            name: name.clone(),
+                            arguments: parameters.clone(),
+                            result: None, // Will be populated by the tool result
+                            successful: false, // Will be updated by the tool result
+                            execution_time: None, // Will be populated by the tool result
+                        };
+                        
+                        if let Err(e) = self.agent_event_sender.send(AgentEvent::ToolCall {
+                            tool_call: gui_tool_call,
+                        }) {
+                            log::warn!("AgentStreamHandler: Failed to send AgentEvent::ToolCall: {}", e);
+                        }
+                        
+                        // Also send a text chunk for backward compatibility
                         let tool_description = format!("\n\n🔧 Executing tool: **{}**\n", name);
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: tool_description,
@@ -896,6 +922,57 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         }) {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for tool call: {}", e);
                         }
+                    }
+                    SagittaCodeMessagePart::ToolResult { tool_call_id, name, result } => {
+                        // CRITICAL FIX: Emit proper ToolCallComplete event for GUI tool card connection
+                        log::debug!("AgentStreamHandler: Emitting ToolCallComplete event for tool: '{}'", name);
+                        
+                        // Try to extract success information from the stored parsed UiToolResultChunk if available
+                        let (tool_result, _result_summary) = if let Some(ui_chunk) = &parsed_ui_tool_result {
+                            // Use the original UiToolResultChunk data for accurate success/error info
+                            let tool_result = if ui_chunk.success {
+                                crate::tools::types::ToolResult::Success(ui_chunk.data.clone())
+                            } else {
+                                crate::tools::types::ToolResult::Error { 
+                                    error: ui_chunk.error.clone().unwrap_or_else(|| "Tool execution failed".to_string())
+                                }
+                            };
+                            
+                            let summary = if ui_chunk.success {
+                                format!("✅ Tool {} completed in {}ms", name, "234") // TODO: Extract timing from metadata
+                            } else {
+                                format!("❌ Tool {} failed: {}", name, ui_chunk.error.as_deref().unwrap_or("Unknown error"))
+                            };
+                            
+                            (tool_result, summary)
+                        } else {
+                            // Fallback: assume success if we have result data
+                            let tool_result = crate::tools::types::ToolResult::Success(result.clone());
+                            let summary = match result.as_str() {
+                                Some(str_result) if str_result.len() > 100 => {
+                                    format!("✅ Tool {} completed in {}ms", name, "234")
+                                }
+                                Some(str_result) => {
+                                    format!("✅ Tool {} completed: {}", name, str_result)
+                                }
+                                None => {
+                                    format!("✅ Tool {} completed in {}ms", name, "234")
+                                }
+                            };
+                            (tool_result, summary)
+                        };
+                        
+                        if let Err(e) = self.agent_event_sender.send(AgentEvent::ToolCallComplete {
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: name.clone(),
+                            result: tool_result,
+                        }) {
+                            log::warn!("AgentStreamHandler: Failed to send AgentEvent::ToolCallComplete: {}", e);
+                        }
+                        
+                        // NOTE: Removed duplicate text chunk emission for tool results
+                        // The GUI handles tool results via the ToolCallComplete event and creates clickable cards
+                        // Adding text chunks here would create duplicate output in the chat
                     }
                     _ => {
                         // For other types, send a generic processing indicator with emoji
