@@ -29,4 +29,5 @@ repo-collection/
 
 onnx/
 
-query_benchmark/benchmark_results.md
+# File that is created when tests run
+test_file.rs
