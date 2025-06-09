@@ -17,7 +17,7 @@ Installation is currently a manual process, with future improvements to the inst
 
 1. **Clone and build**:
    ```bash
-   git clone https://gitlab.com/amulvany/sagitta-search.git
+   git clone https://gitlab.com/amulvany/sagitta.git
    cd sagitta-search/crates/sagitta-code
    # Build with Cuda
    cargo build --release --all --features cuda
