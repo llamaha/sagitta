@@ -197,6 +197,24 @@ impl TitleGenerator {
             "API Development".to_string()
         } else if content_lower.contains("debug") || content_lower.contains("fix") {
             "Debugging Assistance".to_string()
+        } else if content_lower.contains("dog") || content_lower.contains("pet") || content_lower.contains("cat") {
+            if content_lower.contains("name") {
+                "Pet Naming Advice".to_string()
+            } else {
+                "Pet Care Discussion".to_string()
+            }
+        } else if content_lower.contains("recipe") || content_lower.contains("cooking") || content_lower.contains("food") {
+            "Cooking & Recipe Help".to_string()
+        } else if content_lower.contains("travel") || content_lower.contains("vacation") {
+            "Travel Planning".to_string()
+        } else if content_lower.contains("book") || content_lower.contains("reading") {
+            "Book Recommendations".to_string()
+        } else if content_lower.contains("movie") || content_lower.contains("film") {
+            "Movie Discussion".to_string()
+        } else if content_lower.contains("music") || content_lower.contains("song") {
+            "Music Discussion".to_string()
+        } else if content_lower.contains("health") || content_lower.contains("exercise") || content_lower.contains("fitness") {
+            "Health & Fitness".to_string()
         } else if content_lower.contains("how") && content_lower.contains("?") {
             // Extract the "how to" part
             if let Some(start) = content_lower.find("how") {
@@ -204,15 +222,36 @@ impl TitleGenerator {
                 let words: Vec<&str> = question_part.split_whitespace().take(4).collect();
                 format!("{}", words.join(" "))
             } else {
-                "Programming Question".to_string()
+                "How-To Question".to_string()
             }
+        } else if content_lower.contains("what") && content_lower.contains("?") {
+            "General Question".to_string()
+        } else if content_lower.contains("why") && content_lower.contains("?") {
+            "Explanation Request".to_string()
+        } else if content_lower.contains("where") && content_lower.contains("?") {
+            "Location Question".to_string()
+        } else if content_lower.contains("when") && content_lower.contains("?") {
+            "Timing Question".to_string()
         } else {
-            // Use first few words of the message
+            // Use first few words of the message, but make it more title-like
             let words: Vec<&str> = first_user_message.split_whitespace().take(4).collect();
             if words.is_empty() {
                 return Ok(self.generate_fallback_title());
             }
-            words.join(" ")
+            let raw_title = words.join(" ");
+            
+            // If it ends with a question mark, make it more title-like
+            if raw_title.ends_with("?") {
+                if raw_title.to_lowercase().starts_with("what") {
+                    "General Question".to_string()
+                } else if raw_title.to_lowercase().starts_with("how") {
+                    "How-To Question".to_string()
+                } else {
+                    "Question & Answer".to_string()
+                }
+            } else {
+                raw_title
+            }
         };
         
         Ok(self.truncate_title(title))

@@ -87,6 +87,9 @@ pub struct ConversationManagerImpl {
     
     /// Whether to auto-save changes
     auto_save: bool,
+    
+    /// Track conversations currently being processed for title generation to prevent recursion
+    title_generation_in_progress: Arc<RwLock<std::collections::HashSet<Uuid>>>,
 }
 
 /// Statistics about conversations
@@ -130,6 +133,7 @@ impl ConversationManagerImpl {
             tagging_pipeline: None,
             title_generator: None,
             auto_save: true,
+            title_generation_in_progress: Arc::new(RwLock::new(std::collections::HashSet::new())),
         };
         
         // Load existing conversations from persistence
@@ -203,49 +207,93 @@ impl ConversationManagerImpl {
     /// Run title generation on a conversation if enabled and needed
     async fn maybe_run_title_generation(&self, conversation_id: Uuid) -> Result<()> {
         if let Some(title_generator) = self.title_generator.clone() {
-            let conversations = self.conversations.clone();
-            tokio::spawn(async move {
-                // Get the conversation
-                let conversation = {
-                    let conversations_guard = conversations.read().await;
-                    conversations_guard.get(&conversation_id).cloned()
-                };
+            // Check if title generation is already in progress for this conversation
+            {
+                let in_progress = self.title_generation_in_progress.read().await;
+                if in_progress.contains(&conversation_id) {
+                    return Ok(()); // Skip to avoid recursion
+                }
+            }
+            
+            // Mark as in progress
+            {
+                let mut in_progress = self.title_generation_in_progress.write().await;
+                in_progress.insert(conversation_id);
+            }
+            
+            // Get the conversation
+            let conversation = {
+                let conversations_guard = self.conversations.read().await;
+                conversations_guard.get(&conversation_id).cloned()
+            };
+            
+            if let Some(conversation) = conversation {
+                // Only generate title if:
+                // 1. Current title is empty or generic
+                // 2. OR title looks like a user question/input rather than a proper title
+                // 3. Conversation has enough messages
+                let title_looks_like_user_input = conversation.title.ends_with("?") || 
+                                                 conversation.title.to_lowercase().starts_with("how") ||
+                                                 conversation.title.to_lowercase().starts_with("what") ||
+                                                 conversation.title.to_lowercase().starts_with("why") ||
+                                                 conversation.title.to_lowercase().starts_with("when") ||
+                                                 conversation.title.to_lowercase().starts_with("where") ||
+                                                 conversation.title.to_lowercase().starts_with("can") ||
+                                                 conversation.title.to_lowercase().starts_with("should") ||
+                                                 conversation.title.to_lowercase().starts_with("i need") ||
+                                                 conversation.title.to_lowercase().starts_with("help");
                 
-                if let Some(conversation) = conversation {
-                    // Only generate title if:
-                    // 1. Current title is empty or generic
-                    // 2. Conversation has enough messages
-                    let should_generate = (conversation.title.is_empty() || 
-                                         conversation.title.starts_with("Conversation") ||
-                                         conversation.title == "New Conversation") &&
-                                        conversation.messages.len() >= 2;
-                    
-                    if should_generate {
-                        match title_generator.generate_title(&conversation.messages).await {
-                            Ok(new_title) => {
-                                log::info!("Generated title '{}' for conversation {}", new_title, conversation_id);
-                                
-                                // Update the conversation with the new title
-                                let mut updated_conversation = conversation.clone();
-                                updated_conversation.title = new_title;
-                                
-                                // Update in memory cache
-                                {
-                                    let mut conversations_guard = conversations.write().await;
-                                    conversations_guard.insert(conversation_id, updated_conversation.clone());
+                let should_generate = (conversation.title.is_empty() || 
+                                     conversation.title.starts_with("Conversation") ||
+                                     conversation.title == "New Conversation" ||
+                                     title_looks_like_user_input) &&
+                                    conversation.messages.len() >= 2;
+                
+                if should_generate {
+                    log::info!("Triggering title generation for conversation {} with current title: '{}'", conversation_id, conversation.title);
+                    match title_generator.generate_title(&conversation.messages).await {
+                        Ok(new_title) => {
+                            log::info!("Generated title '{}' for conversation {}", new_title, conversation_id);
+                            
+                            // Update the conversation with the new title
+                            let mut updated_conversation = conversation.clone();
+                            updated_conversation.title = new_title;
+                            
+                            // Update in memory cache
+                            {
+                                let mut conversations_guard = self.conversations.write().await;
+                                conversations_guard.insert(conversation_id, updated_conversation.clone());
+                            }
+                            
+                            // Save to persistence if auto-save is enabled (without triggering title generation again)
+                            if self.auto_save {
+                                if let Err(e) = self.persistence.save_conversation(&updated_conversation).await {
+                                    log::error!("Failed to save conversation after title generation: {}", e);
                                 }
                                 
-                                // Note: We don't call update_conversation here to avoid infinite recursion
-                                // The persistence and search index updates would need to be handled separately
-                                log::debug!("Title generation completed for conversation {}", conversation_id);
-                            },
-                            Err(e) => {
-                                log::warn!("Failed to generate title for conversation {}: {}", conversation_id, e);
+                                // Update search index
+                                if let Err(e) = self.search_engine.index_conversation(&updated_conversation).await {
+                                    log::error!("Failed to update search index after title generation: {}", e);
+                                }
                             }
+                            
+                            log::debug!("Title generation completed for conversation {}", conversation_id);
+                        },
+                        Err(e) => {
+                            log::warn!("Failed to generate title for conversation {}: {}", conversation_id, e);
                         }
                     }
+                } else {
+                    log::debug!("Skipping title generation for conversation {} - title: '{}', messages: {}, should_generate: {}", 
+                              conversation_id, conversation.title, conversation.messages.len(), should_generate);
                 }
-            });
+            }
+            
+            // Mark as completed
+            {
+                let mut in_progress = self.title_generation_in_progress.write().await;
+                in_progress.remove(&conversation_id);
+            }
         }
         Ok(())
     }

@@ -1307,6 +1307,7 @@ impl ConversationSidebar {
                         let use_virtual_scrolling = performance_config.enable_virtual_scrolling && 
                             total_conversations > performance_config.virtual_scrolling_threshold;
 
+                        // Show existing conversations with reduced opacity
                         match self.organize_conversations(
                             &app_state.conversation_list,
                             Some(&self.clusters),
@@ -1338,7 +1339,7 @@ impl ConversationSidebar {
                                 ui.add_space(if is_small_screen { 4.0 } else { 6.0 });
                                 ui.separator();
                                 ui.add_space(if is_small_screen { 1.0 } else { 2.0 });
-                                ui.colored_label(theme.hint_text_color(), format!("📊 Showing {} of {} conversations", organized_data.filtered_count, organized_data.total_count));
+                                ui.colored_label(theme.hint_text_color(), format!("Showing {} of {} conversations", organized_data.filtered_count, organized_data.total_count));
                             },
                             Err(e) => {
                                 log::error!("Failed to organize conversations: {}", e);
@@ -1458,7 +1459,7 @@ impl ConversationSidebar {
                 ui.colored_label(theme.hint_text_color(), "→");
                 
                 // Show "Clusters" as current level
-                ui.colored_label(theme.text_color(), "🔗 Clusters");
+                ui.colored_label(theme.text_color(), "Clusters");
                 
                 // Show expanded cluster name if any
                 let expanded_cluster_names: Vec<String> = self.expanded_groups
@@ -1683,7 +1684,7 @@ impl ConversationSidebar {
                             theme.error_color() // Red for low cohesion
                         };
                         
-                        ui.colored_label(cohesion_color, format!("🔗{:.0}%", cohesion_score * 100.0));
+                        ui.colored_label(cohesion_color, format!("{:.0}%", cohesion_score * 100.0));
                     }
                 } else {
                     // Show average success rate for non-cluster groups
@@ -1694,10 +1695,10 @@ impl ConversationSidebar {
                 
                 // Compact status indicators
                 if group.metadata.statistics.completed_count > 0 {
-                    ui.colored_label(theme.success_color(), format!("✅{}", group.metadata.statistics.completed_count));
+                    ui.colored_label(theme.success_color(), format!("✓{}", group.metadata.statistics.completed_count));
                 }
                 if group.metadata.statistics.active_count > 0 {
-                    ui.colored_label(theme.accent_color(), format!("🟢{}", group.metadata.statistics.active_count));
+                    ui.colored_label(theme.accent_color(), format!("●{}", group.metadata.statistics.active_count));
                 }
             });
         });
@@ -1728,7 +1729,7 @@ impl ConversationSidebar {
             ui.horizontal(|ui| {
                 // Status indicator
                 let status_icon = match conv_item.display.status_indicator {
-                    StatusIndicator::Active => "🟢",
+                    StatusIndicator::Active => "●",
                     StatusIndicator::Paused => "⏸️",
                     StatusIndicator::Completed => "✅",
                     StatusIndicator::Failed => "❌",

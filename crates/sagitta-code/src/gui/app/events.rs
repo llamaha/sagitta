@@ -571,13 +571,17 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
             },
             ConversationEvent::ConversationCreated(id) => {
                 log::info!("Conversation created: {}", id);
-                // Force refresh to show the new conversation
-                force_refresh_conversation_data(app);
+                // Only refresh if it's been more than 5 seconds since last refresh
+                if app.state.last_conversation_refresh
+                    .map(|last| last.elapsed().as_secs() >= 5)
+                    .unwrap_or(true) {
+                    force_refresh_conversation_data(app);
+                }
             },
             ConversationEvent::ConversationSwitched(id) => {
                 log::info!("Conversation switched: {}", id);
-                // Force refresh to update current conversation display
-                force_refresh_conversation_data(app);
+                // Don't force refresh on conversation switch - just update the current conversation
+                // The conversation list doesn't need to be refreshed when switching
             },
             ConversationEvent::ConversationMessagesLoaded { conversation_id, messages } => {
                 log::info!("Conversation messages loaded for conversation {}", conversation_id);
@@ -594,9 +598,9 @@ pub fn process_conversation_events(app: &mut SagittaCodeApp) {
 
 /// Refresh conversation data asynchronously
 pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
-    // Always set loading state when refresh is requested
+    // Check if we should refresh based on time and loading state
     let should_refresh = app.state.last_conversation_refresh
-        .map(|last| last.elapsed().as_secs() >= 10)
+        .map(|last| last.elapsed().as_secs() >= 30) // Increased from 10 to 30 seconds
         .unwrap_or(true);
     
     log::debug!("refresh_conversation_data called: should_refresh={}, currently_loading={}", should_refresh, app.state.conversation_data_loading);
