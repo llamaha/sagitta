@@ -3,7 +3,7 @@ use chrono::{Duration, Utc};
 use sagitta_code::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use sagitta_code::agent::conversation::persistence::ConversationPersistence;
 use sagitta_code::agent::conversation::search::ConversationSearchEngine;
-use sagitta_code::agent::conversation::types::{Conversation, ConversationQuery, ConversationSearchResult};
+use sagitta_code::agent::conversation::types::{Conversation, ConversationQuery, ConversationSearchResult, ConversationSummary};
 use sagitta_code::agent::state::types::ConversationStatus;
 use sagitta_code::agent::state::status_engine::{ConversationStatusEngine, StatusEngineConfig};
 use sagitta_code::agent::events::AgentEvent;
@@ -31,6 +31,10 @@ impl ConversationPersistence for MockPersistence {
     }
     
     async fn list_conversation_ids(&self) -> Result<Vec<Uuid>> {
+        Ok(Vec::new())
+    }
+    
+    async fn list_conversation_summaries(&self, _workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
         Ok(Vec::new())
     }
     

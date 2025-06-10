@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 use super::ConversationPersistence;
-use crate::agent::conversation::types::Conversation;
+use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use crate::agent::state::types::ConversationStatus;
 
 /// Disk-based conversation persistence
@@ -237,6 +237,36 @@ impl ConversationPersistence for DiskConversationPersistence {
     async fn list_conversation_ids(&self) -> Result<Vec<Uuid>> {
         let index = self.load_index().await?;
         Ok(index.conversations.keys().copied().collect())
+    }
+    
+    async fn list_conversation_summaries(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
+        let index = self.load_index().await?;
+        
+        let summaries: Vec<ConversationSummary> = index.conversations
+            .values()
+            .filter(|entry| {
+                // Filter by workspace if specified
+                workspace_id.map_or(true, |ws_id| entry.workspace_id == Some(ws_id))
+            })
+            .map(|entry| ConversationSummary {
+                id: entry.id,
+                title: entry.title.clone(),
+                workspace_id: entry.workspace_id,
+                created_at: entry.created_at,
+                last_active: entry.last_active,
+                status: entry.status.clone(),
+                message_count: entry.message_count,
+                tags: entry.tags.clone(),
+                project_name: None, // Not stored in index for performance
+                has_branches: false, // Not stored in index for performance
+                has_checkpoints: false, // Not stored in index for performance
+            })
+            .collect();
+        
+        log::debug!("Loaded {} conversation summaries from index (workspace filter: {:?})", 
+                   summaries.len(), workspace_id);
+        
+        Ok(summaries)
     }
     
     async fn archive_conversation(&self, id: Uuid) -> Result<()> {

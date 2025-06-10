@@ -187,11 +187,26 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     })?;
     drop(config_guard);
 
-    // Initialize Qdrant client
-    let qdrant_client = create_qdrant_client(&core_config).await.map_err(|e| {
-        app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
-        e
-    })?;
+    // Initialize Qdrant client - create concrete instance for sharing
+    let qdrant_client_concrete = match Qdrant::from_url(&core_config.qdrant_url).build() {
+        Ok(client) => {
+            log::info!("GUI: Connected to Qdrant at {}", core_config.qdrant_url);
+            Some(Arc::new(client))
+        }
+        Err(e) => {
+            log::error!("GUI: Failed to connect to Qdrant at {}: {}. Semantic features will be limited.", core_config.qdrant_url, e);
+            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
+            None
+        }
+    };
+
+    // Create trait version for tools that need it
+    let qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
+        concrete_client.clone()
+    } else {
+        // Fallback - should not happen in normal operation, but provides safety
+        return Err(anyhow::anyhow!("Failed to initialize Qdrant client for GUI"));
+    };
 
     // Use the locally scoped embedding_handler_arc, which is correctly typed.
     let vector_size = embedding_handler_arc.dimension() as u64;
@@ -370,15 +385,15 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             app.agent = Some(Arc::new(agent));
             app.agent_event_receiver = Some(event_receiver);
             
-            // Initialize conversation service for the sidebar
-            if let Err(e) = app.initialize_conversation_service().await {
+            // Initialize conversation service for the sidebar - use shared instances (Phase 1 optimization)
+            if let Err(e) = app.initialize_conversation_service_with_shared_instances(qdrant_client_concrete.clone(), Some(embedding_handler_arc.clone())).await {
                 log::warn!("Failed to initialize conversation service: {}. Conversation sidebar features may be limited.", e);
                 app.panels.events_panel.add_event(
                     super::SystemEventType::Info,
                     format!("Conversation service initialization failed: {}", e)
                 );
             } else {
-                log::info!("Conversation service initialized successfully");
+                log::info!("Conversation service initialized successfully with shared instances");
             }
             
             // Initial conversation data load

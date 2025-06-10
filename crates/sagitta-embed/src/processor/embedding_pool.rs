@@ -218,8 +218,7 @@ impl EmbeddingPool {
         }
     }
 
-    /// Process chunks using a producer-consumer pattern with multiple CPU worker threads.
-    /// This optimizes CPU utilization for GPU coordination tasks.
+    /// Process multiple chunks in parallel using worker threads.
     async fn process_chunks_parallel(
         &self, 
         chunks: Vec<ProcessedChunk>,
@@ -230,59 +229,46 @@ impl EmbeddingPool {
         }
 
         let total_chunks = chunks.len();
+        let chunk_size = self.config.embedding_batch_size;
+        let total_batches = (total_chunks + chunk_size - 1) / chunk_size;
         let start_time = Instant::now();
-        log::info!("Processing {} chunks using {} CPU worker threads and {} GPU sessions", 
-                   total_chunks, self.cpu_worker_threads, self.config.max_embedding_sessions);
 
-        // Split chunks into batches
-        let batches: Vec<Vec<ProcessedChunk>> = chunks
-            .chunks(self.config.embedding_batch_size)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+        log::info!("Processing {} chunks in {} batches using {} CPU workers", 
+                   total_chunks, total_batches, self.cpu_worker_threads);
 
-        let total_batches = batches.len();
-        log::debug!("Split {} chunks into {} batches of size {}", 
-                    total_chunks, total_batches, self.config.embedding_batch_size);
-
-        // Create a channel for work distribution
-        let (work_sender, work_receiver) = mpsc::channel::<Vec<ProcessedChunk>>(total_batches);
+        // Create work queue
+        let (batch_sender, batch_receiver) = mpsc::channel::<Vec<ProcessedChunk>>(total_batches);
         let (result_sender, mut result_receiver) = mpsc::channel::<Result<Vec<EmbeddedChunk>>>(total_batches);
 
-        // Send all batches to the work queue
-        for batch in batches {
-            work_sender.send(batch).await
-                .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to send work batch: {}", e)))?;
+        // Send batches to work queue
+        for batch in chunks.chunks(chunk_size) {
+            if let Err(_) = batch_sender.send(batch.to_vec()).await {
+                return Err(SagittaEmbedError::thread_safety("Failed to queue batch for processing".to_string()));
+            }
         }
-        drop(work_sender); // Close the channel
+        drop(batch_sender); // Close the queue
 
         // Wrap the receiver in Arc<Mutex> to share among workers
-        let shared_work_receiver = Arc::new(Mutex::new(work_receiver));
-
-        // Clone the necessary components for workers to avoid lifetime issues
-        let semaphore = Arc::clone(&self.semaphore);
-        #[cfg(feature = "onnx")]
-        let models = Arc::clone(&self.models);
-        let embedding_config = self.embedding_config.clone();
-        let max_sessions = self.config.max_embedding_sessions;
+        let shared_batch_receiver = Arc::new(Mutex::new(batch_receiver));
 
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
-        for worker_id in 0..std::cmp::min(self.cpu_worker_threads, total_batches) {
-            let work_receiver = Arc::clone(&shared_work_receiver);
-            let result_sender = result_sender.clone();
-            let semaphore = Arc::clone(&semaphore);
+        for worker_id in 0..self.cpu_worker_threads {
+            let batch_receiver = Arc::clone(&shared_batch_receiver);
+            let sender = result_sender.clone();
+            let semaphore = Arc::clone(&self.semaphore);
             #[cfg(feature = "onnx")]
-            let models = Arc::clone(&models);
-            let embedding_config = embedding_config.clone();
+            let models = Arc::clone(&self.models);
+            let embedding_config = self.embedding_config.clone();
+            let max_sessions = self.config.max_embedding_sessions;
 
             let handle = tokio::spawn(async move {
-                log::debug!("Worker {} starting", worker_id);
                 let mut batches_processed = 0;
-
+                
                 loop {
                     // Try to get work from the shared receiver
                     let batch = {
-                        let mut receiver = work_receiver.lock().await;
+                        let mut receiver = batch_receiver.lock().await;
                         receiver.recv().await
                     };
 
@@ -304,7 +290,8 @@ impl EmbeddingPool {
                                 log::error!("Worker {} failed to process batch: {}", worker_id, e);
                             }
                             
-                            if result_sender.send(result).await.is_err() {
+                            // Always try to send result, even if it's an error
+                            if sender.send(result).await.is_err() {
                                 log::error!("Worker {} failed to send result", worker_id);
                                 break;
                             }
@@ -326,10 +313,11 @@ impl EmbeddingPool {
 
         drop(result_sender); // Close the result channel
 
-        // Collect results with progress reporting
+        // Collect results with improved error handling
         let mut all_embedded_chunks = Vec::with_capacity(total_chunks);
         let mut batches_received = 0;
         let mut chunks_processed = 0;
+        let mut any_errors = Vec::new();
 
         while let Some(result) = result_receiver.recv().await {
             match result {
@@ -360,27 +348,44 @@ impl EmbeddingPool {
                     log::debug!("Received batch {}/{} - {} chunks processed", batches_received, total_batches, chunks_processed);
                 }
                 Err(e) => {
-                    log::error!("Batch processing failed: {}", e);
-                    // Cancel remaining workers
-                    for handle in worker_handles {
-                        handle.abort();
-                    }
-                    return Err(e);
+                    log::warn!("Batch processing failed (will continue with other batches): {}", e);
+                    any_errors.push(e);
+                    batches_received += 1;
+                    
+                    // Don't cancel remaining workers immediately, let them finish their current work
+                    // Only fail the entire operation if all batches fail
                 }
             }
         }
 
-        // Wait for all workers to complete
+        // Wait for all workers to complete gracefully
         for (i, handle) in worker_handles.into_iter().enumerate() {
-            if let Err(e) = handle.await {
-                if !e.is_cancelled() {
+            match handle.await {
+                Ok(()) => {
+                    log::debug!("Worker {} completed successfully", i);
+                }
+                Err(e) if e.is_cancelled() => {
+                    log::debug!("Worker {} was cancelled (this is normal during shutdown)", i);
+                }
+                Err(e) => {
                     log::error!("Worker {} task failed: {}", i, e);
+                    any_errors.push(SagittaEmbedError::thread_safety(format!("Worker {} failed: {}", i, e)));
                 }
             }
         }
 
-        log::info!("Completed processing {} chunks in {} batches using parallel workers", 
-                   all_embedded_chunks.len(), batches_received);
+        // Check if we have any successful results
+        if all_embedded_chunks.is_empty() && !any_errors.is_empty() {
+            // All batches failed, return the first error
+            return Err(any_errors.into_iter().next().unwrap());
+        } else if !any_errors.is_empty() {
+            // Some batches failed but we have some results - log the errors but don't fail
+            log::warn!("Some batches failed ({} errors) but {} chunks were processed successfully", 
+                      any_errors.len(), all_embedded_chunks.len());
+        }
+
+        log::info!("Completed processing {} chunks in {} batches using parallel workers (with {} errors)", 
+                   all_embedded_chunks.len(), batches_received, any_errors.len());
 
         Ok(all_embedded_chunks)
     }
@@ -407,25 +412,43 @@ impl EmbeddingPool {
             // Acquire a model from the pool
             let model = Self::acquire_model_static(models, embedding_config).await?;
             
-            // Extract text content for embedding in a separate CPU task
-            let texts: Vec<String> = tokio::task::spawn_blocking({
+            // Extract text content for embedding in a separate CPU task with cancellation handling
+            let texts: Vec<String> = match tokio::task::spawn_blocking({
                 let chunks = chunks.clone();
                 move || {
                     chunks.iter().map(|c| c.content.clone()).collect::<Vec<String>>()
                 }
-            }).await
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Text extraction task failed: {}", e)))?;
+            }).await {
+                Ok(result) => result,
+                Err(e) if e.is_cancelled() => {
+                    // Return model to pool before failing
+                    Self::release_model_static(model, models, max_sessions).await;
+                    return Err(SagittaEmbedError::thread_safety("Text extraction task was cancelled".to_string()));
+                }
+                Err(e) => {
+                    // Return model to pool before failing
+                    Self::release_model_static(model, models, max_sessions).await;
+                    return Err(SagittaEmbedError::thread_safety(format!("Text extraction task failed: {}", e)));
+                }
+            };
             
             let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
             
             // Generate embeddings
-            let embeddings = model.embed_batch(&text_refs)?;
+            let embeddings = match model.embed_batch(&text_refs) {
+                Ok(embeddings) => embeddings,
+                Err(e) => {
+                    // Return model to pool before failing
+                    Self::release_model_static(model, models, max_sessions).await;
+                    return Err(e);
+                }
+            };
             
             // Return model to pool
             Self::release_model_static(model, models, max_sessions).await;
             
-            // Combine chunks with embeddings in a separate CPU task
-            let embedded_chunks = tokio::task::spawn_blocking({
+            // Combine chunks with embeddings in a separate CPU task with cancellation handling
+            let embedded_chunks = match tokio::task::spawn_blocking({
                 let chunks = chunks;
                 let embeddings = embeddings;
                 move || {
@@ -440,8 +463,15 @@ impl EmbeddingPool {
                         })
                         .collect::<Vec<EmbeddedChunk>>()
                 }
-            }).await
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Result combination task failed: {}", e)))?;
+            }).await {
+                Ok(result) => result,
+                Err(e) if e.is_cancelled() => {
+                    return Err(SagittaEmbedError::thread_safety("Result combination task was cancelled (worker shutdown)".to_string()));
+                }
+                Err(e) => {
+                    return Err(SagittaEmbedError::thread_safety(format!("Result combination task failed: {}", e)));
+                }
+            };
 
             Ok(embedded_chunks)
         }

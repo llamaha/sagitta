@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use anyhow::Result;
 use uuid::Uuid;
 
-use super::types::Conversation;
+use super::types::{Conversation, ConversationSummary};
 
 /// Trait for conversation persistence
 #[async_trait]
@@ -21,6 +21,9 @@ pub trait ConversationPersistence: Send + Sync {
     
     /// List all conversation IDs
     async fn list_conversation_ids(&self) -> Result<Vec<Uuid>>;
+    
+    /// Load conversation summaries from index (Phase 2: for lazy loading)
+    async fn list_conversation_summaries(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>>;
     
     /// Archive a conversation (move to archive storage)
     async fn archive_conversation(&self, id: Uuid) -> Result<()>;
@@ -43,6 +46,7 @@ mockall::mock! {
         async fn load_conversation(&self, id: Uuid) -> Result<Option<Conversation>>;
         async fn delete_conversation(&self, id: Uuid) -> Result<()>;
         async fn list_conversation_ids(&self) -> Result<Vec<Uuid>>;
+        async fn list_conversation_summaries(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>>;
         async fn archive_conversation(&self, id: Uuid) -> Result<()>;
         async fn list_archived_conversation_ids(&self) -> Result<Vec<Uuid>>;
         async fn restore_conversation(&self, id: Uuid) -> Result<()>;

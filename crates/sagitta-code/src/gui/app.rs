@@ -241,36 +241,13 @@ impl SagittaCodeApp {
         let search_engine = Box::new(TextConversationSearchEngine::new());
         
         // Create conversation manager
-        let conversation_manager = Arc::new(ConversationManagerImpl::new(persistence, search_engine).await?);
+        let conversation_manager = ConversationManagerImpl::new(persistence, search_engine).await?;
+        let conversation_manager_arc = Arc::new(conversation_manager) as Arc<dyn ConversationManager>;
         
-        // Try to create and add tagging pipeline and title generator
-        let conversation_manager_with_features = {
-            // Create a new manager instance for adding features
-            let mut manager_impl = ConversationManagerImpl::new(
-                Box::new(DiskConversationPersistence::new(storage_path.clone()).await?),
-                Box::new(TextConversationSearchEngine::new())
-            ).await?;
-            
-            // Try to add tagging pipeline
-            if let Ok(tagging_pipeline) = self.try_create_tagging_pipeline(conversation_manager.clone()).await {
-                log::info!("Tagging pipeline initialized for conversation service");
-                manager_impl = manager_impl.with_tagging_pipeline(Arc::new(tagging_pipeline));
-            } else {
-                log::warn!("Failed to initialize tagging pipeline - auto-tagging will be disabled");
-            }
-            
-            // Try to add title generator
-            if let Ok(title_generator) = self.try_create_title_generator().await {
-                log::info!("Title generator initialized for conversation service");
-                manager_impl = manager_impl.with_title_generator(Arc::new(title_generator));
-            } else {
-                log::warn!("Failed to initialize title generator - auto-titling will be disabled");
-            }
-            
-            Arc::new(manager_impl) as Arc<dyn ConversationManager>
-        };
+        // Skip advanced features for Phase 1 to focus on the main performance gain
+        log::info!("Phase 1 optimization: Skipping tagging pipeline and title generator to focus on eliminating duplicate manager creation");
         
-        // Try to create clustering manager (optional, requires Qdrant)
+        // Try to create clustering manager (optional, requires Qdrant) - this will be optimized in later phases
         let clustering_manager = match self.try_create_clustering_manager().await {
             Ok(manager) => Some(manager),
             Err(e) => {
@@ -284,7 +261,63 @@ impl SagittaCodeApp {
         
         // Create conversation service
         let service = ConversationService::new(
-            conversation_manager_with_features,
+            conversation_manager_arc,
+            clustering_manager,
+            analytics_manager,
+        );
+        
+        self.conversation_service = Some(Arc::new(service));
+        
+        // Initial refresh of conversation data
+        self.refresh_conversation_clusters().await?;
+        
+        Ok(())
+    }
+
+    /// Initialize conversation service with shared instances from initialization (Phase 1 optimization)
+    pub async fn initialize_conversation_service_with_shared_instances(
+        &mut self,
+        _shared_qdrant_client: Option<Arc<qdrant_client::Qdrant>>,
+        _shared_embedding_pool: Option<Arc<sagitta_search::EmbeddingPool>>,
+    ) -> Result<()> {
+        // Create persistence layer using the same path logic as initialization
+        let config_guard = self.config.lock().await;
+        let storage_path = if let Some(path) = &config_guard.conversation.storage_path {
+            path.clone()
+        } else {
+            initialization::get_default_conversation_storage_path()
+        };
+        drop(config_guard);
+        
+        let persistence = Box::new(DiskConversationPersistence::new(storage_path.clone()).await?);
+        
+        // Create search engine
+        let search_engine = Box::new(TextConversationSearchEngine::new());
+        
+        // Create conversation manager (single creation - Phase 1 optimization)
+        let conversation_manager = ConversationManagerImpl::new(persistence, search_engine).await?;
+        let conversation_manager_arc = Arc::new(conversation_manager) as Arc<dyn ConversationManager>;
+        
+        // Skip advanced features for Phase 1 to eliminate complexity and focus on the main performance gain
+        log::info!("Phase 1 optimization: Skipping tagging pipeline and title generator to focus on eliminating duplicate manager creation");
+        
+        // For Phase 1, we'll skip the shared clustering optimization and use the existing method
+        // The main gain is from eliminating the duplicate ConversationManagerImpl creation
+        // Future phases will optimize clustering with shared instances
+        let clustering_manager = match self.try_create_clustering_manager().await {
+            Ok(manager) => Some(manager),
+            Err(e) => {
+                log::warn!("Failed to initialize clustering manager: {}. Clustering features will be disabled.", e);
+                None
+            }
+        };
+        
+        // Create analytics manager
+        let analytics_manager = ConversationAnalyticsManager::new(AnalyticsConfig::default());
+        
+        // Create conversation service
+        let service = ConversationService::new(
+            conversation_manager_arc,
             clustering_manager,
             analytics_manager,
         );
@@ -317,11 +350,12 @@ impl SagittaCodeApp {
         
         Ok(pipeline)
     }
-    
+
     /// Try to create clustering manager (may fail if Qdrant is not available)
     async fn try_create_clustering_manager(&self) -> Result<ConversationClusteringManager> {
         use qdrant_client::Qdrant;
         use sagitta_search::EmbeddingPool;
+        use crate::agent::conversation::clustering::ClusteringConfig;
         
         // Try to connect to Qdrant using the configured URL
         let qdrant_url = std::env::var("QDRANT_URL").unwrap_or_else(|_| {
@@ -333,11 +367,26 @@ impl SagittaCodeApp {
         let embedding_config = sagitta_search::app_config_to_embedding_config(&self.app_core_config);
         let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;
         
-        // Create clustering manager
-        ConversationClusteringManager::with_default_config(
+        // Phase 3: Create optimized clustering configuration
+        let clustering_config = ClusteringConfig {
+            similarity_threshold: 0.7,
+            max_cluster_size: 20,
+            min_cluster_size: 2,
+            use_temporal_proximity: true,
+            max_temporal_distance_hours: 24 * 7, // 1 week
+            smart_clustering_threshold: 10, // Phase 3: Only cluster if >=10 conversations
+            enable_embedding_cache: true,   // Phase 3: Enable embedding caching
+            use_local_similarity: true,     // Phase 3: Use local similarity computation
+            async_clustering: true,         // Phase 3: Enable async clustering
+            embedding_cache_size: 100,      // Phase 3: Cache size for embeddings
+        };
+        
+        // Create clustering manager with Phase 3 optimizations
+        ConversationClusteringManager::new(
             qdrant_client,
             embedding_pool,
             "conversation_clusters".to_string(),
+            clustering_config,
         ).await
     }
     
