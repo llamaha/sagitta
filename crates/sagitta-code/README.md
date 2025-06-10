@@ -42,6 +42,19 @@ Installation is currently a manual process, with future improvements to the inst
    ./target/release/sagitta-code
    ```
 
+## Supported Languages
+
+Currently these languages are supported:
+- Rust
+- Python  
+- JavaScript
+- TypeScript
+- Go
+- Ruby
+- Markdown
+- YAML
+- HTML
+
 ## Configuration
 
 ### Core Configuration (`~/.config/sagitta/config.toml`)
