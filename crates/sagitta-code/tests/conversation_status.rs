@@ -11,31 +11,79 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 // Mock implementations for testing
-#[derive(Default)]
-struct MockPersistence;
+struct MockPersistence {
+    conversations: Arc<RwLock<HashMap<Uuid, Conversation>>>,
+}
+
+impl Default for MockPersistence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MockPersistence {
+    fn new() -> Self {
+        Self {
+            conversations: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+}
 
 #[async_trait]
 impl ConversationPersistence for MockPersistence {
-    async fn save_conversation(&self, _conversation: &Conversation) -> Result<()> {
+    async fn save_conversation(&self, conversation: &Conversation) -> Result<()> {
+        let mut conversations = self.conversations.write().await;
+        conversations.insert(conversation.id, conversation.clone());
         Ok(())
     }
     
-    async fn load_conversation(&self, _id: Uuid) -> Result<Option<Conversation>> {
-        Ok(None)
+    async fn load_conversation(&self, id: Uuid) -> Result<Option<Conversation>> {
+        let conversations = self.conversations.read().await;
+        Ok(conversations.get(&id).cloned())
     }
     
-    async fn delete_conversation(&self, _id: Uuid) -> Result<()> {
+    async fn delete_conversation(&self, id: Uuid) -> Result<()> {
+        let mut conversations = self.conversations.write().await;
+        conversations.remove(&id);
         Ok(())
     }
     
     async fn list_conversation_ids(&self) -> Result<Vec<Uuid>> {
-        Ok(Vec::new())
+        let conversations = self.conversations.read().await;
+        Ok(conversations.keys().cloned().collect())
     }
     
-    async fn list_conversation_summaries(&self, _workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
-        Ok(Vec::new())
+    async fn list_conversation_summaries(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
+        let conversations = self.conversations.read().await;
+        let mut summaries = Vec::new();
+        
+        for conversation in conversations.values() {
+            // Filter by workspace if specified
+            if let Some(ws_id) = workspace_id {
+                if conversation.workspace_id != Some(ws_id) {
+                    continue;
+                }
+            }
+            
+            summaries.push(ConversationSummary {
+                id: conversation.id,
+                title: conversation.title.clone(),
+                workspace_id: conversation.workspace_id,
+                created_at: conversation.created_at,
+                last_active: conversation.last_active,
+                status: conversation.status.clone(),
+                message_count: conversation.messages.len(),
+                tags: conversation.tags.clone(),
+                project_name: None,
+                has_branches: !conversation.branches.is_empty(),
+                has_checkpoints: !conversation.checkpoints.is_empty(),
+            });
+        }
+        
+        Ok(summaries)
     }
     
     async fn archive_conversation(&self, _id: Uuid) -> Result<()> {
@@ -100,13 +148,14 @@ async fn test_conversation_pauses_after_inactivity() -> Result<()> {
     let conversation_id = manager.create_conversation("Test Conversation".to_string(), None).await?;
     
     // Simulate 30 minutes of inactivity by manually setting last_active
+    // Don't use the status engine to update, as that would mark it as a manual override
     let mut conversation = manager.get_conversation(conversation_id).await?
         .expect("Conversation should exist");
     conversation.last_active = Utc::now() - Duration::minutes(31);
     manager.update_conversation(conversation).await?;
     
     // Manually trigger status check (in real app this would be automatic)
-    trigger_status_check(&status_engine, &manager).await?;
+    status_engine.trigger_status_check().await?;
     
     let updated_conversation = manager.get_conversation(conversation_id).await?
         .expect("Conversation should exist");
@@ -146,12 +195,13 @@ async fn test_old_completed_conversations_archived() -> Result<()> {
         .expect("Conversation should exist");
     
     // Manually set status to Completed and make it old
+    // Don't use the status engine to update, as that would mark it as a manual override
     conversation.status = ConversationStatus::Completed;
     conversation.last_active = Utc::now() - Duration::days(91);
     manager.update_conversation(conversation).await?;
     
     // Manually trigger status check (in real app this would be automatic)
-    trigger_status_check(&status_engine, &manager).await?;
+    status_engine.trigger_status_check().await?;
     
     let updated_conversation = manager.get_conversation(conversation_id).await?
         .expect("Conversation should exist");
@@ -208,7 +258,7 @@ async fn test_manual_status_override_respected() -> Result<()> {
     manager.update_conversation(conversation).await?;
     
     // Trigger status check - should not change because of manual override
-    trigger_status_check(&status_engine, &manager).await?;
+    status_engine.trigger_status_check().await?;
     
     let updated_conversation = manager.get_conversation(conversation_id).await?
         .expect("Conversation should exist");
@@ -221,7 +271,7 @@ async fn test_manual_status_override_respected() -> Result<()> {
 /// Helper function to create a test conversation manager
 async fn create_test_manager() -> Result<Arc<dyn ConversationManager>> {
     let manager = ConversationManagerImpl::new(
-        Box::new(MockPersistence::default()),
+        Box::new(MockPersistence::new()),
         Box::new(MockSearchEngine::default()),
     ).await?;
     Ok(Arc::new(manager) as Arc<dyn ConversationManager>)
@@ -237,47 +287,4 @@ async fn create_test_status_engine(manager: Arc<dyn ConversationManager>) -> Res
     };
     
     Ok(ConversationStatusEngine::new(config, manager))
-}
-
-/// Helper function to manually trigger status check (for testing)
-async fn trigger_status_check(
-    status_engine: &ConversationStatusEngine,
-    manager: &Arc<dyn ConversationManager>,
-) -> Result<()> {
-    // We need to access the private check_and_update_statuses method
-    // For testing, we'll simulate what it does
-    let conversations = manager.list_conversations(None).await?;
-    
-    for summary in conversations {
-        let mut needs_update = false;
-        let mut new_status = summary.status.clone();
-        
-        // Check for inactivity (Active -> Paused)
-        if summary.status == ConversationStatus::Active {
-            let inactive_duration = Utc::now() - summary.last_active;
-            if inactive_duration > Duration::minutes(30) {
-                new_status = ConversationStatus::Paused;
-                needs_update = true;
-            }
-        }
-        
-        // Check for archival (Completed -> Archived)
-        if summary.status == ConversationStatus::Completed {
-            let age = Utc::now() - summary.last_active;
-            if age > Duration::days(90) {
-                new_status = ConversationStatus::Archived;
-                needs_update = true;
-            }
-        }
-        
-        // Update if needed
-        if needs_update {
-            if let Some(mut conversation) = manager.get_conversation(summary.id).await? {
-                conversation.status = new_status;
-                manager.update_conversation(conversation).await?;
-            }
-        }
-    }
-    
-    Ok(())
 } 

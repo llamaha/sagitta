@@ -205,4 +205,14 @@ impl ConversationStatusEngine {
         
         Ok(())
     }
+    
+    /// Manually trigger a status check (useful for testing)
+    pub async fn trigger_status_check(&self) -> Result<()> {
+        Self::check_and_update_statuses(
+            &self.config,
+            &self.conversation_manager,
+            &self.event_sender,
+            &self.manual_overrides,
+        ).await
+    }
 } 
