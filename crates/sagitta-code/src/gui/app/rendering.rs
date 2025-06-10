@@ -296,7 +296,11 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                                 // The chunk processing is handled via events
                                                 // so we don't need to do anything here
                                                 
-                                                // Do NOT break on chunk.is_final; there may be additional tool calls or assistant messages
+                                                // Check if this is the final chunk
+                                                if chunk.is_final {
+                                                    log::info!("Received final chunk, stream complete");
+                                                    break;
+                                                }
                                             },
                                             Err(e) => {
                                                 log::error!("Error in streaming response chunk #{}: {}", chunk_count, e);

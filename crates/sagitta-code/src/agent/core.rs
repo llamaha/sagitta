@@ -870,7 +870,8 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 // CRITICAL FIX: Always send to raw chunk sender for stream consumption
                 if let Err(_) = self.raw_chunk_sender.send(Ok(sagitta_code_stream_chunk)) {
                     log::warn!("AgentStreamHandler: Raw chunk receiver dropped.");
-                    return Err(ReasoningError::streaming("raw_sender_dropped".to_string(), "Failed to send to raw_chunk_sender".to_string()));
+                    // Don't return an error when receiver is dropped - this is expected when stream completes
+                    // return Err(ReasoningError::streaming("raw_sender_dropped".to_string(), "Failed to send to raw_chunk_sender".to_string()));
                 } else {
                     log::debug!("AgentStreamHandler: Successfully sent chunk to stream");
                 }

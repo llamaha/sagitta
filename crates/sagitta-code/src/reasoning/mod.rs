@@ -918,7 +918,13 @@ impl EventEmitter for AgentEventEmitter {
                 AgentEvent::Log(format!("Tool execution started: {}", tool_name))
             }
             ReasoningEvent::ToolExecutionCompleted { session_id: _, tool_name, success, duration_ms } => {
-                // Do NOT emit streaming text here; GUI already shows inline tool cards.
+                // Emit streaming text for tool execution completion
+                let status_icon = if success { "✅" } else { "❌" };
+                self.emit_streaming_text(
+                    format!("\n{} Tool **{}** completed in {}ms\n\n", status_icon, tool_name, duration_ms),
+                    false
+                ).await;
+                
                 AgentEvent::ToolCompleted {
                     tool_name,
                     success,

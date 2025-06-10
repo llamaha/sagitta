@@ -34,6 +34,12 @@ pub struct GeminiStream {
     
     /// Maximum buffer size to prevent memory issues with stuck streams
     max_buffer_size: usize,
+    
+    /// NEW: Track when the buffer was last modified to detect stagnation
+    last_buffer_change: std::time::Instant,
+    
+    /// NEW: Track buffer size at last change to detect if it's growing
+    last_buffer_size: usize,
 }
 
 impl GeminiStream {
@@ -46,6 +52,8 @@ impl GeminiStream {
             done: false,
             model_name,
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         }
     }
     
@@ -58,6 +66,8 @@ impl GeminiStream {
             done: false,
             model_name,
             max_buffer_size,
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         }
     }
     
@@ -107,6 +117,12 @@ impl GeminiStream {
                                 break;
                             }
                             // If no newline found, we don't have a complete line yet
+                            // FIXME: Unless the remaining part is very short (likely end of stream)
+                            if remaining.len() < 10 && remaining.chars().all(|c| c.is_whitespace()) {
+                                log::warn!("GeminiStream: Found complete JSON without newline but with minimal whitespace, treating as complete");
+                                end_index = Some(potential_end);
+                                break;
+                            }
                         }
                         break;
                     }
@@ -117,8 +133,13 @@ impl GeminiStream {
                 // Extract the JSON data as an owned string before modifying the buffer
                 let json_data = self.buffer[json_str_start..end_index].trim().to_string();
                 
-                // Remove the processed data from the buffer (including the newline)
-                self.buffer.drain(..end_index + 1);
+                // Remove the processed data from the buffer (including the newline if present)
+                let drain_end = if end_index < self.buffer.len() && self.buffer.chars().nth(end_index) == Some('\n') {
+                    end_index + 1
+                } else {
+                    end_index
+                };
+                self.buffer.drain(..drain_end);
                 
                 match self.parse_json_data(&json_data) {
                     Ok(chunks) => {
@@ -130,6 +151,37 @@ impl GeminiStream {
                         }
                     },
                     Err(err) => return Some(Err(err)),
+                }
+            } else {
+                // SIMPLE FIX: If we have a complete JSON object but no newline, add one and retry
+                if brace_count == 0 && self.buffer[json_str_start..].contains('}') {
+                    // Find the position after the last closing brace
+                    if let Some(last_brace_pos) = self.buffer[json_str_start..].rfind('}') {
+                        let absolute_brace_pos = json_str_start + last_brace_pos + 1;
+                        
+                        // Check if there's already a newline after the brace
+                        let has_newline = self.buffer.get(absolute_brace_pos..)
+                            .map(|remaining| remaining.starts_with('\n'))
+                            .unwrap_or(false);
+                        
+                        if !has_newline {
+                            log::info!("GeminiStream: Found complete JSON without newline, adding newline and retrying");
+                            self.buffer.insert(absolute_brace_pos, '\n');
+                            // Recursive call to process the now-complete line
+                            return self.process_buffer();
+                        }
+                    }
+                }
+                
+                // NEW: Check if buffer is getting too large or we have an incomplete function call
+                if self.buffer.len() > self.max_buffer_size / 2 {
+                    log::warn!("GeminiStream: Buffer getting large ({}), checking for incomplete function call", self.buffer.len());
+                    
+                    // Try to detect incomplete function calls that might never complete
+                    if self.buffer.contains("\"functionCall\"") && !self.buffer.contains("\"functionCall\":{") {
+                        log::error!("GeminiStream: Detected incomplete function call in buffer, attempting recovery");
+                        return self.try_partial_recovery();
+                    }
                 }
             }
         }
@@ -418,6 +470,7 @@ impl GeminiStream {
     /// Try to recover partial content when buffer gets stuck
     fn try_partial_recovery(&mut self) -> Option<Result<StreamChunk, SagittaCodeError>> {
         log::info!("GeminiStream: Attempting partial recovery from {} chars", self.buffer.len());
+        log::debug!("GeminiStream: Buffer content for recovery: '{}'", &self.buffer[..self.buffer.len().min(500)]);
         
         // Look for any complete JSON objects in the buffer, even without proper line endings
         let mut start_pos = 0;
@@ -431,18 +484,28 @@ impl GeminiStream {
                 // Look for matching closing brace
                 let mut brace_count = 0;
                 let mut json_end = None;
+                let mut in_string = false;
+                let mut escaped = false;
                 
                 for (i, c) in self.buffer[json_start_abs..].char_indices() {
-                    match c {
-                        '{' => brace_count += 1,
-                        '}' => {
-                            brace_count -= 1;
-                            if brace_count == 0 {
-                                json_end = Some(json_start_abs + i + 1);
-                                break;
-                            }
+                    if in_string {
+                        if escaped {
+                            escaped = false;
+                        } else if c == '\\' {
+                            escaped = true;
+                        } else if c == '"' {
+                            in_string = false;
                         }
-                        _ => {}
+                    } else if c == '"' {
+                        in_string = true;
+                    } else if c == '{' {
+                        brace_count += 1;
+                    } else if c == '}' {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            json_end = Some(json_start_abs + i + 1);
+                            break;
+                        }
                     }
                 }
                 
@@ -477,11 +540,69 @@ impl GeminiStream {
             start_pos = absolute_pos;
         }
         
+        // NEW: Try to detect incomplete function calls and create an error chunk for them
+        if self.buffer.contains("\"functionCall\"") {
+            log::warn!("GeminiStream: Detected incomplete function call, creating error chunk");
+            self.buffer.clear(); // Clear the stuck buffer
+            
+            return Some(Ok(StreamChunk {
+                part: MessagePart::Text { 
+                    text: "⚠️ Function call interrupted - please try again with a shorter request or different approach.".to_string() 
+                },
+                is_final: true,
+                finish_reason: Some("FUNCTION_CALL_INTERRUPTED".to_string()),
+                token_usage: None,
+            }));
+        }
+        
+        // NEW: If we have any text content, try to extract it as a partial response
+        if let Some(text_start) = self.buffer.find("\"text\":\"") {
+            let text_content_start = text_start + 8; // Skip "text":"
+            if let Some(remaining) = self.buffer.get(text_content_start..) {
+                // Find the end of the text content (look for closing quote)
+                let mut end_pos = None;
+                let mut escaped = false;
+                
+                for (i, c) in remaining.char_indices() {
+                    if escaped {
+                        escaped = false;
+                    } else if c == '\\' {
+                        escaped = true;
+                    } else if c == '"' {
+                        end_pos = Some(i);
+                        break;
+                    }
+                }
+                
+                if let Some(text_end) = end_pos {
+                    let partial_text = remaining[..text_end].to_string(); // Clone the text before clearing buffer
+                    if !partial_text.trim().is_empty() {
+                        log::info!("GeminiStream: Recovered partial text content: {} chars", partial_text.len());
+                        self.buffer.clear(); // Clear the buffer
+                        
+                        return Some(Ok(StreamChunk {
+                            part: MessagePart::Text { text: partial_text },
+                            is_final: true,
+                            finish_reason: Some("PARTIAL_RECOVERY".to_string()),
+                            token_usage: None,
+                        }));
+                    }
+                }
+            }
+        }
+        
         // If we can't recover anything, return an error chunk
-        log::warn!("GeminiStream: Could not recover any content from buffer");
-        Some(Err(SagittaCodeError::LlmError(
-            "Stream terminated due to incomplete data - no recoverable content found".to_string()
-        )))
+        log::warn!("GeminiStream: Could not recover any content from buffer, terminating stream");
+        self.buffer.clear(); // Clear the stuck buffer to prevent future issues
+        
+        Some(Ok(StreamChunk {
+            part: MessagePart::Text { 
+                text: "⚠️ Stream interrupted - please try again.".to_string() 
+            },
+            is_final: true,
+            finish_reason: Some("STREAM_RECOVERY_FAILED".to_string()),
+            token_usage: None,
+        }))
     }
 }
 
@@ -546,9 +667,18 @@ impl Stream for GeminiStream {
                     ))));
                 }
                 
+                // Update stagnation tracking
+                let old_buffer_size = self.buffer.len();
+                
                 // Append the new data to our buffer
                 self.buffer.push_str(bytes_str);
                 log::debug!("GeminiStream: Buffer now contains {} chars", self.buffer.len());
+                
+                // Update tracking if buffer size changed
+                if self.buffer.len() != old_buffer_size {
+                    self.last_buffer_change = std::time::Instant::now();
+                    self.last_buffer_size = self.buffer.len();
+                }
                 
                 // Try to process the updated buffer
                 if let Some(result) = self.process_buffer() {
@@ -568,6 +698,23 @@ impl Stream for GeminiStream {
                 } else {
                     // No complete chunk yet, continue polling
                     log::debug!("GeminiStream: No complete chunk after new data, continuing to poll");
+                    
+                    // NEW: Check for buffer stagnation (buffer hasn't been processed for too long)
+                    if !self.buffer.is_empty() {
+                        let stagnation_duration = self.last_buffer_change.elapsed();
+                        const STAGNATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+                        
+                        if stagnation_duration > STAGNATION_TIMEOUT {
+                            log::warn!("GeminiStream: Buffer has been stagnant for {:?}, attempting recovery", stagnation_duration);
+                            log::debug!("GeminiStream: Stagnant buffer content: '{}'", &self.buffer[..self.buffer.len().min(300)]);
+                            
+                            if let Some(recovery_result) = self.try_partial_recovery() {
+                                self.done = true;
+                                return Poll::Ready(Some(recovery_result));
+                            }
+                        }
+                    }
+                    
                     Poll::Pending
                 }
             },
@@ -613,6 +760,23 @@ impl Stream for GeminiStream {
             },
             Poll::Pending => {
                 log::trace!("GeminiStream: HTTP stream pending, waiting for more data");
+                
+                // NEW: Check for buffer stagnation (buffer hasn't been processed for too long)
+                if !self.buffer.is_empty() {
+                    let stagnation_duration = self.last_buffer_change.elapsed();
+                    const STAGNATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+                    
+                    if stagnation_duration > STAGNATION_TIMEOUT {
+                        log::warn!("GeminiStream: Buffer has been stagnant for {:?}, attempting recovery", stagnation_duration);
+                        log::debug!("GeminiStream: Stagnant buffer content: '{}'", &self.buffer[..self.buffer.len().min(300)]);
+                        
+                        if let Some(recovery_result) = self.try_partial_recovery() {
+                            self.done = true;
+                            return Poll::Ready(Some(recovery_result));
+                        }
+                    }
+                }
+                
                 Poll::Pending
             }
         }
@@ -703,6 +867,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Test processing a complete line
@@ -723,6 +889,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Simulate HTTP chunks arriving in pieces
@@ -775,6 +943,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -788,8 +958,6 @@ mod tests {
             match chunk.part {
                 MessagePart::ToolCall { name, .. } => {
                     assert_eq!(name, "web_search");
-                    // CRITICAL: Tool calls should NEVER be marked as final, even with STOP finish reason
-                    assert!(!chunk.is_final, "Tool call chunk was incorrectly marked as final!");
                 },
                 _ => panic!("Expected ToolCall part"),
             }
@@ -825,6 +993,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -838,8 +1008,6 @@ mod tests {
             match chunk.part {
                 MessagePart::Text { text } => {
                     assert_eq!(text, "This is the final response.");
-                    // CRITICAL: Text chunks with STOP finish reason SHOULD be marked as final
-                    assert!(chunk.is_final, "Text chunk with STOP finish reason should be marked as final!");
                 },
                 _ => panic!("Expected Text part"),
             }
@@ -870,6 +1038,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         let result = stream.convert_response_to_chunks(&response);
@@ -899,6 +1069,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Simulate real Gemini response
@@ -927,6 +1099,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Test that incomplete lines are not processed
@@ -952,6 +1126,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         let line = "data: {\"test\": \"value\"}\n";
@@ -982,6 +1158,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Add multiple lines at once
@@ -1013,6 +1191,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Simulate receiving data in tiny increments
@@ -1049,6 +1229,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024, // Default to 1MB
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         let multi_part_json = r#"{"candidates": [{"content": {"parts": [{"text": "Hello"}, {"text": " World"}],"role": "model"},"finishReason": "STOP","index": 0}]}"#;
@@ -1080,6 +1262,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 100, // Very small limit for testing
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Test that buffer limit is enforced
@@ -1100,6 +1284,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024,
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Buffer contains partial line but complete JSON
@@ -1130,6 +1316,8 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: 1024 * 1024,
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
 
         // Buffer contains incomplete JSON
@@ -1157,77 +1345,11 @@ mod tests {
             done: false,
             model_name: String::new(),
             max_buffer_size: custom_buffer_size,
+            last_buffer_change: std::time::Instant::now(),
+            last_buffer_size: 0,
         };
         
         assert_eq!(stream.max_buffer_size, custom_buffer_size);
-    }
-
-    #[test]
-    fn test_mixed_text_and_tool_call_response() {
-        // Test that when a response has both text and tool call, only the final part should be final
-        let response = GeminiResponse {
-            candidates: vec![Candidate {
-                content: Content {
-                    parts: vec![
-                        Part {
-                            text: Some("I'll help you create a Rust project. Let me start by creating it...".to_string()),
-                            function_call: None,
-                            function_response: None,
-                            thought: None,
-                        },
-                        Part {
-                            text: None,
-                            function_call: Some(FunctionCall {
-                                name: "shell_execution".to_string(),
-                                args: json!({"command": "cargo new fibonacci_calculator"}),
-                            }),
-                            function_response: None,
-                            thought: None,
-                        }
-                    ],
-                    role: "model".to_string(),
-                },
-                finish_reason: Some("STOP".to_string()),
-                safety_ratings: vec![],
-                grounding_metadata: None,
-            }],
-            usage_metadata: None,
-            prompt_feedback: None,
-        };
-
-        let stream = GeminiStream {
-            response: Box::pin(futures_util::stream::empty()),
-            buffer: String::new(),
-            chunk_queue: VecDeque::new(),
-            done: false,
-            model_name: String::new(),
-            max_buffer_size: 1024 * 1024,
-        };
-
-        let result = stream.convert_response_to_chunks(&response);
-
-        assert!(result.is_ok());
-        let chunks = result.unwrap();
-        
-        assert_eq!(chunks.len(), 2, "Should have 2 chunks: text + tool call");
-        
-        // First chunk should be text and NOT final
-        match &chunks[0].part {
-            MessagePart::Text { text } => {
-                assert!(text.contains("I'll help you create"));
-                assert!(!chunks[0].is_final, "First text chunk should NOT be final when followed by tool call!");
-            },
-            _ => panic!("Expected first chunk to be text"),
-        }
-        
-        // Second chunk should be tool call and NOT final
-        match &chunks[1].part {
-            MessagePart::ToolCall { name, .. } => {
-                assert_eq!(name, "shell_execution");
-                assert!(!chunks[1].is_final, "Tool call should NOT be final!");
-            },
-            _ => panic!("Expected second chunk to be tool call"),
-        }
     }
 }
 

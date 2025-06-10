@@ -590,12 +590,15 @@ fn render_single_message_content(
     }
     
     // Tool calls (if any) - render inline after the main content
+    // REMOVED: Tool cards removed per user request
+    /*
     if !message.tool_calls.is_empty() {
         ui.add_space(1.0); // Small spacing before tool calls
         if let Some(tool_info) = render_tool_calls_compact(ui, &message.tool_calls, &bg_color, max_width, app_theme) {
             clicked_tool = Some(tool_info);
         }
     }
+    */
     
     clicked_tool
 }
