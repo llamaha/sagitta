@@ -507,16 +507,7 @@ impl Agent {
         tokio::spawn(async move {
             debug!("Starting reasoning engine task...");
             
-            let engine_guard_result = engine_arc_clone.try_lock();
-            if engine_guard_result.is_err() {
-                error!("Failed to acquire lock on reasoning engine");
-                if tx.send(Err(SagittaCodeError::ReasoningError("Failed to acquire reasoning engine lock".to_string()))).is_err() {
-                    warn!("Failed to send error to stream - receiver dropped");
-                }
-                return;
-            }
-            
-            let mut engine_guard = engine_guard_result.unwrap();
+            let mut engine_guard = engine_arc_clone.lock().await;
             
             debug!("Calling ReasoningEngine::process_with_context with {} history messages.", final_reasoning_history.len());
             

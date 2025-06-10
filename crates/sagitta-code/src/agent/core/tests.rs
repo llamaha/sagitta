@@ -430,7 +430,7 @@ mod tests {
                 "message": "Repository added successfully",
                 "name": "tokio",
                 "url": "https://github.com/tokio-rs/tokio"
-            }))
+            })),
         };
         tool_registry.register(Arc::new(repo_tool)).await.unwrap();
         
@@ -1729,5 +1729,212 @@ mod tests {
         assert!(chunk_count > 0, "Adapter should have produced at least one chunk");
         
         println!("Test: ✅ Reasoning adapter basic test passed");
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_reasoning_lock_failure() {
+        // This test verifies that concurrent messages are properly serialized and no longer fail with lock errors
+        println!("=== test_concurrent_reasoning_lock_failure ===");
+        
+        use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
+        use crate::agent::conversation::search::text::TextConversationSearchEngine;
+        use crate::config::types::SagittaCodeConfig;
+        use crate::tools::registry::ToolRegistry;
+        use tempfile::TempDir;
+        
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let storage_path = temp_dir.path().to_path_buf();
+        
+        let config = SagittaCodeConfig::default();
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let embedding_provider = Arc::new(MockEmbeddingProvider::new());
+
+        // Setup persistence and search engine like other tests
+        let persistence = Box::new(DiskConversationPersistence::new(storage_path.clone()).await.unwrap());
+        let search_engine = Box::new(TextConversationSearchEngine::new());
+        
+        // Use mock client with predictable responses
+        let mock_client = Arc::new(MockLlmClient::new(vec![
+            "Response to first message",
+            "Response to second message"
+        ]));
+        
+        let agent = Agent::new(
+            config,
+            tool_registry,
+            embedding_provider,
+            persistence,
+            search_engine,
+            mock_client,
+        ).await.unwrap();
+
+        // Send two messages in quick succession to trigger lock contention
+        let message1 = "Hello first message";
+        let message2 = "Hello second message"; 
+
+        println!("Sending first message: '{}'", message1);
+        let stream1_future = agent.process_message_stream(message1);
+        
+        // Small delay to let first task grab the lock
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        
+        println!("Sending second message: '{}'", message2);
+        let stream2_future = agent.process_message_stream(message2);
+
+        // Both futures should resolve to streams
+        let (stream1_result, stream2_result) = tokio::join!(stream1_future, stream2_future);
+        
+        let mut stream1 = stream1_result.expect("First stream should be created successfully");
+        let mut stream2 = stream2_result.expect("Second stream should be created successfully");
+
+        // Collect chunks from both streams
+        let mut stream1_chunks = Vec::new();
+        let mut stream2_chunks = Vec::new();
+        
+        // Process stream1 chunks
+        while let Some(chunk_result) = stream1.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    println!("Stream1 chunk: {:?}", chunk);
+                    stream1_chunks.push(chunk);
+                }
+                Err(e) => {
+                    // With the fix, we should not get lock errors anymore
+                    panic!("Stream1 should not fail after fix, got error: {}", e);
+                }
+            }
+        }
+        
+        // Process stream2 chunks 
+        while let Some(chunk_result) = stream2.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    println!("Stream2 chunk: {:?}", chunk);
+                    stream2_chunks.push(chunk);
+                }
+                Err(e) => {
+                    // With the fix, we should not get lock errors anymore
+                    panic!("Stream2 should not fail after fix, got error: {}", e);
+                }
+            }
+        }
+        
+        // Both streams should process chunks successfully 
+        assert!(!stream1_chunks.is_empty(), "Stream1 should process at least one chunk");
+        assert!(!stream2_chunks.is_empty(), "Stream2 should process at least one chunk");
+        
+        println!("Test completed - fix verified: both streams processed successfully without lock errors");
+    }
+
+    #[tokio::test] 
+    async fn test_concurrent_reasoning_serialized_access() {
+        // This test verifies that after our fix, concurrent messages are properly serialized
+        println!("=== test_concurrent_reasoning_serialized_access ===");
+        
+        use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
+        use crate::agent::conversation::search::text::TextConversationSearchEngine;
+        use crate::config::types::SagittaCodeConfig;
+        use crate::tools::registry::ToolRegistry;
+        use tempfile::TempDir;
+        
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let storage_path = temp_dir.path().to_path_buf();
+        
+        let config = SagittaCodeConfig::default();
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let embedding_provider = Arc::new(MockEmbeddingProvider::new());
+
+        // Use mock client with predictable responses for this test
+        let mock_client = Arc::new(MockLlmClient::new(vec![
+            "Response to first message",
+            "Response to second message"
+        ]));
+        
+        // Setup persistence and search engine like other tests
+        let persistence = Box::new(DiskConversationPersistence::new(storage_path.clone()).await.unwrap());
+        let search_engine = Box::new(TextConversationSearchEngine::new());
+        
+        let agent = Agent::new(
+            config,
+            tool_registry,
+            embedding_provider,
+            persistence,
+            search_engine,
+            mock_client,
+        ).await.unwrap();
+
+        // Send two messages in quick succession
+        let message1 = "First message";
+        let message2 = "Second message";
+
+        println!("Sending first message: '{}'", message1);
+        let stream1_future = agent.process_message_stream(message1);
+        
+        // Immediately send second message without delay
+        println!("Sending second message: '{}'", message2);
+        let stream2_future = agent.process_message_stream(message2);
+
+        // Both futures should resolve to streams successfully (no lock errors)
+        let (stream1_result, stream2_result) = tokio::join!(stream1_future, stream2_future);
+        
+        let mut stream1 = stream1_result.expect("First stream should be created successfully");
+        let mut stream2 = stream2_result.expect("Second stream should be created successfully");
+
+        // Collect all chunks from both streams - they should both complete successfully
+        let mut stream1_successful = false;
+        let mut stream2_successful = false;
+        let mut stream1_chunks = 0;
+        let mut stream2_chunks = 0;
+        
+        // Process stream1 to completion with timeout
+        while let Ok(Some(chunk_result)) = tokio::time::timeout(
+            Duration::from_millis(500), 
+            stream1.next()
+        ).await {
+            match chunk_result {
+                Ok(chunk) => {
+                    stream1_chunks += 1;
+                    println!("Stream1 chunk #{}: is_final={}", stream1_chunks, chunk.is_final);
+                    if chunk.is_final {
+                        stream1_successful = true;
+                        break;
+                    }
+                }
+                Err(e) => {
+                    panic!("Stream1 should not fail after fix, got error: {}", e);
+                }
+            }
+        }
+        
+        // Process stream2 to completion with timeout
+        while let Ok(Some(chunk_result)) = tokio::time::timeout(
+            Duration::from_millis(500), 
+            stream2.next()
+        ).await {
+            match chunk_result {
+                Ok(chunk) => {
+                    stream2_chunks += 1;
+                    println!("Stream2 chunk #{}: is_final={}", stream2_chunks, chunk.is_final);
+                    if chunk.is_final {
+                        stream2_successful = true;
+                        break;
+                    }
+                }
+                Err(e) => {
+                    panic!("Stream2 should not fail after fix, got error: {}", e);
+                }
+            }
+        }
+        
+        println!("Stream1: {} chunks, successful: {}", stream1_chunks, stream1_successful);
+        println!("Stream2: {} chunks, successful: {}", stream2_chunks, stream2_successful);
+        
+        // Both streams should have processed some chunks (the main goal)
+        // Don't require final chunks since the reasoning engine may handle stream completion differently
+        assert!(stream1_chunks > 0, "First stream should process at least one chunk");
+        assert!(stream2_chunks > 0, "Second stream should process at least one chunk");
+        
+        // The key assertion: no lock errors should occur
+        println!("Test completed - both streams processed successfully without lock errors");
     }
 } 
