@@ -816,6 +816,68 @@ mod tests {
             .expect_save_conversation()
             .returning(|_| Ok(()));
         
+        let workspace_id = Uuid::new_v4();
+        let conv1_id = Uuid::new_v4();
+        let conv2_id = Uuid::new_v4();
+        let conv3_id = Uuid::new_v4();
+        
+        // Mock list_conversation_summaries to return created conversations
+        mock_persistence
+            .expect_list_conversation_summaries()
+            .returning(move |workspace_filter| {
+                use crate::agent::conversation::types::ConversationSummary;
+                use crate::agent::state::types::ConversationStatus;
+                use chrono::Utc;
+                
+                let all_summaries = vec![
+                    ConversationSummary {
+                        id: conv1_id,
+                        title: "Conv 1".to_string(),
+                        workspace_id: Some(workspace_id),
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                    ConversationSummary {
+                        id: conv2_id,
+                        title: "Conv 2".to_string(),
+                        workspace_id: None,
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                    ConversationSummary {
+                        id: conv3_id,
+                        title: "Conv 3".to_string(),
+                        workspace_id: Some(workspace_id),
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                ];
+                
+                if let Some(ws_id) = workspace_filter {
+                    Ok(all_summaries.into_iter().filter(|s| s.workspace_id == Some(ws_id)).collect())
+                } else {
+                    Ok(all_summaries)
+                }
+            });
+        
         let mut mock_search = MockConversationSearchEngine::new();
         mock_search
             .expect_index_conversation()
@@ -826,9 +888,7 @@ mod tests {
             Box::new(mock_search),
         ).await.unwrap();
         
-        let workspace_id = Uuid::new_v4();
-        
-        // Create conversations
+        // Create conversations (these will be stored in memory cache but listing comes from persistence)
         manager.create_conversation("Conv 1".to_string(), Some(workspace_id)).await.unwrap();
         manager.create_conversation("Conv 2".to_string(), None).await.unwrap();
         manager.create_conversation("Conv 3".to_string(), Some(workspace_id)).await.unwrap();

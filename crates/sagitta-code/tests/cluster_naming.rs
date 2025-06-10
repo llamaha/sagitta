@@ -220,15 +220,43 @@ async fn test_cluster_naming_fallback() -> Result<()> {
 async fn test_cluster_naming_consistency() -> Result<()> {
     let cluster_namer = create_test_cluster_namer().await?;
     
+    // Use deterministic UUIDs to ensure consistent behavior
+    let conv1_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001")?;
+    let conv2_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002")?;
+    
     let conversations = vec![
-        create_test_conversation("Machine Learning Model Training", vec!["ml".to_string(), "training".to_string()]),
-        create_test_conversation("Neural Network Architecture", vec!["ml".to_string(), "neural".to_string()]),
+        ConversationSummary {
+            id: conv1_id,
+            title: "Machine Learning Model Training".to_string(),
+            created_at: Utc::now() - chrono::Duration::hours(1),
+            last_active: Utc::now(),
+            message_count: 5,
+            status: ConversationStatus::Active,
+            tags: vec!["ml".to_string(), "training".to_string()],
+            workspace_id: None,
+            has_branches: false,
+            has_checkpoints: false,
+            project_name: None,
+        },
+        ConversationSummary {
+            id: conv2_id,
+            title: "Neural Network Architecture".to_string(),
+            created_at: Utc::now() - chrono::Duration::hours(1),
+            last_active: Utc::now(),
+            message_count: 5,
+            status: ConversationStatus::Active,
+            tags: vec!["ml".to_string(), "neural".to_string()],
+            workspace_id: None,
+            has_branches: false,
+            has_checkpoints: false,
+            project_name: None,
+        },
     ];
     
     let cluster = ConversationCluster {
-        id: Uuid::new_v4(),
+        id: uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003")?,
         title: "ML Cluster".to_string(),
-        conversation_ids: conversations.iter().map(|c| c.id).collect(),
+        conversation_ids: vec![conv1_id, conv2_id],
         centroid: vec![0.6, 0.7, 0.8],
         cohesion_score: 0.88,
         common_tags: vec!["ml".to_string()],

@@ -3,6 +3,8 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
+use std::sync::Mutex as StdMutex;
+use std::collections::HashMap;
 
 use super::types::{Conversation, ConversationSummary};
 use super::clustering::{ConversationCluster, ConversationClusteringManager, ClusteringResult};
@@ -267,19 +269,70 @@ mod tests {
     use crate::agent::conversation::analytics::AnalyticsConfig;
     use crate::agent::conversation::persistence::MockConversationPersistence;
     use crate::agent::conversation::search::MockConversationSearchEngine;
+    use crate::agent::conversation::types::ConversationSummary;
     use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+    use std::collections::HashMap;
     
     async fn create_test_service() -> ConversationService {
+        // Create shared state for the mock to track conversations
+        let conversations_state: Arc<StdMutex<HashMap<Uuid, ConversationSummary>>> = Arc::new(StdMutex::new(HashMap::new()));
+        let conversations_data: Arc<StdMutex<HashMap<Uuid, Conversation>>> = Arc::new(StdMutex::new(HashMap::new()));
+        
+        let conversations_state_clone = Arc::clone(&conversations_state);
+        let conversations_state_clone2 = Arc::clone(&conversations_state);
+        let conversations_state_clone3 = Arc::clone(&conversations_state);
+        let conversations_data_clone = Arc::clone(&conversations_data);
+        let conversations_data_clone2 = Arc::clone(&conversations_data);
+        let conversations_data_clone3 = Arc::clone(&conversations_data);
+        
         let mut mock_persistence = MockConversationPersistence::new();
         mock_persistence
             .expect_list_conversation_ids()
             .returning(|| Ok(Vec::new()));
         mock_persistence
+            .expect_load_conversation()
+            .returning(move |id| {
+                let data = conversations_data_clone.lock().unwrap();
+                Ok(data.get(&id).cloned())
+            });
+        mock_persistence
             .expect_save_conversation()
-            .returning(|_| Ok(()));
+            .returning(move |conversation| {
+                let mut state = conversations_state_clone.lock().unwrap();
+                let mut data = conversations_data_clone2.lock().unwrap();
+                let summary = ConversationSummary {
+                    id: conversation.id,
+                    title: conversation.title.clone(),
+                    workspace_id: conversation.workspace_id,
+                    created_at: conversation.created_at,
+                    last_active: conversation.last_active,
+                    message_count: conversation.messages.len(),
+                    tags: conversation.tags.clone(),
+                    status: conversation.status.clone(),
+                    has_branches: !conversation.branches.is_empty(),
+                    has_checkpoints: !conversation.checkpoints.is_empty(),
+                    project_name: conversation.project_context.as_ref().map(|ctx| ctx.name.clone()),
+                };
+                state.insert(conversation.id, summary);
+                data.insert(conversation.id, conversation.clone());
+                Ok(())
+            });
         mock_persistence
             .expect_delete_conversation()
-            .returning(|_| Ok(()));
+            .returning(move |id| {
+                let mut state = conversations_state_clone2.lock().unwrap();
+                let mut data = conversations_data_clone3.lock().unwrap();
+                state.remove(&id);
+                data.remove(&id);
+                Ok(())
+            });
+        mock_persistence
+            .expect_list_conversation_summaries()
+            .returning(move |_workspace_id| {
+                let state = conversations_state_clone3.lock().unwrap();
+                Ok(state.values().cloned().collect())
+            });
         
         let mut mock_search = MockConversationSearchEngine::new();
         mock_search

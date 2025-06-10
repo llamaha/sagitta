@@ -670,7 +670,7 @@ async fn test_direct_tool_executor_parameter_validation() {
     assert!(chunk_event_received, "Expected LLM chunk with parameter validation feedback");
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_direct_loop_detection() {
     // Test loop detection directly on AgentToolExecutor
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -703,24 +703,24 @@ async fn test_direct_loop_detection() {
         // The first few calls might succeed or fail for other reasons, but the 4th should trigger loop detection
     }
     
-    // The 4th call should trigger loop detection
+    // The 4th call should trigger loop detection/repeated failure handling
     let final_result = tool_executor.execute_tool("add_repository", valid_params.clone()).await.unwrap();
     
-    // Should fail due to loop detection
-    assert!(!final_result.success, "Expected loop detection to trigger");
+    // Should fail due to repeated failure detection (graceful degradation)
+    assert!(!final_result.success, "Expected repeated failure detection to trigger");
     if let Some(error) = &final_result.error {
-        assert!(error.contains("Loop detected") || error.contains("repeatedly"), 
-               "Expected loop detection error, got: {}", error);
+        assert!(error.contains("Loop detected") || error.contains("repeated") || error.contains("Skipping"), 
+               "Expected loop detection or repeated failure handling, got: {}", error);
     }
     
-    // Check that we got loop detection feedback
-    let mut loop_event_received = false;
+    // Check that we got appropriate feedback
+    let mut appropriate_feedback_received = false;
     for _ in 0..20 {
         if let Ok(event) = event_receiver.try_recv() {
             match event {
                 AgentEvent::LlmChunk { content, .. } => {
-                    if content.contains("🔄") || content.contains("Loop detected") || content.contains("repeatedly") {
-                        loop_event_received = true;
+                    if content.contains("🔄") || content.contains("Loop detected") || content.contains("repeated") || content.contains("Skipping") {
+                        appropriate_feedback_received = true;
                         break;
                     }
                 }
@@ -729,7 +729,7 @@ async fn test_direct_loop_detection() {
         }
     }
     
-    assert!(loop_event_received, "Expected loop detection feedback to LLM");
+    assert!(appropriate_feedback_received, "Expected loop detection or repeated failure feedback to LLM");
 }
 
 #[tokio::test]

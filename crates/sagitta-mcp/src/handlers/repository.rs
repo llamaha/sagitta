@@ -1495,9 +1495,13 @@ mod tests {
     }
 
     fn create_test_app_config(repositories: Vec<RepositoryConfig>, temp_dir_path_str: String) -> Arc<RwLock<AppConfig>> {
-        let model_path = PathBuf::from(temp_dir_path_str.clone()).join("model.onnx");
-        let tokenizer_path = PathBuf::from(temp_dir_path_str.clone()).join("tokenizer.json");
-        let test_config_path = PathBuf::from(temp_dir_path_str.clone()).join("test_config.toml");
+        // Create the directory structure first
+        let temp_dir_path = PathBuf::from(&temp_dir_path_str);
+        std::fs::create_dir_all(&temp_dir_path).expect("Failed to create temp directory");
+        
+        let model_path = temp_dir_path.join("model.onnx");
+        let tokenizer_path = temp_dir_path.join("tokenizer.json");
+        let test_config_path = temp_dir_path.join("test_config.toml");
 
         // Set up test isolation to prevent overwriting user's real config
         std::env::set_var("SAGITTA_TEST_CONFIG_PATH", test_config_path.to_str().unwrap());
@@ -1534,8 +1538,8 @@ mod tests {
             onnx_model_path: Some(model_path.to_string_lossy().into_owned()),
             onnx_tokenizer_path: Some(tokenizer_path.to_string_lossy().into_owned()),
             server_api_key_path: None,
-            repositories_base_path: Some(PathBuf::from(temp_dir_path_str.clone()).join("repos").to_string_lossy().into_owned()),
-            vocabulary_base_path: Some(PathBuf::from(temp_dir_path_str).join("vocab").to_string_lossy().into_owned()),
+            repositories_base_path: Some(temp_dir_path.join("repos").to_string_lossy().into_owned()),
+            vocabulary_base_path: Some(temp_dir_path.join("vocab").to_string_lossy().into_owned()),
             repositories,
             active_repository: None,
             indexing: IndexingConfig::default(),
@@ -1611,7 +1615,7 @@ mod tests {
         let global_repo = create_test_repo_config(global_repo_name, Some("default_mcp_instance_tenant_for_tests".to_string()));
 
         // Scenario 1: User Tenant A tries to remove Repo Tenant A (SUCCESS - auth passes)
-        let config_s1 = create_test_app_config(vec![repo_for_a.clone()], temp_dir_path_str.clone());
+        let config_s1 = create_test_app_config(vec![repo_for_a.clone()], format!("{}/s1", temp_dir_path_str));
         let auth_user_s1 = create_test_auth_user(Some(tenant_a_id));
         let params_s1 = RepositoryRemoveParams { name: repo_for_a_name.to_string() };
         let result_s1 = handle_repository_remove(params_s1, config_s1.clone(), qdrant_client.clone(), auth_user_s1).await;
@@ -1621,7 +1625,7 @@ mod tests {
         }
 
         // Scenario 2: User Tenant A tries to remove Repo Tenant B (FAIL - ACCESS_DENIED)
-        let config_s2 = create_test_app_config(vec![repo_for_b.clone()], temp_dir_path_str.clone());
+        let config_s2 = create_test_app_config(vec![repo_for_b.clone()], format!("{}/s2", temp_dir_path_str));
         let auth_user_s2 = create_test_auth_user(Some(tenant_a_id));
         let params_s2 = RepositoryRemoveParams { name: repo_for_b_name.to_string() };
         let result_s2 = handle_repository_remove(params_s2, config_s2.clone(), qdrant_client.clone(), auth_user_s2).await;
@@ -1629,7 +1633,7 @@ mod tests {
         assert!(result_s2.err().map_or(false, |e| is_access_denied(&e)), "S2: Expected ACCESS_DENIED");
 
         // Scenario 3: User Tenant A tries to remove Global Repo (FAIL - ACCESS_DENIED)
-        let config_s3 = create_test_app_config(vec![global_repo.clone()], temp_dir_path_str.clone());
+        let config_s3 = create_test_app_config(vec![global_repo.clone()], format!("{}/s3", temp_dir_path_str));
         let auth_user_s3 = create_test_auth_user(Some(tenant_a_id));
         let params_s3 = RepositoryRemoveParams { name: global_repo_name.to_string() };
         let result_s3 = handle_repository_remove(params_s3, config_s3.clone(), qdrant_client.clone(), auth_user_s3).await;
@@ -1637,7 +1641,7 @@ mod tests {
         assert!(result_s3.err().map_or(false, |e| is_access_denied(&e)), "S3: Expected ACCESS_DENIED");
 
         // Scenario 4: Global User tries to remove Repo Tenant A (FAIL - ACCESS_DENIED)
-        let config_s4 = create_test_app_config(vec![repo_for_a.clone()], temp_dir_path_str.clone());
+        let config_s4 = create_test_app_config(vec![repo_for_a.clone()], format!("{}/s4", temp_dir_path_str));
         let auth_user_s4 = create_test_auth_user(None); 
         let params_s4 = RepositoryRemoveParams { name: repo_for_a_name.to_string() };
         let result_s4 = handle_repository_remove(params_s4, config_s4.clone(), qdrant_client.clone(), auth_user_s4).await;
@@ -1645,7 +1649,7 @@ mod tests {
         assert!(result_s4.err().map_or(false, |e| is_access_denied(&e)), "S4: Expected ACCESS_DENIED");
 
         // Scenario 5: Global User tries to remove Global Repo (SUCCESS - auth passes)
-        let config_s5 = create_test_app_config(vec![global_repo.clone()], temp_dir_path_str.clone());
+        let config_s5 = create_test_app_config(vec![global_repo.clone()], format!("{}/s5", temp_dir_path_str));
         let auth_user_s5 = create_test_auth_user(None); 
         let params_s5 = RepositoryRemoveParams { name: global_repo_name.to_string() };
         let result_s5 = handle_repository_remove(params_s5, config_s5.clone(), qdrant_client.clone(), auth_user_s5).await;
