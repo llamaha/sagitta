@@ -47,8 +47,8 @@ pub struct DirectoryChangeResult {
 impl WorkingDirectoryManager {
     /// Create a new working directory manager
     pub fn new(base_directory: PathBuf) -> Result<Self, SagittaCodeError> {
-        let current_directory = std::env::current_dir()
-            .unwrap_or_else(|_| base_directory.clone());
+        // Start with the base directory as the current directory
+        let current_directory = base_directory.clone();
         
         Ok(Self {
             current_directory: Arc::new(RwLock::new(current_directory)),
