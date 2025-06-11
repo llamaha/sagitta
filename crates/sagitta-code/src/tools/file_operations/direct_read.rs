@@ -40,10 +40,26 @@ impl DirectFileReadTool {
         let file_path = Path::new(&params.file_path);
         
         // Resolve absolute path
+        // If a relative path is given we first attempt to resolve it against the *current* process
+        // working directory (which is updated by WorkingDirectoryManager when the user calls
+        // `change_directory`).  This allows tools to work correctly after the agent has changed
+        // directories.  If that file does not exist we fall back to resolving relative to the
+        // workspace root (`base_directory`) to keep backwards-compatibility with existing tests.
         let absolute_path = if file_path.is_absolute() {
             file_path.to_path_buf()
         } else {
-            self.base_directory.join(file_path)
+            // Try `cwd` first
+            match std::env::current_dir() {
+                Ok(cwd) => {
+                    let candidate = cwd.join(file_path);
+                    if candidate.exists() {
+                        candidate
+                    } else {
+                        self.base_directory.join(file_path)
+                    }
+                }
+                Err(_) => self.base_directory.join(file_path),
+            }
         };
         
         // Validate that the path is within the base directory for security

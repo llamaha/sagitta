@@ -40,7 +40,7 @@ pub struct EditParams {
 }
 
 /// Maximum content size in bytes to prevent streaming buffer overflows
-const MAX_CONTENT_SIZE: usize = 50 * 1024; // 50KB limit
+const MAX_CONTENT_SIZE: usize = 10 * 1024; // 10KB limit to prevent streaming timeouts
 
 /// Tool for editing code by line numbers with repository and direct file fallback
 #[derive(Debug)]
@@ -215,7 +215,7 @@ impl Tool for EditTool {
                     },
                     "content": {
                         "type": "string",
-                        "description": "New content to replace the lines"
+                        "description": "New content to replace the lines. IMPORTANT: Keep content under 10KB. For large files, break into multiple smaller edit_file calls targeting different line ranges."
                     },
                     "format": {
                         "type": "boolean",

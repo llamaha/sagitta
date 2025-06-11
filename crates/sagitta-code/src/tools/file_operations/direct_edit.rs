@@ -28,7 +28,7 @@ pub struct DirectEditFileParams {
 }
 
 /// Maximum content size in bytes to prevent memory issues
-const MAX_CONTENT_SIZE: usize = 50 * 1024; // 50KB limit
+const MAX_CONTENT_SIZE: usize = 10 * 1024; // 10KB limit to prevent streaming timeouts
 
 /// Tool for editing files directly from the filesystem without repository management
 #[derive(Debug)]
@@ -50,7 +50,7 @@ impl DirectFileEditTool {
         // Validate content size
         if params.content.len() > MAX_CONTENT_SIZE {
             return Err(SagittaCodeError::ToolError(format!(
-                "Content size ({} bytes) exceeds maximum allowed size ({} bytes). Consider breaking large edits into smaller chunks.",
+                "Content size ({} bytes) exceeds maximum allowed size ({} bytes). Consider breaking large edits into smaller chunks targeting specific line ranges or using multiple edit_file calls.",
                 params.content.len(), MAX_CONTENT_SIZE
             )));
         }
@@ -58,10 +58,24 @@ impl DirectFileEditTool {
         let file_path = Path::new(&params.file_path);
         
         // Resolve absolute path
+        // When the user has called `change_directory`, the process cwd is updated.  We therefore
+        // first attempt to resolve the relative path against the current cwd, falling back to the
+        // workspace root if the path does not exist there.  This mirrors the logic used in the
+        // direct file *read* tool and prevents "file not found" errors after a directory change.
         let absolute_path = if file_path.is_absolute() {
             file_path.to_path_buf()
         } else {
-            self.base_directory.join(file_path)
+            match std::env::current_dir() {
+                Ok(cwd) => {
+                    let candidate = cwd.join(file_path);
+                    if candidate.exists() {
+                        candidate
+                    } else {
+                        self.base_directory.join(file_path)
+                    }
+                }
+                Err(_) => self.base_directory.join(file_path),
+            }
         };
         
         // Handle file creation if it doesn't exist
@@ -218,7 +232,7 @@ impl Tool for DirectFileEditTool {
                     },
                     "content": {
                         "type": "string",
-                        "description": "New content to replace the lines"
+                        "description": "New content to replace the lines. IMPORTANT: Keep content under 10KB. For large files, break into multiple smaller direct_edit_file calls targeting different line ranges."
                     },
                     "create_if_missing": {
                         "type": "boolean",
