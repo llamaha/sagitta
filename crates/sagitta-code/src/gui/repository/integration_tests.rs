@@ -13,7 +13,7 @@ use anyhow::Result;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::repository::{
-    AddRepositoryTool, ListRepositoriesTool, SyncRepositoryTool, 
+    AddExistingRepositoryTool, ListRepositoriesTool, SyncRepositoryTool, 
     RemoveRepositoryTool, SearchFileInRepositoryTool, ViewFileInRepositoryTool
 };
 use crate::tools::types::{Tool, ToolResult};
@@ -180,7 +180,7 @@ mod tests {
             .expect("Failed to create test git repository");
         
         // Create tools
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let list_tool = ListRepositoriesTool::new(repo_manager.clone());
         let sync_tool = SyncRepositoryTool::new(repo_manager.clone());
         let remove_tool = RemoveRepositoryTool::new(repo_manager.clone());
@@ -407,7 +407,7 @@ mod tests {
             .expect("Failed to create test repo manager");
         
         // Test AddRepositoryTool parameter validation
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         
         // Test missing name
         let result = add_tool.execute(json!({"url": "https://github.com/test/repo.git"})).await.unwrap();
@@ -422,7 +422,7 @@ mod tests {
         let result = add_tool.execute(json!({"name": "test"})).await.unwrap();
         match result {
             ToolResult::Error { error } => {
-                assert!(error.contains("Either URL or local_path must be provided"));
+                assert!(error.contains("Either 'url' or 'local_path' must be provided"));
             }
             _ => panic!("Expected validation error for missing URL/path"),
         }
@@ -492,7 +492,7 @@ mod tests {
             .expect("Failed to create test git repository");
         
         // Test that operations fail appropriately when manager is not fully initialized
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let params = json!({
             "name": "test-init-repo",
             "local_path": test_repo_path.to_string_lossy()
@@ -582,7 +582,7 @@ mod tests {
             .expect("Failed to create test repo manager");
         
         let tools: Vec<Box<dyn Tool + Send + Sync>> = vec![
-            Box::new(AddRepositoryTool::new(repo_manager.clone())),
+            Box::new(AddExistingRepositoryTool::new(repo_manager.clone())),
             Box::new(ListRepositoriesTool::new(repo_manager.clone())),
             Box::new(SyncRepositoryTool::new(repo_manager.clone())),
             Box::new(RemoveRepositoryTool::new(repo_manager.clone())),

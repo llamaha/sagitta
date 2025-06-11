@@ -48,7 +48,7 @@ use futures_util::future::join_all;
 
 use crate::error::{Result, ReasoningError};
 use crate::config::OrchestrationConfig;
-use crate::traits::{ToolExecutor, ToolResult, ToolDefinition, EventEmitter, ReasoningEvent};
+use crate::traits::{ToolExecutor, ToolResult, ToolDefinition, EventEmitter, ReasoningEvent, ValidationStatus, CompletionEvidence, EvidenceType};
 
 /// Main tool orchestrator for managing and coordinating tool execution
 pub struct ToolOrchestrator {
@@ -110,6 +110,119 @@ pub struct RetryConfig {
     pub backoff_multiplier: f32,
     /// Whether to retry on specific error types only
     pub retry_on_errors: Option<Vec<String>>,
+    /// Enable alternative tool suggestions on failure
+    pub enable_alternatives: bool,
+    /// Enable parameter variation on retry
+    pub enable_parameter_variation: bool,
+}
+
+/// Enhanced error recovery strategies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryStrategy {
+    /// Strategy type
+    pub strategy_type: RecoveryStrategyType,
+    /// Alternative tool to try
+    pub alternative_tool: Option<String>,
+    /// Modified parameters to try
+    pub modified_parameters: Option<serde_json::Value>,
+    /// Simplified approach with reduced requirements
+    pub simplified_approach: Option<SimplifiedApproach>,
+    /// Human-readable description of the strategy
+    pub description: String,
+    /// Confidence in this strategy (0.0 to 1.0)
+    pub confidence: f32,
+}
+
+/// Types of recovery strategies
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RecoveryStrategyType {
+    /// Retry with same parameters
+    BasicRetry,
+    /// Try alternative tool
+    AlternativeTool,
+    /// Modify parameters
+    ParameterVariation,
+    /// Use simpler approach
+    SimplifiedApproach,
+    /// Break down into smaller steps
+    Decomposition,
+    /// Use manual/shell commands
+    ManualFallback,
+    /// Skip non-critical operation
+    GracefulSkip,
+}
+
+/// Simplified approach configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimplifiedApproach {
+    /// Reduced functionality parameters
+    pub reduced_parameters: serde_json::Value,
+    /// Description of what functionality is being reduced
+    pub reduction_description: String,
+    /// Whether this maintains core functionality
+    pub maintains_core_functionality: bool,
+}
+
+/// Recovery suggestions for common failure scenarios
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoverySuggestions {
+    /// Suggested recovery strategies
+    pub strategies: Vec<RecoveryStrategy>,
+    /// Analysis of the failure
+    pub failure_analysis: FailureAnalysis,
+    /// Recommended next steps for the user
+    pub user_recommendations: Vec<String>,
+    /// Whether manual intervention is recommended
+    pub requires_manual_intervention: bool,
+}
+
+/// Analysis of tool failure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailureAnalysis {
+    /// Category of failure
+    pub failure_category: FailureCategory,
+    /// Root cause analysis
+    pub root_cause: String,
+    /// Whether this is a recoverable failure
+    pub is_recoverable: bool,
+    /// Likelihood of success with retry (0.0 to 1.0)
+    pub retry_success_probability: f32,
+    /// Alternative approaches available
+    pub alternatives_available: bool,
+}
+
+/// Categories of tool failures
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FailureCategory {
+    /// Network/connectivity issues
+    NetworkError,
+    /// Authentication/permission problems
+    AuthenticationError,
+    /// Invalid parameters
+    ParameterError,
+    /// Resource exhaustion
+    ResourceError,
+    /// Tool configuration issues
+    ConfigurationError,
+    /// External dependency failure
+    DependencyError,
+    /// Timeout
+    TimeoutError,
+    /// Unknown error
+    UnknownError,
+}
+
+/// Validation outcome for tool execution results
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ValidationOutcome {
+    /// Result is validated and consistent
+    Validated,
+    /// Result needs verification but can proceed
+    NeedsVerification { reason: String },
+    /// Result is inconsistent and should be retried
+    Inconsistent { details: String },
+    /// Verification itself failed
+    VerificationFailed { error: String },
 }
 
 /// Result of orchestrating multiple tools
@@ -156,6 +269,8 @@ pub struct ToolExecutionResult {
     pub error: Option<String>,
     /// Resources that were allocated for this execution
     pub allocated_resources: Vec<AllocatedResource>,
+    /// Recovery suggestions if execution failed
+    pub recovery_suggestions: Option<RecoverySuggestions>,
 }
 
 /// Status of tool execution
@@ -646,6 +761,7 @@ impl ToolOrchestrator {
                 execution_time: Duration::ZERO,
                 error: Some("Dependencies not satisfied".to_string()),
                 allocated_resources: Vec::new(),
+                recovery_suggestions: None,
             });
         }
         
@@ -700,17 +816,38 @@ impl ToolOrchestrator {
                         execution_time: start_time.elapsed(),
                         error: None,
                         allocated_resources,
+                        recovery_suggestions: None,
                     });
                 }
                 Ok(Err(error)) => {
                     // Tool execution failed
-                    last_error = Some(error.to_string());
+                    let error_message = error.to_string();
+                    last_error = Some(error_message.clone());
+                    
+                    // Generate recovery suggestions on failure if enabled
+                    if retry_config.enable_alternatives || retry_config.enable_parameter_variation {
+                        if let Ok(suggestions) = self.analyze_failure_and_suggest_recovery(
+                            &request.tool_name,
+                            &error_message,
+                            &request.parameters,
+                            retry_attempts
+                        ).await {
+                            // Log recovery suggestions for debugging
+                            tracing::info!("Generated {} recovery strategies for failed tool '{}': {}", 
+                                suggestions.strategies.len(),
+                                request.tool_name,
+                                suggestions.strategies.iter()
+                                    .map(|s| s.description.clone())
+                                    .collect::<Vec<_>>()
+                                    .join("; "));
+                        }
+                    }
                     
                     if retry_attempts < retry_config.max_attempts {
                         retry_attempts += 1;
                         let delay = self.calculate_retry_delay(&retry_config, retry_attempts);
-                        tracing::warn!("Tool {} failed, retrying in {:?} (attempt {}/{})", 
-                            request.tool_name, delay, retry_attempts, retry_config.max_attempts);
+                        tracing::warn!("Tool {} failed, retrying in {:?} (attempt {}/{}): {}", 
+                            request.tool_name, delay, retry_attempts, retry_config.max_attempts, error_message);
                         tokio::time::sleep(delay).await;
                         continue;
                     }
@@ -723,8 +860,23 @@ impl ToolOrchestrator {
             }
         }
         
-        // All retries exhausted - release resources and return failure
+        // All retries exhausted - generate final recovery suggestions and return failure
         self.release_resources(&allocated_resources).await?;
+        
+        let final_recovery_suggestions = if retry_config.enable_alternatives || retry_config.enable_parameter_variation {
+            if let Some(error_msg) = &last_error {
+                self.analyze_failure_and_suggest_recovery(
+                    &request.tool_name,
+                    error_msg,
+                    &request.parameters,
+                    retry_attempts
+                ).await.ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         
         event_emitter.emit_event(ReasoningEvent::ToolExecutionCompleted {
             session_id: Uuid::new_v4(), // TODO: Use orchestration ID
@@ -742,6 +894,7 @@ impl ToolOrchestrator {
             execution_time: start_time.elapsed(),
             error: last_error,
             allocated_resources,
+            recovery_suggestions: final_recovery_suggestions,
         })
     }
     
@@ -803,9 +956,11 @@ impl ToolOrchestrator {
             max_delay: self.config.retry_max_delay,
             backoff_multiplier: 2.0,
             retry_on_errors: None,
+            enable_alternatives: true,
+            enable_parameter_variation: true,
         }
     }
-    
+
     /// Update orchestration metrics
     async fn update_metrics(&self, result: &OrchestrationResult) {
         let mut metrics = self.metrics.write().await;
@@ -834,6 +989,676 @@ impl ToolOrchestrator {
     pub async fn get_active_orchestrations(&self) -> Vec<Uuid> {
         let active = self.active_executions.read().await;
         active.keys().cloned().collect()
+    }
+
+    /// Analyze tool failure and suggest recovery strategies
+    async fn analyze_failure_and_suggest_recovery(
+        &self,
+        tool_name: &str,
+        error_message: &str,
+        parameters: &serde_json::Value,
+        retry_attempts: u32,
+    ) -> Result<RecoverySuggestions> {
+        let failure_analysis = self.analyze_failure(tool_name, error_message).await;
+        let strategies = self.generate_recovery_strategies(
+            tool_name, 
+            &failure_analysis, 
+            parameters, 
+            retry_attempts
+        ).await?;
+        
+        let user_recommendations = self.generate_user_recommendations(
+            tool_name,
+            &failure_analysis,
+            &strategies
+        );
+
+        Ok(RecoverySuggestions {
+            strategies,
+            failure_analysis,
+            user_recommendations,
+            requires_manual_intervention: self.requires_manual_intervention(tool_name, error_message),
+        })
+    }
+
+    /// Analyze the failure to determine category and root cause
+    async fn analyze_failure(&self, tool_name: &str, error_message: &str) -> FailureAnalysis {
+        let failure_category = self.categorize_failure(error_message);
+        let root_cause = self.determine_root_cause(tool_name, error_message, &failure_category);
+        let is_recoverable = self.is_failure_recoverable(&failure_category, error_message);
+        let retry_success_probability = self.estimate_retry_success_probability(&failure_category, error_message);
+        let alternatives_available = self.check_alternatives_available(tool_name, &failure_category);
+
+        FailureAnalysis {
+            failure_category,
+            root_cause,
+            is_recoverable,
+            retry_success_probability,
+            alternatives_available,
+        }
+    }
+
+    /// Categorize the failure based on error message patterns
+    fn categorize_failure(&self, error_message: &str) -> FailureCategory {
+        let lower_message = error_message.to_lowercase();
+        
+        if lower_message.contains("network") || lower_message.contains("connection") || 
+           lower_message.contains("timeout") || lower_message.contains("unreachable") {
+            if lower_message.contains("timeout") || lower_message.contains("timed out") {
+                FailureCategory::TimeoutError
+            } else {
+                FailureCategory::NetworkError
+            }
+        } else if lower_message.contains("auth") || lower_message.contains("permission") || 
+                  lower_message.contains("unauthorized") || lower_message.contains("forbidden") {
+            FailureCategory::AuthenticationError
+        } else if lower_message.contains("parameter") || lower_message.contains("invalid") || 
+                  lower_message.contains("missing") || lower_message.contains("required") {
+            FailureCategory::ParameterError
+        } else if lower_message.contains("resource") || lower_message.contains("quota") || 
+                  lower_message.contains("limit") || lower_message.contains("exhausted") {
+            FailureCategory::ResourceError
+        } else if lower_message.contains("config") || lower_message.contains("setup") || 
+                  lower_message.contains("initialization") {
+            FailureCategory::ConfigurationError
+        } else if lower_message.contains("dependency") || lower_message.contains("external") || 
+                  lower_message.contains("service") {
+            FailureCategory::DependencyError
+        } else {
+            FailureCategory::UnknownError
+        }
+    }
+
+    /// Determine specific root cause analysis
+    fn determine_root_cause(&self, tool_name: &str, error_message: &str, category: &FailureCategory) -> String {
+        match category {
+            FailureCategory::NetworkError => {
+                format!("Network connectivity issue while executing '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::AuthenticationError => {
+                format!("Authentication or permission problem with '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::ParameterError => {
+                format!("Invalid or missing parameters for '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::ResourceError => {
+                format!("Resource limitation encountered in '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::ConfigurationError => {
+                format!("Configuration issue with '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::DependencyError => {
+                format!("External dependency failure affecting '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::TimeoutError => {
+                format!("Timeout occurred while executing '{}': {}", tool_name, error_message)
+            }
+            FailureCategory::UnknownError => {
+                format!("Unknown error in '{}': {}", tool_name, error_message)
+            }
+        }
+    }
+
+    /// Check if failure is recoverable
+    fn is_failure_recoverable(&self, category: &FailureCategory, error_message: &str) -> bool {
+        match category {
+            FailureCategory::NetworkError => true,
+            FailureCategory::TimeoutError => true,
+            FailureCategory::ResourceError => true,
+            FailureCategory::DependencyError => true,
+            FailureCategory::AuthenticationError => false,
+            FailureCategory::ConfigurationError => false,
+            FailureCategory::ParameterError => {
+                // Parameter errors might be recoverable with alternative parameters
+                !error_message.to_lowercase().contains("missing required")
+            }
+            FailureCategory::UnknownError => true, // Assume recoverable for unknown errors
+        }
+    }
+
+    /// Estimate probability of retry success
+    fn estimate_retry_success_probability(&self, category: &FailureCategory, error_message: &str) -> f32 {
+        match category {
+            FailureCategory::NetworkError => 0.7,
+            FailureCategory::TimeoutError => 0.6,
+            FailureCategory::ResourceError => 0.4,
+            FailureCategory::DependencyError => 0.5,
+            FailureCategory::AuthenticationError => 0.1,
+            FailureCategory::ConfigurationError => 0.2,
+            FailureCategory::ParameterError => {
+                if error_message.to_lowercase().contains("format") {
+                    0.3 // Format errors might be fixable with parameter variation
+                } else {
+                    0.1
+                }
+            }
+            FailureCategory::UnknownError => 0.4,
+        }
+    }
+
+    /// Check if alternative tools are available
+    fn check_alternatives_available(&self, tool_name: &str, category: &FailureCategory) -> bool {
+        // Common tools that have alternatives
+        let tool_alternatives = [
+            ("add_existing_repository", vec!["shell_execution"]),
+            ("file_write", vec!["shell_execution"]),
+            ("file_read", vec!["shell_execution"]),
+            ("git_clone", vec!["shell_execution"]),
+            ("package_install", vec!["shell_execution"]),
+        ];
+
+        for (tool, _alternatives) in &tool_alternatives {
+            if tool_name.contains(tool) {
+                return true;
+            }
+        }
+
+        // Some error categories have generic alternatives
+        matches!(category, 
+            FailureCategory::ParameterError | 
+            FailureCategory::ConfigurationError |
+            FailureCategory::DependencyError
+        )
+    }
+
+    /// Generate recovery strategies based on failure analysis
+    async fn generate_recovery_strategies(
+        &self,
+        tool_name: &str,
+        analysis: &FailureAnalysis,
+        parameters: &serde_json::Value,
+        retry_attempts: u32,
+    ) -> Result<Vec<RecoveryStrategy>> {
+        let mut strategies = Vec::new();
+
+        // Basic retry if recoverable and not too many attempts
+        if analysis.is_recoverable && retry_attempts < 3 {
+            strategies.push(RecoveryStrategy {
+                strategy_type: RecoveryStrategyType::BasicRetry,
+                alternative_tool: None,
+                modified_parameters: None,
+                simplified_approach: None,
+                description: format!("Retry '{}' with exponential backoff", tool_name),
+                confidence: analysis.retry_success_probability,
+            });
+        }
+
+        // Alternative tools based on tool name and error category
+        if analysis.alternatives_available {
+            strategies.extend(self.generate_alternative_tool_strategies(tool_name, analysis).await);
+        }
+
+        // Parameter variation strategies
+        if matches!(analysis.failure_category, FailureCategory::ParameterError) {
+            strategies.extend(self.generate_parameter_variation_strategies(tool_name, parameters).await);
+        }
+
+        // Simplified approach strategies
+        strategies.extend(self.generate_simplified_approach_strategies(tool_name, analysis, parameters).await);
+
+        // Manual fallback strategies
+        strategies.extend(self.generate_manual_fallback_strategies(tool_name, analysis).await);
+
+        // Sort by confidence
+        strategies.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(strategies)
+    }
+
+    /// Generate alternative tool strategies
+    async fn generate_alternative_tool_strategies(
+        &self,
+        tool_name: &str,
+        _analysis: &FailureAnalysis,
+    ) -> Vec<RecoveryStrategy> {
+        let mut strategies = Vec::new();
+
+        // Repository management alternatives
+        if tool_name.contains("add_existing_repository") {
+            strategies.push(RecoveryStrategy {
+                strategy_type: RecoveryStrategyType::AlternativeTool,
+                alternative_tool: Some("shell_execution".to_string()),
+                modified_parameters: Some(serde_json::json!({
+                    "command": "ls -la",
+                    "description": "Use shell commands to verify directory existence and contents"
+                })),
+                simplified_approach: None,
+                description: "Use shell commands to manually verify and work with the directory".to_string(),
+                confidence: 0.8,
+            });
+        }
+
+        // File operations alternatives
+        if tool_name.contains("file_") {
+            strategies.push(RecoveryStrategy {
+                strategy_type: RecoveryStrategyType::AlternativeTool,
+                alternative_tool: Some("shell_execution".to_string()),
+                modified_parameters: Some(serde_json::json!({
+                    "command": "echo 'Using shell for file operations'",
+                    "description": "Fall back to shell commands for file operations"
+                })),
+                simplified_approach: None,
+                description: "Use shell commands for file operations instead of specialized tools".to_string(),
+                confidence: 0.7,
+            });
+        }
+
+        strategies
+    }
+
+    /// Generate parameter variation strategies
+    async fn generate_parameter_variation_strategies(
+        &self,
+        tool_name: &str,
+        parameters: &serde_json::Value,
+    ) -> Vec<RecoveryStrategy> {
+        let mut strategies = Vec::new();
+
+        if tool_name.contains("add_existing_repository") {
+            if let Some(obj) = parameters.as_object() {
+                // Try with just local_path if both URL and local_path were provided
+                if obj.contains_key("url") && obj.contains_key("local_path") {
+                    let mut new_params = obj.clone();
+                    new_params.remove("url");
+                    new_params.remove("branch");
+                    
+                    strategies.push(RecoveryStrategy {
+                        strategy_type: RecoveryStrategyType::ParameterVariation,
+                        alternative_tool: None,
+                        modified_parameters: Some(serde_json::Value::Object(new_params)),
+                        simplified_approach: None,
+                        description: "Try with only local_path parameter, removing URL and branch".to_string(),
+                        confidence: 0.6,
+                    });
+                }
+
+                // Try with absolute path if relative path was used
+                if let Some(local_path) = obj.get("local_path").and_then(|v| v.as_str()) {
+                    if !local_path.starts_with('/') {
+                        let mut new_params = obj.clone();
+                        new_params.insert("local_path".to_string(), 
+                            serde_json::Value::String(format!("/home/user/{}", local_path)));
+                        
+                        strategies.push(RecoveryStrategy {
+                            strategy_type: RecoveryStrategyType::ParameterVariation,
+                            alternative_tool: None,
+                            modified_parameters: Some(serde_json::Value::Object(new_params)),
+                            simplified_approach: None,
+                            description: "Try with absolute path instead of relative path".to_string(),
+                            confidence: 0.5,
+                        });
+                    }
+                }
+            }
+        }
+
+        strategies
+    }
+
+    /// Generate simplified approach strategies
+    async fn generate_simplified_approach_strategies(
+        &self,
+        tool_name: &str,
+        _analysis: &FailureAnalysis,
+        _parameters: &serde_json::Value,
+    ) -> Vec<RecoveryStrategy> {
+        let mut strategies = Vec::new();
+
+        if tool_name.contains("add_existing_repository") {
+            strategies.push(RecoveryStrategy {
+                strategy_type: RecoveryStrategyType::SimplifiedApproach,
+                alternative_tool: None,
+                modified_parameters: None,
+                simplified_approach: Some(SimplifiedApproach {
+                    reduced_parameters: serde_json::json!({
+                        "description": "Skip repository registration and work with files directly"
+                    }),
+                    reduction_description: "Skip complex repository registration".to_string(),
+                    maintains_core_functionality: false,
+                }),
+                description: "Skip repository registration and work with files directly using shell commands".to_string(),
+                confidence: 0.7,
+            });
+        }
+
+        strategies
+    }
+
+    /// Generate manual fallback strategies
+    async fn generate_manual_fallback_strategies(
+        &self,
+        tool_name: &str,
+        _analysis: &FailureAnalysis,
+    ) -> Vec<RecoveryStrategy> {
+        let mut strategies = Vec::new();
+
+        strategies.push(RecoveryStrategy {
+            strategy_type: RecoveryStrategyType::ManualFallback,
+            alternative_tool: Some("shell_execution".to_string()),
+            modified_parameters: Some(serde_json::json!({
+                "command": "echo 'Manual intervention required'",
+                "description": "Provide guidance for manual steps"
+            })),
+            simplified_approach: None,
+            description: format!("Provide manual instructions for completing the '{}' operation", tool_name),
+            confidence: 0.4,
+        });
+
+        strategies
+    }
+
+    /// Generate user recommendations
+    fn generate_user_recommendations(
+        &self,
+        tool_name: &str,
+        analysis: &FailureAnalysis,
+        strategies: &[RecoveryStrategy],
+    ) -> Vec<String> {
+        let mut recommendations = Vec::new();
+
+        match analysis.failure_category {
+            FailureCategory::NetworkError => {
+                recommendations.push("Check your internet connection".to_string());
+                recommendations.push("Verify that the remote service is accessible".to_string());
+                recommendations.push("Try again in a few moments".to_string());
+            }
+            FailureCategory::AuthenticationError => {
+                recommendations.push("Check your credentials and permissions".to_string());
+                recommendations.push("Verify you have access to the required resources".to_string());
+                recommendations.push("Ensure your authentication tokens are valid".to_string());
+            }
+            FailureCategory::ParameterError => {
+                recommendations.push("Review the parameters provided to the tool".to_string());
+                recommendations.push("Ensure all required parameters are present and correctly formatted".to_string());
+                if tool_name.contains("repository") {
+                    recommendations.push("For repository tools, provide either 'url' OR 'local_path', not both".to_string());
+                    recommendations.push("Ensure local paths are absolute and directories exist".to_string());
+                }
+            }
+            FailureCategory::ResourceError => {
+                recommendations.push("Wait for resources to become available".to_string());
+                recommendations.push("Consider reducing resource requirements".to_string());
+                recommendations.push("Try the operation during off-peak hours".to_string());
+            }
+            FailureCategory::ConfigurationError => {
+                recommendations.push("Check the tool configuration".to_string());
+                recommendations.push("Verify all required dependencies are installed".to_string());
+                recommendations.push("Review the system setup requirements".to_string());
+            }
+            FailureCategory::DependencyError => {
+                recommendations.push("Check that external services are available".to_string());
+                recommendations.push("Verify network connectivity to dependencies".to_string());
+                recommendations.push("Consider using alternative approaches".to_string());
+            }
+            FailureCategory::TimeoutError => {
+                recommendations.push("The operation timed out - try again with increased timeout".to_string());
+                recommendations.push("Consider breaking the operation into smaller steps".to_string());
+                recommendations.push("Check for network latency issues".to_string());
+            }
+            FailureCategory::UnknownError => {
+                recommendations.push("An unexpected error occurred".to_string());
+                recommendations.push("Try the suggested alternative approaches".to_string());
+                recommendations.push("Consider reporting this issue if it persists".to_string());
+            }
+        }
+
+        // Add strategy-specific recommendations
+        if !strategies.is_empty() {
+            recommendations.push("Consider trying these alternative approaches:".to_string());
+            for (i, strategy) in strategies.iter().take(3).enumerate() {
+                recommendations.push(format!("{}. {}", i + 1, strategy.description));
+            }
+        }
+
+        recommendations
+    }
+
+    /// Check if manual intervention is required
+    fn requires_manual_intervention(&self, _tool_name: &str, error_message: &str) -> bool {
+        // Heuristics for determining manual intervention
+        error_message.contains("authentication") || 
+        error_message.contains("permission denied") ||
+        error_message.contains("access denied") ||
+        error_message.contains("not authorized") ||
+        error_message.contains("credential") ||
+        error_message.contains("login") ||
+        error_message.contains("password") ||
+        error_message.contains("api key") ||
+        error_message.contains("token") ||
+        error_message.contains("certificate") ||
+        error_message.contains("ssl") ||
+        error_message.contains("firewall") ||
+        error_message.contains("network unreachable") ||
+        error_message.contains("configuration error")
+    }
+
+    /// NEW: Validate tool execution result against expected behavior
+    async fn validate_tool_execution_result(
+        &self,
+        request: &ToolExecutionRequest,
+        tool_result: &mut ToolResult,
+        execution_time: Duration,
+    ) -> ValidationOutcome {
+        // First, validate internal consistency
+        let consistency_status = tool_result.validate_consistency();
+        
+        // Then perform tool-specific validation
+        let tool_specific_validation = self.perform_tool_specific_validation(
+            &request.tool_name,
+            &request.parameters,
+            tool_result
+        ).await;
+
+        // Combine validation results
+        match (consistency_status, tool_specific_validation) {
+            (ValidationStatus::Validated, Ok(())) => ValidationOutcome::Validated,
+            (ValidationStatus::NeedsVerification { reason }, Ok(())) => {
+                ValidationOutcome::NeedsVerification { reason }
+            }
+            (ValidationStatus::Inconsistent { details }, _) => {
+                ValidationOutcome::Inconsistent { details }
+            }
+            (_, Err(validation_error)) => {
+                ValidationOutcome::VerificationFailed { error: validation_error.to_string() }
+            }
+            (ValidationStatus::UnableToValidate, Ok(())) => {
+                // If we can't validate, but there are no obvious issues, proceed with caution
+                ValidationOutcome::NeedsVerification { 
+                    reason: "Unable to validate tool execution result".to_string() 
+                }
+            }
+        }
+    }
+
+    /// NEW: Perform tool-specific validation
+    async fn perform_tool_specific_validation(
+        &self,
+        tool_name: &str,
+        parameters: &serde_json::Value,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        match tool_name {
+            "add_existing_repository" => {
+                self.validate_repository_operation(parameters, tool_result).await
+            }
+            "shell_execution" | "streaming_shell_execution" => {
+                self.validate_shell_execution(parameters, tool_result).await
+            }
+            "read_file" | "write_file" | "edit_file" => {
+                self.validate_file_operation(parameters, tool_result).await
+            }
+            "sync_repository" => {
+                self.validate_sync_operation(parameters, tool_result).await
+            }
+            _ => {
+                // For unknown tools, perform basic validation
+                self.validate_generic_tool_result(tool_result).await
+            }
+        }
+    }
+
+    /// Validate repository operations
+    async fn validate_repository_operation(
+        &self,
+        parameters: &serde_json::Value,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        if !tool_result.success {
+            // For failed repository operations, check if it's actually a "already exists" success
+            if let Some(error_msg) = &tool_result.error {
+                if error_msg.contains("already exists") || error_msg.contains("already available") {
+                    // This is actually a success case
+                    tool_result.success = true;
+                    tool_result.error = None;
+                    tool_result.operation_performed = Some("Repository registration (already existed)".to_string());
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::RepositoryOperation,
+                        description: "Repository was already registered".to_string(),
+                        supports_success: true,
+                        confidence: 0.9,
+                    });
+                    tool_result.validation_status = ValidationStatus::Validated;
+                    
+                    tracing::info!("Corrected repository operation result: 'already exists' treated as success");
+                }
+            }
+        } else {
+            // For successful repository operations, add evidence
+            if let Some(repo_name) = parameters.get("name").and_then(|v| v.as_str()) {
+                tool_result.operation_performed = Some(format!("Added repository: {}", repo_name));
+                tool_result.completion_evidence.push(CompletionEvidence {
+                    evidence_type: EvidenceType::RepositoryOperation,
+                    description: format!("Repository '{}' was added to configuration", repo_name),
+                    supports_success: true,
+                    confidence: 0.8,
+                });
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Validate shell execution results
+    async fn validate_shell_execution(
+        &self,
+        parameters: &serde_json::Value,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        if let Some(command) = parameters.get("command").and_then(|v| v.as_str()) {
+            tool_result.operation_performed = Some(format!("Executed command: {}", command));
+            
+            // Check for common success/failure patterns in shell output
+            if let Some(output) = tool_result.data.get("stdout").and_then(|v| v.as_str()) {
+                // Check for success indicators
+                if output.contains("successfully") || output.contains("completed") || output.contains("done") {
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::CommandOutput,
+                        description: "Command output indicates success".to_string(),
+                        supports_success: true,
+                        confidence: 0.7,
+                    });
+                }
+                
+                // Check for failure indicators
+                if output.contains("error") || output.contains("failed") || output.contains("not found") {
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::CommandOutput,
+                        description: "Command output indicates error".to_string(),
+                        supports_success: false,
+                        confidence: 0.8,
+                    });
+                }
+            }
+            
+            // Check exit code if available
+            if let Some(exit_code) = tool_result.data.get("exit_code").and_then(|v| v.as_i64()) {
+                if exit_code == 0 && !tool_result.success {
+                    // Exit code 0 but tool claims failure - add contradicting evidence
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::ProcessCompletion,
+                        description: "Exit code is 0 (success)".to_string(),
+                        supports_success: true,
+                        confidence: 0.9,
+                    });
+                } else if exit_code != 0 && tool_result.success {
+                    // Non-zero exit code but tool claims success - add contradicting evidence
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::ProcessCompletion,
+                        description: format!("Exit code is {} (failure)", exit_code),
+                        supports_success: false,
+                        confidence: 0.9,
+                    });
+                } else {
+                    // Consistent result - add supporting evidence
+                    tool_result.completion_evidence.push(CompletionEvidence {
+                        evidence_type: EvidenceType::ProcessCompletion,
+                        description: format!("Exit code: {}", exit_code),
+                        supports_success: exit_code == 0,
+                        confidence: 0.9,
+                    });
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Validate file operations
+    async fn validate_file_operation(
+        &self,
+        parameters: &serde_json::Value,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        if let Some(file_path) = parameters.get("file_path").or_else(|| parameters.get("target_file")).and_then(|v| v.as_str()) {
+            tool_result.operation_performed = Some(format!("File operation on: {}", file_path));
+            
+            // For file operations, we could check if the file actually exists/was modified
+            // This is a placeholder for more sophisticated validation
+            tool_result.completion_evidence.push(CompletionEvidence {
+                evidence_type: EvidenceType::FileSystemChange,
+                description: format!("File operation on {}", file_path),
+                supports_success: tool_result.success,
+                confidence: 0.6, // Lower confidence since we're not actually checking the filesystem
+            });
+        }
+        
+        Ok(())
+    }
+
+    /// Validate sync operations
+    async fn validate_sync_operation(
+        &self,
+        _parameters: &serde_json::Value,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        // Add evidence for sync operations
+        tool_result.completion_evidence.push(CompletionEvidence {
+            evidence_type: EvidenceType::RepositoryOperation,
+            description: "Repository synchronization".to_string(),
+            supports_success: tool_result.success,
+            confidence: 0.7,
+        });
+        
+        Ok(())
+    }
+
+    /// Generic validation for unknown tools
+    async fn validate_generic_tool_result(
+        &self,
+        tool_result: &mut ToolResult,
+    ) -> Result<()> {
+        // For unknown tools, we can only do basic validation
+        if tool_result.completion_evidence.is_empty() {
+            // Add evidence that indicates we can't validate
+            tool_result.completion_evidence.push(CompletionEvidence {
+                evidence_type: EvidenceType::NoEvidence,
+                description: "Unknown tool type - unable to validate specific behavior".to_string(),
+                supports_success: tool_result.success, // Neither supports nor contradicts
+                confidence: 0.1, // Very low confidence
+            });
+        }
+        
+        Ok(())
     }
 }
 
@@ -1674,32 +2499,31 @@ mod tests {
     
     #[tokio::test]
     async fn test_simple_tool_failure() {
-        println!("Creating orchestrator...");
         let config = OrchestrationConfig::default();
         let orchestrator = ToolOrchestrator::new(config).await.unwrap();
-        println!("Orchestrator created");
         
-        println!("Creating mock executor...");
         let tool_executor = Arc::new(MockToolExecutor::new(true, Duration::from_millis(10)));
         let event_emitter = Arc::new(MockEventEmitter::new());
-        println!("Mocks created");
         
-        println!("Creating simple request...");
         let request = ToolExecutionRequest::new(
             "test_tool".to_string(),
             serde_json::json!({})
         );
-        println!("Request created: {:?}", request.tool_name);
         
-        println!("Starting orchestration...");
-        // Test just the orchestration without complex dependencies
         let result = orchestrator.orchestrate_tools(
             vec![request],
             tool_executor,
             event_emitter,
-        ).await;
+        ).await.unwrap();
         
-        println!("Orchestration completed with result: {:?}", result.is_ok());
-        assert!(result.is_ok());
+        assert!(!result.success);
+        assert_eq!(result.successful_tools, 0);
+        assert_eq!(result.failed_tools, 1);
+        assert_eq!(result.skipped_tools, 0);
+        
+        // Test that we recorded the failure in metrics
+        assert!(result.tool_results.iter().any(|(_, result)| 
+            matches!(result.status, ExecutionStatus::Failed)));
     }
 }
+

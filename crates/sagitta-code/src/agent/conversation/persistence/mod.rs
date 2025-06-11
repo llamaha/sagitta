@@ -1,6 +1,9 @@
 pub mod disk;
 pub mod index;
 
+#[cfg(test)]
+pub mod test_persistence;
+
 use async_trait::async_trait;
 use anyhow::Result;
 use uuid::Uuid;

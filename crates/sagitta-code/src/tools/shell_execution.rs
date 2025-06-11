@@ -258,6 +258,8 @@ pub struct ShellExecutionResult {
     pub stderr: String,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
+    /// Working directory where the command was executed
+    pub working_directory: PathBuf,
     /// Container used for execution (now always "local")
     pub container_image: String,
     /// Whether the command timed out
@@ -860,6 +862,7 @@ mod tests {
             stdout: "Success".to_string(),
             stderr: String::new(),
             execution_time_ms: 1234,
+            working_directory: PathBuf::from("/tmp"),
             container_image: "test_image:latest".to_string(),
             timed_out: false,
         };
@@ -871,6 +874,7 @@ mod tests {
         assert_eq!(original_result.stdout, deserialized.stdout);
         assert_eq!(original_result.stderr, deserialized.stderr);
         assert_eq!(original_result.execution_time_ms, deserialized.execution_time_ms);
+        assert_eq!(original_result.working_directory, deserialized.working_directory);
         assert_eq!(original_result.container_image, deserialized.container_image);
         assert_eq!(original_result.timed_out, deserialized.timed_out);
     }

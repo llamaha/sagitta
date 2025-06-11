@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::error::{Result, ReasoningError};
 use crate::streaming::StreamChunk;
 
-/// Tool execution result
+/// Enhanced tool execution result with better state validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     /// Whether the tool execution was successful
@@ -22,10 +22,63 @@ pub struct ToolResult {
     pub execution_time_ms: u64,
     /// Additional metadata about the execution
     pub metadata: HashMap<String, Value>,
+    /// NEW: Validation status to catch inconsistent reporting
+    pub validation_status: ValidationStatus,
+    /// NEW: Actual operation performed (what the tool claims to have done)
+    pub operation_performed: Option<String>,
+    /// NEW: Evidence of successful completion (file created, command output, etc.)
+    pub completion_evidence: Vec<CompletionEvidence>,
+}
+
+/// Validation status for tool execution results
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ValidationStatus {
+    /// Result is consistent and validated
+    Validated,
+    /// Result needs verification (potential inconsistency detected)
+    NeedsVerification { reason: String },
+    /// Result is inconsistent (success claim doesn't match evidence)
+    Inconsistent { details: String },
+    /// Result could not be validated
+    UnableToValidate,
+}
+
+/// Evidence of tool completion for validation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionEvidence {
+    /// Type of evidence
+    pub evidence_type: EvidenceType,
+    /// Description of the evidence
+    pub description: String,
+    /// Whether this evidence supports success claim
+    pub supports_success: bool,
+    /// Confidence in this evidence (0.0 to 1.0)
+    pub confidence: f32,
+}
+
+/// Types of completion evidence
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EvidenceType {
+    /// File was created/modified
+    FileSystemChange,
+    /// Command produced expected output
+    CommandOutput,
+    /// Repository was successfully cloned/added
+    RepositoryOperation,
+    /// Network operation completed
+    NetworkOperation,
+    /// Configuration was updated
+    ConfigurationChange,
+    /// Process completed successfully
+    ProcessCompletion,
+    /// Error message indicates partial success
+    PartialSuccess,
+    /// No evidence available
+    NoEvidence,
 }
 
 impl ToolResult {
-    /// Create a successful tool result
+    /// Create a successful tool result with validation
     pub fn success(data: Value, execution_time_ms: u64) -> Self {
         Self {
             success: true,
@@ -33,6 +86,39 @@ impl ToolResult {
             error: None,
             execution_time_ms,
             metadata: HashMap::new(),
+            validation_status: ValidationStatus::Validated,
+            operation_performed: None,
+            completion_evidence: Vec::new(),
+        }
+    }
+    
+    /// Create a successful tool result with evidence
+    pub fn success_with_evidence(
+        data: Value, 
+        execution_time_ms: u64, 
+        operation: String,
+        evidence: Vec<CompletionEvidence>
+    ) -> Self {
+        // Auto-validate if we have supporting evidence
+        let validation_status = if evidence.iter().any(|e| e.supports_success && e.confidence > 0.7) {
+            ValidationStatus::Validated
+        } else if evidence.is_empty() {
+            ValidationStatus::NeedsVerification { 
+                reason: "No completion evidence provided".to_string() 
+            }
+        } else {
+            ValidationStatus::UnableToValidate
+        };
+
+        Self {
+            success: true,
+            data,
+            error: None,
+            execution_time_ms,
+            metadata: HashMap::new(),
+            validation_status,
+            operation_performed: Some(operation),
+            completion_evidence: evidence,
         }
     }
     
@@ -44,6 +130,52 @@ impl ToolResult {
             error: Some(error),
             execution_time_ms,
             metadata: HashMap::new(),
+            validation_status: ValidationStatus::Validated, // Failures are typically accurately reported
+            operation_performed: None,
+            completion_evidence: Vec::new(),
+        }
+    }
+
+    /// Create a partial success result (operation partially worked)
+    pub fn partial_success(
+        data: Value,
+        execution_time_ms: u64,
+        operation: String,
+        partial_evidence: Vec<CompletionEvidence>
+    ) -> Self {
+        Self {
+            success: true, // Still considered success but with evidence that shows limitations
+            data,
+            error: None,
+            execution_time_ms,
+            metadata: HashMap::new(),
+            validation_status: ValidationStatus::NeedsVerification { 
+                reason: "Partial success detected".to_string() 
+            },
+            operation_performed: Some(operation),
+            completion_evidence: partial_evidence,
+        }
+    }
+
+    /// Create a result that needs validation due to inconsistency
+    pub fn inconsistent_result(
+        claimed_success: bool,
+        data: Value,
+        error: Option<String>,
+        execution_time_ms: u64,
+        inconsistency_details: String
+    ) -> Self {
+        Self {
+            success: claimed_success,
+            data,
+            error,
+            execution_time_ms,
+            metadata: HashMap::new(),
+            validation_status: ValidationStatus::Inconsistent { 
+                details: inconsistency_details 
+            },
+            operation_performed: None,
+            completion_evidence: Vec::new(),
         }
     }
     
@@ -52,15 +184,126 @@ impl ToolResult {
         self.metadata.insert(key, value);
         self
     }
+
+    /// Add operation description
+    pub fn with_operation(mut self, operation: String) -> Self {
+        self.operation_performed = Some(operation);
+        self
+    }
+
+    /// Add completion evidence
+    pub fn with_evidence(mut self, evidence: CompletionEvidence) -> Self {
+        self.completion_evidence.push(evidence);
+        self
+    }
+
+    /// Set validation status
+    pub fn with_validation_status(mut self, status: ValidationStatus) -> Self {
+        self.validation_status = status;
+        self
+    }
     
     /// Check if the result indicates success
     pub fn is_success(&self) -> bool {
         self.success
     }
+
+    /// Check if the result is validated and trustworthy
+    pub fn is_validated(&self) -> bool {
+        matches!(self.validation_status, ValidationStatus::Validated)
+    }
+
+    /// Check if the result needs verification
+    pub fn needs_verification(&self) -> bool {
+        matches!(self.validation_status, ValidationStatus::NeedsVerification { .. } | ValidationStatus::Inconsistent { .. })
+    }
+
+    /// Get validation issues if any
+    pub fn get_validation_issues(&self) -> Option<String> {
+        match &self.validation_status {
+            ValidationStatus::NeedsVerification { reason } => Some(reason.clone()),
+            ValidationStatus::Inconsistent { details } => Some(details.clone()),
+            _ => None,
+        }
+    }
+
+    /// Validate result consistency and update status
+    pub fn validate_consistency(&mut self) -> ValidationStatus {
+        // Check if success claim matches evidence
+        let supporting_evidence_count = self.completion_evidence.iter()
+            .filter(|e| e.supports_success && e.confidence > 0.5)
+            .count();
+        
+        let contradicting_evidence_count = self.completion_evidence.iter()
+            .filter(|e| !e.supports_success && e.confidence > 0.5)
+            .count();
+
+        self.validation_status = if self.success {
+            if supporting_evidence_count > 0 && contradicting_evidence_count == 0 {
+                ValidationStatus::Validated
+            } else if contradicting_evidence_count > supporting_evidence_count {
+                ValidationStatus::Inconsistent {
+                    details: format!(
+                        "Success claimed but {} pieces of evidence contradict this (vs {} supporting)",
+                        contradicting_evidence_count, supporting_evidence_count
+                    )
+                }
+            } else if self.completion_evidence.is_empty() {
+                ValidationStatus::NeedsVerification {
+                    reason: "Success claimed but no evidence provided".to_string()
+                }
+            } else {
+                ValidationStatus::UnableToValidate
+            }
+        } else {
+            // For failures, check if there's evidence of partial success
+            if supporting_evidence_count > 0 {
+                ValidationStatus::Inconsistent {
+                    details: format!(
+                        "Failure claimed but {} pieces of evidence suggest partial success",
+                        supporting_evidence_count
+                    )
+                }
+            } else {
+                ValidationStatus::Validated
+            }
+        };
+
+        self.validation_status.clone()
+    }
     
     /// Get the error message if any
     pub fn error_message(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    /// Get high-confidence evidence supporting the result
+    pub fn get_reliable_evidence(&self) -> Vec<&CompletionEvidence> {
+        self.completion_evidence.iter()
+            .filter(|e| e.confidence > 0.7)
+            .collect()
+    }
+
+    /// Create a summary of the execution for logging/debugging
+    pub fn execution_summary(&self) -> String {
+        let status = if self.success { "SUCCESS" } else { "FAILURE" };
+        let validation = match &self.validation_status {
+            ValidationStatus::Validated => "VALIDATED",
+            ValidationStatus::NeedsVerification { .. } => "NEEDS_VERIFICATION",
+            ValidationStatus::Inconsistent { .. } => "INCONSISTENT", 
+            ValidationStatus::UnableToValidate => "UNABLE_TO_VALIDATE",
+        };
+        
+        let operation = self.operation_performed.as_ref()
+            .map(|op| format!(" ({})", op))
+            .unwrap_or_default();
+        
+        let evidence_count = self.completion_evidence.len();
+        
+        format!(
+            "{}{} - {} - {} evidence items - {}ms",
+            status, operation, validation, evidence_count, self.execution_time_ms
+        )
     }
 }
 

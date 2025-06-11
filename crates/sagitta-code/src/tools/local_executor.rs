@@ -703,12 +703,13 @@ impl CommandExecutor for LocalExecutor {
         }
         
         Ok(ShellExecutionResult {
-            exit_code,
+            exit_code: exit_code,
             stdout: stdout_output,
             stderr: stderr_output,
             execution_time_ms: execution_time.as_millis() as u64,
-            container_image: "local".to_string(), // No container used
-            timed_out: false, // TODO: Implement timeout support
+            working_directory: working_dir.clone(),
+            container_image: "local".to_string(),
+            timed_out: false,
         })
     }
 }

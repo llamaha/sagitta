@@ -18,7 +18,7 @@ use crate::tools::file_operations::read::ReadFileTool;
 use crate::tools::repository::list::ListRepositoriesTool;
 use crate::tools::repository::search::SearchFileInRepositoryTool;
 use crate::tools::repository::view::ViewFileInRepositoryTool;
-use crate::tools::repository::add::AddRepositoryTool;
+use crate::tools::repository::add::AddExistingRepositoryTool;
 use crate::tools::repository::sync::SyncRepositoryTool;
 use crate::tools::repository::remove::RemoveRepositoryTool;
 use crate::tools::repository::map::RepositoryMapTool;
@@ -271,33 +271,52 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Initialize ToolRegistry
     let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
+    
+    // Get the configured working directory instead of using current_dir
+    let config_guard = app.config.lock().await;
+    let working_dir = config_guard.repositories_base_path();
+    drop(config_guard);
+    
+    // Ensure the working directory exists
+    if !working_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&working_dir) {
+            log::warn!("Failed to create working directory {}: {}", working_dir.display(), e);
+        }
+    }
+    
+    // Create WorkingDirectoryManager
+    let working_dir_manager = Arc::new(crate::tools::WorkingDirectoryManager::new(working_dir.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to create WorkingDirectoryManager: {}", e))?);
 
     // Register tools first
     tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
     tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone()))).await?;
+    
+    // Register working directory tools
+    tool_registry.register(Arc::new(crate::tools::GetCurrentDirectoryTool::new(working_dir_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::ChangeDirectoryTool::new(working_dir_manager.clone()))).await?;
+    
+    tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone(), working_dir.clone()))).await?;
     tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(SearchFileInRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ViewFileInRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(AddRepositoryTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(AddExistingRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(SyncRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RemoveRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RepositoryMapTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(TargetedViewTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
-    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone()))).await?; // Added EditTool registration
+    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone(), working_dir.clone()))).await?; // Added EditTool registration
     tool_registry.register(Arc::new(crate::tools::repository::SwitchBranchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::CreateBranchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::CommitChangesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::PushChangesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::PullChangesTool::new(repo_manager.clone()))).await?;
 
-    let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-
-    tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(working_dir.clone()))).await?;
 
     // Register streaming shell execution tool for terminal integration
-    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(default_working_dir.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(working_dir.clone()))).await?;
 
     // Note: Project creation and test execution functionality is now available through shell_execution tool
     // Examples:
