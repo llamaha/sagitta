@@ -886,6 +886,19 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   event_emitter.clone(),
               ).await?;
 
+              // Emit ToolExecutionCompleted events for each tool
+              for (tool_name, exec_result) in &current_orchestration_result.tool_results {
+                  let success = exec_result.result.as_ref().map_or(false, |r| r.success);
+                  let duration_ms = exec_result.execution_time.as_millis() as u64;
+                  
+                  event_emitter.emit_event(ReasoningEvent::ToolExecutionCompleted {
+                      session_id,
+                      tool_name: tool_name.clone(),
+                      success,
+                      duration_ms,
+                  }).await?;
+              }
+
               let mut actual_orchestration_success = current_orchestration_result.success;
               if actual_orchestration_success {
                   for (_tool_name, tool_exec_result) in &current_orchestration_result.tool_results {
