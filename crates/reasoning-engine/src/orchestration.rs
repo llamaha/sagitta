@@ -192,7 +192,7 @@ pub struct FailureAnalysis {
 }
 
 /// Categories of tool failures
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum FailureCategory {
     /// Network/connectivity issues
     NetworkError,
@@ -1038,63 +1038,183 @@ impl ToolOrchestrator {
         }
     }
 
-    /// Categorize the failure based on error message patterns
+    /// Enhanced failure categorization with comprehensive error pattern matching
     fn categorize_failure(&self, error_message: &str) -> FailureCategory {
-        let lower_message = error_message.to_lowercase();
+        let error_lower = error_message.to_lowercase();
         
-        if lower_message.contains("network") || lower_message.contains("connection") || 
-           lower_message.contains("timeout") || lower_message.contains("unreachable") {
-            if lower_message.contains("timeout") || lower_message.contains("timed out") {
-                FailureCategory::TimeoutError
-            } else {
-                FailureCategory::NetworkError
-            }
-        } else if lower_message.contains("auth") || lower_message.contains("permission") || 
-                  lower_message.contains("unauthorized") || lower_message.contains("forbidden") {
-            FailureCategory::AuthenticationError
-        } else if lower_message.contains("parameter") || lower_message.contains("invalid") || 
-                  lower_message.contains("missing") || lower_message.contains("required") {
-            FailureCategory::ParameterError
-        } else if lower_message.contains("resource") || lower_message.contains("quota") || 
-                  lower_message.contains("limit") || lower_message.contains("exhausted") {
-            FailureCategory::ResourceError
-        } else if lower_message.contains("config") || lower_message.contains("setup") || 
-                  lower_message.contains("initialization") {
-            FailureCategory::ConfigurationError
-        } else if lower_message.contains("dependency") || lower_message.contains("external") || 
-                  lower_message.contains("service") {
-            FailureCategory::DependencyError
-        } else {
-            FailureCategory::UnknownError
+        // Network-related errors
+        if error_lower.contains("connection") && (
+            error_lower.contains("refused") || 
+            error_lower.contains("timeout") || 
+            error_lower.contains("reset") ||
+            error_lower.contains("lost") ||
+            error_lower.contains("unreachable") ||
+            error_lower.contains("dns") ||
+            error_lower.contains("network")
+        ) {
+            return FailureCategory::NetworkError;
         }
+        
+        // Timeout-specific errors
+        if error_lower.contains("timeout") || 
+           error_lower.contains("timed out") ||
+           error_lower.contains("deadline exceeded") ||
+           error_lower.contains("operation timeout") {
+            return FailureCategory::TimeoutError;
+        }
+        
+        // Authentication and authorization errors
+        if error_lower.contains("unauthorized") || 
+           error_lower.contains("forbidden") ||
+           error_lower.contains("authentication") ||
+           error_lower.contains("invalid token") ||
+           error_lower.contains("access denied") ||
+           error_lower.contains("permission denied") ||
+           error_lower.contains("401") ||
+           error_lower.contains("403") {
+            return FailureCategory::AuthenticationError;
+        }
+        
+        // Parameter and input validation errors
+        if error_lower.contains("invalid parameter") ||
+           error_lower.contains("invalid argument") ||
+           error_lower.contains("missing parameter") ||
+           error_lower.contains("validation error") ||
+           error_lower.contains("bad request") ||
+           error_lower.contains("malformed") ||
+           error_lower.contains("400") {
+            return FailureCategory::ParameterError;
+        }
+        
+        // Resource exhaustion errors
+        if error_lower.contains("out of memory") ||
+           error_lower.contains("memory exhausted") ||
+           error_lower.contains("disk full") ||
+           error_lower.contains("quota exceeded") ||
+           error_lower.contains("rate limit") ||
+           error_lower.contains("too many requests") ||
+           error_lower.contains("resource exhausted") ||
+           error_lower.contains("capacity exceeded") ||
+           error_lower.contains("429") {
+            return FailureCategory::ResourceError;
+        }
+        
+        // Configuration errors
+        if error_lower.contains("configuration") ||
+           error_lower.contains("config") ||
+           error_lower.contains("not configured") ||
+           error_lower.contains("invalid config") ||
+           error_lower.contains("missing config") ||
+           error_lower.contains("setup error") {
+            return FailureCategory::ConfigurationError;
+        }
+        
+        // External dependency errors
+        if error_lower.contains("service unavailable") ||
+           error_lower.contains("dependency") ||
+           error_lower.contains("upstream") ||
+           error_lower.contains("external service") ||
+           error_lower.contains("503") ||
+           error_lower.contains("502") ||
+           error_lower.contains("504") {
+            return FailureCategory::DependencyError;
+        }
+        
+        // Default to unknown for unrecognized patterns
+        FailureCategory::UnknownError
     }
-
-    /// Determine specific root cause analysis
+    
+    /// Enhanced root cause analysis with detailed error pattern matching
     fn determine_root_cause(&self, tool_name: &str, error_message: &str, category: &FailureCategory) -> String {
+        let error_lower = error_message.to_lowercase();
+        
         match category {
             FailureCategory::NetworkError => {
-                format!("Network connectivity issue while executing '{}': {}", tool_name, error_message)
-            }
-            FailureCategory::AuthenticationError => {
-                format!("Authentication or permission problem with '{}': {}", tool_name, error_message)
-            }
-            FailureCategory::ParameterError => {
-                format!("Invalid or missing parameters for '{}': {}", tool_name, error_message)
-            }
-            FailureCategory::ResourceError => {
-                format!("Resource limitation encountered in '{}': {}", tool_name, error_message)
-            }
-            FailureCategory::ConfigurationError => {
-                format!("Configuration issue with '{}': {}", tool_name, error_message)
-            }
-            FailureCategory::DependencyError => {
-                format!("External dependency failure affecting '{}': {}", tool_name, error_message)
+                if error_lower.contains("connection refused") {
+                    format!("Service at endpoint is not accepting connections. The {} tool may be trying to connect to a service that is down or not listening on the expected port.", tool_name)
+                } else if error_lower.contains("dns") {
+                    format!("DNS resolution failed for {}. Check if the hostname is correct and DNS servers are reachable.", tool_name)
+                } else if error_lower.contains("unreachable") {
+                    format!("Network routing issue preventing {} from reaching the target service. Check network connectivity and firewall rules.", tool_name)
+                } else if error_lower.contains("reset") {
+                    format!("Connection was reset by the remote service. The {} service may be overloaded or experiencing issues.", tool_name)
+                } else {
+                    format!("Network connectivity issue with {} tool. Check internet connection and service availability.", tool_name)
+                }
             }
             FailureCategory::TimeoutError => {
-                format!("Timeout occurred while executing '{}': {}", tool_name, error_message)
+                if error_lower.contains("read timeout") {
+                    format!("The {} service is responding slowly or not responding to requests. Consider increasing timeout values or checking service performance.", tool_name)
+                } else if error_lower.contains("connect timeout") {
+                    format!("Unable to establish connection to {} service within timeout period. Service may be overloaded or network latency is high.", tool_name)
+                } else {
+                    format!("Operation with {} tool exceeded time limit. Service may be experiencing high load or the operation is too complex.", tool_name)
+                }
+            }
+            FailureCategory::AuthenticationError => {
+                if error_lower.contains("invalid token") || error_lower.contains("expired") {
+                    format!("Authentication credentials for {} are invalid or expired. Refresh tokens or check API key configuration.", tool_name)
+                } else if error_lower.contains("unauthorized") {
+                    format!("The {} tool lacks proper authentication. Verify API keys, tokens, or credentials are correctly configured.", tool_name)
+                } else if error_lower.contains("forbidden") {
+                    format!("Access denied for {}. The authenticated user may lack necessary permissions for this operation.", tool_name)
+                } else {
+                    format!("Authentication problem with {}. Check credentials and access permissions.", tool_name)
+                }
+            }
+            FailureCategory::ParameterError => {
+                if error_lower.contains("missing") {
+                    format!("Required parameter missing for {} tool. Review the tool's parameter requirements and ensure all mandatory fields are provided.", tool_name)
+                } else if error_lower.contains("invalid") {
+                    format!("Invalid parameter value provided to {} tool. Check parameter types, formats, and valid value ranges.", tool_name)
+                } else if error_lower.contains("validation") {
+                    format!("Parameter validation failed for {} tool. Ensure all parameters meet the tool's validation requirements.", tool_name)
+                } else {
+                    format!("Parameter issue with {} tool. Review input parameters for correctness and completeness.", tool_name)
+                }
+            }
+            FailureCategory::ResourceError => {
+                if error_lower.contains("rate limit") || error_lower.contains("429") {
+                    format!("Rate limit exceeded for {} tool. Reduce request frequency or upgrade service plan if available.", tool_name)
+                } else if error_lower.contains("quota") {
+                    format!("Resource quota exceeded for {}. Check usage limits and consider upgrading or optimizing usage.", tool_name)
+                } else if error_lower.contains("memory") {
+                    format!("Memory exhaustion detected for {}. The operation may be too resource-intensive or there's a memory leak.", tool_name)
+                } else if error_lower.contains("disk") {
+                    format!("Disk space exhaustion for {}. Free up disk space or increase storage capacity.", tool_name)
+                } else {
+                    format!("Resource limit reached for {} tool. Check system resources and service quotas.", tool_name)
+                }
+            }
+            FailureCategory::ConfigurationError => {
+                if error_lower.contains("not configured") {
+                    format!("The {} tool is not properly configured. Check configuration files and environment variables.", tool_name)
+                } else if error_lower.contains("invalid config") {
+                    format!("Invalid configuration detected for {}. Review configuration values for correctness.", tool_name)
+                } else {
+                    format!("Configuration issue with {} tool. Verify all required settings are properly configured.", tool_name)
+                }
+            }
+            FailureCategory::DependencyError => {
+                if error_lower.contains("service unavailable") || error_lower.contains("503") {
+                    format!("External service required by {} is currently unavailable. The service may be down for maintenance or experiencing issues.", tool_name)
+                } else if error_lower.contains("upstream") {
+                    format!("Upstream service failure affecting {}. The issue is likely with a service that depends on {}.", tool_name, tool_name)
+                } else {
+                    format!("External dependency failure for {} tool. Check status of dependent services.", tool_name)
+                }
             }
             FailureCategory::UnknownError => {
-                format!("Unknown error in '{}': {}", tool_name, error_message)
+                // Try to extract useful information even for unknown errors
+                if error_lower.contains("panic") || error_lower.contains("crash") {
+                    format!("Critical error in {} tool causing crash. This may indicate a bug or corrupt data. Report this issue.", tool_name)
+                } else if error_lower.contains("encoding") || error_lower.contains("utf") {
+                    format!("Data encoding issue with {}. Input data may contain invalid characters or wrong encoding.", tool_name)
+                } else if error_lower.contains("permission") {
+                    format!("File system permission issue with {}. Check read/write permissions for required files and directories.", tool_name)
+                } else {
+                    format!("Unknown error occurred with {} tool: {}. This may require manual investigation.", tool_name, error_message)
+                }
             }
         }
     }
@@ -1659,6 +1779,13 @@ impl ToolOrchestrator {
         }
         
         Ok(())
+    }
+
+    /// Get the current circuit breaker state for a specific failure category
+    pub async fn get_circuit_breaker_state(&self, category: &FailureCategory) -> crate::streaming::CircuitBreakerState {
+        // For now, return a default state - in a real implementation this would
+        // check the actual circuit breaker state for the category
+        crate::streaming::CircuitBreakerState::Closed
     }
 }
 

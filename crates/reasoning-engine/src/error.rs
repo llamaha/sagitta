@@ -2,6 +2,7 @@
 //! Error types for the reasoning engine
 
 use thiserror::Error;
+use crate::orchestration::FailureCategory;
 
 /// Result type alias for reasoning engine operations
 pub type Result<T> = std::result::Result<T, ReasoningError>;
@@ -192,29 +193,26 @@ impl ReasoningError {
         }
     }
     
-    /// Get error category for metrics
-    pub fn category(&self) -> &'static str {
+    /// Map error to failure category for circuit breaker
+    pub fn to_failure_category(&self) -> FailureCategory {
         match self {
-            Self::Configuration { .. } => "configuration",
-            Self::State { .. } => "state",
-            Self::ToolExecution { .. } => "tool_execution",
-            Self::Orchestration { .. } => "orchestration",
-            Self::Decision { .. } => "decision",
-            Self::GraphExecution { .. } => "graph_execution",
-            Self::Streaming { .. } => "streaming",
-            Self::Backtracking { .. } => "backtracking",
-            Self::Pattern { .. } => "pattern",
-            Self::Reflection { .. } => "reflection",
-            Self::Confidence { .. } => "confidence",
-            Self::Coordination { .. } => "coordination",
-            Self::Timeout { .. } => "timeout",
-            Self::ResourceExhaustion { .. } => "resource_exhausted",
-            Self::ExternalService { .. } => "external_service",
-            Self::Serialization { .. } => "serialization",
-            Self::LlmError { .. } => "llm_error",
-            Self::IntentAnalysisError { .. } => "intent_analysis",
-            Self::Other { .. } => "other",
+            Self::ExternalService { .. } => FailureCategory::DependencyError,
+            Self::Timeout { .. } => FailureCategory::TimeoutError,
+            Self::LlmError { .. } => FailureCategory::DependencyError,
+            Self::ResourceExhaustion { .. } => FailureCategory::ResourceError,
+            Self::Configuration { .. } => FailureCategory::ConfigurationError,
+            Self::ToolExecution { .. } => FailureCategory::ParameterError,
+            Self::Orchestration { .. } => FailureCategory::DependencyError,
+            Self::Streaming { .. } => FailureCategory::NetworkError,
+            Self::State { .. } => FailureCategory::UnknownError,
+            Self::IntentAnalysisError { .. } => FailureCategory::UnknownError,
+            _ => FailureCategory::UnknownError,
         }
+    }
+
+    /// Get error category for metrics (enhanced version)
+    pub fn category(&self) -> FailureCategory {
+        self.to_failure_category()
     }
 }
 
@@ -256,7 +254,7 @@ mod tests {
     #[test]
     fn test_error_creation_and_display() {
         let err = ReasoningError::configuration("Invalid config");
-        assert_eq!(err.category(), "configuration");
+        assert_eq!(err.category(), FailureCategory::ConfigurationError);
         assert!(!err.is_retryable());
         assert_eq!(err.to_string(), "Configuration error: Invalid config");
 
@@ -285,18 +283,23 @@ mod tests {
     fn test_error_categories() {
         let errors = vec![
             ReasoningError::configuration("test"),
-            ReasoningError::state("context", "test"),
-            ReasoningError::streaming("stream_id".to_string(), "test".to_string()),
-            ReasoningError::tool_execution("tool", "test"),
-            ReasoningError::orchestration("test".to_string()),
-            ReasoningError::intent_analysis("test".to_string()),
-            ReasoningError::misc("test".to_string()),
+            ReasoningError::state("test", "test"),
+            ReasoningError::streaming("test", "test"),
+            ReasoningError::tool_execution("test", "test"),
+            ReasoningError::orchestration("test"),
+            ReasoningError::intent_analysis("test"),
+            ReasoningError::misc("test"),
         ];
         
-        let categories: Vec<&str> = errors.iter().map(|e| e.category()).collect();
+        let categories: Vec<FailureCategory> = errors.iter().map(|e| e.category()).collect();
         assert_eq!(categories, vec![
-            "configuration", "state", "streaming", "tool_execution", 
-            "orchestration", "intent_analysis", "other"
+            FailureCategory::ConfigurationError, 
+            FailureCategory::UnknownError, 
+            FailureCategory::NetworkError,
+            FailureCategory::ParameterError, 
+            FailureCategory::DependencyError, 
+            FailureCategory::UnknownError,
+            FailureCategory::UnknownError
         ]);
     }
 } 

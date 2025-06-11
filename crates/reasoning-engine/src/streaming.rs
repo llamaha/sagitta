@@ -66,6 +66,7 @@ use tokio::time::{sleep, timeout};
 
 use crate::error::{Result, ReasoningError};
 use crate::config::StreamingConfig;
+use crate::orchestration::FailureCategory;
 
 /// Main streaming engine with state machine
 pub struct StreamingEngine {
@@ -265,32 +266,87 @@ pub struct StreamingMetrics {
     pub recovery_success_rate: f32,
 }
 
-/// Circuit breaker for error handling
-#[derive(Debug, Clone)]
+/// Enhanced circuit breaker with failure category awareness
 pub struct CircuitBreaker {
     /// Current state
     pub state: CircuitBreakerState,
-    /// Failure count
-    pub failure_count: u32,
-    /// Failure threshold
-    pub failure_threshold: u32,
-    /// Recovery timeout
-    pub recovery_timeout: Duration,
-    /// Last failure time
-    pub last_failure: Option<Instant>,
+    /// Failure count by category
+    pub failure_counts: HashMap<FailureCategory, u32>,
+    /// Failure thresholds by category
+    pub failure_thresholds: HashMap<FailureCategory, u32>,
+    /// Recovery timeout by category
+    pub recovery_timeouts: HashMap<FailureCategory, Duration>,
+    /// Last failure time by category
+    pub last_failures: HashMap<FailureCategory, Instant>,
     /// Success count since last failure
     pub success_count: u32,
+    /// Total failure count across all categories
+    pub total_failure_count: u32,
+    /// Circuit breaker configuration
+    pub config: CircuitBreakerConfig,
 }
 
-/// Circuit breaker states
+/// Configuration for enhanced circuit breaker
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerConfig {
+    /// Default failure threshold
+    pub default_failure_threshold: u32,
+    /// Default recovery timeout
+    pub default_recovery_timeout: Duration,
+    /// Category-specific thresholds
+    pub category_thresholds: HashMap<FailureCategory, u32>,
+    /// Category-specific recovery timeouts
+    pub category_timeouts: HashMap<FailureCategory, Duration>,
+    /// Whether to use adaptive thresholds
+    pub adaptive_thresholds: bool,
+}
+
+/// Categories of circuit breaker states with failure-specific context
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CircuitBreakerState {
     /// Circuit is closed, allowing requests
     Closed,
-    /// Circuit is open, blocking requests
-    Open,
-    /// Circuit is half-open, testing recovery
-    HalfOpen,
+    /// Circuit is open, blocking requests due to specific failure category
+    Open { 
+        failure_category: FailureCategory,
+        opened_at: Instant,
+    },
+    /// Circuit is half-open, testing recovery for specific category
+    HalfOpen { 
+        failure_category: FailureCategory,
+        testing_since: Instant,
+    },
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        let mut category_thresholds = HashMap::new();
+        let mut category_timeouts = HashMap::new();
+        
+        // Configure different thresholds for different failure types
+        category_thresholds.insert(FailureCategory::NetworkError, 3);
+        category_thresholds.insert(FailureCategory::TimeoutError, 2);
+        category_thresholds.insert(FailureCategory::ResourceError, 1);
+        category_thresholds.insert(FailureCategory::ConfigurationError, 1);
+        category_thresholds.insert(FailureCategory::AuthenticationError, 1);
+        category_thresholds.insert(FailureCategory::DependencyError, 2);
+        
+        // Configure different recovery timeouts
+        category_timeouts.insert(FailureCategory::NetworkError, Duration::from_secs(30));
+        category_timeouts.insert(FailureCategory::TimeoutError, Duration::from_secs(60));
+        category_timeouts.insert(FailureCategory::ResourceError, Duration::from_secs(120));
+        category_timeouts.insert(FailureCategory::ConfigurationError, Duration::from_secs(300));
+        category_timeouts.insert(FailureCategory::AuthenticationError, Duration::from_secs(300));
+        category_timeouts.insert(FailureCategory::DependencyError, Duration::from_secs(90));
+        
+        Self {
+            default_failure_threshold: 5,
+            default_recovery_timeout: Duration::from_secs(60),
+            category_thresholds,
+            category_timeouts,
+            adaptive_thresholds: true,
+        }
+    }
 }
 
 impl StreamingEngine {
@@ -319,7 +375,8 @@ impl StreamingEngine {
         tracing::debug!("Starting stream: {} (type: {})", stream_id, stream_type);
         
         // Check circuit breaker
-        if self.circuit_breaker.read().await.state == CircuitBreakerState::Open {
+        let breaker_state = self.circuit_breaker.read().await.state.clone();
+        if matches!(breaker_state, CircuitBreakerState::Open { .. }) {
             return Err(ReasoningError::streaming(
                 "circuit_breaker",
                 "Circuit breaker is open, rejecting new streams"
@@ -379,57 +436,68 @@ impl StreamingEngine {
 
     /// Process a stream chunk
     pub async fn process_chunk(&mut self, stream_id: Uuid, chunk: StreamChunk) -> Result<()> {
-        tracing::debug!("Processing chunk {} for stream {}", chunk.id, stream_id);
-        
-        let start_time = Instant::now();
-        
-        // Get stream
-        let stream = {
+        // Check circuit breaker
+        let breaker_state = self.circuit_breaker.read().await.state.clone();
+        if matches!(breaker_state, CircuitBreakerState::Open { .. }) {
+            return Err(ReasoningError::streaming(
+                "circuit_breaker",
+                "Circuit breaker is open, rejecting new streams"
+            ));
+        }
+
+        // Validate that stream exists
+        {
             let streams = self.streams.read().await;
-            streams.get(&stream_id)
-                .ok_or_else(|| ReasoningError::streaming(
-                    &stream_id.to_string(),
-                    format!("Stream {} not found", stream_id)
-                ))?
-                .clone()
+            if !streams.contains_key(&stream_id) {
+                return Err(ReasoningError::streaming(
+                    "invalid_stream",
+                    &format!("Stream {} does not exist", stream_id)
+                ));
+            }
+        }
+
+        // Validate current state allows chunk processing
+        let current_state = {
+            let streams = self.streams.read().await;
+            streams.get(&stream_id).unwrap().clone()
         };
-        
-        // Validate state transition
-        self.validate_chunk_processing(&stream).await?;
-        
+
+        self.validate_chunk_processing(&current_state).await?;
+
         // Add chunk to buffer
-        let buffer_result = self.add_chunk_to_buffer(stream_id, chunk.clone()).await?;
+        let chunk_for_processing = chunk.clone();
+        let buffer_result = self.add_chunk_to_buffer(stream_id, chunk).await?;
         
         // Update stream state based on buffer status
-        let new_state = self.calculate_new_state(&stream, &buffer_result).await?;
+        let new_state = self.calculate_new_state(&current_state, &buffer_result).await?;
         
         // Transition to new state
-        self.transition_state(stream_id, stream, new_state).await?;
+        self.transition_state(stream_id, current_state, new_state).await?;
         
         // Process chunk if not buffering
         if !matches!(buffer_result, BufferResult::Buffered) {
-            self.process_chunk_internal(stream_id, chunk.clone()).await?;
+            self.process_chunk_internal(stream_id, chunk_for_processing.clone()).await?;
         }
         
         // Update metrics
-        let processing_time = start_time.elapsed();
-        self.update_processing_metrics(processing_time, chunk.data.len()).await;
+        let processing_time = Instant::now().duration_since(chunk_for_processing.created_at);
+        self.update_processing_metrics(processing_time, chunk_for_processing.data.len()).await;
         
         // Emit events
-        let event = StreamEvent::ChunkReceived {
+        self.emit_event(StreamEvent::ChunkReceived {
             stream_id,
-            chunk: chunk.clone(),
+            chunk: chunk_for_processing.clone(),
             timestamp: Instant::now(),
-        };
-        self.emit_event(event).await?;
-        
-        let processed_event = StreamEvent::ChunkProcessed {
-            stream_id,
-            chunk_id: chunk.id,
-            processing_time,
-            timestamp: Instant::now(),
-        };
-        self.emit_event(processed_event).await?;
+        }).await?;
+
+        if !matches!(buffer_result, BufferResult::Buffered) {
+            self.emit_event(StreamEvent::ChunkProcessed {
+                stream_id,
+                chunk_id: chunk_for_processing.id,
+                processing_time: Duration::from_millis(10), // Placeholder
+                timestamp: Instant::now(),
+            }).await?;
+        }
         
         Ok(())
     }
@@ -594,12 +662,13 @@ impl StreamingEngine {
 
     /// Handle stream error
     pub async fn handle_stream_error(&mut self, stream_id: Uuid, error: ReasoningError) -> Result<()> {
-        tracing::error!("Handling stream error for {}: {}", stream_id, error);
+        tracing::error!("Stream {} error: {}", stream_id, error);
         
-        // Update circuit breaker
+        // Record failure with circuit breaker using the error's failure category
+        let failure_category = error.to_failure_category();
         {
             let mut breaker = self.circuit_breaker.write().await;
-            breaker.record_failure();
+            breaker.record_failure_with_category(failure_category.clone());
         }
         
         // Get current state
@@ -667,15 +736,102 @@ impl StreamingEngine {
         }
     }
 
+    /// Add chunk to buffer with circuit breaker integration
     async fn add_chunk_to_buffer(&self, stream_id: Uuid, chunk: StreamChunk) -> Result<BufferResult> {
         let mut buffers = self.buffers.write().await;
         let buffer = buffers.get_mut(&stream_id)
             .ok_or_else(|| ReasoningError::streaming(
                 &stream_id.to_string(),
-                format!("Buffer for stream {} not found", stream_id)
+                "Buffer not found"
             ))?;
-        
-        buffer.add_chunk(chunk)
+
+        // Check buffer health before adding chunk
+        let utilization = buffer.utilization();
+        if utilization > 0.9 {
+            // High buffer utilization, emit backpressure signal
+            let event = StreamEvent::BackpressureDetected {
+                stream_id,
+                pressure_level: utilization,
+                timestamp: Instant::now(),
+            };
+            self.emit_event(event).await?;
+        }
+
+        // Try to add chunk with enhanced error handling
+        match buffer.add_chunk(chunk.clone()) {
+            Ok(result) => {
+                // Update last accessed time
+                buffer.last_accessed = Instant::now();
+                Ok(result)
+            }
+            Err(e) => {
+                // Handle buffer overflow
+                match buffer.overflow_strategy {
+                    OverflowStrategy::DropOldest => {
+                        if buffer.next_chunk().is_some() {
+                            buffer.add_chunk(chunk).map_err(|e| {
+                                ReasoningError::streaming(
+                                    "buffer_overflow",
+                                    &format!("Failed to add chunk after dropping oldest: {}", e)
+                                )
+                            })
+                        } else {
+                            Err(ReasoningError::streaming("buffer_overflow", &e.to_string()))
+                        }
+                    }
+                    OverflowStrategy::DropNewest => {
+                        Err(ReasoningError::streaming("buffer_overflow", &e.to_string()))
+                    }
+                    OverflowStrategy::Block => {
+                        Err(ReasoningError::streaming("buffer_overflow", &e.to_string()))
+                    }
+                    OverflowStrategy::Expand { max_expansion } => {
+                        let new_max_size = (buffer.max_size + chunk.size()).min(buffer.max_size + max_expansion);
+                        
+                        if new_max_size > buffer.max_size {
+                            // Check system resource limits before expanding
+                            if new_max_size > 100 * 1024 * 1024 { // 100MB limit
+                                return Err(ReasoningError::resource_exhausted(
+                                    "buffer_expansion_exceeds_system_limits"
+                                ));
+                            }
+                            
+                            buffer.max_size = new_max_size;
+                            buffer.add_chunk(chunk).map_err(|e| {
+                                ReasoningError::streaming(
+                                    "buffer_overflow",
+                                    &format!("Failed to add chunk after expanding: {}", e)
+                                )
+                            })
+                        } else {
+                            // Cannot expand further, use drop oldest as fallback
+                            tracing::warn!("Buffer expansion limit reached, falling back to drop oldest");
+                            
+                            // Remove chunks until we have space
+                            while !buffer.chunks.is_empty() && buffer.current_size + chunk.size() > buffer.max_size {
+                                if let Some(old_chunk) = buffer.chunks.pop_front() {
+                                    buffer.current_size = buffer.current_size.saturating_sub(old_chunk.size());
+                                    buffer.total_dropped += 1;
+                                }
+                            }
+                            
+                            if chunk.size() > buffer.max_size {
+                                return Err(ReasoningError::resource_exhausted(
+                                    "chunk_too_large_after_expansion_limit"
+                                ));
+                            }
+                            
+                            buffer.add_chunk(chunk).map_err(|e| {
+                                ReasoningError::streaming(
+                                    "buffer_overflow",
+                                    &format!("Failed to add chunk after expansion fallback: {}", e)
+                                )
+                            })
+                        }
+                    }
+                }
+            }
+        }
     }
 
     async fn calculate_new_state(&self, current_state: &StreamState, buffer_result: &BufferResult) -> Result<StreamState> {
@@ -917,21 +1073,34 @@ impl StreamBuffer {
         }
     }
 
-    /// Add a chunk to the buffer
+    /// Add a chunk to the buffer with enhanced resource management
     pub fn add_chunk(&mut self, chunk: StreamChunk) -> Result<BufferResult> {
-        self.last_accessed = Instant::now();
-        
         let chunk_size = chunk.size();
         
-        // Check if chunk fits
+        // Check if adding this chunk would exceed buffer capacity
         if self.current_size + chunk_size > self.max_size {
+            // Try to handle overflow based on strategy
             return self.handle_overflow(chunk);
         }
         
-        // Add chunk
+        // Check if we're approaching system resource limits
+        if self.chunks.len() > 10000 {
+            return Err(ReasoningError::resource_exhausted(
+                "buffer_chunk_count"
+            ));
+        }
+        
+        if self.current_size + chunk_size > usize::MAX / 2 {
+            return Err(ReasoningError::resource_exhausted(
+                "buffer_memory"
+            ));
+        }
+        
+        // Add chunk to buffer
         self.chunks.push_back(chunk);
         self.current_size += chunk_size;
         self.total_processed += 1;
+        self.last_accessed = Instant::now();
         
         Ok(BufferResult::Added)
     }
@@ -973,45 +1142,89 @@ impl StreamBuffer {
         self.last_accessed = Instant::now();
     }
 
+    /// Enhanced overflow handling with resource exhaustion prevention
     fn handle_overflow(&mut self, chunk: StreamChunk) -> Result<BufferResult> {
-        let chunk_size = chunk.size(); // Calculate size before moving
+        let chunk_size = chunk.size();
         
-        match self.overflow_strategy {
+        match &self.overflow_strategy {
             OverflowStrategy::DropOldest => {
-                // Drop oldest chunks until there's space
+                // Remove chunks until we have space
                 while !self.chunks.is_empty() && self.current_size + chunk_size > self.max_size {
-                    if let Some(dropped) = self.chunks.pop_front() {
-                        self.current_size = self.current_size.saturating_sub(dropped.size());
+                    if let Some(old_chunk) = self.chunks.pop_front() {
+                        self.current_size = self.current_size.saturating_sub(old_chunk.size());
                         self.total_dropped += 1;
                     }
                 }
                 
-                if self.current_size + chunk_size <= self.max_size {
-                    self.chunks.push_back(chunk);
-                    self.current_size += chunk_size;
-                    Ok(BufferResult::Added)
-                } else {
-                    self.total_dropped += 1;
-                    Ok(BufferResult::Dropped)
+                // If still can't fit after dropping all chunks, the single chunk is too large
+                if chunk_size > self.max_size {
+                    return Err(ReasoningError::resource_exhausted(
+                        "chunk_too_large_for_buffer"
+                    ));
                 }
+                
+                // Add the new chunk
+                self.chunks.push_back(chunk);
+                self.current_size += chunk_size;
+                self.total_processed += 1;
+                Ok(BufferResult::Added)
             }
             OverflowStrategy::DropNewest => {
-                self.total_dropped += 1;
-                Ok(BufferResult::Dropped)
+                // Drop the new chunk if buffer is full
+                if chunk_size > self.max_size - self.current_size {
+                    self.total_dropped += 1;
+                    return Ok(BufferResult::Dropped);
+                }
+                
+                // Should not reach here due to earlier check, but handle gracefully
+                self.chunks.push_back(chunk);
+                self.current_size += chunk_size;
+                Ok(BufferResult::Added)
             }
             OverflowStrategy::Block => {
-                Ok(BufferResult::Buffered)
+                // In async context, we can't actually block, so return error
+                Err(ReasoningError::resource_exhausted(
+                    "buffer_full_blocking_not_supported"
+                ))
             }
             OverflowStrategy::Expand { max_expansion } => {
                 let new_max_size = (self.max_size + chunk_size).min(self.max_size + max_expansion);
+                
                 if new_max_size > self.max_size {
+                    // Check system resource limits before expanding
+                    if new_max_size > 100 * 1024 * 1024 { // 100MB limit
+                        return Err(ReasoningError::resource_exhausted(
+                            "buffer_expansion_exceeds_system_limits"
+                        ));
+                    }
+                    
                     self.max_size = new_max_size;
                     self.chunks.push_back(chunk);
                     self.current_size += chunk_size;
+                    self.total_processed += 1;
                     Ok(BufferResult::Added)
                 } else {
-                    self.total_dropped += 1;
-                    Ok(BufferResult::Dropped)
+                    // Cannot expand further, use drop oldest as fallback
+                    tracing::warn!("Buffer expansion limit reached, falling back to drop oldest");
+                    
+                    // Remove chunks until we have space
+                    while !self.chunks.is_empty() && self.current_size + chunk_size > self.max_size {
+                        if let Some(old_chunk) = self.chunks.pop_front() {
+                            self.current_size = self.current_size.saturating_sub(old_chunk.size());
+                            self.total_dropped += 1;
+                        }
+                    }
+                    
+                    if chunk_size > self.max_size {
+                        return Err(ReasoningError::resource_exhausted(
+                            "chunk_too_large_after_expansion_limit"
+                        ));
+                    }
+                    
+                    self.chunks.push_back(chunk);
+                    self.current_size += chunk_size;
+                    self.total_processed += 1;
+                    Ok(BufferResult::Added)
                 }
             }
         }
@@ -1021,63 +1234,223 @@ impl StreamBuffer {
 impl CircuitBreaker {
     /// Create a new circuit breaker
     pub fn new(failure_threshold: u32, recovery_timeout: Duration) -> Self {
+        let mut config = CircuitBreakerConfig::default();
+        config.default_failure_threshold = failure_threshold;
+        config.default_recovery_timeout = recovery_timeout;
+        
         Self {
             state: CircuitBreakerState::Closed,
-            failure_count: 0,
-            failure_threshold,
-            recovery_timeout,
-            last_failure: None,
+            failure_counts: HashMap::new(),
+            failure_thresholds: config.category_thresholds.clone(),
+            recovery_timeouts: config.category_timeouts.clone(),
+            last_failures: HashMap::new(),
             success_count: 0,
+            total_failure_count: 0,
+            config,
         }
     }
 
-    /// Record a successful operation
-    pub fn record_success(&mut self) {
-        match self.state {
-            CircuitBreakerState::HalfOpen => {
-                self.success_count += 1;
-                if self.success_count >= 3 {
-                    self.state = CircuitBreakerState::Closed;
-                    self.failure_count = 0;
-                    self.success_count = 0;
+    /// Create a new circuit breaker with custom configuration
+    pub fn with_config(config: CircuitBreakerConfig) -> Self {
+        Self {
+            state: CircuitBreakerState::Closed,
+            failure_counts: HashMap::new(),
+            failure_thresholds: config.category_thresholds.clone(),
+            recovery_timeouts: config.category_timeouts.clone(),
+            last_failures: HashMap::new(),
+            success_count: 0,
+            total_failure_count: 0,
+            config,
+        }
+    }
+
+    /// Enhanced circuit breaker that allows requests based on failure category
+    pub fn allows_request(&mut self) -> bool {
+        match &self.state {
+            CircuitBreakerState::Closed => true,
+            CircuitBreakerState::Open { failure_category, opened_at } => {
+                let timeout = self.recovery_timeouts.get(failure_category)
+                    .unwrap_or(&self.config.default_recovery_timeout);
+                
+                if opened_at.elapsed() >= *timeout {
+                    // Transition to half-open for this specific category
+                    self.state = CircuitBreakerState::HalfOpen {
+                        failure_category: failure_category.clone(),
+                        testing_since: Instant::now(),
+                    };
+                    true
+                } else {
+                    false
                 }
             }
-            CircuitBreakerState::Closed => {
-                self.failure_count = 0;
+            CircuitBreakerState::HalfOpen { .. } => {
+                // Allow limited requests in half-open state
+                true
             }
-            _ => {}
         }
     }
-
-    /// Record a failed operation
-    pub fn record_failure(&mut self) {
-        self.failure_count += 1;
-        self.last_failure = Some(Instant::now());
-        
-        if self.failure_count >= self.failure_threshold {
-            self.state = CircuitBreakerState::Open;
-        }
-    }
-
-    /// Check if the circuit breaker allows requests
-    pub fn allows_request(&mut self) -> bool {
-        match self.state {
+    
+    /// Allow requests for a specific failure category
+    pub fn allows_request_for_category(&mut self, category: &FailureCategory) -> bool {
+        match &self.state {
             CircuitBreakerState::Closed => true,
-            CircuitBreakerState::Open => {
-                if let Some(last_failure) = self.last_failure {
-                    if last_failure.elapsed() >= self.recovery_timeout {
-                        self.state = CircuitBreakerState::HalfOpen;
-                        self.success_count = 0;
+            CircuitBreakerState::Open { failure_category, opened_at } => {
+                if failure_category == category {
+                    // Check if recovery timeout has passed
+                    let recovery_timeout = self.recovery_timeouts.get(category)
+                        .copied()
+                        .unwrap_or(self.config.default_recovery_timeout);
+                    
+                    if opened_at.elapsed() >= recovery_timeout {
+                        // Transition to half-open
+                        self.state = CircuitBreakerState::HalfOpen {
+                            failure_category: category.clone(),
+                            testing_since: Instant::now(),
+                        };
                         true
                     } else {
                         false
                     }
                 } else {
-                    false
+                    // Open for different category, allow this category
+                    true
                 }
             }
-            CircuitBreakerState::HalfOpen => true,
+            CircuitBreakerState::HalfOpen { failure_category, .. } => {
+                failure_category != category
+            }
         }
+    }
+    
+    /// Record a failure with specific category
+    pub fn record_failure_with_category(&mut self, category: FailureCategory) {
+        self.total_failure_count += 1;
+        
+        let current_count = self.failure_counts.entry(category.clone()).or_insert(0);
+        *current_count += 1;
+        self.last_failures.insert(category.clone(), Instant::now());
+        
+        let threshold = self.failure_thresholds.get(&category)
+            .copied()
+            .unwrap_or(self.config.default_failure_threshold);
+        
+        if *current_count >= threshold {
+            self.state = CircuitBreakerState::Open {
+                failure_category: category.clone(),
+                opened_at: Instant::now(),
+            };
+            
+            if self.config.adaptive_thresholds {
+                self.adapt_threshold_for_category(category);
+            }
+        }
+    }
+    
+    /// Record a successful operation
+    pub fn record_success(&mut self) {
+        self.success_count += 1;
+        
+        // Extract failure_category from the current state before borrowing mutably
+        let current_failure_category = match &self.state {
+            CircuitBreakerState::HalfOpen { failure_category, .. } => Some(failure_category.clone()),
+            _ => None,
+        };
+        
+        // Handle state transitions based on the extracted category
+        if let Some(failure_category) = current_failure_category {
+            // In half-open state, successful request closes the circuit for this category
+            self.reset_category(&failure_category);
+        }
+    }
+    
+    /// Adapt threshold for a category based on failure patterns
+    fn adapt_threshold_for_category(&mut self, category: FailureCategory) {
+        if !self.config.adaptive_thresholds {
+            return;
+        }
+        
+        let current_threshold = self.failure_thresholds.get(&category)
+            .copied()
+            .unwrap_or(self.config.default_failure_threshold);
+        
+        // Increase threshold for categories that fail frequently
+        let new_threshold = match category {
+            FailureCategory::NetworkError | FailureCategory::TimeoutError => {
+                // Network issues might be temporary, be more tolerant
+                (current_threshold + 1).min(10)
+            }
+            FailureCategory::ResourceError | FailureCategory::ConfigurationError => {
+                // Resource/config issues are usually persistent, be less tolerant
+                current_threshold.max(1)
+            }
+            _ => current_threshold,
+        };
+        
+        self.failure_thresholds.insert(category, new_threshold);
+    }
+    
+    /// Handle resource exhaustion - returns true if circuit should open
+    pub fn handle_resource_exhaustion(&mut self, resource_type: &str) -> bool {
+        let category = if resource_type.contains("memory") || resource_type.contains("buffer") {
+            FailureCategory::ResourceError
+        } else {
+            FailureCategory::UnknownError
+        };
+
+        self.record_failure_with_category(category.clone());
+        !self.is_open_for_category(&category)
+    }
+
+    /// Get current failure count for a category
+    pub fn get_failure_count(&self, category: &FailureCategory) -> u32 {
+        self.failure_counts.get(category).cloned().unwrap_or(0)
+    }
+
+    /// Check if circuit is open for a specific category
+    pub fn is_open_for_category(&self, category: &FailureCategory) -> bool {
+        match &self.state {
+            CircuitBreakerState::Open { failure_category, .. } => failure_category == category,
+            _ => false,
+        }
+    }
+
+    /// Get time until recovery for a category
+    pub fn time_until_recovery(&self, category: &FailureCategory) -> Option<Duration> {
+        match &self.state {
+            CircuitBreakerState::Open { failure_category, opened_at } if failure_category == category => {
+                let recovery_timeout = self.recovery_timeouts.get(category)
+                    .unwrap_or(&self.config.default_recovery_timeout);
+                let elapsed = opened_at.elapsed();
+                if elapsed < *recovery_timeout {
+                    Some(*recovery_timeout - elapsed)
+                } else {
+                    Some(Duration::ZERO)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Reset circuit breaker for a specific category
+    pub fn reset_category(&mut self, category: &FailureCategory) {
+        self.failure_counts.remove(category);
+        self.last_failures.remove(category);
+        
+        // If this was the category causing the open state, close the circuit
+        match &self.state {
+            CircuitBreakerState::Open { failure_category, .. } 
+            | CircuitBreakerState::HalfOpen { failure_category, .. } 
+                if failure_category == category => {
+                self.state = CircuitBreakerState::Closed;
+                self.success_count = 0;
+            }
+            _ => {}
+        }
+    }
+
+    /// Record a failed operation (legacy method for backward compatibility)
+    pub fn record_failure(&mut self) {
+        self.record_failure_with_category(FailureCategory::UnknownError);
     }
 }
 
@@ -1227,13 +1600,13 @@ mod tests {
         assert_eq!(breaker.state, CircuitBreakerState::Closed);
         
         breaker.record_failure();
-        assert_eq!(breaker.state, CircuitBreakerState::Open);
+        assert!(matches!(breaker.state, CircuitBreakerState::Open { .. }));
         assert!(!breaker.allows_request());
         
         // Wait for recovery timeout
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(breaker.allows_request());
-        assert_eq!(breaker.state, CircuitBreakerState::HalfOpen);
+        assert!(matches!(breaker.state, CircuitBreakerState::HalfOpen { .. }));
         
         // Record successes to close circuit
         breaker.record_success();
