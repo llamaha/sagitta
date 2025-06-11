@@ -172,6 +172,29 @@ mod tests {
         });
         
         let result = tool.execute(params).await.unwrap();
+        
+        // Debug: print the actual result if it's not successful
+        if !result.is_success() {
+            match &result {
+                ToolResult::Error { error } => {
+                    println!("Tool returned error: {}", error);
+                    panic!("Expected success but got error: {}", error);
+                }
+                ToolResult::Success(data) => {
+                    println!("Tool returned success data: {}", serde_json::to_string_pretty(data).unwrap());
+                    if let Some(success_val) = data.get("success").and_then(|v| v.as_bool()) {
+                        if !success_val {
+                            if let Some(message) = data.get("message").and_then(|v| v.as_str()) {
+                                panic!("Change directory reported failure: {}", message);
+                            } else {
+                                panic!("Change directory reported failure with no message");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         assert!(result.is_success());
         
         if let Some(data) = result.success_value() {

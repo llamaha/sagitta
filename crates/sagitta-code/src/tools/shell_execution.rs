@@ -276,11 +276,8 @@ pub struct ShellExecutionTool {
 impl ShellExecutionTool {
     /// Create a new shell execution tool with default configuration
     pub fn new(default_working_dir: PathBuf) -> Self {
-        let repositories_base_path = get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
         let config = LocalExecutorConfig {
-            base_dir: repositories_base_path,
+            base_dir: default_working_dir.clone(), // Use the provided working directory as base
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
@@ -883,9 +880,7 @@ mod tests {
     fn test_shell_execution_tool_new_with_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        }));
+        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
         assert!(!tool.executor.config().allow_automatic_tool_install);
         assert!(tool.executor.config().cpu_limit_seconds.is_none());
@@ -896,9 +891,7 @@ mod tests {
     fn test_shell_execution_tool_with_custom_executor_config() {
         let temp_dir = TempDir::new().unwrap();
         let config = LocalExecutorConfig {
-            base_dir: get_repo_base_path(None).unwrap_or_else(|_| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            }),
+            base_dir: temp_dir.path().to_path_buf(),
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
@@ -918,9 +911,7 @@ mod tests {
 
         let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
-        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        }));
+        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
         assert!(!tool.executor.config().allow_automatic_tool_install);
         assert!(tool.executor.config().cpu_limit_seconds.is_none());

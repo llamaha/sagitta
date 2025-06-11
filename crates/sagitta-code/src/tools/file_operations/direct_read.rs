@@ -46,6 +46,59 @@ impl DirectFileReadTool {
             self.base_directory.join(file_path)
         };
         
+        // Validate that the path is within the base directory for security
+        let canonical_base = self.base_directory.canonicalize()
+            .map_err(|e| SagittaCodeError::ToolError(format!(
+                "Failed to canonicalize base directory '{}': {}",
+                self.base_directory.display(), e
+            )))?;
+        
+        // Try to canonicalize the target path if it exists
+        let canonical_path = if absolute_path.exists() {
+            absolute_path.canonicalize()
+                .map_err(|e| SagittaCodeError::ToolError(format!(
+                    "Failed to canonicalize path '{}': {}",
+                    absolute_path.display(), e
+                )))?
+        } else {
+            // For non-existent paths, we still need to validate they would be within bounds
+            absolute_path.clone()
+        };
+        
+        // Check if the path is within the base directory
+        let is_within_base = if canonical_path.exists() {
+            // For existing paths, use the canonical form
+            canonical_path.starts_with(&canonical_base)
+        } else {
+            // For non-existing paths, check if the target path starts with base
+            absolute_path.starts_with(&self.base_directory) ||
+            absolute_path.starts_with(&canonical_base)
+        };
+        
+        if !is_within_base {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Access denied: Path '{}' is outside the allowed workspace directory '{}'. All file operations must stay within the workspace for security.",
+                absolute_path.display(),
+                self.base_directory.display()
+            )));
+        }
+        
+        // Forbid certain system-critical directories even if they're somehow within base
+        let forbidden_paths = [
+            "/etc", "/bin", "/sbin", "/usr/bin", "/usr/sbin", 
+            "/boot", "/root", "/proc", "/sys", "/dev"
+        ];
+        
+        let path_str = absolute_path.to_string_lossy();
+        for forbidden in &forbidden_paths {
+            if path_str == *forbidden || path_str.starts_with(&format!("{}/", forbidden)) {
+                return Err(SagittaCodeError::ToolError(format!(
+                    "Access denied: Reading from system directory '{}' is forbidden for security reasons",
+                    path_str
+                )));
+            }
+        }
+        
         // Check if file exists
         if !absolute_path.exists() {
             return Err(SagittaCodeError::ToolError(format!(
@@ -243,6 +296,47 @@ mod tests {
                 assert_eq!(data["content"], "Absolute path test");
             }
             _ => panic!("Expected ToolResult::Success"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reject_paths_outside_workspace() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = DirectFileReadTool::new(temp_dir.path().to_path_buf());
+        
+        // Try to read a file outside the workspace using relative path traversal
+        let params = serde_json::json!({
+            "file_path": "../../etc/passwd"
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Access denied") || error_msg.contains("outside the allowed workspace"));
+    }
+
+    #[tokio::test]
+    async fn test_reject_system_directories() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = DirectFileReadTool::new(temp_dir.path().to_path_buf());
+        
+        // Try to read from system directories using absolute paths
+        let system_paths = ["/etc/passwd", "/bin/sh", "/usr/bin/ls"];
+        
+        for system_path in &system_paths {
+            let params = serde_json::json!({
+                "file_path": system_path
+            });
+            
+            let result = tool.execute(params).await;
+            assert!(result.is_err(), "Should reject access to {}", system_path);
+            let error_msg = result.unwrap_err().to_string();
+            assert!(
+                error_msg.contains("Access denied") || 
+                error_msg.contains("outside the allowed workspace") ||
+                error_msg.contains("system directory"),
+                "Error message should indicate access denial for {}: {}", system_path, error_msg
+            );
         }
     }
 } 
