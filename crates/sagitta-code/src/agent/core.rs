@@ -27,7 +27,7 @@ use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
-use crate::llm::gemini::client::GeminiClient;
+use crate::llm::openrouter::client::OpenRouterClient;
 use crate::tools::executor::{ToolExecutor as SagittaCodeToolExecutorInternal, ToolExecutionEvent};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{ToolResult, ToolDefinition as ToolDefinitionType};
@@ -77,7 +77,7 @@ use crate::agent::conversation::search::ConversationSearchEngine;
 use terminal_stream::events::StreamEvent;
 
 /// The system prompt instructing the agent how to respond
-const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by Gemini and sagitta-search.
+const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by OpenRouter and sagitta-search.
 You help developers understand and work with code repositories efficiently.
 You have access to tools that can search and retrieve code, view file contents, and more.
 When asked about code, use your tools to look up accurate and specific information.

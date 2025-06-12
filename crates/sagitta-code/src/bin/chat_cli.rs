@@ -10,7 +10,7 @@ use sagitta_code::{
     config::{SagittaCodeConfig, load_config},
     utils::init_logger,
     llm::client::LlmClient,
-    llm::gemini::client::GeminiClient,
+    llm::openrouter::client::OpenRouterClient,
     tools::analyze_input::TOOLS_COLLECTION_NAME,
 };
 
@@ -53,20 +53,20 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Check for API key - follow the same pattern as GeminiClient
-    let api_key_available = match config.gemini.api_key.as_ref() {
+    // Check for API key - follow the same pattern as OpenRouterClient
+    let api_key_available = match config.openrouter.api_key.as_ref() {
         Some(key) if !key.is_empty() => true,
         _ => {
             // Check environment variable as fallback
-            std::env::var("GEMINI_API_KEY").map(|key| !key.is_empty()).unwrap_or(false)
+            std::env::var("OPENROUTER_API_KEY").map(|key| !key.is_empty()).unwrap_or(false)
         }
     };
 
     if !api_key_available {
-        eprintln!("❌ Error: GEMINI_API_KEY not available");
-        eprintln!("Please set your Gemini API key in:");
+        eprintln!("❌ Error: OPENROUTER_API_KEY not available");
+        eprintln!("Please set your OpenRouter API key in:");
         eprintln!("  1. Configuration file: ~/.config/sagitta/sagitta_code_config.json");
-        eprintln!("  2. Environment variable: export GEMINI_API_KEY=your_key_here");
+        eprintln!("  2. Environment variable: export OPENROUTER_API_KEY=your_key_here");
         std::process::exit(1);
     }
 
@@ -294,8 +294,8 @@ async fn initialize_agent(config: SagittaCodeConfig) -> Result<Agent> {
     
     // Create the LLM client for tools
     let llm_client: Arc<dyn LlmClient> = Arc::new(
-        GeminiClient::new(&config)
-            .map_err(|e| anyhow!("Failed to create GeminiClient: {}", e))?
+        OpenRouterClient::new(&config)
+            .map_err(|e| anyhow!("Failed to create OpenRouterClient: {}", e))?
     );
     
     // Register AnalyzeInputTool

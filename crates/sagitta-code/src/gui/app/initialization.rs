@@ -9,7 +9,7 @@ use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
 use super::super::chat::view::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
-use crate::llm::gemini::client::GeminiClient;
+use crate::llm::openrouter::client::OpenRouterClient;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
@@ -104,16 +104,16 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
 
 /// Create LLM client from config
 pub fn create_llm_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>> {
-    let gemini_client_result = GeminiClient::new(config);
+    let openrouter_client_result = OpenRouterClient::new(config);
     
-    match gemini_client_result {
+    match openrouter_client_result {
         Ok(client) => Ok(Arc::new(client)),
         Err(e) => {
             log::error!(
-                "Failed to create GeminiClient: {}. Agent will not be initialized properly. Some features may be disabled.",
+                "Failed to create OpenRouterClient: {}. Agent will not be initialized properly. Some features may be disabled.",
                 e
             );
-            Err(anyhow::anyhow!("Failed to create GeminiClient for Agent: {}", e))
+            Err(anyhow::anyhow!("Failed to create OpenRouterClient for Agent: {}", e))
         }
     }
 }
@@ -150,9 +150,13 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Load both sagitta-code and sagitta-search configs
     let (code_config, core_config) = match load_all_configs() {
-        Ok(configs) => {
+        Ok((code_cfg, core_cfg_opt)) => {
             log::info!("SagittaCodeApp: Loaded both configurations successfully");
-            configs
+            let core_cfg = core_cfg_opt.unwrap_or_else(|| {
+                log::warn!("SagittaCodeApp: sagitta-search config not found, using default");
+                sagitta_search::config::AppConfig::default()
+            });
+            (code_cfg, core_cfg)
         }
         Err(e) => {
             log::warn!("SagittaCodeApp: Could not load configurations: {}. Using defaults.", e);
@@ -180,7 +184,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let llm_client = create_llm_client(&*config_guard).map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
-            format!("CRITICAL: Failed to initialize LLM Client (Gemini): {}. Agent is disabled.", e),
+            format!("CRITICAL: Failed to initialize LLM Client (OpenRouter): {}. Agent is disabled.", e),
         );
         app.chat_manager.add_complete_message(error_message);
         e
@@ -431,7 +435,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             // Add to events panel instead of chat
             app.panels.events_panel.add_event(
                 super::SystemEventType::Error,
-                format!("Failed to initialize agent: {}. Check your Gemini API key in settings.", err)
+                format!("Failed to initialize agent: {}. Check your OpenRouter API key in settings.", err)
             );
         }
     }
@@ -545,7 +549,7 @@ mod tests {
         let mut config = SagittaCodeConfig::default();
         
         // Set invalid API key to force failure
-        config.gemini.api_key = Some("invalid_key".to_string());
+        config.openrouter.api_key = Some("invalid_key".to_string());
         
         let result = create_llm_client(&config);
         
@@ -557,7 +561,7 @@ mod tests {
             }
             Err(e) => {
                 // Expected failure with invalid config
-                assert!(e.to_string().contains("Failed to create GeminiClient"));
+                assert!(e.to_string().contains("Failed to create OpenRouterClient"));
             }
         }
     }

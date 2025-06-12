@@ -36,7 +36,7 @@ env_logger = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Networking (for Gemini API)
+# Networking (for OpenRouter API)
 reqwest = { version = "0.11", features = ["json", "stream"] }
 bytes = "1.5"
 
