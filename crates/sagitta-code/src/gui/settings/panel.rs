@@ -14,9 +14,10 @@ use log::{info, warn, error};
 use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
 use crate::config::types::OpenRouterConfig;
 use crate::config::paths::{get_sagitta_code_app_config_path};
+use crate::llm::openrouter::models::ModelManager;
+use super::model_selector::ModelSelector;
 
 /// Settings panel for configuring Sagitta core settings
-#[derive(Clone)]
 pub struct SettingsPanel {
     // Sagitta config
     sagitta_config: Arc<Mutex<AppConfig>>,
@@ -42,6 +43,9 @@ pub struct SettingsPanel {
     pub openrouter_api_key: String,
     pub openrouter_model: String,
     pub openrouter_max_reasoning_steps: u32,
+    
+    // Model selector for dynamic model selection
+    model_selector: Option<ModelSelector>,
 }
 
 impl SettingsPanel {
@@ -70,7 +74,21 @@ impl SettingsPanel {
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
             openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
             openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
+            
+            // Initialize model selector as None (will be lazy-loaded)
+            model_selector: None,
         }
+    }
+    
+    /// Create a new settings panel with model manager for enhanced model selection
+    pub fn with_model_manager(
+        initial_sagitta_code_config: SagittaCodeConfig, 
+        initial_app_config: AppConfig,
+        model_manager: Arc<ModelManager>
+    ) -> Self {
+        let mut panel = Self::new(initial_sagitta_code_config, initial_app_config);
+        panel.model_selector = Some(ModelSelector::new(model_manager));
+        panel
     }
     
     /// Toggle the panel visibility
@@ -129,17 +147,32 @@ impl SettingsPanel {
                                         .hint_text("Enter your OpenRouter API key"));
                                     ui.end_row();
                                     
-                                    ui.label("Model:");
-                                    ui.add(TextEdit::singleline(&mut self.openrouter_model)
-                                        .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
-                                    ui.end_row();
-                                    
                                     ui.label("Max Reasoning Steps:");
                                     ui.add(egui::DragValue::new(&mut self.openrouter_max_reasoning_steps)
                                         .range(1..=100)
                                         .speed(1.0));
                                     ui.end_row();
                                 });
+                            
+                            // Model selector (enhanced UI)
+                            ui.add_space(8.0);
+                            if let Some(ref mut model_selector) = self.model_selector {
+                                // Use the dynamic model selector
+                                if model_selector.render(ui, &mut self.openrouter_model, &theme) {
+                                    // Model was changed - you can add any callback logic here
+                                    info!("Model changed to: {}", self.openrouter_model);
+                                }
+                            } else {
+                                // Fallback to simple text input if no model manager available
+                                ui.horizontal(|ui| {
+                                    ui.label("Model:");
+                                    ui.add(TextEdit::singleline(&mut self.openrouter_model)
+                                        .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
+                                    
+                                    // Note about enhanced selection
+                                    ui.small("💡 Enhanced model selection available with API key");
+                                });
+                            }
                             
                             ui.separator();
                             ui.add_space(8.0);
