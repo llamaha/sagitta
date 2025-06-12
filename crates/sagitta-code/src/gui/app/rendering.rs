@@ -271,11 +271,19 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                                         chunk_count += 1;
                                         last_chunk_time = std::time::Instant::now();
                                         consecutive_timeouts = 0;
-                                        log::debug!("Received chunk #{}: {:?}", chunk_count, chunk_result);
+                                        // Only log substantial chunks or final chunks
+                                        if chunk_count % 10 == 0 || match &chunk_result {
+                                            Ok(chunk) => chunk.is_final,
+                                            Err(_) => true,
+                                        } {
+                                            log::debug!("Received chunk #{}: {:?}", chunk_count, chunk_result);
+                                        }
                                         
                                         match chunk_result {
                                             Ok(chunk) => {
-                                                log::trace!("Successfully processed chunk #{}", chunk_count);
+                                                if chunk.is_final || chunk_count % 10 == 0 {
+                                                    log::trace!("Successfully processed chunk #{}", chunk_count);
+                                                }
                                                 // The chunk processing is handled via events
                                                 // so we don't need to do anything here
                                                 

@@ -78,7 +78,15 @@ pub fn init_logger() {
     
     // Only apply default sagitta_code level if not specified in RUST_LOG
     if std::env::var("RUST_LOG").is_err() || !std::env::var("RUST_LOG").unwrap_or_default().contains("sagitta_code") {
-        builder.filter_module("sagitta_code", LevelFilter::Debug);
+        // Check for special streaming debug mode
+        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+            builder.filter_module("sagitta_code::agent::core", LevelFilter::Trace);
+            builder.filter_module("sagitta_code::gui::app", LevelFilter::Debug);
+            log::info!("SAGITTA_STREAMING_DEBUG enabled - verbose streaming logs active");
+        } else {
+            // Changed from DEBUG to INFO to reduce noise in production/normal usage
+            builder.filter_module("sagitta_code", LevelFilter::Info);
+        }
     }
 
     builder
@@ -114,7 +122,7 @@ pub fn init_logger() {
     // Initialize the logger - this is the ONLY logger initialization
     builder.init();
     
-    log::info!("Logger initialized with effective filters: sagitta_code=debug, zbus=error, hyper=warn, egui=warn (and all submodules)");
+    log::info!("Logger initialized with effective filters: sagitta_code=info, zbus=error, hyper=warn, egui=warn (and all submodules)");
 }
 
 #[cfg(test)]

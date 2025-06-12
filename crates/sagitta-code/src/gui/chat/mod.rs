@@ -67,10 +67,18 @@ impl StreamingChatManager {
     
     /// Append content to a streaming message
     pub fn append_content(&self, message_id: &str, chunk: String) {
-        log::info!("StreamingChatManager::append_content CALLED for ID: '{}', chunk: '{}'", message_id, chunk.chars().take(70).collect::<String>());
+        // Only log when streaming debug is enabled or for substantial chunks
+        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+            log::debug!("StreamingChatManager::append_content CALLED for ID: '{}', chunk: '{}'", message_id, chunk.chars().take(70).collect::<String>());
+        } else if chunk.len() > 20 {
+            log::trace!("StreamingChatManager::append_content CALLED for ID: '{}', chunk_len: {}", message_id, chunk.len());
+        }
+        
         let mut active_streams = self.active_streams.lock().unwrap();
         if let Some(message) = active_streams.get_mut(message_id) {
-            log::info!("StreamingChatManager::append_content - Found active stream for ID: '{}'", message_id);
+            if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                log::debug!("StreamingChatManager::append_content - Found active stream for ID: '{}'", message_id);
+            }
             // If we're thinking, switch to streaming but preserve thinking content
             if message.is_thinking() {
                 message.status = MessageStatus::Streaming;
@@ -112,7 +120,11 @@ impl StreamingChatManager {
     
     /// Add a tool call to a streaming message
     pub fn add_tool_call(&self, message_id: &str, tool_call: ToolCall) {
-        log::info!("StreamingChatManager::add_tool_call CALLED for message_id: '{}', tool_name: '{}', args: '{}'", message_id, tool_call.name, tool_call.arguments.chars().take(100).collect::<String>());
+        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+            log::debug!("StreamingChatManager::add_tool_call CALLED for message_id: '{}', tool_name: '{}', args: '{}'", message_id, tool_call.name, tool_call.arguments.chars().take(100).collect::<String>());
+        } else {
+            log::trace!("StreamingChatManager::add_tool_call for tool: '{}'", tool_call.name);
+        }
         
         // INLINE APPROACH: Add tool call directly to the current agent message
         {
@@ -120,7 +132,9 @@ impl StreamingChatManager {
             if let Some(current_message) = active_streams.get_mut(message_id) {
                 // Add the tool call directly to the current agent message
                 current_message.add_tool_call(tool_call);
-                log::info!("StreamingChatManager::add_tool_call - Added tool call inline to agent message");
+                if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                    log::debug!("StreamingChatManager::add_tool_call - Added tool call inline to agent message");
+                }
             } else {
                 log::warn!("StreamingChatManager::add_tool_call - NO active stream found for message_id: '{}'", message_id);
                 
@@ -129,7 +143,9 @@ impl StreamingChatManager {
                 for message in messages.iter_mut().rev() {
                     if message.id == message_id && message.author == MessageAuthor::Agent {
                         message.add_tool_call(tool_call);
-                        log::info!("StreamingChatManager::add_tool_call - Added tool call to completed agent message");
+                        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                            log::debug!("StreamingChatManager::add_tool_call - Added tool call to completed agent message");
+                        }
                         return;
                     }
                 }
@@ -190,7 +206,11 @@ impl StreamingChatManager {
             let mut active_streams = self.active_streams.lock().unwrap();
             active_streams.clear();
         }
-        log::info!("StreamingChatManager: Cleared all messages and active streams");
+        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+            log::debug!("StreamingChatManager: Cleared all messages and active streams");
+        } else {
+            log::trace!("StreamingChatManager: Cleared messages for conversation switch");
+        }
     }
     
     /// Update a tool call result by tool_call_id (more precise than by tool name)

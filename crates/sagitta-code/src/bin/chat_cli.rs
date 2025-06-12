@@ -34,14 +34,21 @@ use sagitta_code::tools::shell_execution::StreamingShellExecutionTool;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Enable verbose logging for debugging
-    std::env::set_var("RUST_LOG", "debug,sagitta_code=trace,reqwest=debug");
+    // Use more reasonable logging for CLI - only enable verbose mode if explicitly requested
+    if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
+        std::env::set_var("RUST_LOG", "debug,sagitta_code=trace,reqwest=debug");
+        println!("🔍 DEBUG MODE: Extensive logging enabled");
+    } else {
+        std::env::set_var("RUST_LOG", "info,sagitta_code=info");
+    }
     init_logger();
     
-    println!("🤖 Sagitta Code CLI Chat - DEBUG MODE");
+    println!("🤖 Sagitta Code CLI Chat");
     println!("{}", "=".repeat(60));
     println!("Interactive chat interface for testing the reasoning engine");
-    println!("🔍 DEBUGGING: Extensive logging enabled for OpenRouter integration");
+    if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
+        println!("🔍 DEBUGGING: Extensive logging enabled for OpenRouter integration");
+    }
     println!("Type 'exit', 'quit', or Ctrl+C to exit");
     println!("Type 'help' for available commands");
     println!("Type 'debug' to toggle debug output");
@@ -51,16 +58,20 @@ async fn main() -> Result<()> {
     let config = match load_config() {
         Ok(config) => {
             println!("✓ Configuration loaded successfully");
-            println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
-            println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
-            println!("🔍 DEBUG: Max history size: {}", config.openrouter.max_history_size);
+            if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
+                println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
+                println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
+                println!("🔍 DEBUG: Max history size: {}", config.openrouter.max_history_size);
+            }
             config
         }
         Err(e) => {
             eprintln!("⚠️  Warning: Failed to load config: {}", e);
             eprintln!("Using default configuration");
             let default_config = SagittaCodeConfig::default();
-            println!("🔍 DEBUG: Using default model: {}", default_config.openrouter.model);
+            if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
+                println!("🔍 DEBUG: Using default model: {}", default_config.openrouter.model);
+            }
             default_config
         }
     };
