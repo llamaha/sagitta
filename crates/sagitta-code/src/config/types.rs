@@ -54,6 +54,29 @@ impl SagittaCodeConfig {
                     .join("config.toml")
             })
     }
+
+    /// Gets the repositories base path with proper fallback logic
+    /// Order of precedence:
+    /// 1. config.sagitta.repositories_base_path (if set)
+    /// 2. config.workspaces.storage_path (if set)  
+    /// 3. default ~/.local/share/sagitta/workspaces
+    pub fn repositories_base_path(&self) -> PathBuf {
+        // First try sagitta.repositories_base_path
+        if let Some(ref path) = self.sagitta.repositories_base_path {
+            return path.clone();
+        }
+        
+        // Then try workspaces.storage_path
+        if let Some(ref path) = self.workspaces.storage_path {
+            return path.clone();
+        }
+        
+        // Finally fall back to default workspaces path
+        crate::config::paths::get_workspaces_path()
+            .unwrap_or_else(|_| {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            })
+    }
 }
 
 /// Configuration for Gemini API

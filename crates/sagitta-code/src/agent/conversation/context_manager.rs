@@ -594,22 +594,33 @@ impl ConversationContextManager {
             confidence += 0.4;
         }
 
-        // Check if user is stuck on same action
-        let recent_failures: Vec<_> = context.failure_history
-            .iter()
-            .rev()
-            .take(5)
-            .collect();
+        // Check if user is stuck on same action - but only consider failures after last success
+        let failures_to_check: Vec<_> = if let Some(last_success) = &context.last_success_context {
+            // Only look at failures that happened after the last success
+            context.failure_history
+                .iter()
+                .filter(|f| f.timestamp > last_success.timestamp)
+                .rev()
+                .take(5)
+                .collect()
+        } else {
+            // No success yet, check all recent failures
+            context.failure_history
+                .iter()
+                .rev()
+                .take(5)
+                .collect()
+        };
         
-        if recent_failures.len() >= 3 {
-            let same_action_failures = recent_failures.iter()
-                .filter(|f| f.failed_action == recent_failures[0].failed_action)
+        if failures_to_check.len() >= 3 {
+            let same_action_failures = failures_to_check.iter()
+                .filter(|f| f.failed_action == failures_to_check[0].failed_action)
                 .count();
             
             if same_action_failures >= 3 {
                 recommendations.push(format!(
                     "User is stuck repeating the same action: '{}'. Suggest alternative approaches or ask for more context.",
-                    recent_failures[0].failed_action
+                    failures_to_check[0].failed_action
                 ));
                 confidence += 0.5;
             }

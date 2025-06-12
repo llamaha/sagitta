@@ -561,9 +561,23 @@ impl CommandExecutor for LocalExecutor {
         
         // Resolve and validate working directory
         let working_dir = if let Some(ref wd) = params.working_directory {
+            // Caller provided an explicit working directory path.
             self.config.resolve_and_check(wd)?
         } else {
-            self.config.base_dir.clone()
+            // No explicit working directory – assume the *current* process cwd that may have been
+            // changed via WorkingDirectoryManager.  This allows users (or the ChangeDirectoryTool)
+            // to `cd` and then run shell commands without needing to always pass the
+            // `working_directory` parameter.
+            match std::env::current_dir() {
+                Ok(cwd) => {
+                    // If cwd is within the workspace base, use it. Otherwise fall back to base.
+                    match self.config.resolve_and_check(&cwd) {
+                        Ok(valid) => valid,
+                        Err(_) => self.config.base_dir.clone(),
+                    }
+                }
+                Err(_) => self.config.base_dir.clone(),
+            }
         };
         
         // Create the command
@@ -703,12 +717,13 @@ impl CommandExecutor for LocalExecutor {
         }
         
         Ok(ShellExecutionResult {
-            exit_code,
+            exit_code: exit_code,
             stdout: stdout_output,
             stderr: stderr_output,
             execution_time_ms: execution_time.as_millis() as u64,
-            container_image: "local".to_string(), // No container used
-            timed_out: false, // TODO: Implement timeout support
+            working_directory: working_dir.clone(),
+            container_image: "local".to_string(),
+            timed_out: false,
         })
     }
 }

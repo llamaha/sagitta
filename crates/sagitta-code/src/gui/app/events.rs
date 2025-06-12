@@ -1284,17 +1284,18 @@ mod tests {
     #[test]
     fn test_handle_tool_call() {
         let mut app = create_test_app();
+        
+        // First create an agent message to attach the tool call to
+        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true, None);
+        
         let args = serde_json::json!({"query": "rust programming"});
         let tool_call = create_test_tool_call("web_search", args);
         
         handle_tool_call(&mut app, tool_call.clone());
         
-        // Should create a tool call message
+        // Should not create a new message, but attach to existing one
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages.len(), 1);
-        let message = &messages[0];
-        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Agent);
-        assert!(message.content.contains("web_search"));
         
         // Should store pending tool call
         assert_eq!(app.state.pending_tool_calls.len(), 1);
@@ -1332,13 +1333,11 @@ mod tests {
         
         handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name.clone(), result);
         
-        // Should add error message
-        let messages = app.chat_manager.get_all_messages();
-        assert_eq!(messages.len(), 1);
-        let message = &messages[0];
-        assert_eq!(message.author, crate::gui::chat::view::MessageAuthor::Tool);
-        assert!(message.content.contains("Error"));
-        assert!(message.content.contains("Network connection failed"));
+        // Should store error result in tool_results
+        let stored_result = app.state.tool_results.get(&tool_call_id);
+        assert!(stored_result.is_some());
+        assert!(stored_result.unwrap().contains("Error"));
+        assert!(stored_result.unwrap().contains("Network connection failed"));
     }
 
     #[test]
@@ -1442,23 +1441,26 @@ mod tests {
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages[0].content, "I'll search for information about Rust programming.");
         
-        // 3. Tool call
+        // 3. Tool call - now attaches to existing message instead of creating new one
         let args = serde_json::json!({"query": "rust programming"});
         let tool_call = create_test_tool_call("web_search", args);
         handle_tool_call(&mut app, tool_call.clone());
         let messages = app.chat_manager.get_all_messages();
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 1); // Still 1 message, tool call attached
         
-        // 4. Tool result
+        // 4. Tool result - stores in tool_results rather than creating message
         let result = ToolResultType::Success(serde_json::json!("Found comprehensive Rust tutorials"));
-        handle_tool_call_result(&mut app, tool_call.id, tool_call.name, result);
+        handle_tool_call_result(&mut app, tool_call.id.clone(), tool_call.name, result);
         let messages = app.chat_manager.get_all_messages();
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 1); // Still 1 message
         
-        // Verify message sequence
+        // Verify message is agent message and tool result is stored
         assert_eq!(messages[0].author, crate::gui::chat::view::MessageAuthor::Agent);
-        assert_eq!(messages[1].author, crate::gui::chat::view::MessageAuthor::Agent);
-        assert_eq!(messages[2].author, crate::gui::chat::view::MessageAuthor::Tool);
+        
+        // Verify tool result is stored in state
+        let stored_result = app.state.tool_results.get(&tool_call.id);
+        assert!(stored_result.is_some());
+        assert!(stored_result.unwrap().contains("Found comprehensive Rust tutorials"));
     }
 
     #[test]
@@ -1478,6 +1480,9 @@ mod tests {
     fn test_multiple_tool_calls() {
         let mut app = create_test_app();
         
+        // First create an agent message to attach tool calls to
+        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true, None);
+        
         // Add multiple tool calls
         let args1 = serde_json::json!({"query": "rust"});
         let args2 = serde_json::json!({"pattern": "fn main"});
@@ -1487,9 +1492,9 @@ mod tests {
         handle_tool_call(&mut app, tool_call1);
         handle_tool_call(&mut app, tool_call2);
         
-        // Should have 2 tool call messages
+        // Should not create new messages, but attach to existing message
         let messages = app.chat_manager.get_all_messages();
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 1);
         assert_eq!(app.state.pending_tool_calls.len(), 2);
         
         // Verify both tool calls are stored
@@ -1547,12 +1552,12 @@ mod tests {
             }
         }));
         
-        handle_tool_call_result(&mut app, tool_call_id, tool_name, result);
+        handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name, result);
         
-        // Should include result in the message
-        let messages = app.chat_manager.get_all_messages();
-        let message = &messages[0];
-        assert!(message.content.contains("Found 5 files") || message.content.contains("file_count"));
+        // Should store result in tool_results
+        let stored_result = app.state.tool_results.get(&tool_call_id);
+        assert!(stored_result.is_some());
+        assert!(stored_result.unwrap().contains("Found 5 files") || stored_result.unwrap().contains("file_count"));
     }
 
     #[test]

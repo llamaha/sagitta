@@ -9,8 +9,15 @@ use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, SearchPoint
 use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::cluster_namer::{ClusterNamer, ClusterNamerConfig};
+use tokio::sync::RwLock;
+use chrono::{DateTime, Utc};
+use serde::{Serialize, Deserialize};
+use crate::llm::client::LlmClient;
 
 use super::types::{Conversation, ConversationSummary};
+
+// Phase 3: Add embedding cache type
+type EmbeddingCache = Arc<RwLock<HashMap<String, Vec<f32>>>>;
 
 /// Conversation clustering manager for semantic grouping
 pub struct ConversationClusteringManager {
@@ -28,6 +35,10 @@ pub struct ConversationClusteringManager {
     
     /// Cluster namer for generating descriptive names
     cluster_namer: Option<ClusterNamer>,
+    
+    // Phase 3 optimizations
+    /// Embedding cache to avoid O(n²) embedding generation
+    embedding_cache: EmbeddingCache,
 }
 
 /// Configuration for conversation clustering
@@ -47,6 +58,22 @@ pub struct ClusteringConfig {
     
     /// Maximum time difference for temporal clustering (in hours)
     pub max_temporal_distance_hours: u64,
+    
+    // Phase 3 optimizations
+    /// Smart threshold: only cluster if >= this many conversations
+    pub smart_clustering_threshold: usize,
+    
+    /// Enable embedding caching to avoid O(n²) embedding calls
+    pub enable_embedding_cache: bool,
+    
+    /// Use local similarity computation instead of Qdrant searches
+    pub use_local_similarity: bool,
+    
+    /// Run clustering asynchronously in background
+    pub async_clustering: bool,
+    
+    /// Cache size for embeddings (number of conversation embeddings to cache)
+    pub embedding_cache_size: usize,
 }
 
 impl Default for ClusteringConfig {
@@ -57,6 +84,11 @@ impl Default for ClusteringConfig {
             min_cluster_size: 2,
             use_temporal_proximity: true,
             max_temporal_distance_hours: 24 * 7, // 1 week
+            smart_clustering_threshold: 5,
+            enable_embedding_cache: true,
+            use_local_similarity: false,
+            async_clustering: false,
+            embedding_cache_size: 100,
         }
     }
 }
@@ -173,6 +205,7 @@ impl ConversationClusteringManager {
             collection_name,
             config,
             cluster_namer: None,
+            embedding_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
     
@@ -295,6 +328,44 @@ impl ConversationClusteringManager {
     
     /// Perform clustering on indexed conversations
     pub async fn cluster_conversations(&self, conversations: &[ConversationSummary]) -> Result<ClusteringResult> {
+        // Phase 3: Smart threshold check - skip clustering if too few conversations
+        if conversations.len() < self.config.smart_clustering_threshold {
+            log::debug!("Skipping clustering: {} conversations < threshold of {}", 
+                conversations.len(), self.config.smart_clustering_threshold);
+            return Ok(ClusteringResult {
+                clusters: Vec::new(),
+                outliers: conversations.iter().map(|c| c.id).collect(),
+                metrics: ClusteringMetrics {
+                    cluster_count: 0,
+                    outlier_count: conversations.len(),
+                    average_cohesion: 0.0,
+                    silhouette_score: 0.0,
+                },
+            });
+        }
+
+        // Phase 3: Use async clustering if enabled
+        if self.config.async_clustering {
+            self.cluster_conversations_async(conversations).await
+        } else {
+            self.cluster_conversations_sync(conversations).await
+        }
+    }
+
+    /// Phase 3: Asynchronous clustering that can run in background
+    pub async fn cluster_conversations_async(&self, conversations: &[ConversationSummary]) -> Result<ClusteringResult> {
+        // Instead of spawning a task, just call the optimized method directly
+        // The actual async benefit comes from the non-blocking nature of the embedding operations
+        self.cluster_conversations_optimized(conversations).await
+    }
+
+    /// Phase 3: Synchronous clustering (existing implementation)
+    async fn cluster_conversations_sync(&self, conversations: &[ConversationSummary]) -> Result<ClusteringResult> {
+        self.cluster_conversations_optimized(conversations).await
+    }
+
+    /// Phase 3: Optimized clustering with caching and local similarity
+    async fn cluster_conversations_optimized(&self, conversations: &[ConversationSummary]) -> Result<ClusteringResult> {
         if conversations.is_empty() {
             return Ok(ClusteringResult {
                 clusters: Vec::new(),
@@ -308,8 +379,12 @@ impl ConversationClusteringManager {
             });
         }
         
-        // Build similarity matrix
-        let similarity_matrix = self.build_similarity_matrix(conversations).await?;
+        // Phase 3: Build optimized similarity matrix with caching
+        let similarity_matrix = if self.config.use_local_similarity {
+            self.build_similarity_matrix_local(conversations).await?
+        } else {
+            self.build_similarity_matrix_cached(conversations).await?
+        };
         
         // Apply clustering algorithm
         let clusters = self.apply_clustering_algorithm(&similarity_matrix, conversations).await?;
@@ -358,6 +433,168 @@ impl ConversationClusteringManager {
         }
         
         Ok(matrix)
+    }
+    
+    /// Phase 3: Build similarity matrix with embedding caching
+    async fn build_similarity_matrix_cached(&self, conversations: &[ConversationSummary]) -> Result<Vec<Vec<f32>>> {
+        let n = conversations.len();
+        let mut matrix = vec![vec![0.0; n]; n];
+        
+        // Pre-generate and cache all embeddings
+        for conversation in conversations {
+            let _ = self.get_or_generate_embedding(&conversation.title).await?;
+        }
+        
+        for i in 0..n {
+            for j in i..n {
+                if i == j {
+                    matrix[i][j] = 1.0;
+                } else {
+                    let similarity = self.calculate_conversation_similarity_cached(
+                        &conversations[i],
+                        &conversations[j],
+                    ).await?;
+                    matrix[i][j] = similarity;
+                    matrix[j][i] = similarity;
+                }
+            }
+        }
+        
+        Ok(matrix)
+    }
+
+    /// Phase 3: Build similarity matrix using local computation (fastest)
+    async fn build_similarity_matrix_local(&self, conversations: &[ConversationSummary]) -> Result<Vec<Vec<f32>>> {
+        let n = conversations.len();
+        let mut matrix = vec![vec![0.0; n]; n];
+        
+        // Pre-generate all embeddings in parallel
+        let mut embeddings = Vec::with_capacity(n);
+        for conversation in conversations {
+            let embedding = self.get_or_generate_embedding(&conversation.title).await?;
+            embeddings.push(embedding);
+        }
+        
+        // Compute all similarities locally using cosine similarity
+        for i in 0..n {
+            for j in i..n {
+                if i == j {
+                    matrix[i][j] = 1.0;
+                } else {
+                    let similarity = self.calculate_local_similarity(
+                        &embeddings[i], 
+                        &embeddings[j],
+                        &conversations[i],
+                        &conversations[j],
+                    );
+                    matrix[i][j] = similarity;
+                    matrix[j][i] = similarity;
+                }
+            }
+        }
+        
+        Ok(matrix)
+    }
+
+    /// Phase 3: Get embedding from cache or generate and cache it
+    async fn get_or_generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        // Check cache first
+        {
+            let cache = self.embedding_cache.read().await;
+            if let Some(embedding) = cache.get(text) {
+                return Ok(embedding.clone());
+            }
+        }
+        
+        // Generate new embedding
+        let embedding = sagitta_search::embed_single_text_with_pool(&self.embedding_handler, text).await?;
+        
+        // Cache it (with size limit)
+        {
+            let mut cache = self.embedding_cache.write().await;
+            if cache.len() >= self.config.embedding_cache_size {
+                // Simple LRU: remove oldest (in practice, remove arbitrary entry)
+                if let Some(key) = cache.keys().next().cloned() {
+                    cache.remove(&key);
+                }
+            }
+            cache.insert(text.to_string(), embedding.clone());
+        }
+        
+        Ok(embedding)
+    }
+
+    /// Phase 3: Calculate similarity using cached embeddings
+    async fn calculate_conversation_similarity_cached(
+        &self,
+        conv1: &ConversationSummary,
+        conv2: &ConversationSummary,
+    ) -> Result<f32> {
+        // Get embeddings from cache (they should already be there)
+        let emb1 = self.get_or_generate_embedding(&conv1.title).await?;
+        let emb2 = self.get_or_generate_embedding(&conv2.title).await?;
+        
+        // Calculate cosine similarity locally
+        let mut semantic_similarity = cosine_similarity(&emb1, &emb2);
+        
+        // Apply temporal proximity if enabled
+        if self.config.use_temporal_proximity {
+            semantic_similarity = self.apply_temporal_weighting(semantic_similarity, conv1, conv2);
+        }
+        
+        // Tag similarity bonus
+        semantic_similarity = self.apply_tag_weighting(semantic_similarity, conv1, conv2);
+        
+        Ok(semantic_similarity.clamp(0.0, 1.0))
+    }
+
+    /// Phase 3: Calculate similarity using local computation only
+    fn calculate_local_similarity(
+        &self,
+        emb1: &[f32],
+        emb2: &[f32],
+        conv1: &ConversationSummary,
+        conv2: &ConversationSummary,
+    ) -> f32 {
+        // Calculate cosine similarity locally
+        let mut semantic_similarity = cosine_similarity(emb1, emb2);
+        
+        // Apply temporal proximity if enabled
+        if self.config.use_temporal_proximity {
+            semantic_similarity = self.apply_temporal_weighting(semantic_similarity, conv1, conv2);
+        }
+        
+        // Tag similarity bonus
+        semantic_similarity = self.apply_tag_weighting(semantic_similarity, conv1, conv2);
+        
+        semantic_similarity.clamp(0.0, 1.0)
+    }
+
+    /// Phase 3: Apply temporal weighting to similarity score
+    fn apply_temporal_weighting(&self, base_similarity: f32, conv1: &ConversationSummary, conv2: &ConversationSummary) -> f32 {
+        let time_diff = (conv1.last_active - conv2.last_active).num_hours().abs() as u64;
+        let max_diff = self.config.max_temporal_distance_hours;
+        
+        if time_diff <= max_diff {
+            let temporal_factor = 1.0 - (time_diff as f32 / max_diff as f32);
+            base_similarity * 0.7 + temporal_factor * 0.3
+        } else {
+            base_similarity * 0.5 // Reduce similarity for distant conversations
+        }
+    }
+
+    /// Phase 3: Apply tag weighting to similarity score
+    fn apply_tag_weighting(&self, base_similarity: f32, conv1: &ConversationSummary, conv2: &ConversationSummary) -> f32 {
+        let common_tags = conv1.tags.iter()
+            .filter(|tag| conv2.tags.contains(tag))
+            .count();
+        
+        if common_tags > 0 {
+            let tag_similarity = common_tags as f32 / (conv1.tags.len() + conv2.tags.len()) as f32;
+            base_similarity * 0.8 + tag_similarity * 0.2
+        } else {
+            base_similarity
+        }
     }
     
     /// Calculate similarity between two conversations
@@ -715,6 +952,23 @@ impl ConversationClusteringManager {
     }
 }
 
+/// Calculate cosine similarity between two embedding vectors
+fn cosine_similarity(vec1: &[f32], vec2: &[f32]) -> f32 {
+    if vec1.len() != vec2.len() {
+        return 0.0;
+    }
+    
+    let dot_product: f32 = vec1.iter().zip(vec2.iter()).map(|(a, b)| a * b).sum();
+    let norm1: f32 = vec1.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm2: f32 = vec2.iter().map(|x| x * x).sum::<f32>().sqrt();
+    
+    if norm1 == 0.0 || norm2 == 0.0 {
+        return 0.0;
+    }
+    
+    dot_product / (norm1 * norm2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +1032,11 @@ mod tests {
             min_cluster_size: 3,
             use_temporal_proximity: false,
             max_temporal_distance_hours: 48,
+            smart_clustering_threshold: 5,
+            enable_embedding_cache: true,
+            use_local_similarity: false,
+            async_clustering: false,
+            embedding_cache_size: 100,
         };
         
         manager.update_config(new_config.clone());

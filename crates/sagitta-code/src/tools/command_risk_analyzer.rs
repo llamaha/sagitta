@@ -54,21 +54,21 @@ impl CommandRiskAnalyzer {
 
         let safe_patterns = vec![
             // File operations (read-only or minimal impact)
-            "ls".to_string(), "dir".to_string(), "pwd".to_string(), "cd".to_string(),
-            "cat".to_string(), "head".to_string(), "tail".to_string(), "less".to_string(), "more".to_string(),
-            "find".to_string(), "grep".to_string(), "awk".to_string(), "sed".to_string(),
-            "echo".to_string(), "printf".to_string(), "which".to_string(), "where".to_string(),
-            "type".to_string(), "file".to_string(), "stat".to_string(), "wc".to_string(),
+            "ls".to_string(), "pwd".to_string(), "cd ".to_string(),
+            "cat ".to_string(), "head ".to_string(), "tail ".to_string(), "less ".to_string(), "more ".to_string(),
+            "find ".to_string(), "grep ".to_string(), "awk ".to_string(), "sed ".to_string(),
+            "echo ".to_string(), "printf ".to_string(), "which ".to_string(), "where ".to_string(),
+            "type ".to_string(), "file ".to_string(), "stat ".to_string(), "wc ".to_string(),
             
             // System info (read-only)
             "uname".to_string(), "whoami".to_string(), "id".to_string(), "env".to_string(),
-            "date".to_string(), "uptime".to_string(), "ps".to_string(), "top".to_string(),
-            "free".to_string(), "df".to_string(), "du".to_string(), "lscpu".to_string(),
+            "date".to_string(), "uptime".to_string(), "ps ".to_string(), "top".to_string(),
+            "free".to_string(), "df ".to_string(), "du ".to_string(), "lscpu".to_string(),
             
-            // Development tools (safe in most contexts)
+            // Development tools (safe in most contexts) - be more specific
             "git status".to_string(), "git log".to_string(), "git diff".to_string(), "git show".to_string(),
-            "cargo check".to_string(), "cargo test".to_string(), "cargo build".to_string(),
-            "npm test".to_string(), "npm run".to_string(), "python -m".to_string(),
+            "cargo check".to_string(), "cargo test".to_string(),
+            "npm test".to_string(),
         ];
 
         let critical_patterns = vec![
@@ -140,7 +140,11 @@ impl CommandRiskAnalyzer {
         
         // Check for explicitly safe patterns
         for pattern in &self.safe_patterns {
-            if cmd_lower.starts_with(pattern) || cmd_lower.contains(&format!(" {}", pattern)) {
+            if cmd_lower.starts_with(pattern) {
+                return CommandRiskLevel::Safe;
+            }
+            // For patterns that don't end with space, also check if command is exactly the pattern
+            if !pattern.ends_with(' ') && cmd_lower == *pattern {
                 return CommandRiskLevel::Safe;
             }
         }
@@ -155,6 +159,12 @@ impl CommandRiskAnalyzer {
         // Common development operations
         if cmd_lower.contains("build") || cmd_lower.contains("test") || cmd_lower.contains("compile") ||
            cmd_lower.contains("run") || cmd_lower.contains("start") {
+            return CommandRiskLevel::Medium;
+        }
+        
+        // File system operations that need approval but are common
+        if cmd_lower.starts_with("mkdir") || cmd_lower.starts_with("cp ") || cmd_lower.starts_with("mv ") ||
+           cmd_lower.starts_with("touch") || cmd_lower.starts_with("ln ") || cmd_lower.starts_with("chmod") {
             return CommandRiskLevel::Medium;
         }
         

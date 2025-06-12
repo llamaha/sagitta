@@ -1276,7 +1276,14 @@ fn is_tool_result_message(text: &str) -> bool {
                              text.contains("\"grounded\":") ||
                              text.contains("\"search_queries\":") ||
                              text.contains("\"confidence\":") ||
-                             text.contains("\"uri\":");
+                             text.contains("\"uri\":") ||
+                             // Add shell execution specific patterns
+                             text.contains("\"exit_code\":") ||
+                             text.contains("\"stdout\":") ||
+                             text.contains("\"stderr\":") ||
+                             text.contains("\"execution_time_ms\":") ||
+                             text.contains("\"container_image\":") ||
+                             text.contains("\"timed_out\":");
     
     // Return true if it's explicitly a tool result OR tool call OR has JSON structure with indicators
     has_tool_result_prefix || has_tool_call_prefix || (has_json_structure && (has_large_content || has_tool_indicators || has_structured_data))

@@ -197,7 +197,7 @@ mod tests {
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new_for_test(mock_config)));
         
         // Register all expected repository tools
-        registry.register(Arc::new(AddRepositoryTool::new(repo_manager.clone()))).await.unwrap();
+        registry.register(Arc::new(AddExistingRepositoryTool::new(repo_manager.clone()))).await.unwrap();
         registry.register(Arc::new(SyncRepositoryTool::new(repo_manager.clone()))).await.unwrap();
         registry.register(Arc::new(RemoveRepositoryTool::new(repo_manager.clone()))).await.unwrap();
         registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await.unwrap();

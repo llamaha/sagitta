@@ -2,6 +2,7 @@
 
 use egui::{Context, Key, TopBottomPanel, Frame, Vec2, Widget};
 use crate::gui::app::AppEvent;
+use crate::gui::conversation::sidebar::OrganizationMode;
 use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
@@ -125,39 +126,27 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if enable_shortcuts {
         if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.ctrl) {
             // Ctrl+1: Switch to Recency mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Recency
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Recency);
         }
         if ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.ctrl) {
             // Ctrl+2: Switch to Project mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Project
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Project);
         }
         if ctx.input(|i| i.key_pressed(Key::Num3) && i.modifiers.ctrl) {
             // Ctrl+3: Switch to Status mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Status
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Status);
         }
         if ctx.input(|i| i.key_pressed(Key::Num4) && i.modifiers.ctrl) {
             // Ctrl+4: Switch to Clusters mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Clusters
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Clusters);
         }
         if ctx.input(|i| i.key_pressed(Key::Num5) && i.modifiers.ctrl) {
             // Ctrl+5: Switch to Tags mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Tags
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Tags);
         }
         if ctx.input(|i| i.key_pressed(Key::Num6) && i.modifiers.ctrl) {
             // Ctrl+6: Switch to Success mode
-            app.conversation_sidebar.set_organization_mode(
-                crate::gui::conversation::sidebar::OrganizationMode::Success
-            );
+            app.conversation_sidebar.set_organization_mode(OrganizationMode::Success);
         }
     }
     
@@ -390,7 +379,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 match action {
                     super::panels::AnalyticsAction::SwitchToSuccessMode => {
                         // Switch conversation sidebar to success organization mode
-                        app.conversation_sidebar.organization_mode = crate::gui::conversation::sidebar::OrganizationMode::Success;
+                        app.conversation_sidebar.organization_mode = OrganizationMode::Success;
                         
                         // Also switch to conversation panel to show the success mode
                         app.panels.toggle_panel(ActivePanel::Conversation);

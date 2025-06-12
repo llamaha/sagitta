@@ -381,11 +381,42 @@ fn clean_json_schema(value: &Value) -> Value {
         Value::Object(obj) => {
             let mut cleaned = serde_json::Map::new();
             for (key, val) in obj {
-                // Skip unsupported schema fields
-                if matches!(key.as_str(), "additionalProperties" | "oneOf" | "anyOf" | "allOf" | "not" | "if" | "then" | "else") {
-                    continue;
+                // Allow-list of fields supported by Gemini's function calling schema
+                // Based on: https://ai.google.dev/api/rest/v1beta/Tool#functiondeclaration
+                match key.as_str() {
+                    // Core JSON Schema fields supported by Gemini
+                    // Note: "additionalProperties" removed as Gemini doesn't support it even in nested contexts
+                    "type" | "description" | "enum" | "enumDescriptions" | 
+                    "items" | "required" => {
+                        cleaned.insert(key.clone(), clean_json_schema(val));
+                    }
+                    // Special handling for "properties" - preserve all property names but clean their schemas
+                    "properties" => {
+                        if let Value::Object(props) = val {
+                            let mut cleaned_props = serde_json::Map::new();
+                            for (prop_name, prop_schema) in props {
+                                // Always preserve property names, but clean their schemas
+                                cleaned_props.insert(prop_name.clone(), clean_json_schema(prop_schema));
+                            }
+                            cleaned.insert(key.clone(), Value::Object(cleaned_props));
+                        } else {
+                            // If properties is not an object, preserve as-is
+                            cleaned.insert(key.clone(), val.clone());
+                        }
+                    }
+                    // Skip all other fields including:
+                    // - "examples" (our original issue)
+                    // - "additionalProperties" (current issue - not supported even nested)
+                    // - "minLength", "maxLength", "pattern" (string validation)
+                    // - "minimum", "maximum" (number validation)
+                    // - "format" (string formats)
+                    // - "oneOf", "anyOf", "allOf", "not" (schema composition)
+                    // - "if", "then", "else" (conditional schemas)
+                    // - Any other non-standard or unsupported fields
+                    _ => {
+                        // Silently skip unsupported fields
+                    }
                 }
-                cleaned.insert(key.clone(), clean_json_schema(val));
             }
             Value::Object(cleaned)
         }
@@ -1114,45 +1145,135 @@ mod tests {
 
     #[test]
     fn test_clean_json_schema() {
-        use serde_json::json;
-        
-        // Test schema with unsupported fields
+        // Test that unsupported fields are removed
         let schema_with_unsupported = json!({
             "type": "object",
+            "description": "A test schema",
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Name field"
+                    "description": "A name",
+                    "examples": ["John", "Jane"],  // Should be removed
+                    "minLength": 1,                // Should be removed
+                    "maxLength": 100,              // Should be removed
+                    "pattern": "^[a-zA-Z]+$"       // Should be removed
                 },
-                "env_vars": {
-                    "type": "object",
-                    "description": "Environment variables",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                "age": {
+                    "type": "number",
+                    "description": "An age",
+                    "minimum": 0,                  // Should be removed
+                    "maximum": 150                 // Should be removed
                 }
             },
             "required": ["name"],
-            "oneOf": [
-                {"required": ["url"]},
-                {"required": ["local_path"]}
+            "oneOf": [                             // Should be removed
+                {"required": ["name"]},
+                {"required": ["age"]}
+            ],
+            "examples": [                          // Should be removed
+                {"name": "John", "age": 30}
             ]
         });
-        
+
         let cleaned = clean_json_schema(&schema_with_unsupported);
         
-        // Should keep supported fields
+        // Verify supported fields are preserved
         assert_eq!(cleaned["type"], "object");
+        assert_eq!(cleaned["description"], "A test schema");
         assert!(cleaned["properties"].is_object());
-        assert!(cleaned["required"].is_array());
+        assert_eq!(cleaned["required"], json!(["name"]));
         
-        // Should remove unsupported fields
+        // Verify unsupported top-level fields are removed
         assert!(cleaned.get("oneOf").is_none());
-        assert!(cleaned["properties"]["env_vars"].get("additionalProperties").is_none());
+        assert!(cleaned.get("examples").is_none());
         
-        // Should keep nested supported fields
-        assert_eq!(cleaned["properties"]["name"]["type"], "string");
-        assert_eq!(cleaned["properties"]["env_vars"]["type"], "object");
+        // Verify unsupported nested fields are removed
+        let name_prop = &cleaned["properties"]["name"];
+        assert_eq!(name_prop["type"], "string");
+        assert_eq!(name_prop["description"], "A name");
+        assert!(name_prop.get("examples").is_none());
+        assert!(name_prop.get("minLength").is_none());
+        assert!(name_prop.get("maxLength").is_none());
+        assert!(name_prop.get("pattern").is_none());
+        
+        let age_prop = &cleaned["properties"]["age"];
+        assert_eq!(age_prop["type"], "number");
+        assert_eq!(age_prop["description"], "An age");
+        assert!(age_prop.get("minimum").is_none());
+        assert!(age_prop.get("maximum").is_none());
+    }
+
+    #[test]
+    fn test_clean_json_schema_preserves_supported_fields() {
+        // Test that all supported fields are preserved
+        let supported_schema = json!({
+            "type": "object",
+            "description": "A schema with only supported fields",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Status value",
+                    "enum": ["active", "inactive"],
+                    "enumDescriptions": ["Currently active", "Currently inactive"]
+                },
+                "items": {
+                    "type": "array",
+                    "description": "List of items",
+                    "items": {
+                        "type": "string",
+                        "description": "An item"
+                    }
+                }
+            },
+            "required": ["status"]
+        });
+
+        let cleaned = clean_json_schema(&supported_schema);
+        
+        // Should be identical since all fields are supported
+        assert_eq!(cleaned, supported_schema);
+    }
+
+    #[test]
+    fn test_clean_json_schema_with_arrays() {
+        // Test cleaning of arrays containing objects with unsupported fields
+        let schema_with_array = json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "examples": ["test"],  // Should be removed
+                        "format": "email"      // Should be removed
+                    }
+                },
+                "if": {"properties": {"name": {"const": "test"}}},  // Should be removed
+                "then": {"required": ["name"]}                      // Should be removed
+            }
+        });
+
+        let cleaned = clean_json_schema(&schema_with_array);
+        
+        assert_eq!(cleaned["type"], "array");
+        let items = &cleaned["items"];
+        assert_eq!(items["type"], "object");
+        
+        let name_prop = &items["properties"]["name"];
+        assert_eq!(name_prop["type"], "string");
+        assert!(name_prop.get("examples").is_none());
+        assert!(name_prop.get("format").is_none());
+        assert!(items.get("if").is_none());
+        assert!(items.get("then").is_none());
+    }
+
+    #[test]
+    fn test_clean_json_schema_primitive_values() {
+        // Test that primitive values are preserved unchanged
+        assert_eq!(clean_json_schema(&json!("string")), json!("string"));
+        assert_eq!(clean_json_schema(&json!(42)), json!(42));
+        assert_eq!(clean_json_schema(&json!(true)), json!(true));
+        assert_eq!(clean_json_schema(&json!(null)), json!(null));
     }
 
     #[test]
@@ -1160,22 +1281,61 @@ mod tests {
         use crate::llm::client::ToolDefinition;
         use serde_json::json;
         
+        // Test with a schema similar to AddExistingRepositoryTool that contains unsupported fields
         let tool_def = ToolDefinition {
-            name: "test_tool".to_string(),
-            description: "A test tool".to_string(),
+            name: "add_existing_repository".to_string(),
+            description: "Register an existing repository".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "param1": {"type": "string"},
-                    "param2": {
-                        "type": "object",
-                        "additionalProperties": {"type": "string"}
+                    "name": {
+                        "type": "string",
+                        "description": "Repository name",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "pattern": "^[a-zA-Z0-9_-]+$"
+                    },
+                    "url": {
+                        "type": "string", 
+                        "description": "Git URL",
+                        "examples": [
+                            "https://github.com/user/repo.git",
+                            "git@github.com:user/repo.git"
+                        ]
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name",
+                        "examples": ["main", "develop", "feature/new-feature"]
+                    },
+                    "local_path": {
+                        "type": "string",
+                        "description": "Local path",
+                        "examples": [
+                            "/home/user/projects/myproject",
+                            "/Users/user/code/project"
+                        ]
                     }
                 },
-                "required": ["param1"],
+                "required": ["name"],
                 "oneOf": [
-                    {"required": ["param1"]},
-                    {"required": ["param2"]}
+                    {
+                        "required": ["url"],
+                        "properties": {
+                            "url": true,
+                            "branch": true
+                        },
+                        "not": {"required": ["local_path"]}
+                    },
+                    {
+                        "required": ["local_path"],
+                        "not": {
+                            "anyOf": [
+                                {"required": ["url"]},
+                                {"required": ["branch"]}
+                            ]
+                        }
+                    }
                 ]
             }),
             is_required: false,
@@ -1183,32 +1343,121 @@ mod tests {
         
         let function_declaration: FunctionDeclaration = (&tool_def).into();
         
-        // Should have cleaned parameters
-        assert!(function_declaration.parameters.get("oneOf").is_none());
-        assert!(function_declaration.parameters["properties"]["param2"].get("additionalProperties").is_none());
+        // Verify basic fields are preserved
+        assert_eq!(function_declaration.name, "add_existing_repository");
+        assert_eq!(function_declaration.description, "Register an existing repository");
         
-        // Should keep supported fields
+        // Verify supported fields are preserved
         assert_eq!(function_declaration.parameters["type"], "object");
         assert!(function_declaration.parameters["properties"].is_object());
-        assert!(function_declaration.parameters["required"].is_array());
+        assert_eq!(function_declaration.parameters["required"], json!(["name"]));
+        
+        // Verify unsupported top-level fields are removed
+        assert!(function_declaration.parameters.get("oneOf").is_none());
+        
+        // Verify unsupported nested fields are removed from each property
+        let properties = &function_declaration.parameters["properties"];
+        
+        let name_prop = &properties["name"];
+        assert_eq!(name_prop["type"], "string");
+        assert_eq!(name_prop["description"], "Repository name");
+        assert!(name_prop.get("minLength").is_none());
+        assert!(name_prop.get("maxLength").is_none());
+        assert!(name_prop.get("pattern").is_none());
+        
+        let url_prop = &properties["url"];
+        assert_eq!(url_prop["type"], "string");
+        assert_eq!(url_prop["description"], "Git URL");
+        assert!(url_prop.get("examples").is_none());
+        
+        let branch_prop = &properties["branch"];
+        assert_eq!(branch_prop["type"], "string");
+        assert_eq!(branch_prop["description"], "Branch name");
+        assert!(branch_prop.get("examples").is_none());
+        
+        let local_path_prop = &properties["local_path"];
+        assert_eq!(local_path_prop["type"], "string");
+        assert_eq!(local_path_prop["description"], "Local path");
+        assert!(local_path_prop.get("examples").is_none());
+        
+        // Verify the cleaned schema can be serialized without issues
+        let serialized = serde_json::to_string(&function_declaration).unwrap();
+        
+        // Should not contain any of the problematic fields
+        assert!(!serialized.contains("examples"));
+        assert!(!serialized.contains("minLength"));
+        assert!(!serialized.contains("maxLength"));
+        assert!(!serialized.contains("pattern"));
+        assert!(!serialized.contains("oneOf"));
+        assert!(!serialized.contains("anyOf"));
+        assert!(!serialized.contains("not"));
     }
 
     #[test]
-    fn test_tools_with_problematic_schemas() {
+    fn test_clean_json_schema_removes_additional_properties() {
+        // Test that additionalProperties is removed even when nested in property definitions
+        let schema_with_additional_properties = json!({
+            "type": "object",
+            "description": "Schema with additionalProperties",
+            "properties": {
+                "env_vars": {
+                    "type": "object",
+                    "description": "Environment variables",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "config": {
+                    "type": "object",
+                    "description": "Configuration object",
+                    "additionalProperties": true
+                }
+            },
+            "required": ["env_vars"],
+            "additionalProperties": false
+        });
+
+        let cleaned = clean_json_schema(&schema_with_additional_properties);
+        
+        // Verify supported fields are preserved
+        assert_eq!(cleaned["type"], "object");
+        assert_eq!(cleaned["description"], "Schema with additionalProperties");
+        assert!(cleaned["properties"].is_object());
+        assert_eq!(cleaned["required"], json!(["env_vars"]));
+        
+        // Verify additionalProperties is removed at all levels
+        assert!(cleaned.get("additionalProperties").is_none());
+        
+        let env_vars_prop = &cleaned["properties"]["env_vars"];
+        assert_eq!(env_vars_prop["type"], "object");
+        assert_eq!(env_vars_prop["description"], "Environment variables");
+        assert!(env_vars_prop.get("additionalProperties").is_none());
+        
+        let config_prop = &cleaned["properties"]["config"];
+        assert_eq!(config_prop["type"], "object");
+        assert_eq!(config_prop["description"], "Configuration object");
+        assert!(config_prop.get("additionalProperties").is_none());
+    }
+
+    #[test]
+    fn test_shell_execution_tool_schema_cleaning() {
         use crate::llm::client::ToolDefinition;
         use serde_json::json;
         
-        // Test with shell execution tool schema (has additionalProperties)
+        // Test with a schema similar to ShellExecutionTool that contains additionalProperties
         let shell_tool = ToolDefinition {
             name: "shell_execution".to_string(),
             description: "Execute shell commands".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string"},
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute"
+                    },
                     "env_vars": {
                         "type": "object",
-                        "description": "Environment variables",
+                        "description": "Additional environment variables",
                         "additionalProperties": {
                             "type": "string"
                         }
@@ -1218,44 +1467,29 @@ mod tests {
             }),
             is_required: false,
         };
-
-        // Test with repository tool schema (has oneOf)
-        let repo_tool = ToolDefinition {
-            name: "add_repository".to_string(),
-            description: "Add a repository".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "url": {"type": "string"},
-                    "local_path": {"type": "string"}
-                },
-                "required": ["name"],
-                "oneOf": [
-                    {"required": ["url"]},
-                    {"required": ["local_path"]}
-                ]
-            }),
-            is_required: false,
-        };
-
-        let shell_declaration: FunctionDeclaration = (&shell_tool).into();
-        let repo_declaration: FunctionDeclaration = (&repo_tool).into();
-
-        // Verify shell tool cleaning
-        assert!(shell_declaration.parameters["properties"]["env_vars"].get("additionalProperties").is_none());
-        assert_eq!(shell_declaration.parameters["properties"]["env_vars"]["type"], "object");
-
-        // Verify repo tool cleaning
-        assert!(repo_declaration.parameters.get("oneOf").is_none());
-        assert!(repo_declaration.parameters["properties"].is_object());
-
-        // Ensure all declarations are valid for Gemini API
-        let serialized_shell = serde_json::to_string(&shell_declaration).unwrap();
-        let serialized_repo = serde_json::to_string(&repo_declaration).unwrap();
         
-        // Should not contain problematic fields
-        assert!(!serialized_shell.contains("additionalProperties"));
-        assert!(!serialized_repo.contains("oneOf"));
+        let function_declaration: FunctionDeclaration = (&shell_tool).into();
+        
+        // Verify basic fields are preserved
+        assert_eq!(function_declaration.name, "shell_execution");
+        assert_eq!(function_declaration.description, "Execute shell commands");
+        
+        // Verify supported fields are preserved
+        assert_eq!(function_declaration.parameters["type"], "object");
+        assert!(function_declaration.parameters["properties"].is_object());
+        assert_eq!(function_declaration.parameters["required"], json!(["command"]));
+        
+        // Verify additionalProperties is removed from nested env_vars property
+        let properties = &function_declaration.parameters["properties"];
+        let env_vars_prop = &properties["env_vars"];
+        assert_eq!(env_vars_prop["type"], "object");
+        assert_eq!(env_vars_prop["description"], "Additional environment variables");
+        assert!(env_vars_prop.get("additionalProperties").is_none());
+        
+        // Verify the cleaned schema can be serialized without issues
+        let serialized = serde_json::to_string(&function_declaration).unwrap();
+        
+        // Should not contain additionalProperties anywhere
+        assert!(!serialized.contains("additionalProperties"));
     }
 }

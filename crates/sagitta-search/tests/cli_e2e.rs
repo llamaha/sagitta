@@ -11,7 +11,7 @@ use std::io::Write;
 use std::process::Stdio;
 use anyhow::Context as AnyhowContext;
 
-const WORKSPACE_ROOT: &str = "/home/adam/repos/sagitta-search"; // From user context
+const WORKSPACE_ROOT: &str = "/home/adam/repos/sagitta"; // Fixed path
 const TEST_TENANT_ID: &str = "test_tenant_001";
 const QDRANT_URL_TEST: &str = "http://localhost:6334";
 const VECTOR_DIMENSION: i32 = 384;
@@ -26,8 +26,9 @@ const FAST_RAYON_THREADS: &str = "2"; // Fewer threads to reduce resource conten
 const SMALL_REPO_URL: &str = "https://github.com/octocat/Hello-World.git"; // Very small repo
 const MEDIUM_REPO_URL: &str = "https://github.com/octocat/Spoon-Knife.git"; // Small repo
 
-fn get_cli_path() -> PathBuf {
-    PathBuf::from(WORKSPACE_ROOT).join("target/release/sagitta-cli")
+fn get_cli_cmd() -> Command {
+    let mut cmd = Command::cargo_bin("sagitta-cli").expect("Failed to find cargo binary for sagitta-cli");
+    cmd
 }
 
 // ONNX paths are now primarily for writing to config, not direct CLI args
@@ -75,7 +76,7 @@ impl TestEnv {
     }
 
     fn cli_cmd(&self) -> Result<Command, Box<dyn std::error::Error>> {
-        let mut cmd = Command::new(get_cli_path());
+        let mut cmd = get_cli_cmd();
         cmd.env("RUST_LOG", "info"); // Enable logging for CLI, useful for debugging
 
         // Explicitly set SAGITTA_TEST_CONFIG_PATH to the config file created in TestEnv::new()

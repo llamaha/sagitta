@@ -170,16 +170,21 @@ impl ConversationManagerImpl {
         self.title_generator.clone()
     }
     
-    /// Load all conversations from persistence into memory
-    async fn load_all_conversations(&mut self) -> Result<()> {
+    /// Load all conversations from persistence into memory (Phase 2: Lazy loading optimization)
+    /// This now loads only conversation summaries from the index for fast startup
+    pub async fn load_all_conversations(&mut self) -> Result<()> {
+        // Phase 2 optimization: Instead of loading full conversations, only load IDs
+        // and rely on lazy loading in get_conversation()
         let conversation_ids = self.persistence.list_conversation_ids().await?;
-        let mut conversations = self.conversations.write().await;
         
-        for id in conversation_ids {
-            if let Some(conversation) = self.persistence.load_conversation(id).await? {
-                conversations.insert(id, conversation);
-            }
-        }
+        // For lazy loading, we don't pre-load conversations into memory
+        // We just ensure the conversations cache exists but keep it empty
+        let conversations = self.conversations.read().await;
+        let current_count = conversations.len();
+        drop(conversations);
+        
+        log::info!("Phase 2 lazy loading: Discovered {} conversations (loaded {} summaries only, full conversations loaded on-demand)", 
+                   conversation_ids.len(), current_count);
         
         Ok(())
     }
@@ -346,8 +351,32 @@ impl ConversationManager for ConversationManagerImpl {
     }
     
     async fn get_conversation(&self, id: Uuid) -> Result<Option<Conversation>> {
-        let conversations = self.conversations.read().await;
-        Ok(conversations.get(&id).cloned())
+        // Phase 2 lazy loading: Check cache first, then load from persistence if needed
+        {
+            let conversations = self.conversations.read().await;
+            if let Some(conversation) = conversations.get(&id) {
+                log::debug!("Conversation {} found in cache", id);
+                return Ok(Some(conversation.clone()));
+            }
+        }
+        
+        // Not in cache, try to load from persistence
+        log::debug!("Conversation {} not in cache, loading from persistence", id);
+        match self.persistence.load_conversation(id).await? {
+            Some(conversation) => {
+                // Cache the loaded conversation for future access
+                {
+                    let mut conversations = self.conversations.write().await;
+                    conversations.insert(id, conversation.clone());
+                }
+                log::debug!("Conversation {} loaded from persistence and cached", id);
+                Ok(Some(conversation))
+            }
+            None => {
+                log::debug!("Conversation {} not found in persistence", id);
+                Ok(None)
+            }
+        }
     }
     
     async fn update_conversation(&self, conversation: Conversation) -> Result<()> {
@@ -391,23 +420,8 @@ impl ConversationManager for ConversationManagerImpl {
     }
     
     async fn list_conversations(&self, workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
-        let conversations = self.conversations.read().await;
-        let mut summaries: Vec<ConversationSummary> = conversations
-            .values()
-            .filter(|conv| {
-                if let Some(workspace_id) = workspace_id {
-                    conv.workspace_id == Some(workspace_id)
-                } else {
-                    true
-                }
-            })
-            .map(|conv| conv.to_summary())
-            .collect();
-        
-        // Sort by last activity (most recent first)
-        summaries.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-        
-        Ok(summaries)
+        // Phase 2 lazy loading: Use the index-based summaries instead of loading full conversations
+        self.persistence.list_conversation_summaries(workspace_id).await
     }
     
     async fn search_conversations(&self, query: &ConversationQuery) -> Result<Vec<ConversationSearchResult>> {
@@ -802,6 +816,68 @@ mod tests {
             .expect_save_conversation()
             .returning(|_| Ok(()));
         
+        let workspace_id = Uuid::new_v4();
+        let conv1_id = Uuid::new_v4();
+        let conv2_id = Uuid::new_v4();
+        let conv3_id = Uuid::new_v4();
+        
+        // Mock list_conversation_summaries to return created conversations
+        mock_persistence
+            .expect_list_conversation_summaries()
+            .returning(move |workspace_filter| {
+                use crate::agent::conversation::types::ConversationSummary;
+                use crate::agent::state::types::ConversationStatus;
+                use chrono::Utc;
+                
+                let all_summaries = vec![
+                    ConversationSummary {
+                        id: conv1_id,
+                        title: "Conv 1".to_string(),
+                        workspace_id: Some(workspace_id),
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                    ConversationSummary {
+                        id: conv2_id,
+                        title: "Conv 2".to_string(),
+                        workspace_id: None,
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                    ConversationSummary {
+                        id: conv3_id,
+                        title: "Conv 3".to_string(),
+                        workspace_id: Some(workspace_id),
+                        created_at: Utc::now(),
+                        last_active: Utc::now(),
+                        status: ConversationStatus::Active,
+                        message_count: 0,
+                        tags: vec![],
+                        project_name: None,
+                        has_branches: false,
+                        has_checkpoints: false,
+                    },
+                ];
+                
+                if let Some(ws_id) = workspace_filter {
+                    Ok(all_summaries.into_iter().filter(|s| s.workspace_id == Some(ws_id)).collect())
+                } else {
+                    Ok(all_summaries)
+                }
+            });
+        
         let mut mock_search = MockConversationSearchEngine::new();
         mock_search
             .expect_index_conversation()
@@ -812,9 +888,7 @@ mod tests {
             Box::new(mock_search),
         ).await.unwrap();
         
-        let workspace_id = Uuid::new_v4();
-        
-        // Create conversations
+        // Create conversations (these will be stored in memory cache but listing comes from persistence)
         manager.create_conversation("Conv 1".to_string(), Some(workspace_id)).await.unwrap();
         manager.create_conversation("Conv 2".to_string(), None).await.unwrap();
         manager.create_conversation("Conv 3".to_string(), Some(workspace_id)).await.unwrap();

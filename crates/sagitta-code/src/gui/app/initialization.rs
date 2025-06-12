@@ -18,7 +18,7 @@ use crate::tools::file_operations::read::ReadFileTool;
 use crate::tools::repository::list::ListRepositoriesTool;
 use crate::tools::repository::search::SearchFileInRepositoryTool;
 use crate::tools::repository::view::ViewFileInRepositoryTool;
-use crate::tools::repository::add::AddRepositoryTool;
+use crate::tools::repository::add::AddExistingRepositoryTool;
 use crate::tools::repository::sync::SyncRepositoryTool;
 use crate::tools::repository::remove::RemoveRepositoryTool;
 use crate::tools::repository::map::RepositoryMapTool;
@@ -187,11 +187,26 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     })?;
     drop(config_guard);
 
-    // Initialize Qdrant client
-    let qdrant_client = create_qdrant_client(&core_config).await.map_err(|e| {
-        app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
-        e
-    })?;
+    // Initialize Qdrant client - create concrete instance for sharing
+    let qdrant_client_concrete = match Qdrant::from_url(&core_config.qdrant_url).build() {
+        Ok(client) => {
+            log::info!("GUI: Connected to Qdrant at {}", core_config.qdrant_url);
+            Some(Arc::new(client))
+        }
+        Err(e) => {
+            log::error!("GUI: Failed to connect to Qdrant at {}: {}. Semantic features will be limited.", core_config.qdrant_url, e);
+            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant connection failed: {}", e));
+            None
+        }
+    };
+
+    // Create trait version for tools that need it
+    let qdrant_client: Arc<dyn QdrantClientTrait> = if let Some(ref concrete_client) = qdrant_client_concrete {
+        concrete_client.clone()
+    } else {
+        // Fallback - should not happen in normal operation, but provides safety
+        return Err(anyhow::anyhow!("Failed to initialize Qdrant client for GUI"));
+    };
 
     // Use the locally scoped embedding_handler_arc, which is correctly typed.
     let vector_size = embedding_handler_arc.dimension() as u64;
@@ -256,33 +271,52 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Initialize ToolRegistry
     let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
+    
+    // Get the configured working directory instead of using current_dir
+    let config_guard = app.config.lock().await;
+    let working_dir = config_guard.repositories_base_path();
+    drop(config_guard);
+    
+    // Ensure the working directory exists
+    if !working_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&working_dir) {
+            log::warn!("Failed to create working directory {}: {}", working_dir.display(), e);
+        }
+    }
+    
+    // Create WorkingDirectoryManager
+    let working_dir_manager = Arc::new(crate::tools::WorkingDirectoryManager::new(working_dir.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to create WorkingDirectoryManager: {}", e))?);
 
     // Register tools first
     tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
     tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone()))).await?;
+    
+    // Register working directory tools
+    tool_registry.register(Arc::new(crate::tools::GetCurrentDirectoryTool::new(working_dir_manager.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::ChangeDirectoryTool::new(working_dir_manager.clone()))).await?;
+    
+    tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone(), working_dir.clone()))).await?;
     tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(SearchFileInRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ViewFileInRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(AddRepositoryTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(AddExistingRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(SyncRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RemoveRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RepositoryMapTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(TargetedViewTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
-    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone()))).await?; // Added EditTool registration
+    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone(), working_dir.clone()))).await?; // Added EditTool registration
     tool_registry.register(Arc::new(crate::tools::repository::SwitchBranchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::CreateBranchTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::CommitChangesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::PushChangesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(crate::tools::repository::PullChangesTool::new(repo_manager.clone()))).await?;
 
-    let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-
-    tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(working_dir.clone()))).await?;
 
     // Register streaming shell execution tool for terminal integration
-    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(default_working_dir.clone()))).await?;
+    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(working_dir.clone()))).await?;
 
     // Note: Project creation and test execution functionality is now available through shell_execution tool
     // Examples:
@@ -370,15 +404,15 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             app.agent = Some(Arc::new(agent));
             app.agent_event_receiver = Some(event_receiver);
             
-            // Initialize conversation service for the sidebar
-            if let Err(e) = app.initialize_conversation_service().await {
+            // Initialize conversation service for the sidebar - use shared instances (Phase 1 optimization)
+            if let Err(e) = app.initialize_conversation_service_with_shared_instances(qdrant_client_concrete.clone(), Some(embedding_handler_arc.clone())).await {
                 log::warn!("Failed to initialize conversation service: {}. Conversation sidebar features may be limited.", e);
                 app.panels.events_panel.add_event(
                     super::SystemEventType::Info,
                     format!("Conversation service initialization failed: {}", e)
                 );
             } else {
-                log::info!("Conversation service initialized successfully");
+                log::info!("Conversation service initialized successfully with shared instances");
             }
             
             // Initial conversation data load

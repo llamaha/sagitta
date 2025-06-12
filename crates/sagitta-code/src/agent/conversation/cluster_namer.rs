@@ -329,6 +329,15 @@ impl ClusterNamer {
         for conv in conversations {
             let title_lower = conv.title.to_lowercase();
             
+            // Machine Learning and AI themes
+            if title_lower.contains("machine learning") || title_lower.contains("ml") ||
+               title_lower.contains("neural network") || title_lower.contains("neural") ||
+               title_lower.contains("model training") || title_lower.contains("training") ||
+               title_lower.contains("deep learning") || title_lower.contains("ai") ||
+               title_lower.contains("artificial intelligence") || title_lower.contains("algorithm") {
+                *theme_scores.entry("Machine Learning".to_string()).or_insert(0) += 3;
+            }
+            
             // Programming themes
             if title_lower.contains("error") || title_lower.contains("debug") || title_lower.contains("fix") {
                 *theme_scores.entry("Error Resolution".to_string()).or_insert(0) += 2;
@@ -393,9 +402,18 @@ impl ClusterNamer {
             }
         }
         
-        word_counts
+        let mut common_words: Vec<(String, usize)> = word_counts
             .into_iter()
             .filter(|(_, count)| *count >= (titles.len() + 1) / 2) // At least half the titles
+            .collect();
+        
+        // Sort by count (descending) then alphabetically for deterministic behavior
+        common_words.sort_by(|a, b| {
+            b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0))
+        });
+        
+        common_words
+            .into_iter()
             .map(|(word, _)| self.capitalize_first_letter(&word))
             .take(2) // Limit to 2 words
             .collect()
@@ -637,5 +655,38 @@ mod tests {
         
         assert!(!common_words.is_empty());
         assert!(common_words.iter().any(|word| word.to_lowercase().contains("rust") || word.to_lowercase().contains("error")));
+    }
+    
+    #[tokio::test]
+    async fn test_machine_learning_thematic_naming() {
+        let namer = ClusterNamer::new(ClusterNamerConfig::default());
+        
+        let conversations = vec![
+            create_test_conversation("Machine Learning Model Training", vec!["ml".to_string(), "training".to_string()]),
+            create_test_conversation("Neural Network Architecture", vec!["ml".to_string(), "neural".to_string()]),
+        ];
+        
+        let cluster = ConversationCluster {
+            id: Uuid::new_v4(),
+            title: "Test".to_string(),
+            conversation_ids: conversations.iter().map(|c| c.id).collect(),
+            centroid: vec![0.6, 0.7, 0.8],
+            cohesion_score: 0.88,
+            common_tags: vec!["ml".to_string()],
+            dominant_project_type: None,
+            time_range: (Utc::now() - chrono::Duration::days(1), Utc::now()),
+        };
+        
+        let name = namer.generate_cluster_name(&cluster, &conversations).await.unwrap();
+        
+        assert!(!name.is_empty());
+        assert!(name.len() > 3);
+        // Should identify machine learning theme
+        assert!(
+            name.to_lowercase().contains("machine learning") ||
+            name.to_lowercase().contains("ml") ||
+            name.to_lowercase().contains("learning"),
+            "Should identify ML theme, got: '{}'", name
+        );
     }
 } 

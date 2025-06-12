@@ -318,10 +318,9 @@ mod tests {
     fn test_log_collector_message_format() {
         let collector = SagittaCodeLogCollector;
         
-        // Clear any existing logs
-        if let Ok(mut logs) = LOG_COLLECTOR.lock() {
-            logs.clear();
-        }
+        // Use a unique identifier for this test to avoid race conditions
+        let unique_test_id = "TEST_MESSAGE_FORMAT_UNIQUE_987654321";
+        let expected_message = format!("Warning message with args: {}", unique_test_id);
         
         let metadata = Metadata::builder()
             .level(Level::Warn)
@@ -330,24 +329,29 @@ mod tests {
         
         collector.log(&Record::builder()
             .metadata(metadata)
-            .args(format_args!("Warning message with args: 42"))
+            .args(format_args!("{}", expected_message))
             .build());
         
-        // Check the message format
+        // Check the message format by searching for our specific test message
         if let Ok(logs) = LOG_COLLECTOR.lock() {
             assert!(!logs.is_empty(), "Log collector should not be empty after logging.");
-            let last_log = &logs[logs.len() - 1];
+            
+            // Find our specific log message instead of assuming it's the last one
+            let our_log = logs.iter().find(|(_, msg)| msg.contains(unique_test_id));
+            assert!(our_log.is_some(), "Could not find our test log message with unique ID: {}", unique_test_id);
+            
+            let (_, log_message) = our_log.unwrap();
             
             // Print the actual log message for debugging
-            eprintln!("Collected log for test_log_collector_message_format: '{}'", last_log.1);
+            eprintln!("Collected log for test_log_collector_message_format: '{}'", log_message);
             
             // Should contain timestamp, level, and message
-            assert!(last_log.1.contains("WARN"), "Log message should contain WARN level string.");
-            assert!(last_log.1.contains("Warning message with args: 42"), "Log message should contain the original arguments.");
+            assert!(log_message.contains("WARN"), "Log message should contain WARN level string. Actual: '{}'", log_message);
+            assert!(log_message.contains(&expected_message), "Log message should contain the original arguments. Expected to contain: '{}', Actual: '{}'", expected_message, log_message);
             
             // Should have timestamp format [HH:MM:SS LEVEL]
-            assert!(last_log.1.starts_with('['), "Log message should start with '['.");
-            assert!(last_log.1.contains(']'), "Log message should contain ']'.");
+            assert!(log_message.starts_with('['), "Log message should start with '['. Actual: '{}'", log_message);
+            assert!(log_message.contains(']'), "Log message should contain ']'. Actual: '{}'", log_message);
         }
     }
 

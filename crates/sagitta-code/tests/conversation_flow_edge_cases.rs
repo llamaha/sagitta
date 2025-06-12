@@ -30,7 +30,7 @@ use mock_providers::ThreadSafeMockProvider;
 // Import the traits for creating our own mock implementations
 use sagitta_code::agent::conversation::persistence::ConversationPersistence;
 use sagitta_code::agent::conversation::search::ConversationSearchEngine;
-use sagitta_code::agent::conversation::types::{Conversation, ConversationQuery, ConversationSearchResult};
+use sagitta_code::agent::conversation::types::{Conversation, ConversationQuery, ConversationSearchResult, ConversationSummary};
 use anyhow::Result;
 
 // Add the missing import for reasoning engine LlmClient trait
@@ -67,6 +67,10 @@ impl ConversationPersistence for MockConversationPersistence {
     }
     
     async fn list_conversation_ids(&self) -> Result<Vec<Uuid>> {
+        Ok(Vec::new())
+    }
+    
+    async fn list_conversation_summaries(&self, _workspace_id: Option<Uuid>) -> Result<Vec<ConversationSummary>> {
         Ok(Vec::new())
     }
     

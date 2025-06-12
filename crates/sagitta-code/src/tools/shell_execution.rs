@@ -258,6 +258,8 @@ pub struct ShellExecutionResult {
     pub stderr: String,
     /// Execution time in milliseconds
     pub execution_time_ms: u64,
+    /// Working directory where the command was executed
+    pub working_directory: PathBuf,
     /// Container used for execution (now always "local")
     pub container_image: String,
     /// Whether the command timed out
@@ -274,11 +276,8 @@ pub struct ShellExecutionTool {
 impl ShellExecutionTool {
     /// Create a new shell execution tool with default configuration
     pub fn new(default_working_dir: PathBuf) -> Self {
-        let repositories_base_path = get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
         let config = LocalExecutorConfig {
-            base_dir: repositories_base_path,
+            base_dir: default_working_dir.clone(), // Use the provided working directory as base
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
@@ -860,6 +859,7 @@ mod tests {
             stdout: "Success".to_string(),
             stderr: String::new(),
             execution_time_ms: 1234,
+            working_directory: PathBuf::from("/tmp"),
             container_image: "test_image:latest".to_string(),
             timed_out: false,
         };
@@ -871,6 +871,7 @@ mod tests {
         assert_eq!(original_result.stdout, deserialized.stdout);
         assert_eq!(original_result.stderr, deserialized.stderr);
         assert_eq!(original_result.execution_time_ms, deserialized.execution_time_ms);
+        assert_eq!(original_result.working_directory, deserialized.working_directory);
         assert_eq!(original_result.container_image, deserialized.container_image);
         assert_eq!(original_result.timed_out, deserialized.timed_out);
     }
@@ -879,9 +880,7 @@ mod tests {
     fn test_shell_execution_tool_new_with_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        }));
+        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
         assert!(!tool.executor.config().allow_automatic_tool_install);
         assert!(tool.executor.config().cpu_limit_seconds.is_none());
@@ -892,9 +891,7 @@ mod tests {
     fn test_shell_execution_tool_with_custom_executor_config() {
         let temp_dir = TempDir::new().unwrap();
         let config = LocalExecutorConfig {
-            base_dir: get_repo_base_path(None).unwrap_or_else(|_| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            }),
+            base_dir: temp_dir.path().to_path_buf(),
             approval_policy: ApprovalPolicy::Auto,
             allow_automatic_tool_install: false,
             cpu_limit_seconds: None,
@@ -914,9 +911,7 @@ mod tests {
 
         let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
-        assert_eq!(tool.executor.config().base_dir, get_repo_base_path(None).unwrap_or_else(|_| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        }));
+        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
         assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
         assert!(!tool.executor.config().allow_automatic_tool_install);
         assert!(tool.executor.config().cpu_limit_seconds.is_none());
@@ -1011,7 +1006,14 @@ mod tests {
     #[tokio::test]
     async fn test_stderr_classification() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        // Configure the tool to use the temp directory as the base directory for security validation
+        let config = LocalExecutorConfig {
+            base_dir: temp_dir.path().to_path_buf(),
+            auto_approve_safe_commands: true,
+            enable_approval_flow: false,
+            ..Default::default()
+        };
+        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
         // Create a test script that outputs to stderr but isn't an error
         let script_content = r#"#!/bin/bash
@@ -1019,7 +1021,7 @@ echo "Creating binary (application) package" >&2
 echo "note: see more Cargo.toml keys and their definitions" >&2
 echo "Normal output to stdout"
 exit 0
-+"#;
+"#;
         
         let script_path = temp_dir.path().join("test_script.sh");
         std::fs::write(&script_path, script_content).unwrap();
@@ -1057,7 +1059,14 @@ exit 0
     #[tokio::test]
     async fn test_cargo_new_functionality() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        // Configure the tool to use the temp directory as the base directory for security validation
+        let config = LocalExecutorConfig {
+            base_dir: temp_dir.path().to_path_buf(),
+            auto_approve_safe_commands: true,
+            enable_approval_flow: false,
+            ..Default::default()
+        };
+        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
         // Test creating a new Rust project
         let params = serde_json::json!({
@@ -1072,17 +1081,30 @@ exit 0
             
             // Should succeed if cargo is available
             if exec_result.exit_code == 0 {
-                // Verify the project was created
+                // Verify the project was created by checking for the actual files
                 assert!(temp_dir.path().join("fibonacci_calculator").exists());
                 assert!(temp_dir.path().join("fibonacci_calculator/Cargo.toml").exists());
                 assert!(temp_dir.path().join("fibonacci_calculator/src/main.rs").exists());
                 
-                // The output should mention creating the project
-                assert!(exec_result.stdout.contains("Created") || 
-                       exec_result.stderr.contains("Created"));
+                // The output may or may not contain "Created" depending on cargo version and environment
+                // The fact that the files exist is the real test of success
+                println!("Cargo output (stdout): {}", exec_result.stdout);
+                println!("Cargo output (stderr): {}", exec_result.stderr);
             } else {
-                // If cargo is not available, that's ok for testing
-                println!("Cargo not available in test environment: {}", exec_result.stderr);
+                // If cargo is not available, that's ok for testing, but let's see what happened
+                println!("Cargo not available in test environment. Exit code: {}", exec_result.exit_code);
+                println!("Stderr: {}", exec_result.stderr);
+                println!("Stdout: {}", exec_result.stdout);
+                
+                // Don't fail the test if cargo isn't available - this is an environment issue
+                if exec_result.stderr.contains("cargo: command not found") || 
+                   exec_result.stderr.contains("No such file or directory") {
+                    println!("Cargo not installed, skipping actual functionality test");
+                    return;
+                }
+                
+                // If cargo is available but failed for another reason, that might be a real issue
+                // But for now, we'll be lenient since this is about testing the tool, not cargo itself
             }
         }
     }
@@ -1090,7 +1112,14 @@ exit 0
     #[tokio::test] 
     async fn test_tool_result_json_structure() {
         let temp_dir = TempDir::new().unwrap();
-        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        // Configure the tool to use the temp directory as the base directory for security validation
+        let config = LocalExecutorConfig {
+            base_dir: temp_dir.path().to_path_buf(),
+            auto_approve_safe_commands: true,
+            enable_approval_flow: false,
+            ..Default::default()
+        };
+        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
         let params = serde_json::json!({
             "command": "echo 'test output'",

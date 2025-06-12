@@ -13,7 +13,7 @@ pub mod push_changes;
 pub mod pull_changes;
 
 // Re-export all implemented tools
-pub use add::AddRepositoryTool;
+pub use add::AddExistingRepositoryTool;
 pub use list::ListRepositoriesTool;
 pub use remove::RemoveRepositoryTool;
 pub use sync::SyncRepositoryTool;
@@ -43,10 +43,10 @@ mod tests {
         let mock_config = Arc::new(Mutex::new(AppConfig::default()));
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new_for_test(mock_config)));
 
-        // Test AddRepositoryTool
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        // Test AddExistingRepositoryTool
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let add_def = add_tool.definition();
-        assert_eq!(add_def.name, "add_repository");
+        assert_eq!(add_def.name, "add_existing_repository");
         assert!(!add_def.description.is_empty());
         assert!(!add_def.parameters.is_null());
 
@@ -135,7 +135,7 @@ mod tests {
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new_for_test(mock_config)));
 
         let tools: Vec<Box<dyn Tool + Send + Sync>> = vec![
-            Box::new(AddRepositoryTool::new(repo_manager.clone())),
+            Box::new(AddExistingRepositoryTool::new(repo_manager.clone())),
             Box::new(SyncRepositoryTool::new(repo_manager.clone())),
             Box::new(RemoveRepositoryTool::new(repo_manager.clone())),
             Box::new(ListRepositoriesTool::new(repo_manager.clone())),
@@ -165,7 +165,7 @@ mod tests {
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new_for_test(mock_config)));
 
         let tools: Vec<Box<dyn Tool + Send + Sync>> = vec![
-            Box::new(AddRepositoryTool::new(repo_manager.clone())),
+            Box::new(AddExistingRepositoryTool::new(repo_manager.clone())),
             Box::new(SyncRepositoryTool::new(repo_manager.clone())),
             Box::new(RemoveRepositoryTool::new(repo_manager.clone())),
             Box::new(ListRepositoriesTool::new(repo_manager.clone())),
@@ -207,7 +207,7 @@ mod tests {
         // Test with completely invalid JSON
         let invalid_params = json!("not an object");
 
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let result = add_tool.execute(invalid_params.clone()).await.unwrap();
         match result {
             ToolResult::Error { error } => {
@@ -285,7 +285,7 @@ mod integration_tests {
         create_fake_git_repo(&fake_repo_path).unwrap();
         
         // Test adding a local repository
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let params = json!({
             "name": "test-repo",
             "local_path": fake_repo_path.to_string_lossy()
@@ -323,7 +323,7 @@ mod integration_tests {
         let fake_repo_path = temp_dir.path().join("lifecycle-test-repo");
         create_fake_git_repo(&fake_repo_path).unwrap();
         
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let list_tool = ListRepositoriesTool::new(repo_manager.clone());
         let remove_tool = RemoveRepositoryTool::new(repo_manager.clone());
         
@@ -365,7 +365,7 @@ mod integration_tests {
             }
             Err(e) => {
                 // Tool execution itself failed before producing a ToolResult
-                panic!("AddRepositoryTool execution failed: {}", e);
+                panic!("AddExistingRepositoryTool execution failed: {}", e);
             }
         }
         
@@ -456,7 +456,7 @@ mod integration_tests {
         create_fake_git_repo(&fake_repo_path).unwrap();
         
         // Try to add a repository without initializing the manager
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         let params = json!({
             "name": "init-test-repo",
             "local_path": fake_repo_path.to_string_lossy()
@@ -544,7 +544,7 @@ mod integration_tests {
         let (repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
         
         // Test add tool with various invalid parameters
-        let add_tool = AddRepositoryTool::new(repo_manager.clone());
+        let add_tool = AddExistingRepositoryTool::new(repo_manager.clone());
         
         // Missing name
         let result = add_tool.execute(json!({"url": "https://github.com/test/repo.git"})).await.unwrap();
@@ -556,7 +556,7 @@ mod integration_tests {
         // Missing both URL and local_path
         let result = add_tool.execute(json!({"name": "test"})).await.unwrap();
         match result {
-            ToolResult::Error { error } => assert!(error.contains("Either URL or local_path must be provided")),
+            ToolResult::Error { error } => assert!(error.contains("Either 'url' or 'local_path' must be provided")),
             _ => panic!("Expected validation error for missing URL/path"),
         }
         

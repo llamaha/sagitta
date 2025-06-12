@@ -29,7 +29,7 @@ impl ToolResultFormatter {
             "view_file" | "read_file" => self.format_file_result(value),
             "code_search" => self.format_code_search_result(value),
             "list_repositories" => self.format_repository_list_result(value),
-            "add_repository" | "sync_repository" | "remove_repository" => self.format_repository_operation_result(value),
+            "add_existing_repository" | "sync_repository" | "remove_repository" => self.format_repository_operation_result(value),
             "search_file_in_repository" => self.format_file_search_result(value),
             "edit" | "semantic_edit" | "validate" => self.format_edit_result(value),
             _ => {
@@ -920,7 +920,7 @@ mod tests {
         assert!(formatted.contains("📚 Enhanced Repository List"));
         
         let repo_op_result = json!({"message": "done"});
-        let formatted = formatter.format_successful_tool_result("add_repository", &repo_op_result);
+        let formatted = formatter.format_successful_tool_result("add_existing_repository", &repo_op_result);
         assert!(formatted.contains("📦 Repository Operation"));
         
         let file_search_result = json!({"pattern": "*.rs"});
@@ -1035,7 +1035,7 @@ mod tests {
         // Test all the specific tool types mentioned in format_successful_tool_result
         let tool_types = vec![
             "web_search", "view_file", "read_file", "code_search", "list_repositories",
-            "add_repository", "sync_repository", "remove_repository", "search_file_in_repository",
+            "add_existing_repository", "sync_repository", "remove_repository", "search_file_in_repository",
             "edit", "semantic_edit", "validate"
         ];
         
