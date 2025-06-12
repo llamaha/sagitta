@@ -72,18 +72,18 @@ impl Tool for RemoveRepositoryTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "delete_local_files"],
                 "properties": {
                     "name": {
                         "type": "string",
                         "description": "Name of the repository to remove"
                     },
                     "delete_local_files": {
-                        "type": "boolean",
-                        "description": "Whether to also delete local repository files (default: false)",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to also delete local repository files (defaults to false if null)"
                     }
-                },
-                "required": ["name"]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

@@ -195,10 +195,11 @@ impl Tool for EditTool {
             description: "Edit a file by replacing specified lines with new content, with repository and direct file support".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["file_path", "line_start", "line_end", "content"],
+                "additionalProperties": false,
+                "required": ["repository_name", "file_path", "line_start", "line_end", "content", "format", "create_if_missing"],
                 "properties": {
                     "repository_name": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "The repository containing the file to edit (optional - will fallback to direct file access if not provided or if repository is not found)"
                     },
                     "file_path": {
@@ -218,12 +219,12 @@ impl Tool for EditTool {
                         "description": "New content to replace the lines. IMPORTANT: Keep content under 10KB. For large files, break into multiple smaller edit_file calls targeting different line ranges."
                     },
                     "format": {
-                        "type": "boolean",
-                        "description": "Whether to format the code after editing"
+                        "type": ["boolean", "null"],
+                        "description": "Whether to format the code after editing (defaults to false if null)"
                     },
                     "create_if_missing": {
-                        "type": "boolean",
-                        "description": "Whether to create the file if it doesn't exist"
+                        "type": ["boolean", "null"],
+                        "description": "Whether to create the file if it doesn't exist (defaults to false if null)"
                     }
                 }
             }),

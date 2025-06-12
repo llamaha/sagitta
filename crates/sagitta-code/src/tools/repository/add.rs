@@ -246,58 +246,38 @@ impl Tool for AddExistingRepositoryTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "url", "branch", "local_path"],
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Unique name for the repository in Sagitta's system (will be used for future references). Must be 1-100 characters, alphanumeric with hyphens and underscores allowed.",
-                        "minLength": 1,
-                        "maxLength": 100,
-                        "pattern": "^[a-zA-Z0-9_-]+$"
+                        "description": "Unique name for the repository. Must be meaningful and not empty. Cannot contain special characters like /, \\, :, *, ?, \", <, >, |",
+                        "examples": ["my-project", "awesome-library", "company-api"]
                     },
                     "url": {
-                        "type": "string",
-                        "description": "Git URL for remote repository (HTTPS or SSH format, e.g., 'https://github.com/user/repo.git'). Use this for repositories on GitHub, GitLab, etc. Cannot be used together with 'local_path'.",
+                        "type": ["string", "null"],
+                        "description": "Git URL for remote repositories (e.g., 'https://github.com/user/repo.git' or 'git@github.com:user/repo.git'). Provide either 'url' OR 'local_path', not both.",
                         "examples": [
-                            "https://github.com/user/repo.git",
-                            "git@github.com:user/repo.git",
-                            "https://gitlab.com/user/repo.git"
+                            "https://github.com/tokio-rs/tokio.git",
+                            "git@github.com:rust-lang/rust.git",
+                            "https://gitlab.com/user/project.git"
                         ]
                     },
                     "branch": {
-                        "type": "string",
-                        "description": "Optional branch to checkout (defaults to main/master). Only used with 'url' parameter. Cannot be used with 'local_path'.",
-                        "examples": ["main", "develop", "feature/new-feature"]
+                        "type": ["string", "null"],
+                        "description": "Git branch to checkout (e.g., 'main', 'master', 'develop', 'v1.0'). Only used with 'url'. Defaults to repository's default branch if not specified.",
+                        "examples": ["main", "master", "develop", "feature/new-api", "v1.0.0"]
                     },
                     "local_path": {
-                        "type": "string",
-                        "description": "Absolute path to an existing local directory containing code (e.g., '/home/user/projects/myproject'). Use this for repositories that already exist on the local filesystem. Cannot be used together with 'url' or 'branch'.",
+                        "type": ["string", "null"],
+                        "description": "Absolute path to an existing local directory containing code (e.g., '/home/user/projects/myproject'). Use this for repositories that already exist on the local filesystem. Provide either 'local_path' OR 'url', not both.",
                         "examples": [
                             "/home/user/projects/myproject",
                             "/Users/user/code/project",
                             "C:\\Users\\user\\projects\\myproject"
                         ]
                     }
-                },
-                "required": ["name"],
-                "oneOf": [
-                    {
-                        "required": ["url"],
-                        "properties": {
-                            "url": true,
-                            "branch": true
-                        },
-                        "not": {"required": ["local_path"]}
-                    },
-                    {
-                        "required": ["local_path"],
-                        "not": {
-                            "anyOf": [
-                                {"required": ["url"]},
-                                {"required": ["branch"]}
-                            ]
-                        }
-                    }
-                ]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

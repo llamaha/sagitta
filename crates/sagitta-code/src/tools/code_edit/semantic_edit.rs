@@ -139,7 +139,8 @@ impl Tool for SemanticEditTool {
             description: "Edit a code element (function, class, etc.) semantically".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["repository_name", "file_path", "element", "content"],
+                "additionalProperties": false,
+                "required": ["repository_name", "file_path", "element", "content", "format", "update_references"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -158,14 +159,12 @@ impl Tool for SemanticEditTool {
                         "description": "New content to replace the element"
                     },
                     "format": {
-                        "type": "boolean",
-                        "description": "Whether to format the code after editing",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to format the code after editing (defaults to false if null)"
                     },
                     "update_references": {
-                        "type": "boolean",
-                        "description": "Whether to update references to the edited element",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to update references to the edited element (defaults to false if null)"
                     }
                 }
             }),

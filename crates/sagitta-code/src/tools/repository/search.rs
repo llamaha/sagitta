@@ -47,7 +47,8 @@ impl Tool for SearchFileInRepositoryTool {
             description: "Search for files in a repository matching a pattern".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["repository_name", "pattern"],
+                "additionalProperties": false,
+                "required": ["repository_name", "pattern", "case_sensitive"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -58,9 +59,8 @@ impl Tool for SearchFileInRepositoryTool {
                         "description": "The pattern to search for (e.g., '*.rs' or 'src/*.js')"
                     },
                     "case_sensitive": {
-                        "type": "boolean",
-                        "description": "Whether to use case-sensitive matching",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to use case-sensitive matching (defaults to false if null)"
                     }
                 }
             }),

@@ -28,37 +28,61 @@ use serde_json;
 use sagitta_embed::provider::EmbeddingProvider;
 use qdrant_client::Payload;
 
+use sagitta_code::tools::shell_execution::ShellExecutionTool;
+use sagitta_code::tools::git::{GitCreateBranchTool, GitListBranchesTool};
+use sagitta_code::tools::shell_execution::StreamingShellExecutionTool;
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize the logger with more verbose output for debugging
+    // Enable verbose logging for debugging
+    std::env::set_var("RUST_LOG", "debug,sagitta_code=trace,reqwest=debug");
     init_logger();
     
-    println!("🤖 Sagitta Code CLI Chat");
-    println!("{}", "=".repeat(50));
+    println!("🤖 Sagitta Code CLI Chat - DEBUG MODE");
+    println!("{}", "=".repeat(60));
     println!("Interactive chat interface for testing the reasoning engine");
+    println!("🔍 DEBUGGING: Extensive logging enabled for OpenRouter integration");
     println!("Type 'exit', 'quit', or Ctrl+C to exit");
     println!("Type 'help' for available commands");
+    println!("Type 'debug' to toggle debug output");
     println!();
 
     // Load the configuration
     let config = match load_config() {
         Ok(config) => {
             println!("✓ Configuration loaded successfully");
+            println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
+            println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
+            println!("🔍 DEBUG: Max history size: {}", config.openrouter.max_history_size);
             config
         }
         Err(e) => {
             eprintln!("⚠️  Warning: Failed to load config: {}", e);
             eprintln!("Using default configuration");
-            SagittaCodeConfig::default()
+            let default_config = SagittaCodeConfig::default();
+            println!("🔍 DEBUG: Using default model: {}", default_config.openrouter.model);
+            default_config
         }
     };
 
     // Check for API key - follow the same pattern as OpenRouterClient
     let api_key_available = match config.openrouter.api_key.as_ref() {
-        Some(key) if !key.is_empty() => true,
+        Some(key) if !key.is_empty() => {
+            println!("🔍 DEBUG: API key found in config (length: {})", key.len());
+            true
+        }
         _ => {
             // Check environment variable as fallback
-            std::env::var("OPENROUTER_API_KEY").map(|key| !key.is_empty()).unwrap_or(false)
+            match std::env::var("OPENROUTER_API_KEY") {
+                Ok(key) if !key.is_empty() => {
+                    println!("🔍 DEBUG: API key found in environment (length: {})", key.len());
+                    true
+                }
+                _ => {
+                    println!("🔍 DEBUG: No API key found in config or environment");
+                    false
+                }
+            }
         }
     };
 
@@ -67,7 +91,32 @@ async fn main() -> Result<()> {
         eprintln!("Please set your OpenRouter API key in:");
         eprintln!("  1. Configuration file: ~/.config/sagitta/sagitta_code_config.json");
         eprintln!("  2. Environment variable: export OPENROUTER_API_KEY=your_key_here");
+        eprintln!("🔍 DEBUG: Current working directory: {:?}", std::env::current_dir());
+        eprintln!("🔍 DEBUG: Config directory: {:?}", dirs::config_dir());
         std::process::exit(1);
+    }
+
+    // Test OpenRouter client directly before initializing agent
+    println!("🔍 DEBUG: Testing OpenRouter client directly...");
+    let test_client = match OpenRouterClient::new(&config) {
+        Ok(client) => {
+            println!("✓ OpenRouter client created successfully");
+            client
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to create OpenRouter client: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Test basic functionality
+    println!("🔍 DEBUG: Testing basic OpenRouter connectivity...");
+    match test_simple_request(&test_client).await {
+        Ok(_) => println!("✓ Basic OpenRouter connectivity test passed"),
+        Err(e) => {
+            eprintln!("⚠️  Basic OpenRouter connectivity test failed: {}", e);
+            eprintln!("🔍 DEBUG: Continuing with agent initialization...");
+        }
     }
 
     // Initialize the agent
@@ -85,34 +134,78 @@ async fn main() -> Result<()> {
     // Set default mode
     if let Err(e) = agent.set_mode(AgentMode::ToolsWithConfirmation).await {
         eprintln!("⚠️  Warning: Failed to set agent mode: {}", e);
+    } else {
+        println!("🔍 DEBUG: Agent mode set to ToolsWithConfirmation");
     }
 
     // Subscribe to agent events for real-time feedback
     let mut event_receiver = agent.subscribe();
+    println!("🔍 DEBUG: Event receiver subscribed");
     
-    // Start event handler task
+    // Track debug state
+    let debug_enabled = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let debug_enabled_clone = debug_enabled.clone();
+    
+    // Start event handler task with enhanced debugging
     let event_task = tokio::spawn(async move {
+        let mut chunk_count = 0;
+        let mut tool_call_count = 0;
+        
         while let Ok(event) = event_receiver.recv().await {
+            let is_debug = debug_enabled_clone.load(std::sync::atomic::Ordering::Relaxed);
+            
+            if is_debug {
+                println!("🔍 DEBUG: Received event: {:?}", std::mem::discriminant(&event));
+            }
+            
             match event {
                 sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final } => {
+                    chunk_count += 1;
+                    if is_debug {
+                        println!("🔍 DEBUG: Chunk #{} (final: {}, length: {})", chunk_count, is_final, content.len());
+                        if content.len() < 100 {
+                            println!("🔍 DEBUG: Chunk content: {:?}", content);
+                        }
+                    }
                     print!("{}", content);
                     io::stdout().flush().unwrap();
                     if is_final {
                         println!();
+                        if is_debug {
+                            println!("🔍 DEBUG: Total chunks received: {}", chunk_count);
+                        }
+                        chunk_count = 0; // Reset for next response
                     }
                 },
                 sagitta_code::agent::events::AgentEvent::ToolCall { tool_call } => {
-                    println!("\n🔧 [Tool call: {}]", tool_call.name);
+                    tool_call_count += 1;
+                    println!("\n🔧 [Tool call #{}: {}]", tool_call_count, tool_call.name);
+                    if is_debug {
+                        println!("🔍 DEBUG: Tool call ID: {}", tool_call.id);
+                        println!("🔍 DEBUG: Tool arguments: {}", serde_json::to_string_pretty(&tool_call.arguments).unwrap_or_default());
+                    }
                 },
-                sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id: _, tool_name, result } => {
+                sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
+                    if is_debug {
+                        println!("🔍 DEBUG: Tool call complete - ID: {}, Name: {}", tool_call_id, tool_name);
+                        println!("🔍 DEBUG: Tool result success: {}", result.is_success());
+                    }
                     if result.is_success() {
                         println!("✅ [Tool {} completed successfully]", tool_name);
+                        if is_debug {
+                            if let Some(output) = result.success_value() {
+                                println!("🔍 DEBUG: Tool output: {}", serde_json::to_string_pretty(output).unwrap_or_default());
+                            }
+                        }
                     } else if let Some(error) = result.error_message() {
                         println!("❌ [Tool {} failed: {}]", tool_name, error);
                     }
                 },
                 sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
                     use sagitta_code::agent::state::types::AgentState;
+                    if is_debug {
+                        println!("🔍 DEBUG: State changed to: {:?}", std::mem::discriminant(&state));
+                    }
                     match &state {
                         AgentState::Thinking { message } => {
                             println!("🤔 [Thinking: {}]", message);
@@ -127,21 +220,31 @@ async fn main() -> Result<()> {
                         AgentState::Error { message, .. } => {
                             eprintln!("❌ [Error: {}]", message);
                         },
-                        _ => {}
+                        _ => {
+                            if is_debug {
+                                println!("🔍 DEBUG: Other state change: {:?}", state);
+                            }
+                        }
                     }
                 },
                 sagitta_code::agent::events::AgentEvent::Error(msg) => {
-                    eprintln!("❌ [Error: {}]", msg);
+                    eprintln!("❌ [Agent Error: {}]", msg);
                 },
-                _ => {}
+                _ => {
+                    if is_debug {
+                        println!("🔍 DEBUG: Other event type received");
+                    }
+                }
             }
         }
     });
 
     println!("🚀 Chat interface ready! Start typing your message...");
+    println!("🔍 DEBUG: Tool calls, streaming, and errors will be logged in detail");
     println!();
 
-    // Main interactive loop
+    // Main interactive loop with enhanced debugging
+    let mut message_count = 0;
     loop {
         print!("👤 ");
         io::stdout().flush().unwrap();
@@ -166,7 +269,7 @@ async fn main() -> Result<()> {
             continue;
         }
         
-        // Handle special commands
+        // Handle special debug commands
         match input {
             "exit" | "quit" => {
                 println!("👋 Goodbye!");
@@ -176,11 +279,18 @@ async fn main() -> Result<()> {
                 print_help();
                 continue;
             },
+            "debug" => {
+                let current = debug_enabled.load(std::sync::atomic::Ordering::Relaxed);
+                debug_enabled.store(!current, std::sync::atomic::Ordering::Relaxed);
+                println!("🔍 DEBUG: Debug output {}", if !current { "enabled" } else { "disabled" });
+                continue;
+            },
             "clear" => {
                 if let Err(e) = agent.clear_history().await {
                     eprintln!("Error clearing history: {}", e);
                 } else {
                     println!("🗑️  Conversation history cleared");
+                    message_count = 0;
                 }
                 continue;
             },
@@ -208,21 +318,51 @@ async fn main() -> Result<()> {
                 }
                 continue;
             },
+            "test" => {
+                println!("🔍 DEBUG: Running OpenRouter connectivity test...");
+                match test_simple_request(&test_client).await {
+                    Ok(response) => {
+                        println!("✓ Test successful!");
+                        println!("🔍 DEBUG: Response: {}", response);
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Test failed: {}", e);
+                    }
+                }
+                continue;
+            },
+            "tools" => {
+                println!("🔍 DEBUG: Available tools:");
+                // TODO: Add tool listing functionality
+                println!("  - shell_execution");
+                println!("  - analyze_input");
+                continue;
+            },
             _ => {}
         }
         
+        message_count += 1;
+        println!("🔍 DEBUG: Processing message #{}: '{}'", message_count, input);
         println!("🤖 ");
         
         // Process the message with streaming and timeout
         let process_future = agent.process_message_stream(input);
         let timeout_duration = Duration::from_secs(300); // 5 minute timeout
         
+        let start_time = std::time::Instant::now();
         match timeout(timeout_duration, process_future).await {
             Ok(Ok(mut stream)) => {
+                println!("🔍 DEBUG: Stream started, processing chunks...");
+                let mut chunk_counter = 0;
+                
                 // Process the stream
                 while let Some(chunk_result) = stream.next().await {
                     match chunk_result {
-                        Ok(_chunk) => {
+                        Ok(chunk) => {
+                            chunk_counter += 1;
+                            if debug_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+                                println!("🔍 DEBUG: Processing stream chunk #{}", chunk_counter);
+                            }
                             // The actual output is handled by the event receiver task
                             // which prints chunks in real-time
                         },
@@ -232,10 +372,13 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                let elapsed = start_time.elapsed();
+                println!("🔍 DEBUG: Stream completed in {:.2}s with {} chunks", elapsed.as_secs_f64(), chunk_counter);
                 println!(); // Ensure we end with a newline
             },
             Ok(Err(e)) => {
                 eprintln!("❌ Error processing message: {}", e);
+                println!("🔍 DEBUG: Error details: {:#?}", e);
             },
             Err(_) => {
                 eprintln!("⏰ Request timed out after {} seconds", timeout_duration.as_secs());
@@ -248,6 +391,34 @@ async fn main() -> Result<()> {
     // Clean shutdown
     event_task.abort();
     Ok(())
+}
+
+/// Test basic OpenRouter functionality
+async fn test_simple_request(client: &OpenRouterClient) -> Result<String> {
+    use sagitta_code::llm::client::{Message, MessagePart, Role};
+    use std::collections::HashMap;
+    use uuid::Uuid;
+    
+    let messages = vec![
+        Message {
+            id: Uuid::new_v4(),
+            role: Role::User,
+            parts: vec![MessagePart::Text { text: "Say 'Hello' in one word".to_string() }],
+            metadata: HashMap::new(),
+        }
+    ];
+    
+    println!("🔍 DEBUG: Sending test request to OpenRouter...");
+    match client.generate(&messages, &[]).await {
+        Ok(response) => {
+            if let Some(MessagePart::Text { text }) = response.message.parts.first() {
+                Ok(text.clone())
+            } else {
+                Ok("No text response".to_string())
+            }
+        }
+        Err(e) => Err(anyhow!("OpenRouter test request failed: {}", e))
+    }
 }
 
 async fn initialize_agent(config: SagittaCodeConfig) -> Result<Agent> {
@@ -314,6 +485,17 @@ async fn initialize_agent(config: SagittaCodeConfig) -> Result<Agent> {
     tool_registry.register(Arc::new(sagitta_code::tools::shell_execution::ShellExecutionTool::new(
         default_working_dir.clone()
     ))).await.context("Failed to register shell execution tool")?;
+
+    // Register git tools for current directory operations
+    tool_registry.register(Arc::new(GitCreateBranchTool::new(default_working_dir.clone())))
+        .await.context("Failed to register git create branch tool")?;
+    
+    tool_registry.register(Arc::new(GitListBranchesTool::new(default_working_dir.clone())))
+        .await.context("Failed to register git list branches tool")?;
+
+    // Register streaming shell execution tool for terminal integration
+    tool_registry.register(Arc::new(StreamingShellExecutionTool::new(default_working_dir.clone())))
+        .await.context("Failed to register streaming shell execution tool")?;
 
     // Note: Project creation and test execution functionality is now available through shell_execution tool
     // Examples:
@@ -466,14 +648,26 @@ fn print_help() {
     println!("  help              - Show this help message");
     println!("  exit, quit        - Exit the chat");
     println!("  clear             - Clear conversation history");
+    println!("  debug             - Toggle debug output on/off");
+    println!("  test              - Test OpenRouter connectivity");
+    println!("  tools             - List available tools");
     println!("  mode auto         - Set to fully autonomous mode");
     println!("  mode confirm      - Set to tools with confirmation mode");
     println!("  mode chat         - Set to chat-only mode");
+    println!();
+    println!("🔍 Debug Features:");
+    println!("  - Extensive logging for OpenRouter requests/responses");
+    println!("  - Real-time chunk counting and streaming analysis");
+    println!("  - Tool call tracking with IDs and parameters");
+    println!("  - State change monitoring");
+    println!("  - Error details and timing information");
     println!();
     println!("💡 Tips:");
     println!("  - The agent can use various tools for development tasks");
     println!("  - Real-time streaming shows thoughts and tool executions");
     println!("  - Use Ctrl+C for immediate exit if needed");
     println!("  - Tool confirmations appear in 'confirm' mode");
+    println!("  - Debug mode shows detailed logging for troubleshooting");
+    println!("  - Try 'test' command to verify OpenRouter connectivity");
     println!();
 } 

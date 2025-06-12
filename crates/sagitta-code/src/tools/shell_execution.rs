@@ -353,37 +353,38 @@ impl Tool for ShellExecutionTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["command", "language", "working_directory", "allow_network", "env_vars", "timeout_seconds"],
                 "properties": {
                     "command": {
                         "type": "string",
                         "description": "The shell command to execute"
                     },
                     "language": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional language/environment hint (for backwards compatibility, now ignored)",
-                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default"]
+                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default", null]
                     },
                     "working_directory": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Working directory for command execution (must be within repository base)"
                     },
                     "allow_network": {
-                        "type": "boolean",
+                        "type": ["boolean", "null"],
                         "description": "Whether to allow network access (for backwards compatibility, now ignored)"
                     },
                     "env_vars": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "description": "Additional environment variables",
                         "additionalProperties": {
                             "type": "string"
                         }
                     },
                     "timeout_seconds": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "description": "Custom timeout in seconds (for backwards compatibility, now ignored)"
                     }
-                },
-                "required": ["command"]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }
@@ -451,37 +452,38 @@ impl Tool for StreamingShellExecutionTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["command", "language", "working_directory", "allow_network", "env_vars", "timeout_seconds"],
                 "properties": {
                     "command": {
                         "type": "string",
                         "description": "The shell command to execute"
                     },
                     "language": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional language/environment hint (for backwards compatibility, now ignored)",
-                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default"]
+                        "enum": ["rust", "python", "javascript", "typescript", "go", "golang", "ruby", "html", "css", "yaml", "json", "markdown", "shell", "bash", "default", null]
                     },
                     "working_directory": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Working directory for command execution (must be within repository base)"
                     },
                     "allow_network": {
-                        "type": "boolean",
+                        "type": ["boolean", "null"],
                         "description": "Whether to allow network access (for backwards compatibility, now ignored)"
                     },
                     "env_vars": {
-                        "type": "object",
+                        "type": ["object", "null"],
                         "description": "Additional environment variables",
                         "additionalProperties": {
                             "type": "string"
                         }
                     },
                     "timeout_seconds": {
-                        "type": "number",
+                        "type": ["number", "null"],
                         "description": "Custom timeout in seconds (for backwards compatibility, now ignored)"
                     }
-                },
-                "required": ["command"]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

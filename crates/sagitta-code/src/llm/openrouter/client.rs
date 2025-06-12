@@ -23,6 +23,11 @@ pub struct OpenRouterClient {
 impl OpenRouterClient {
     /// Create a new OpenRouter client
     pub fn new(config: &SagittaCodeConfig) -> Result<Self, OpenRouterError> {
+        Self::new_with_base_url(config, "https://openrouter.ai/api/v1")
+    }
+
+    /// Create a new OpenRouter client with a custom base URL (useful for testing)
+    pub fn new_with_base_url(config: &SagittaCodeConfig, base_url: &str) -> Result<Self, OpenRouterError> {
         // Try config first, then environment
         let api_key = config.openrouter.api_key.clone()
             .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
@@ -61,13 +66,13 @@ impl OpenRouterClient {
             .build()
             .map_err(|e| OpenRouterError::ConfigError(format!("Failed to create HTTP client: {}", e)))?;
 
-        let base_url = "https://openrouter.ai/api/v1".to_string();
-        let model_manager = ModelManager::new(http_client.clone(), base_url.clone());
+        let base_url_string = base_url.to_string();
+        let model_manager = ModelManager::new(http_client.clone(), base_url_string.clone());
 
         Ok(Self {
             config: config.openrouter.clone(),
             http_client,
-            base_url,
+            base_url: base_url_string,
             model_manager,
         })
     }
@@ -109,27 +114,207 @@ impl OpenRouterClient {
 
     /// Convert our Message format to OpenRouter's ChatMessage format
     fn convert_messages(&self, messages: &[Message]) -> Vec<ChatMessage> {
-        messages.iter().map(|msg| {
-            // Combine all text parts into a single content string
-            let content = msg.parts.iter()
-                .filter_map(|part| match part {
-                    MessagePart::Text { text } => Some(text.clone()),
-                    MessagePart::Thought { text } => Some(format!("<thinking>{}</thinking>", text)),
-                    _ => None, // Skip tool calls and results for now
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+        let raw_converted: Vec<ChatMessage> = messages.iter().filter_map(|msg| {
+            match msg.role {
+                Role::User | Role::System => {
+                    // For user/system messages, combine all text parts
+                    let content = msg.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.clone()),
+                            MessagePart::Thought { text } => Some(format!("<thinking>{}</thinking>", text)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
 
-            ChatMessage {
-                role: match msg.role {
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
-                    Role::System => "system".to_string(),
-                    Role::Function => "assistant".to_string(), // Map function to assistant
+                    // Skip messages with empty content - this can cause 400 errors with OpenRouter
+                    if content.trim().is_empty() {
+                        log::warn!("Skipping message with empty content for role: {:?}", msg.role);
+                        return None;
+                    }
+
+                    Some(ChatMessage {
+                        role: match msg.role {
+                            Role::User => "user".to_string(),
+                            Role::System => "system".to_string(),
+                            _ => unreachable!(),
+                        },
+                        content: Some(content),
+                        tool_calls: None,
+                        tool_call_id: None,
+                        name: None,
+                    })
+                }
+                Role::Assistant => {
+                    // For assistant messages, handle both text and tool calls
+                    let content = msg.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.clone()),
+                            MessagePart::Thought { text } => Some(format!("<thinking>{}</thinking>", text)),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    let tool_calls = msg.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::ToolCall { tool_call_id, name, parameters } => {
+                                Some(super::api::ToolCall {
+                                    id: tool_call_id.clone(),
+                                    tool_type: "function".to_string(),
+                                    function: super::api::FunctionCall {
+                                        name: name.clone(),
+                                        arguments: serde_json::to_string(parameters).unwrap_or_default(),
+                                    },
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+
+                    // Assistant messages need either content or tool calls
+                    if content.trim().is_empty() && tool_calls.is_empty() {
+                        log::warn!("Skipping assistant message with no content or tool calls");
+                        return None;
+                    }
+
+                    Some(ChatMessage {
+                        role: "assistant".to_string(),
+                        content: if content.trim().is_empty() { None } else { Some(content) },
+                        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                        tool_call_id: None,
+                        name: None,
+                    })
+                }
+                Role::Function => {
+                    // For function/tool result messages
+                    if let Some(MessagePart::ToolResult { tool_call_id, name, result }) = msg.parts.first() {
+                        let content_str = serde_json::to_string(result).unwrap_or_default();
+                        if content_str.trim().is_empty() {
+                            log::warn!("Skipping tool result message with empty content");
+                            return None;
+                        }
+                        
+                        Some(ChatMessage {
+                            role: "tool".to_string(),
+                            content: Some(content_str),
+                            tool_calls: None,
+                            tool_call_id: Some(tool_call_id.clone()),
+                            name: Some(name.clone()),
+                        })
+                    } else {
+                        // Fallback for function messages without proper tool result
+                        let content = msg.parts.iter()
+                            .filter_map(|part| match part {
+                                MessagePart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        if content.trim().is_empty() {
+                            log::warn!("Skipping function message with empty content");
+                            return None;
+                        }
+
+                        Some(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: Some(content),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            name: None,
+                        })
+                    }
+                }
+            }
+        }).collect();
+
+        // Apply history truncation to prevent payload size issues
+        self.truncate_conversation_history(raw_converted)
+    }
+
+    /// Truncate conversation history to prevent 400 errors due to large payloads
+    fn truncate_conversation_history(&self, messages: Vec<ChatMessage>) -> Vec<ChatMessage> {
+        const MAX_HISTORY_MESSAGES: usize = 10; // Keep system + last 9 messages
+        
+        if messages.len() <= MAX_HISTORY_MESSAGES {
+            return messages;
+        }
+
+        let mut result = Vec::new();
+        
+        // Always keep system message if present
+        if let Some(first_msg) = messages.first() {
+            if first_msg.role == "system" {
+                result.push(first_msg.clone());
+            }
+        }
+
+        // Take the last N messages (excluding system if already added)
+        let start_index = if !result.is_empty() && messages[0].role == "system" {
+            // We have system message, take last (MAX-1) messages after system
+            std::cmp::max(1, messages.len().saturating_sub(MAX_HISTORY_MESSAGES - 1))
+        } else {
+            // No system message, take last MAX messages
+            messages.len().saturating_sub(MAX_HISTORY_MESSAGES)
+        };
+
+        result.extend(messages[start_index..].iter().cloned());
+        
+        log::debug!("Truncated conversation history from {} to {} messages", messages.len(), result.len());
+        result
+    }
+
+    /// Convert Sagitta ToolDefinition to OpenRouter Tool format
+    fn convert_tools(&self, tools: &[ToolDefinition]) -> Vec<super::api::Tool> {
+        tools.iter().map(|tool| {
+            super::api::Tool {
+                tool_type: "function".to_string(),
+                function: super::api::FunctionDefinition {
+                    name: tool.name.clone(),
+                    description: Some(tool.description.clone()),
+                    parameters: Some(self.make_schema_strict_compliant(tool.parameters.clone())),
+                    strict: Some(true), // Enable strict mode for better function call reliability
                 },
-                content,
             }
         }).collect()
+    }
+
+    /// Make a JSON schema strict-mode compliant for OpenAI function calling
+    /// This ensures additionalProperties is false and handles optional fields properly
+    fn make_schema_strict_compliant(&self, mut schema: serde_json::Value) -> serde_json::Value {
+        if let Some(obj) = schema.as_object_mut() {
+            // Ensure additionalProperties is set to false for all objects
+            if obj.get("type").and_then(|t| t.as_str()) == Some("object") {
+                obj.insert("additionalProperties".to_string(), serde_json::Value::Bool(false));
+                
+                // Recursively apply to nested properties
+                if let Some(properties) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                    for (_, prop_value) in properties.iter_mut() {
+                        *prop_value = self.make_schema_strict_compliant(prop_value.clone());
+                    }
+                }
+                
+                // Ensure all properties are marked as required for strict mode
+                // This is a simplification - in a real implementation you might want to 
+                // make optional fields have "null" as an additional type instead
+                if let Some(properties) = obj.get("properties").and_then(|p| p.as_object()) {
+                    if !obj.contains_key("required") {
+                        let required_fields: Vec<_> = properties.keys().cloned().collect();
+                        obj.insert("required".to_string(), serde_json::json!(required_fields));
+                    }
+                }
+            }
+            
+            // Handle arrays
+            if obj.get("type").and_then(|t| t.as_str()) == Some("array") {
+                if let Some(items) = obj.get_mut("items") {
+                    *items = self.make_schema_strict_compliant(items.clone());
+                }
+            }
+        }
+        
+        schema
     }
 
     /// Convert OpenRouter response to our LlmResponse format
@@ -139,17 +324,48 @@ impl OpenRouterClient {
                 index: 0,
                 message: ChatMessage {
                     role: "assistant".to_string(),
-                    content: "No response generated".to_string(),
+                    content: Some("No response generated".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
                 },
                 finish_reason: Some("error".to_string()),
             });
 
+        let mut parts = Vec::new();
+        
+        // Add text content if present
+        if let Some(content) = &choice.message.content {
+            if !content.trim().is_empty() {
+                parts.push(MessagePart::Text { 
+                    text: content.clone() 
+                });
+            }
+        }
+
+        // Add tool calls if present
+        if let Some(tool_calls) = &choice.message.tool_calls {
+            for tool_call in tool_calls {
+                let arguments = serde_json::from_str(&tool_call.function.arguments)
+                    .unwrap_or(serde_json::Value::String(tool_call.function.arguments.clone()));
+                
+                parts.push(MessagePart::ToolCall {
+                    tool_call_id: tool_call.id.clone(),
+                    name: tool_call.function.name.clone(),
+                    parameters: arguments,
+                });
+            }
+        }
+
+        // If no parts, add empty text
+        if parts.is_empty() {
+            parts.push(MessagePart::Text { text: String::new() });
+        }
+
         let message = Message {
             id: Uuid::new_v4(),
             role: Role::Assistant,
-            parts: vec![MessagePart::Text { 
-                text: choice.message.content 
-            }],
+            parts,
             metadata: Default::default(),
         };
 
@@ -162,11 +378,18 @@ impl OpenRouterClient {
             cached_tokens: None,
         });
 
+        // Extract tool calls for the response
+        let tool_calls = choice.message.tool_calls.unwrap_or_default().into_iter().map(|tc| {
+            let arguments = serde_json::from_str(&tc.function.arguments)
+                .unwrap_or(serde_json::Value::String(tc.function.arguments));
+            (tc.id, tc.function.name, arguments)
+        }).collect();
+
         LlmResponse {
             message,
-            tool_calls: Vec::new(), // TODO: Implement tool calling
+            tool_calls,
             usage,
-            grounding: None, // TODO: Implement grounding
+            grounding: None,
         }
     }
 }
@@ -175,15 +398,38 @@ impl OpenRouterClient {
 impl LlmClient for OpenRouterClient {
     async fn generate(&self, 
         messages: &[Message], 
-        _tools: &[ToolDefinition]
+        tools: &[ToolDefinition]
     ) -> Result<LlmResponse, SagittaCodeError> {
+        let openrouter_tools = if !tools.is_empty() {
+            Some(self.convert_tools(tools))
+        } else {
+            None
+        };
+
+        let tool_choice = if !tools.is_empty() {
+            Some(super::api::ToolChoice::String("auto".to_string()))
+        } else {
+            None
+        };
+
+        let converted_messages = self.convert_messages(messages);
+        
+        // Validate we have at least one message - required by OpenRouter API
+        if converted_messages.is_empty() {
+            return Err(SagittaCodeError::LlmError(
+                "No valid messages to send to OpenRouter. All messages were empty or invalid.".to_string()
+            ));
+        }
+
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
-            messages: self.convert_messages(messages),
+            messages: converted_messages,
             stream: Some(false),
             max_tokens: None, // Use model defaults
             temperature: None,
             top_p: None,
+            tools: openrouter_tools,
+            tool_choice,
             provider: self.config.provider_preferences.as_ref().map(|p| ProviderPreferences {
                 order: p.order.clone(),
                 allow_fallbacks: p.allow_fallbacks,
@@ -247,15 +493,38 @@ impl LlmClient for OpenRouterClient {
 
     async fn generate_stream(&self, 
         messages: &[Message], 
-        _tools: &[ToolDefinition]
+        tools: &[ToolDefinition]
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
+        let openrouter_tools = if !tools.is_empty() {
+            Some(self.convert_tools(tools))
+        } else {
+            None
+        };
+
+        let tool_choice = if !tools.is_empty() {
+            Some(super::api::ToolChoice::String("auto".to_string()))
+        } else {
+            None
+        };
+
+        let converted_messages = self.convert_messages(messages);
+        
+        // Validate we have at least one message - required by OpenRouter API
+        if converted_messages.is_empty() {
+            return Err(SagittaCodeError::LlmError(
+                "No valid messages to send to OpenRouter. All messages were empty or invalid.".to_string()
+            ));
+        }
+
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
-            messages: self.convert_messages(messages),
+            messages: converted_messages,
             stream: Some(true), // Enable streaming
             max_tokens: None,
             temperature: None,
             top_p: None,
+            tools: openrouter_tools,
+            tool_choice,
             provider: self.config.provider_preferences.as_ref().map(|p| ProviderPreferences {
                 order: p.order.clone(),
                 allow_fallbacks: p.allow_fallbacks,
@@ -264,23 +533,92 @@ impl LlmClient for OpenRouterClient {
             }),
         };
 
-        let url = format!("{}/chat/completions", self.base_url);
-        let response = self.http_client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| SagittaCodeError::LlmError(format!("HTTP request failed: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(SagittaCodeError::LlmError(
-                format!("HTTP {}: {}", status, error_text)
-            ));
+        // Debug logging to diagnose issues
+        log::debug!("OpenRouter streaming request - Model: {}", &request.model);
+        log::debug!("OpenRouter streaming request - Messages count: {}", request.messages.len());
+        log::debug!("OpenRouter streaming request - Tools count: {}", request.tools.as_ref().map_or(0, |t| t.len()));
+        if let Some(ref tools) = request.tools {
+            for (i, tool) in tools.iter().enumerate() {
+                log::debug!("Tool {}: {} ({})", i, tool.function.name, tool.tool_type);
+                // Log each tool's parameters schema for debugging
+                if let Some(ref params) = tool.function.parameters {
+                    if let Ok(schema_str) = serde_json::to_string_pretty(params) {
+                        log::debug!("Tool {} schema:\n{}", tool.function.name, schema_str);
+                    }
+                }
+            }
+        }
+        
+        // Serialize request for debugging but truncate if too large
+        if let Ok(json_str) = serde_json::to_string_pretty(&request) {
+            if json_str.len() > 10000 {
+                log::debug!("OpenRouter streaming request JSON (truncated):\n{}", &json_str[..10000]);
+            } else {
+                log::debug!("OpenRouter streaming request JSON:\n{}", json_str);
+            }
         }
 
-        let stream = OpenRouterStream::new(response);
+        let url = format!("{}/chat/completions", self.base_url);
+        log::debug!("OpenRouter streaming URL: {}", url);
+        
+        // First, test the request with a cloned builder to get detailed error info
+        let test_request_builder = self.http_client
+            .post(&url)
+            .json(&request);
+        
+        // Try a HEAD request first to validate the request without streaming
+        let validation_request = self.http_client
+            .post(&url)
+            .header("Accept", "application/json") // Regular JSON response instead of SSE
+            .json(&{
+                let mut test_req = request.clone();
+                test_req.stream = Some(false); // Disable streaming for validation
+                test_req
+            });
+        
+        log::debug!("Sending validation request to check for 400 errors...");
+        match validation_request.send().await {
+            Ok(response) => {
+                let status = response.status();
+                log::debug!("Validation request status: {}", status);
+                
+                if !status.is_success() {
+                    let error_text = response.text().await.unwrap_or_else(|e| {
+                        log::error!("Failed to read validation error response: {}", e);
+                        "Failed to read error response".to_string()
+                    });
+                    
+                    log::error!("OpenRouter validation request failed with status {}: {}", status, error_text);
+                    
+                    // Try to parse the error as JSON for better details
+                    if let Ok(json_error) = serde_json::from_str::<serde_json::Value>(&error_text) {
+                        log::error!("OpenRouter validation error details (JSON): {}", 
+                            serde_json::to_string_pretty(&json_error).unwrap_or_default());
+                    } else {
+                        log::error!("OpenRouter validation error details (raw): {}", error_text);
+                    }
+                    
+                    return Err(SagittaCodeError::LlmError(
+                        format!("OpenRouter request validation failed with HTTP {}: {}", status, error_text)
+                    ));
+                } else {
+                    log::debug!("Validation request succeeded, proceeding with streaming...");
+                }
+            }
+            Err(e) => {
+                log::error!("Validation request failed: {}", e);
+                return Err(SagittaCodeError::LlmError(
+                    format!("OpenRouter validation request failed: {}", e)
+                ));
+            }
+        }
+        
+        // Now create the actual streaming request
+        let request_builder = self.http_client
+            .post(&url)
+            .json(&request);
+
+        let stream = OpenRouterStream::new(request_builder)?;
         Ok(Box::pin(stream))
     }
 
@@ -423,9 +761,9 @@ mod tests {
         
         assert_eq!(converted.len(), 2);
         assert_eq!(converted[0].role, "system");
-        assert_eq!(converted[0].content, "You are a helpful assistant.");
+        assert_eq!(converted[0].content, Some("You are a helpful assistant.".to_string()));
         assert_eq!(converted[1].role, "user");
-        assert_eq!(converted[1].content, "Hello, how are you?");
+        assert_eq!(converted[1].content, Some("Hello, how are you?".to_string()));
     }
 
     #[test]
@@ -450,9 +788,10 @@ mod tests {
         
         assert_eq!(converted.len(), 1);
         assert_eq!(converted[0].role, "user");
-        assert!(converted[0].content.contains("First part"));
-        assert!(converted[0].content.contains("Second part"));
-        assert!(converted[0].content.contains("<thinking>Thinking about this</thinking>"));
+        let content = converted[0].content.as_ref().unwrap();
+        assert!(content.contains("First part"));
+        assert!(content.contains("Second part"));
+        assert!(content.contains("<thinking>Thinking about this</thinking>"));
     }
 
     #[test]
@@ -469,7 +808,10 @@ mod tests {
                 index: 0,
                 message: ChatMessage {
                     role: "assistant".to_string(),
-                    content: "Hello! I'm doing well, thank you for asking.".to_string(),
+                    content: Some("Hello! I'm doing well, thank you for asking.".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
                 },
                 finish_reason: Some("stop".to_string()),
             }],

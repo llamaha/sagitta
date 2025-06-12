@@ -49,7 +49,8 @@ impl Tool for ViewFileInRepositoryTool {
             description: "View the complete contents of a file in a repository. **Best for files under 200 lines** - provides full context without filtering. For larger files (200+ lines), consider using 'targeted_view' to focus on relevant code elements and reduce context sent to LLM.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["repository_name", "file_path"],
+                "additionalProperties": false,
+                "required": ["repository_name", "file_path", "start_line", "end_line"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -60,11 +61,11 @@ impl Tool for ViewFileInRepositoryTool {
                         "description": "The path to the file within the repository"
                     },
                     "start_line": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional start line (1-indexed)"
                     },
                     "end_line": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional end line (1-indexed, inclusive)"
                     }
                 }

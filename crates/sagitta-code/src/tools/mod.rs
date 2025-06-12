@@ -12,6 +12,7 @@ pub mod analyze_input;
 pub mod executor;
 pub mod working_directory;
 pub mod working_directory_tools;
+pub mod git;
 
 // Re-export commonly used types and tools
 pub use types::*;
@@ -20,4 +21,5 @@ pub use shell_execution::{ShellExecutionTool, StreamingShellExecutionTool};
 pub use working_directory::{WorkingDirectoryManager, DirectoryContext, DirectoryChangeResult};
 pub use working_directory_tools::{GetCurrentDirectoryTool, ChangeDirectoryTool};
 pub use file_operations::{ReadFileTool, DirectFileReadTool, DirectFileEditTool};
+pub use git::{GitCreateBranchTool, GitListBranchesTool};
 

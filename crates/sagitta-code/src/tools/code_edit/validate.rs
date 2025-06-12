@@ -124,7 +124,8 @@ impl Tool for ValidateTool {
             description: "Validate a code edit without applying it".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["repository_name", "file_path", "content"],
+                "additionalProperties": false,
+                "required": ["repository_name", "file_path", "content", "element", "line_start", "line_end"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -139,15 +140,15 @@ impl Tool for ValidateTool {
                         "description": "Content to validate"
                     },
                     "element": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional semantic element to target (e.g., 'function:my_func', 'class:MyClass')"
                     },
                     "line_start": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional line start (1-indexed, inclusive)"
                     },
                     "line_end": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional line end (1-indexed, inclusive)"
                     }
                 }

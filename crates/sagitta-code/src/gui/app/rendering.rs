@@ -244,18 +244,12 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 
                 app.state.is_waiting_for_response = true;
                 
-                // Process in background task with STREAMING and THINKING
+                // Process in background task with STREAMING
                 tokio::spawn(async move {
                     log::info!("Starting streaming task for user message: '{}'", user_msg_clone);
                     
-                    // Use the streaming version with thinking enabled
-                    match agent_clone.process_message_stream_with_thinking_fixed(
-                        user_msg_clone, 
-                        Some(crate::llm::client::ThinkingConfig {
-                            include_thoughts: true,
-                            thinking_budget: None, // Auto budget
-                        })
-                    ).await {
+                    // Use the same streaming method as the CLI (without thinking config)
+                    match agent_clone.process_message_stream(user_msg_clone).await {
                         Ok(mut stream) => {
                             log::info!("Successfully created stream, starting consumption");
                             let mut chunk_count = 0;

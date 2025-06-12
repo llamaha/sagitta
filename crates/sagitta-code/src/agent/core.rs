@@ -834,11 +834,9 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 self.history.add_assistant_message(assistant_content.clone()).await;
                 log::info!("AgentStreamHandler: Successfully saved assistant message to history");
                 
-                // Emit an AgentEvent::LlmMessage for GUI consumption
-                let assistant_message = AgentMessage::assistant(assistant_content);
-                if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmMessage(assistant_message)) {
-                    log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmMessage: {}", e);
-                }
+                // CRITICAL FIX: DO NOT emit AgentEvent::LlmMessage here - it causes duplicate responses
+                // The GUI should only process AgentEvent::LlmChunk events for streaming display
+                // The complete message is already saved to history above
                 
                 // Clear the buffer for next conversation turn
                 let mut buffer = self.buffered_response.lock().await;

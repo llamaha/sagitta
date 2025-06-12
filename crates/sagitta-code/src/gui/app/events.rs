@@ -63,14 +63,14 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
             match event {
                 AgentEvent::LlmMessage(message) => {
                     // CRITICAL FIX: Only add complete messages if we're NOT currently streaming
-                    // This prevents overwriting streaming responses
-                    if app.state.current_response_id.is_none() {
+                    // This prevents overwriting streaming responses AND prevents duplication
+                    if app.state.current_response_id.is_none() && !app.state.is_streaming_response {
                         let chat_message = make_chat_message_from_agent_message(&message);
                         let streaming_message: StreamingMessage = chat_message.into();
                         app.chat_manager.add_complete_message(streaming_message);
                         log::info!("SagittaCodeApp: Added complete LlmMessage as new message");
                     } else {
-                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?})", app.state.current_response_id);
+                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?}, is_streaming: {})", app.state.current_response_id, app.state.is_streaming_response);
                     }
                     app.state.is_waiting_for_response = false;
                 },

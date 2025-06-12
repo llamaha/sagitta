@@ -281,13 +281,14 @@ impl Tool for AnalyzeInputTool {
             description: "Analyzes the initial user input to determine intent, extract entities, and suggest initial actions using semantic search and schema-based parameter extraction.".to_string(),
             parameters: json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["input"],
                 "properties": {
                     "input": {
                         "type": "string",
                         "description": "The user input to analyze."
                     }
-                },
-                "required": ["input"]
+                }
             }),
             is_required: true,
             category: ToolCategory::Core,

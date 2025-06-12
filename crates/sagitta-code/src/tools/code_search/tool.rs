@@ -51,6 +51,8 @@ impl Tool for CodeSearchTool {
             description: "Search for code in repositories using semantic search.".to_string(),
             parameters: json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["repository_name", "query", "limit", "element_type", "language"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -61,21 +63,18 @@ impl Tool for CodeSearchTool {
                         "description": "Natural language or code search query"
                     },
                     "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return",
-                        "default": 10
+                        "type": ["integer", "null"],
+                        "description": "Maximum number of results to return (defaults to 10 if null)"
                     },
                     "element_type": {
-                        "type": "string",
-                        "description": "Optional filter by code element type (function, struct, class, enum, etc.)",
-                        "enum": ["function", "struct", "class", "interface", "enum", "method", "variable"]
+                        "type": ["string", "null"],
+                        "description": "Optional filter by code element type (function, struct, class, interface, enum, method, variable)"
                     },
                     "language": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional filter by programming language (rust, python, javascript, etc.)"
                     }
-                },
-                "required": ["repository_name", "query"]
+                }
             }),
             is_required: false,
             category: ToolCategory::CodeSearch,

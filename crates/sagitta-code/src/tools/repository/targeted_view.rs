@@ -459,6 +459,8 @@ impl Tool for TargetedViewTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["repository_name", "query", "file_path", "element_type", "language", "max_files", "max_elements_per_file", "include_context"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -469,40 +471,36 @@ impl Tool for TargetedViewTool {
                         "description": "Semantic query to find relevant code elements (e.g., 'authentication middleware', 'database connection', 'error handling')"
                     },
                     "file_path": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional: Specific file path to analyze if known"
                     },
                     "element_type": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional: Type of code element to focus on (function, struct, class, trait, etc.)"
                     },
                     "language": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional: Programming language filter (rust, python, javascript, etc.)"
                     },
                     "max_files": {
-                        "type": "integer",
-                        "description": "Maximum number of files to analyze in detail (default: 5)",
-                        "default": 5,
+                        "type": ["integer", "null"],
+                        "description": "Maximum number of files to analyze in detail (defaults to 5 if null)",
                         "minimum": 1,
                         "maximum": 20
                     },
                     "max_elements_per_file": {
-                        "type": "integer", 
-                        "description": "Maximum number of elements to return per file (default: 10)",
-                        "default": 10,
+                        "type": ["integer", "null"], 
+                        "description": "Maximum number of elements to return per file (defaults to 10 if null)",
                         "minimum": 1,
                         "maximum": 50
                     },
                     "include_context": {
-                        "type": "boolean",
-                        "description": "Whether to include full context around found elements (default: true)",
-                        "default": true
+                        "type": ["boolean", "null"],
+                        "description": "Whether to include full context for found elements (defaults to true if null)"
                     }
-                },
-                "required": ["repository_name", "query"]
+                }
             }),
-            metadata: std::collections::HashMap::new(),
+            metadata: Default::default(),
         }
     }
 

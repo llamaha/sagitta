@@ -66,11 +66,18 @@ impl Tool for SyncRepositoryTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "force"],
                 "properties": {
-                    "name": { "type": "string", "description": "Name of the repository to sync" },
-                    "force": { "type": "boolean", "description": "Force sync even if no changes detected", "default": false }
-                },
-                "required": ["name"]
+                    "name": { 
+                        "type": "string", 
+                        "description": "Name of the repository to sync" 
+                    },
+                    "force": { 
+                        "type": ["boolean", "null"], 
+                        "description": "Force sync even if no changes detected (defaults to false if null)" 
+                    }
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

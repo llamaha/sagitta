@@ -455,7 +455,7 @@ async fn test_openrouter_streaming_response_handling() {
         Ok(response) => {
             assert_eq!(response.choices.len(), 1);
             let choice = &response.choices[0];
-            assert_eq!(choice.message.content, "Hello! How can I help you today?");
+            assert_eq!(choice.message.content, Some("Hello! How can I help you today?".to_string()));
             assert_eq!(choice.finish_reason, Some("stop".to_string()));
             
             // Debug what we actually got

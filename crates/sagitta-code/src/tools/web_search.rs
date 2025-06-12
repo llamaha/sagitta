@@ -449,14 +449,15 @@ impl Tool for WebSearchTool {
 The tool provides both human-readable results and structured data that can be used for automated actions. Use this for any current information not in your training data.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
-                "required": ["search_term"],
+                "additionalProperties": false,
+                "required": ["search_term", "explanation"],
                 "properties": {
                     "search_term": {
                         "type": "string",
                         "description": "The search query. Be specific about what you need:\n• For git repos: 'tokio rust library github' or 'express.js repository'\n• For docs: 'rust tokio documentation' or 'python requests library docs'\n• For examples: 'rust async http client example' or 'python rest api code sample'\n• For APIs: 'stripe api endpoints' or 'twitter api authentication'\n• For installation: 'install rust tokio' or 'npm install express setup'\nSpecific queries get faster, more accurate results."
                     },
                     "explanation": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "One sentence explanation as to why this tool is being used, and how it contributes to the goal."
                     }
                 }
@@ -526,8 +527,9 @@ mod tests {
         let params = &definition.parameters;
         assert_eq!(params["type"], "object");
         assert!(params["required"].as_array().unwrap().contains(&json!("search_term")));
+        assert!(params["required"].as_array().unwrap().contains(&json!("explanation")));
         assert!(params["properties"]["search_term"]["type"] == "string");
-        assert!(params["properties"]["explanation"]["type"] == "string");
+        assert!(params["properties"]["explanation"]["type"] == json!(["string", "null"]));
     }
 
     #[tokio::test]
