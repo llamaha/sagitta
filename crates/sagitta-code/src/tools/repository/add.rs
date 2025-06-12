@@ -17,10 +17,13 @@ pub struct AddExistingRepositoryParams {
     /// Name for the repository
     pub name: String,
     /// Git URL for the repository
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// Branch to use (optional, defaults to main/master)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// Local path to an existing repository (alternative to URL)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
 }
 
@@ -247,7 +250,7 @@ impl Tool for AddExistingRepositoryTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["name", "url", "branch", "local_path"],
+                "required": ["name"],
                 "properties": {
                     "name": {
                         "type": "string",
@@ -277,7 +280,11 @@ impl Tool for AddExistingRepositoryTool {
                             "C:\\Users\\user\\projects\\myproject"
                         ]
                     }
-                }
+                },
+                "oneOf": [
+                    { "required": ["url"] },
+                    { "required": ["local_path"] }
+                ]
             }),
             metadata: std::collections::HashMap::new(),
         }

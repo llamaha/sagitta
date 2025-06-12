@@ -976,3 +976,31 @@ async fn test_enhanced_parameter_validation_feedback() {
     assert!(specific_guidance_provided, "Expected specific parameter guidance");
     assert!(alternative_suggested, "Expected alternative suggested");
 }
+
+#[test]
+fn test_add_existing_repository_params_serialization_omits_nulls() {
+    use sagitta_code::tools::repository::add::AddExistingRepositoryParams;
+    use serde_json::json;
+    // Only url set
+    let params = AddExistingRepositoryParams {
+        name: "repo1".to_string(),
+        url: Some("https://github.com/test/repo.git".to_string()),
+        branch: None,
+        local_path: None,
+    };
+    let value = serde_json::to_value(&params).unwrap();
+    assert!(value.get("url").is_some());
+    assert!(value.get("branch").is_none());
+    assert!(value.get("local_path").is_none());
+    // Only local_path set
+    let params = AddExistingRepositoryParams {
+        name: "repo2".to_string(),
+        url: None,
+        branch: None,
+        local_path: Some("/tmp/repo2".to_string()),
+    };
+    let value = serde_json::to_value(&params).unwrap();
+    assert!(value.get("local_path").is_some());
+    assert!(value.get("url").is_none());
+    assert!(value.get("branch").is_none());
+}
