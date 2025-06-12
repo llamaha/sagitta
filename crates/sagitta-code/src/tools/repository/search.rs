@@ -43,12 +43,14 @@ impl SearchFileInRepositoryTool {
 impl Tool for SearchFileInRepositoryTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "search_file".to_string(),
-            description: "Search for files in a repository matching a pattern".to_string(),
+            name: "search_file_in_repository".to_string(),
+            description: "Search for files in a repository using a glob pattern (e.g., '*.rs' or 'src/*.js'). Returns a list of matching file paths.".to_string(),
+            category: ToolCategory::Repository,
+            is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["repository_name", "pattern", "case_sensitive"],
+                "required": ["repository_name", "pattern"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -64,9 +66,7 @@ impl Tool for SearchFileInRepositoryTool {
                     }
                 }
             }),
-            is_required: false,
-            category: ToolCategory::Repository,
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::new(),
         }
     }
     
@@ -110,7 +110,7 @@ mod tests {
     fn test_search_repository_tool_creation() {
         let tool = SearchFileInRepositoryTool::new(create_test_repo_manager());
         let definition = tool.definition();
-        assert_eq!(definition.name, "search_file");
+        assert_eq!(definition.name, "search_file_in_repository");
     }
 
     #[test]
@@ -118,7 +118,7 @@ mod tests {
         let tool = SearchFileInRepositoryTool::new(create_test_repo_manager());
         let definition = tool.definition();
         
-        assert_eq!(definition.name, "search_file");
+        assert_eq!(definition.name, "search_file_in_repository");
         assert_eq!(definition.category, ToolCategory::Repository);
         assert!(definition.description.contains("Search for files"));
     }

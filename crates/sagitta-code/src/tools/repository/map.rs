@@ -122,31 +122,28 @@ impl Tool for RepositoryMapTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["repository_name", "paths", "file_extension", "verbosity"],
+                "required": ["name"],
                 "properties": {
-                    "repository_name": {
+                    "name": {
                         "type": "string",
                         "description": "Name of the repository to map"
                     },
+                    "verbosity": {
+                        "type": ["integer", "null"],
+                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed)"
+                    },
                     "paths": {
                         "type": ["array", "null"],
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "Optional: Specific paths to scan within the repository (defaults to scanning entire repository if null)",
-                        "examples": [["src/", "lib/"], ["src/main.rs", "src/lib.rs"], ["packages/core/", "packages/api/"]]
+                        "items": {"type": "string"},
+                        "description": "Optional: Specific paths to scan within the repository"
                     },
                     "file_extension": {
                         "type": ["string", "null"],
-                        "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js') - defaults to scanning all supported files if null",
-                        "examples": ["rs", "py", "js", "ts", "go", "java", "cpp"]
+                        "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js')"
                     },
-                    "verbosity": {
-                        "type": ["integer", "null"],
-                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed) - defaults to 1 if null",
-                        "minimum": 0,
-                        "maximum": 2,
-                        "examples": [0, 1, 2]
+                    "content_pattern": {
+                        "type": ["string", "null"],
+                        "description": "Optional: Content pattern to filter files by"
                     }
                 }
             }),

@@ -73,7 +73,7 @@ impl Tool for RemoveRepositoryTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["name", "delete_local_files"],
+                "required": ["name"],
                 "properties": {
                     "name": {
                         "type": "string",

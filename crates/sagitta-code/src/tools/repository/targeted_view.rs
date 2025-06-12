@@ -460,47 +460,43 @@ impl Tool for TargetedViewTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["repository_name", "query", "file_path", "element_type", "language", "max_files", "max_elements_per_file", "include_context"],
+                "required": ["repository_name", "query"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
                         "description": "Name of the repository to analyze"
                     },
                     "query": {
-                        "type": "string", 
-                        "description": "Semantic query to find relevant code elements (e.g., 'authentication middleware', 'database connection', 'error handling')"
+                        "type": "string",
+                        "description": "Semantic query to find relevant files/elements"
                     },
                     "file_path": {
                         "type": ["string", "null"],
-                        "description": "Optional: Specific file path to analyze if known"
+                        "description": "Optional: Specific file path to analyze (if known)"
                     },
                     "element_type": {
                         "type": ["string", "null"],
-                        "description": "Optional: Type of code element to focus on (function, struct, class, trait, etc.)"
+                        "description": "Optional: Element type to focus on (function, struct, class, etc.)"
                     },
                     "language": {
                         "type": ["string", "null"],
-                        "description": "Optional: Programming language filter (rust, python, javascript, etc.)"
+                        "description": "Optional: Programming language filter"
                     },
                     "max_files": {
                         "type": ["integer", "null"],
-                        "description": "Maximum number of files to analyze in detail (defaults to 5 if null)",
-                        "minimum": 1,
-                        "maximum": 20
+                        "description": "Maximum number of files to analyze in detail (default: 5)"
                     },
                     "max_elements_per_file": {
-                        "type": ["integer", "null"], 
-                        "description": "Maximum number of elements to return per file (defaults to 10 if null)",
-                        "minimum": 1,
-                        "maximum": 50
+                        "type": ["integer", "null"],
+                        "description": "Maximum number of elements to return per file (default: 10)"
                     },
                     "include_context": {
                         "type": ["boolean", "null"],
-                        "description": "Whether to include full context for found elements (defaults to true if null)"
+                        "description": "Whether to include full context for found elements (default: true)"
                     }
                 }
             }),
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::new(),
         }
     }
 

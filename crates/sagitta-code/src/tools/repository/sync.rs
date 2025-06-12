@@ -67,7 +67,7 @@ impl Tool for SyncRepositoryTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["name", "force"],
+                "required": ["name"],
                 "properties": {
                     "name": { 
                         "type": "string", 
