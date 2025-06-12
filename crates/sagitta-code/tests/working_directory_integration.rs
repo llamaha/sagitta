@@ -13,6 +13,9 @@ use sagitta_code::{
     gui::repository::manager::RepositoryManager,
 };
 
+// Mutex to serialize tests that change the working directory
+static WORKING_DIR_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Test that tools operate in the correct working directory
 #[tokio::test]
 async fn test_tools_use_configured_base_directory() {
@@ -121,6 +124,9 @@ async fn test_working_directory_management() {
 /// Test that read_file resolves relative paths after a directory change (regression for file \#14)
 #[tokio::test]
 async fn test_read_file_after_change_directory() {
+    // Serialize tests that change working directory to prevent race conditions
+    let _guard = WORKING_DIR_MUTEX.lock().unwrap();
+    
     let temp_workspace = TempDir::new().unwrap();
     let workspace_path = temp_workspace.path().to_path_buf();
 
@@ -129,6 +135,9 @@ async fn test_read_file_after_change_directory() {
     std::fs::create_dir_all(&subdir).unwrap();
     let file_path = subdir.join("hello.txt");
     std::fs::write(&file_path, "Hello, Sagitta!").unwrap();
+
+    // Store original working directory for restoration
+    let original_cwd = std::env::current_dir().unwrap();
 
     // Set the process working directory to the sub-directory, mimicking the effect of the
     // ChangeDirectoryTool / WorkingDirectoryManager in production.
@@ -156,13 +165,16 @@ async fn test_read_file_after_change_directory() {
         panic!("Expected content field in read_file result");
     }
 
-    // Restore cwd for hygiene (TempDir will be deleted afterwards)
-    std::env::set_current_dir(&workspace_path).unwrap();
+    // Restore original cwd for hygiene
+    std::env::set_current_dir(&original_cwd).unwrap();
 }
 
 /// Test that shell_execution defaults to current working directory after ChangeDirectory
 #[tokio::test]
 async fn test_shell_execution_after_change_directory() {
+    // Serialize tests that change working directory to prevent race conditions
+    let _guard = WORKING_DIR_MUTEX.lock().unwrap();
+    
     let temp_workspace = TempDir::new().unwrap();
     let workspace_path = temp_workspace.path().to_path_buf();
 
@@ -172,6 +184,9 @@ async fn test_shell_execution_after_change_directory() {
     std::fs::write(subdir.join("Cargo.toml"), "[package]\nname = \"proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n").unwrap();
     std::fs::create_dir_all(subdir.join("src")).unwrap();
     std::fs::write(subdir.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+
+    // Store original working directory for restoration
+    let original_cwd = std::env::current_dir().unwrap();
 
     // Act: change working directory to the subdir
     std::env::set_current_dir(&subdir).unwrap();
@@ -199,6 +214,9 @@ async fn test_shell_execution_after_change_directory() {
 
     // The output should include "proj" since the command ran in the subdir
     assert!(result.stdout.contains("proj"), "Expected 'proj' in pwd output, but got: {}", result.stdout);
+
+    // Restore original cwd for hygiene
+    std::env::set_current_dir(&original_cwd).unwrap();
 }
 
 /// Test that edit_file content size limit prevents streaming timeouts
