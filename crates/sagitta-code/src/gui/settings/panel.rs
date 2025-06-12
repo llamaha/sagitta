@@ -445,13 +445,17 @@ impl SettingsPanel {
             workspaces: Default::default(),
         };
         
-        // Copy other fields from current config
-        let current_config = self.sagitta_code_config.blocking_lock();
-        updated_config.sagitta = current_config.sagitta.clone();
-        updated_config.ui = current_config.ui.clone();
-        updated_config.logging = current_config.logging.clone();
-        updated_config.conversation = current_config.conversation.clone();
-        updated_config.workspaces = current_config.workspaces.clone();
+        // Copy other fields from current config using try_lock to avoid blocking runtime
+        if let Ok(current_config) = self.sagitta_code_config.try_lock() {
+            updated_config.sagitta = current_config.sagitta.clone();
+            updated_config.ui = current_config.ui.clone();
+            updated_config.logging = current_config.logging.clone();
+            updated_config.conversation = current_config.conversation.clone();
+            updated_config.workspaces = current_config.workspaces.clone();
+        } else {
+            // If we can't get the lock immediately, log a warning but use defaults
+            log::warn!("SettingsPanel: Could not acquire config lock immediately, using defaults for non-OpenRouter fields");
+        }
         
         updated_config
     }
