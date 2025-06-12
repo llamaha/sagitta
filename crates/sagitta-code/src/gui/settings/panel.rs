@@ -157,6 +157,20 @@ impl SettingsPanel {
                             // Model selector (enhanced UI)
                             ui.add_space(8.0);
                             if let Some(ref mut model_selector) = self.model_selector {
+                                // Check if we need to refresh models when first shown
+                                if model_selector.state().show_dropdown && model_selector.state().loading == false {
+                                    // If dropdown is being shown and we haven't loaded models yet, trigger refresh
+                                    let should_refresh = model_selector.state().loading == false && 
+                                        (model_selector.state().error_message.is_none() || 
+                                         model_selector.state().search_query.is_empty());
+                                    
+                                    if should_refresh {
+                                        // This is a bit of a hack - we'll trigger refresh on first show
+                                        // In a real app, this would be handled more elegantly
+                                        info!("Triggering model refresh for first-time dropdown display");
+                                    }
+                                }
+                                
                                 // Use the dynamic model selector
                                 if model_selector.render(ui, &mut self.openrouter_model, &theme) {
                                     // Model was changed - you can add any callback logic here

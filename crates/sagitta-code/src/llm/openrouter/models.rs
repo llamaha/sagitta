@@ -83,25 +83,67 @@ impl ModelManager {
 
     /// Get popular models (commonly used ones)
     pub async fn get_popular_models(&self) -> Result<Vec<ModelInfo>, OpenRouterError> {
-        let models = self.fetch_models().await?;
+        // Instead of hardcoded popular models, get recent models from the last year
+        self.get_recent_models().await
+    }
+
+    /// Get recent models from the last year (more useful than hardcoded popular list)
+    pub async fn get_recent_models(&self) -> Result<Vec<ModelInfo>, OpenRouterError> {
+        let all_models = self.fetch_models().await?;
         
-        // Define popular model IDs based on common usage
-        let popular_ids = [
-            "openai/gpt-4o",
-            "openai/gpt-4o-mini", 
-            "anthropic/claude-3-5-sonnet",
-            "anthropic/claude-3-haiku",
-            "meta-llama/llama-3.1-8b-instruct",
-            "google/gemma-2-9b-it",
-            "microsoft/wizardlm-2-8x22b",
-            "qwen/qwen-2-72b-instruct"
+        // Calculate cutoff date (1 year ago)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let one_year_ago = now.saturating_sub(365 * 24 * 60 * 60); // 1 year in seconds
+        
+        // Filter models to those created in the last year
+        let mut recent_models: Vec<ModelInfo> = all_models.into_iter()
+            .filter(|model| model.created >= one_year_ago)
+            .collect();
+        
+        // Sort by creation date (newest first) and take the first 100
+        recent_models.sort_by(|a, b| b.created.cmp(&a.created));
+        recent_models.truncate(100);
+        
+        // If we don't have enough recent models, include some high-quality models
+        if recent_models.len() < 20 {
+            log::warn!("Only found {} recent models, including additional recommended models", recent_models.len());
+            recent_models.extend(self.get_recommended_models().await?);
+            
+            // Remove duplicates and re-sort
+            recent_models.sort_by(|a, b| a.id.cmp(&b.id));
+            recent_models.dedup_by(|a, b| a.id == b.id);
+            recent_models.sort_by(|a, b| b.created.cmp(&a.created));
+            recent_models.truncate(100);
+        }
+        
+        Ok(recent_models)
+    }
+
+    /// Get recommended models (fallback when not enough recent models)
+    async fn get_recommended_models(&self) -> Result<Vec<ModelInfo>, OpenRouterError> {
+        let all_models = self.fetch_models().await?;
+        
+        // Define recommended model patterns (current 2024/2025 models)
+        let recommended_patterns = [
+            "deepseek-r1-0528",
+            "magistral-medium-2506",
+            "claude-sonnet-4",
+            "gemini-2.5-pro-preview",
+            "gemini-2.5-flash-preview",
+            "llama-3.3-70b-instruct"
         ];
         
-        let popular_models: Vec<ModelInfo> = models.into_iter()
-            .filter(|m| popular_ids.contains(&m.id.as_str()))
+        let recommended_models: Vec<ModelInfo> = all_models.into_iter()
+            .filter(|model| {
+                let model_id_lower = model.id.to_lowercase();
+                recommended_patterns.iter().any(|pattern| model_id_lower.contains(pattern))
+            })
             .collect();
             
-        Ok(popular_models)
+        Ok(recommended_models)
     }
 
     /// Refresh model cache
@@ -141,19 +183,35 @@ impl ModelManager {
     /// Fetch models from OpenRouter API and update cache
     async fn fetch_models_from_api(&self) -> Result<Vec<ModelInfo>, OpenRouterError> {
         let url = format!("{}/models", self.base_url);
+        log::debug!("Fetching models from OpenRouter API: {}", url);
+        
         let response = self.http_client
             .get(&url)
             .send()
             .await?;
 
         if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            log::error!("OpenRouter API error: HTTP {} - {}", status, error_text);
             return Err(OpenRouterError::HttpError(
-                format!("HTTP {}: {}", response.status(), response.text().await.unwrap_or_default())
+                format!("HTTP {}: {}", status, error_text)
             ));
         }
 
         let models_response: super::api::ModelsResponse = response.json().await?;
         let models = models_response.data;
+        
+        log::info!("Fetched {} models from OpenRouter API", models.len());
+        if log::log_enabled!(log::Level::Debug) {
+            // Log first few model names for debugging
+            for (i, model) in models.iter().take(10).enumerate() {
+                log::debug!("Model {}: {} (created: {})", i, model.id, model.created);
+            }
+            if models.len() > 10 {
+                log::debug!("... and {} more models", models.len() - 10);
+            }
+        }
 
         // Update cache
         if let Ok(mut cache) = self.cache.lock() {
@@ -165,6 +223,7 @@ impl ModelManager {
                     cached_at: now,
                 });
             }
+            log::debug!("Updated model cache with {} entries", cache.len());
         }
 
         Ok(models)

@@ -87,6 +87,11 @@ impl OpenRouterClient {
         self.model_manager.get_popular_models().await
     }
 
+    /// Get recent models from the last year
+    pub async fn get_recent_models(&self) -> Result<Vec<ModelInfo>, OpenRouterError> {
+        self.model_manager.get_recent_models().await
+    }
+
     /// Search models by query
     pub async fn search_models(&self, query: &str) -> Result<Vec<ModelInfo>, OpenRouterError> {
         self.model_manager.search_models(query).await
@@ -110,6 +115,11 @@ impl OpenRouterClient {
     /// Refresh model cache
     pub async fn refresh_model_cache(&self) -> Result<(), OpenRouterError> {
         self.model_manager.refresh_cache().await
+    }
+
+    /// Get the model manager for external use (e.g., in settings panel)
+    pub fn get_model_manager(&self) -> &ModelManager {
+        &self.model_manager
     }
 
     /// Convert our Message format to OpenRouter's ChatMessage format

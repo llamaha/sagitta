@@ -69,53 +69,81 @@ impl OpenRouterStream {
 
                 // Parse JSON chunk
                 let chunk: OpenRouterStreamChunk = serde_json::from_str(&msg.data)
-                    .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse OpenRouter streaming chunk: {}", e)))?;
+                    .map_err(|e| {
+                        log::error!("Failed to parse OpenRouter streaming chunk: {}. Raw data: {}", e, msg.data);
+                        SagittaCodeError::LlmError(format!("Failed to parse OpenRouter streaming chunk: {}", e))
+                    })?;
 
                 // Extract content from the first choice
                 if let Some(choice) = chunk.choices.into_iter().next() {
                     let is_final = choice.finish_reason.is_some();
                     let finish_reason = choice.finish_reason;
                     
-                    // Handle text content
+                    // Handle text content first
                     if let Some(content) = choice.delta.content {
                         if !content.is_empty() {
                             return Ok(Some(StreamChunk {
                                 part: MessagePart::Text { text: content },
                                 is_final,
-                                finish_reason,
+                                finish_reason: finish_reason.clone(),
                                 token_usage: None,
                             }));
                         }
                     }
                     
-                    // Handle tool calls
+                    // Handle tool calls - CRITICAL FIX: Don't wait for is_final!
                     if let Some(tool_calls) = choice.delta.tool_calls {
                         for tool_call_delta in tool_calls {
-                            self.accumulate_tool_call(tool_call_delta);
-                        }
-                        
-                        // If final and we have tool calls, return them
-                        if is_final && !self.accumulated_tool_calls.is_empty() {
-                            if let Some(first_tool_call) = self.accumulated_tool_calls.values().next() {
-                                let parameters = if !first_tool_call.function_arguments.is_empty() {
-                                    serde_json::from_str(&first_tool_call.function_arguments)
-                                        .unwrap_or(serde_json::Value::String(first_tool_call.function_arguments.clone()))
+                            log::debug!("Processing tool call delta: index={}, id={:?}, type={:?}, function={:?}", 
+                                       tool_call_delta.index, 
+                                       tool_call_delta.id, 
+                                       tool_call_delta.tool_type, 
+                                       tool_call_delta.function);
+                            
+                            // Accumulate the tool call
+                            self.accumulate_tool_call(tool_call_delta.clone());
+                            
+                            // Check if this tool call is complete enough to emit
+                            if let Some(complete_tool_call) = self.check_tool_call_complete(tool_call_delta.index) {
+                                log::info!("Tool call completed - emitting: {} with args: {}", 
+                                          complete_tool_call.function_name.as_ref().unwrap_or(&"unknown".to_string()),
+                                          complete_tool_call.function_arguments);
+                                
+                                let parameters = if !complete_tool_call.function_arguments.is_empty() {
+                                    match serde_json::from_str(&complete_tool_call.function_arguments) {
+                                        Ok(parsed) => parsed,
+                                        Err(e) => {
+                                            log::warn!("Failed to parse tool call arguments as JSON: {}. Using as string.", e);
+                                            serde_json::Value::String(complete_tool_call.function_arguments.clone())
+                                        }
+                                    }
                                 } else {
                                     serde_json::Value::Null
                                 };
                                 
                                 return Ok(Some(StreamChunk {
                                     part: MessagePart::ToolCall {
-                                        tool_call_id: first_tool_call.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
-                                        name: first_tool_call.function_name.clone().unwrap_or_default(),
+                                        tool_call_id: complete_tool_call.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                                        name: complete_tool_call.function_name.clone().unwrap_or_default(),
                                         parameters,
                                     },
-                                    is_final,
-                                    finish_reason,
+                                    is_final: true, // Tool calls are discrete units, mark as final
+                                    finish_reason: None, // Don't set finish_reason until stream actually ends
                                     token_usage: None,
                                 }));
                             }
                         }
+                    }
+                    
+                    // If this is a final message but we haven't returned anything yet, 
+                    // return an empty final chunk to signal completion
+                    if is_final {
+                        return Ok(Some(StreamChunk {
+                            part: MessagePart::Text { text: String::new() },
+                            is_final: true,
+                            finish_reason,
+                            token_usage: None,
+                        }));
                     }
                 }
 
@@ -152,6 +180,24 @@ impl OpenRouterStream {
                 entry.function_arguments.push_str(&args);
             }
         }
+    }
+
+    /// Check if a tool call at the given index is complete enough to emit
+    fn check_tool_call_complete(&self, index: u32) -> Option<&AccumulatedToolCall> {
+        if let Some(tool_call) = self.accumulated_tool_calls.get(&index) {
+            // A tool call is complete if it has at least an ID, name, and arguments
+            // Arguments can be empty for tools that don't require parameters
+            if tool_call.id.is_some() && tool_call.function_name.is_some() {
+                // Check if arguments appear to be complete JSON
+                if tool_call.function_arguments.is_empty() || 
+                   tool_call.function_arguments.ends_with('}') || 
+                   tool_call.function_arguments.ends_with(']') ||
+                   tool_call.function_arguments == "null" {
+                    return Some(tool_call);
+                }
+            }
+        }
+        None
     }
 }
 
