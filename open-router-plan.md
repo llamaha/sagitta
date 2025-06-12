@@ -205,87 +205,143 @@ crates/sagitta-code/src/llm/openrouter/
 - ✅ Save OpenRouter preferences to config.toml
 - ✅ Handle API key storage securely
 
-### Phase 4: Reasoning Engine Integration
+### ⏳ Phase 4: Reasoning Engine Integration - PENDING
 **Goal**: Update reasoning-engine to work with OpenRouter
 
-#### 4.1 Update LLM Client Adapter
+#### ❌ 4.1 Update LLM Client Adapter - PENDING
 - **File**: `crates/reasoning-engine/src/lib.rs` (or create new adapter)
-- Replace Gemini client references with OpenRouter client
-- Create `OpenRouterLlmClientAdapter` implementing `LlmClient` trait
-- Handle OpenRouter-specific response formats
-- Integrate with streaming engine
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: Replace Gemini client references with OpenRouter client
+- ❌ **TODO**: Create `OpenRouterLlmClientAdapter` implementing `LlmClient` trait
+- ❌ **TODO**: Handle OpenRouter-specific response formats
+- ❌ **TODO**: Integrate with streaming engine
 
-#### 4.2 Update Streaming Integration
+#### ❌ 4.2 Update Streaming Integration - PENDING
 - **File**: `crates/reasoning-engine/src/streaming.rs`
-- Ensure compatibility with OpenRouter SSE format
-- Handle OpenRouter-specific chunk types
-- Maintain existing streaming state machine
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: Ensure compatibility with OpenRouter SSE format
+- ❌ **TODO**: Handle OpenRouter-specific chunk types
+- ❌ **TODO**: Maintain existing streaming state machine
 
-#### 4.3 Update Error Handling
-- Map OpenRouter errors to `ReasoningError`
-- Handle rate limiting and provider failures
-- Implement retry logic for different error types
+#### ❌ 4.3 Update Error Handling - PENDING
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: Map OpenRouter errors to `ReasoningError`
+- ❌ **TODO**: Handle rate limiting and provider failures
+- ❌ **TODO**: Implement retry logic for different error types
 
-### Phase 5: Testing and Validation
+### ⏳ Phase 5: Testing and Validation - PENDING
 **Goal**: Ensure robust migration with comprehensive testing
 
-#### 5.1 Unit Tests
-- Replace all Gemini tests with OpenRouter tests
-- OpenRouter client functionality
-- Configuration loading
-- Streaming chunk processing
-- Error handling scenarios
+#### ✅ 5.1 Unit Tests - PARTIALLY COMPLETED
+- **Status**: ✅ CONFIGURATION TESTS COMPLETED - API TESTS PENDING
+- ✅ **Completed**: Configuration loading tests updated to OpenRouter
+- ✅ **Completed**: Settings panel tests updated to OpenRouter
+- ✅ **Completed**: Core tests updated to use OpenRouter client structure
+- ❌ **TODO**: OpenRouter client functionality tests
+- ❌ **TODO**: Streaming chunk processing tests  
+- ❌ **TODO**: Error handling scenario tests
 
-#### 5.2 Integration Tests
-- End-to-end conversation flows
-- Model switching during conversations
-- Provider fallback scenarios
-- Rate limiting behavior
+#### ❌ 5.2 Integration Tests - PENDING
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: End-to-end conversation flows
+- ❌ **TODO**: Model switching during conversations
+- ❌ **TODO**: Provider fallback scenarios
+- ❌ **TODO**: Rate limiting behavior
 
-#### 5.3 Performance Testing
-- Streaming performance validation
-- Memory usage validation
-- Concurrent request handling
-- Model discovery caching
+#### ❌ 5.3 Performance Testing - PENDING
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: Streaming performance validation
+- ❌ **TODO**: Memory usage validation
+- ❌ **TODO**: Concurrent request handling
+- ❌ **TODO**: Model discovery caching
 
-### Phase 6: Documentation and Cleanup
+### ⏳ Phase 6: Documentation and Cleanup - PENDING
 **Goal**: Complete migration with proper documentation
 
-#### 6.1 Update Documentation
-- README files for both crates
-- Configuration examples
-- Setup guide for users
-- Troubleshooting guide
+#### ❌ 6.1 Update Documentation - PENDING
+- **Status**: ❌ NOT STARTED
+- ❌ **TODO**: README files for both crates
+- ❌ **TODO**: Configuration examples
+- ❌ **TODO**: Setup guide for users
+- ❌ **TODO**: Troubleshooting guide
 
-#### 6.2 Final Cleanup
-- Remove any remaining Gemini references
-- Update all import statements
-- Clean up test files
+#### 🎯 6.2 Final Cleanup - MOSTLY COMPLETED
+- **Status**: ✅ MOSTLY COMPLETED - MINOR REFERENCES REMAIN
+- ✅ **Completed**: Removed main Gemini dependencies and modules
+- ✅ **Completed**: Updated all import statements in core files
+- ✅ **Completed**: Updated test files
+- 🚧 **Remaining**: Some comment references and test names still mention Gemini
+- 🚧 **Remaining**: Some documentation strings and error messages
 
-#### 6.3 Update Dependencies
-- Remove Google AI/Gemini dependencies completely
-- Add required HTTP client dependencies
-- Update Cargo.toml files
+#### ✅ 6.3 Update Dependencies - COMPLETED
+- **Status**: ✅ COMPLETED
+- ✅ **Completed**: Confirmed existing reqwest dependency has required features for OpenRouter
+- ✅ **Completed**: Updated Cargo.toml comments from "Gemini API" to "OpenRouter API"
+- ✅ **Completed**: All compilation successful with OpenRouter placeholders
+
+## 🎯 IMMEDIATE NEXT STEPS
+
+### Priority 1: Complete Phase 2 (LLM Client Implementation)
+The foundation is solid, but we need to implement the actual API functionality:
+
+1. **Implement OpenRouter API calls** in `client.rs`:
+   - `generate()` method with proper OpenAI-compatible request/response
+   - `generate_stream()` method with SSE parsing
+   - Error handling and HTTP client configuration
+
+2. **Implement streaming** in `streaming.rs`:
+   - SSE (Server-Sent Events) parser for OpenRouter responses
+   - Integration with existing reasoning-engine streaming
+
+3. **Implement model discovery** in `models.rs`:
+   - Fetch available models from `/api/v1/models`
+   - Model caching and filtering capabilities
+
+### Priority 2: Enhance GUI (Phase 3.2)
+With basic UI working, enhance the user experience:
+- Dynamic model dropdown with real OpenRouter models
+- Search and filtering capabilities
+- Provider preferences configuration
+
+### Priority 3: Reasoning Engine Integration (Phase 4)
+Ensure the reasoning engine works seamlessly with OpenRouter:
+- Update adapters to work with OpenRouter client
+- Test multi-step reasoning with OpenRouter models
+
+## 🚀 WHAT'S WORKING NOW
+
+✅ **Full Compilation**: All code compiles successfully with OpenRouter placeholders
+✅ **Configuration System**: Complete OpenRouter configuration with TOML persistence
+✅ **GUI Integration**: Basic settings panel with OpenRouter fields
+✅ **Module Structure**: Clean OpenRouter module structure replacing Gemini
+✅ **Test Framework**: All tests pass with OpenRouter configuration
+
+## ⚠️ WHAT'S NOT WORKING YET
+
+❌ **API Functionality**: OpenRouter client methods return placeholder errors
+❌ **Model Discovery**: No actual model fetching from OpenRouter API
+❌ **Streaming**: No actual SSE parsing implementation
+❌ **Dynamic UI**: Model dropdown still uses text input instead of searchable list
 
 ## Implementation Details
 
 ### Key Dependencies to Add
 ```toml
-# For OpenRouter client
-reqwest = { version = "0.11", features = ["json", "stream"] }
-tokio-stream = "0.1"
-futures-util = "0.3"
+# For OpenRouter client - ALREADY AVAILABLE
+reqwest = { version = "0.11", features = ["json", "stream"] } ✅ CONFIRMED
+tokio-stream = "0.1"  # May be needed for advanced streaming
+futures-util = "0.3" ✅ CONFIRMED
 ```
 
 ### Key Dependencies to Remove
 ```toml
-# Remove Gemini-related dependencies
+# Remove Gemini-related dependencies - RESEARCH NEEDED
 google-generativeai = "0.2.0"  # or whatever version was used
 ```
 
 ### Model Selection UI Component
 ```rust
-// Pseudo-code for model selection UI
+// Pseudo-code for model selection UI - TODO: IMPLEMENT
 struct ModelSelector {
     available_models: Vec<OpenRouterModel>,
     filtered_models: Vec<OpenRouterModel>,
@@ -338,19 +394,19 @@ impl ModelSelector {
 
 ## Timeline Estimate
 
-- **Phase 1**: 1-2 days (Configuration)
-- **Phase 2**: 4-5 days (Client Implementation)
-- **Phase 3**: 2-3 days (GUI Integration)
-- **Phase 4**: 2-3 days (Reasoning Engine)
-- **Phase 5**: 2-3 days (Testing)
-- **Phase 6**: 1 day (Documentation/Cleanup)
+- ✅ **Phase 1**: 1-2 days (Configuration) - **COMPLETED**
+- 🚧 **Phase 2**: 4-5 days (Client Implementation) - **~1 day completed, 3-4 days remaining**
+- 🎯 **Phase 3**: 2-3 days (GUI Integration) - **~1 day completed, 1-2 days remaining**
+- ⏳ **Phase 4**: 2-3 days (Reasoning Engine) - **Not started**
+- ⏳ **Phase 5**: 2-3 days (Testing) - **Basic tests completed, integration tests remain**
+- ⏳ **Phase 6**: 1 day (Documentation/Cleanup) - **Mostly completed**
 
-**Total**: 12-17 days
+**Revised Total**: 9-14 days remaining of original 12-17 day estimate
 
 ## Next Steps
 
-1. Start with Phase 1 (Configuration Migration)
-2. Implement TDD approach - write tests first
-3. Create feature branch for OpenRouter migration
-4. Implement phases incrementally with testing
-5. Complete replacement of all Gemini code 
+1. ✅ ~~Start with Phase 1 (Configuration Migration)~~ - **COMPLETED**
+2. 🚧 **CURRENT**: Complete Phase 2 (LLM Client Implementation) - **Priority 1**
+3. 🎯 **NEXT**: Enhance Phase 3 (Dynamic Model Selection) - **Priority 2**
+4. ⏳ **THEN**: Implement Phase 4 (Reasoning Engine Integration) - **Priority 3**
+5. ⏳ **FINALLY**: Complete Phase 5 (Testing) and Phase 6 (Documentation) 
