@@ -261,9 +261,6 @@ pub struct AppConfig {
     /// Optional tenant ID for this configuration (used as default for CLI/server operations)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
-    /// Number of threads for Rayon parallel processing (for controlling GPU memory usage)
-    #[serde(default = "default_rayon_num_threads")]
-    pub rayon_num_threads: usize,
 }
 
 /// Configuration settings related to indexing.
@@ -292,7 +289,6 @@ impl Default for AppConfig {
             cors_allowed_origins: None, // Default to None (no CORS headers or restrictive default by tower-http)
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
-            rayon_num_threads: default_rayon_num_threads(),
         }
     }
 }
@@ -517,10 +513,6 @@ fn default_cors_allow_credentials() -> bool {
     true // Common default for development, might be stricter in production
 }
 
-fn default_rayon_num_threads() -> usize {
-    4 // Default to 4 threads
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,7 +600,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
-            rayon_num_threads: default_rayon_num_threads(),
         };
 
         // Save and load
@@ -670,7 +661,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: default_cors_allow_credentials(),
             tenant_id: None,
-            rayon_num_threads: default_rayon_num_threads(),
         };
         
         // Should use the custom path from config

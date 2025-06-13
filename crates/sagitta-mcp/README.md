@@ -45,7 +45,6 @@ Add a server configuration like this to your Cursor `mcp.json` file (e.g., `~/.c
       "cwd": "/path/to/your/sagitta-workspace",
       "env": {
         "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:/home/adam/onnxruntime-linux-x64-gpu-1.20.0/lib/", // Adjust to your environment
-        "RAYON_NUM_THREADS": "12", // Adjust to your environment
         "RUST_LOG": "info,sagitta_mcp=info" // Optional: Set log level
       }
     }
@@ -59,7 +58,6 @@ Add a server configuration like this to your Cursor `mcp.json` file (e.g., `~/.c
 *   `args`: Should include `"stdio"` to run in stdio mode.
 *   `cwd`: Absolute path to the workspace root (where `sagitta-mcp` can find its own config, etc.).
 *   `env.LD_LIBRARY_PATH`: Path(s) to ONNX Runtime libraries (and CUDA if applicable). Adjust to your environment. Use `PATH` on Windows.
-*   `env.RAYON_NUM_THREADS` (optional): Limit parallel threads for Rayon. Adjust to your environment.
 *   `env.RUST_LOG` (optional): Configure logging. Example: `info,sagitta_mcp=debug` for more verbose logs from this server.
 
 *(Server logs are typically sent to stderr and might be visible in Cursor's MCP logs or developer tools depending on Cursor's version).* 
@@ -74,8 +72,7 @@ Open your terminal. You need to set necessary environment variables and then run
 
 ```bash
 # Adjust these paths and values for your specific environment
-export LD_LIBRARY_PATH="/usr/local/cuda-12.8/lib64:/home/adam/onnxruntime-linux-x64-gpu-1.20.0/lib/:$LD_LIBRARY_PATH"
-export RAYON_NUM_THREADS="12"
+export LD_LIBRARY_PATH="/usr/local/cuda-12.8/lib64:/home/adam/onnxruntime-linux-x64-gpu-1.20.0/lib/"
 export RUST_LOG="info,sagitta_mcp=info" # Optional: for logging
 
 # Navigate to your workspace if the binary needs to resolve paths relative to it (e.g., for config)
@@ -113,7 +110,7 @@ Add a server configuration like this to your Cursor `mcp.json` file:
 
 **Important Notes for HTTP/SSE Mode:**
 
-*   You are responsible for starting, stopping, and managing the `sagitta-mcp` server process, including ensuring it has the correct environment variables (`LD_LIBRARY_PATH`, `RAYON_NUM_THREADS`, `RUST_LOG`, etc.).
+*   You are responsible for starting, stopping, and managing the `sagitta-mcp` server process, including ensuring it has the correct environment variables (`LD_LIBRARY_PATH`, `RUST_LOG`, etc.).
 *   If you update the `sagitta-mcp` binary, you'll need to manually restart your server process.
 *   Ensure the host and port are accessible to Cursor.
 

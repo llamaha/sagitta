@@ -37,7 +37,6 @@ pub struct SettingsPanel {
     performance_batch_size: u32,
     performance_collection_name_prefix: String,
     performance_max_file_size_bytes: u32,
-    rayon_num_threads: u32,
     
     // Sagitta Code config fields
     pub openrouter_api_key: String,
@@ -68,7 +67,6 @@ impl SettingsPanel {
             performance_batch_size: initial_app_config.performance.batch_size as u32,
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
-            rayon_num_threads: initial_app_config.rayon_num_threads as u32,
             
             // Sagitta Code config fields from initial_sagitta_code_config
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
@@ -326,27 +324,6 @@ impl SettingsPanel {
                             });
                             ui.add_space(16.0);
                             
-                            // Rayon threads settings
-                            ui.heading("Rayon Threads");
-                            ui.label("Controls the number of parallel threads used during repository syncing and indexing. Lower values reduce GPU memory usage but may be slower.");
-                            Grid::new("rayon_threads_grid")
-                                .num_columns(2)
-                                .spacing([8.0, 8.0])
-                                .show(ui, |ui| {
-                                    ui.label("Number of Threads:");
-                                    ui.add(egui::DragValue::new(&mut self.rayon_num_threads)
-                                        .clamp_range(1..=128)
-                                        .speed(1.0));
-                                    ui.end_row();
-                                    
-                                    ui.label("Recommendation:");
-                                    ui.label(RichText::new("For 8GB GPU: 2-6 threads. Reduce if you get GPU memory errors.")
-                                        .small()
-                                        .color(theme.hint_text_color()));
-                                    ui.end_row();
-                                });
-                            ui.add_space(16.0);
-                            
                             // Status message
                             if let Some((message, color)) = &self.status_message {
                                 ui.label(RichText::new(message).color(*color));
@@ -431,9 +408,6 @@ impl SettingsPanel {
         config.performance.collection_name_prefix = self.performance_collection_name_prefix.clone();
         config.performance.max_file_size_bytes = self.performance_max_file_size_bytes as u64;
         
-        // Rayon threads
-        config.rayon_num_threads = self.rayon_num_threads as usize;
-        
         config
     }
     
@@ -487,32 +461,31 @@ mod tests {
 
     fn create_test_sagitta_config() -> AppConfig {
         AppConfig {
-            qdrant_url: "http://test:6334".to_string(),
+            qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: Some("/test/model.onnx".to_string()),
             onnx_tokenizer_path: Some("/test/tokenizer".to_string()),
-            server_api_key_path: None,
             repositories_base_path: Some("/test/repos".to_string()),
             vocabulary_base_path: Some("/test/vocab".to_string()),
-            repositories: Vec::new(),
+            tenant_id: Some("test-tenant".to_string()),
+            repositories: vec![],
             active_repository: None,
-            indexing: IndexingConfig {
-                max_concurrent_upserts: 8,
+            indexing: sagitta_search::config::IndexingConfig {
+                max_concurrent_upserts: 10,
             },
-            performance: PerformanceConfig {
-                batch_size: 200,
+            performance: sagitta_search::config::PerformanceConfig {
+                batch_size: 150,
                 collection_name_prefix: "test_sagitta".to_string(),
-                max_file_size_bytes: 2097152,
+                max_file_size_bytes: 2 * 1024 * 1024, // 2MB
                 vector_dimension: 384,
             },
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
+            server_api_key_path: None,
             oauth: None,
             tls_enable: false,
             tls_cert_path: None,
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant-123".to_string()),
-            rayon_num_threads: 8,
         }
     }
 
@@ -539,17 +512,16 @@ mod tests {
         let panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Check values from create_test_sagitta_config()
-        assert_eq!(panel.qdrant_url, "http://test:6334"); // Corrected expected value
+        assert_eq!(panel.qdrant_url, "http://localhost:6334");
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
-        assert_eq!(panel.tenant_id, Some("test-tenant-123".to_string()));
-        assert_eq!(panel.indexing_max_concurrent_upserts, 8);
-        assert_eq!(panel.performance_batch_size, 200);
+        assert_eq!(panel.tenant_id, Some("test-tenant".to_string()));
+        assert_eq!(panel.indexing_max_concurrent_upserts, 10);
+        assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
-        assert_eq!(panel.performance_max_file_size_bytes, 2097152);
-        assert_eq!(panel.rayon_num_threads, 8);
+        assert_eq!(panel.performance_max_file_size_bytes, 2 * 1024 * 1024);
 
         // Check values from create_test_sagitta_code_config()
         assert_eq!(panel.openrouter_api_key, "test-api-key");
@@ -563,17 +535,16 @@ mod tests {
     async fn test_settings_panel_config_population() {
         let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
-        assert_eq!(panel.qdrant_url, "http://test:6334");
+        assert_eq!(panel.qdrant_url, "http://localhost:6334");
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
-        assert_eq!(panel.tenant_id, Some("test-tenant-123".to_string()));
-        assert_eq!(panel.indexing_max_concurrent_upserts, 8);
-        assert_eq!(panel.performance_batch_size, 200);
+        assert_eq!(panel.tenant_id, Some("test-tenant".to_string()));
+        assert_eq!(panel.indexing_max_concurrent_upserts, 10);
+        assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
-        assert_eq!(panel.performance_max_file_size_bytes, 2097152);
-        assert_eq!(panel.rayon_num_threads, 8);
+        assert_eq!(panel.performance_max_file_size_bytes, 2 * 1024 * 1024);
     }
 
     #[tokio::test]
@@ -613,7 +584,6 @@ mod tests {
         panel.performance_batch_size = 300;
         panel.performance_collection_name_prefix = "custom_sagitta".to_string();
         panel.performance_max_file_size_bytes = 4194304;
-        panel.rayon_num_threads = 16;
         
         let config = panel.create_updated_sagitta_config();
         
@@ -627,7 +597,6 @@ mod tests {
         assert_eq!(config.performance.batch_size, 300);
         assert_eq!(config.performance.collection_name_prefix, "custom_sagitta");
         assert_eq!(config.performance.max_file_size_bytes, 4194304);
-        assert_eq!(config.rayon_num_threads, 16);
     }
 
     #[test]
@@ -678,7 +647,6 @@ mod tests {
         assert_eq!(panel.performance_batch_size as usize, default_app_config.performance.batch_size);
         assert_eq!(panel.performance_collection_name_prefix, default_app_config.performance.collection_name_prefix);
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
-        assert_eq!(panel.rayon_num_threads as usize, default_app_config.rayon_num_threads);
 
         // Check SagittaCodeConfig derived fields
         assert_eq!(panel.openrouter_api_key, default_sagitta_code_config.openrouter.api_key.unwrap_or_default());
@@ -698,7 +666,6 @@ mod tests {
             onnx_model_path: Some("initial/model.onnx".to_string()),
             onnx_tokenizer_path: Some("initial/tokenizer/".to_string()),
             tenant_id: Some("initial-tenant".to_string()),
-            rayon_num_threads: 2,
             ..Default::default()
         };
         let initial_sagitta_code_config = SagittaCodeConfig {
@@ -721,7 +688,6 @@ mod tests {
         assert_eq!(panel.qdrant_url, initial_app_config.qdrant_url);
         assert_eq!(panel.onnx_model_path, initial_app_config.onnx_model_path);
         assert_eq!(panel.tenant_id, initial_app_config.tenant_id);
-        assert_eq!(panel.rayon_num_threads as usize, initial_app_config.rayon_num_threads);
 
         assert_eq!(panel.openrouter_api_key, initial_sagitta_code_config.openrouter.api_key.unwrap_or_default());
         assert_eq!(panel.openrouter_model, initial_sagitta_code_config.openrouter.model);
@@ -746,7 +712,6 @@ mod tests {
         panel.qdrant_url = "http://updated-qdrant:6334".to_string();
         panel.onnx_model_path = Some("updated/model.onnx".to_string());
         panel.tenant_id = Some("updated-tenant".to_string());
-        panel.rayon_num_threads = 6;
         panel.openrouter_api_key = "updated-api-key".to_string();
         panel.openrouter_model = "updated-gemini-model".to_string();
         panel.openrouter_max_reasoning_steps = 90;
@@ -777,14 +742,11 @@ mod tests {
         assert_eq!(loaded_app_config_from_file.qdrant_url, updated_sagitta_config.qdrant_url);
         assert_eq!(loaded_app_config_from_file.onnx_model_path, updated_sagitta_config.onnx_model_path);
         assert_eq!(loaded_app_config_from_file.tenant_id, updated_sagitta_config.tenant_id);
-        assert_eq!(loaded_app_config_from_file.rayon_num_threads, updated_sagitta_config.rayon_num_threads);
-        // Add more AppConfig fields if necessary
 
         assert_eq!(loaded_sagitta_code_config_from_file.openrouter.api_key, updated_sagitta_code_config.openrouter.api_key);
         assert_eq!(loaded_sagitta_code_config_from_file.openrouter.model, updated_sagitta_code_config.openrouter.model);
         assert_eq!(loaded_sagitta_code_config_from_file.openrouter.max_reasoning_steps, updated_sagitta_code_config.openrouter.max_reasoning_steps);
         assert_eq!(loaded_sagitta_code_config_from_file.ui.theme, updated_sagitta_code_config.ui.theme);
-        // Add more SagittaCodeConfig fields if necessary
     }
 }
 

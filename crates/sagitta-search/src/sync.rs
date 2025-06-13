@@ -701,7 +701,6 @@ mod tests {
                 vector_dimension: 384,
             },
             embedding: EmbeddingEngineConfig::default(),
-            rayon_num_threads: 4,
             repositories: Vec::new(),
             active_repository: None,
             server_api_key_path: None,

@@ -516,10 +516,6 @@ impl RepositoryManager {
         let client_clone = self.client.as_ref().unwrap().clone();
         let config_clone_for_sync = self.config.lock().await.clone(); // Clone for the sync call
         
-        let rayon_threads = config_clone_for_sync.rayon_num_threads;
-        std::env::set_var("RAYON_NUM_THREADS", rayon_threads.to_string());
-        log::info!("Set RAYON_NUM_THREADS to {} for sync operation for repo: {}", rayon_threads, name);
-        
         let sync_result_future = sync_repository(
             client_clone,
             &repo_config,
@@ -998,25 +994,6 @@ mod tests {
         
         repo_manager.cleanup_gpu_memory_after_sync().await;
         repo_manager.cleanup_gpu_memory_after_sync().await;
-    }
-
-    #[tokio::test]
-    async fn test_rayon_threads_environment_variable_setting() {
-        let (repo_manager, _temp_dir) = create_test_repo_manager_with_temp_config().await;
-        
-        {
-            let mut config_guard = repo_manager.config.lock().await;
-            config_guard.rayon_num_threads = 6;
-        }
-        
-        let config_clone = repo_manager.config.lock().await.clone();
-        let rayon_threads = config_clone.rayon_num_threads;
-        std::env::set_var("RAYON_NUM_THREADS", rayon_threads.to_string());
-        
-        let env_value = std::env::var("RAYON_NUM_THREADS").unwrap();
-        assert_eq!(env_value, "6");
-        
-        std::env::remove_var("RAYON_NUM_THREADS");
     }
 
     /// Tests that the RepositoryManager can be initialized without panicking

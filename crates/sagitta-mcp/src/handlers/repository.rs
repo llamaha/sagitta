@@ -1535,15 +1535,15 @@ mod tests {
 
         Arc::new(RwLock::new(AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some(model_path.to_string_lossy().into_owned()),
-            onnx_tokenizer_path: Some(tokenizer_path.to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
             server_api_key_path: None,
-            repositories_base_path: Some(temp_dir_path.join("repos").to_string_lossy().into_owned()),
-            vocabulary_base_path: Some(temp_dir_path.join("vocab").to_string_lossy().into_owned()),
+            repositories_base_path: Some(temp_dir_path_str.clone()),
+            vocabulary_base_path: Some(temp_dir_path_str.clone()),
             repositories,
             active_repository: None,
-            indexing: IndexingConfig::default(),
-            performance: PerformanceConfig::default(),
+            indexing: sagitta_search::config::IndexingConfig::default(),
+            performance: sagitta_search::config::PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
             oauth: None,
             tls_enable: false,
@@ -1552,7 +1552,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
+            // Remove rayon_num_threads field
         }))
     }
     
@@ -1569,8 +1569,8 @@ mod tests {
 
         let test_config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some(model_base.join("model.onnx").to_string_lossy().into_owned()),
-            onnx_tokenizer_path: Some(model_base.join("tokenizer.json").to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
             server_api_key_path: None,
             repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
@@ -1590,7 +1590,7 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
+            // Remove rayon_num_threads field
         };
 
         let config = Arc::new(RwLock::new(test_config));

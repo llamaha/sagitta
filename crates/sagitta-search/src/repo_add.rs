@@ -314,7 +314,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: None,
-            rayon_num_threads: 4,
         }
     }
 
@@ -353,7 +352,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
         };
         
         // Use branch-aware collection naming - the default branch will be "main" or "master"
@@ -447,7 +445,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
         };
         
         // Use branch-aware collection naming - determine the actual branch name
@@ -546,7 +543,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
         };
 
         let repo_name_str = "test_cloned_repo";
@@ -644,7 +640,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("3c62d9d6-0762-4063-bc26-23d4ced05d53".to_string()),
-            rayon_num_threads: 4,
         };
         
         // Use branch-aware collection naming - the test specifies "master" branch

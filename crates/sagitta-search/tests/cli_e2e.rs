@@ -10,17 +10,17 @@ use std::fs::File;
 use std::io::Write;
 use std::process::Stdio;
 use anyhow::Context as AnyhowContext;
+use std::time::Duration;
 
 const WORKSPACE_ROOT: &str = "/home/adam/repos/sagitta"; // Fixed path
 const TEST_TENANT_ID: &str = "test_tenant_001";
 const QDRANT_URL_TEST: &str = "http://localhost:6334";
-const VECTOR_DIMENSION: i32 = 384;
+const VECTOR_DIMENSION: u64 = 384;
 
 // Performance optimizations for faster tests
-const FAST_BATCH_SIZE: i32 = 16; // Smaller batch size for faster processing
+const FAST_BATCH_SIZE: usize = 25; // Smaller batch size for faster processing
 const FAST_EMBED_BATCH_SIZE: i32 = 8; // Smaller embedding batch size
-const FAST_MAX_FILE_SIZE: i32 = 512 * 1024; // 512KB limit for faster processing
-const FAST_RAYON_THREADS: &str = "2"; // Fewer threads to reduce resource contention
+const FAST_MAX_FILE_SIZE: u64 = 64 * 1024; // 64KB limit for faster processing
 
 // Use smaller, faster repositories for testing
 const SMALL_REPO_URL: &str = "https://github.com/octocat/Hello-World.git"; // Very small repo
@@ -66,7 +66,6 @@ impl TestEnv {
         writeln!(config_file, "onnx_model_path = \"{}\"", get_onnx_model_path_config_str()).unwrap();
         writeln!(config_file, "onnx_tokenizer_path = \"{}\"", get_onnx_tokenizer_path_config_str()).unwrap();
         writeln!(config_file, "vector_dimension = {}", VECTOR_DIMENSION).unwrap(); 
-        writeln!(config_file, "rayon_num_threads = 2").unwrap(); // Limit threads for faster tests
         
         writeln!(config_file, "\n[performance]").unwrap();
         writeln!(config_file, "batch_size = {}", FAST_BATCH_SIZE).unwrap(); 
@@ -335,19 +334,16 @@ mod phase_1_repo_commands {
         env.cli_cmd()?.args(&["repo", "add", "--name", &repo_name_rb, "--url", repo_url_rb]).assert().success();
 
         let mut cmd_sync_rb = env.cli_cmd()?;
-        cmd_sync_rb.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
         cmd_sync_rb.args(&["repo", "sync", &repo_name_rb]);
         cmd_sync_rb.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
         
         env.cli_cmd()?.args(&["repo", "use", &repo_name_sk]).assert().success();
 
         let mut cmd_sync_sk_active = env.cli_cmd()?;
-        cmd_sync_sk_active.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
         cmd_sync_sk_active.args(&["repo", "sync"] as &[&str]);
         cmd_sync_sk_active.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
 
         let mut cmd_sync_sk_force_ext = env.cli_cmd()?;
-        cmd_sync_sk_force_ext.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads
         cmd_sync_sk_force_ext.args(&["repo", "sync", "--force", "--extensions", "md,txt"]); // Only sync small files
         cmd_sync_sk_force_ext.assert().success().stdout(contains("Successfully synced repository").or(contains("Sync operation finished")));
 
@@ -489,7 +485,6 @@ mod phase_3_edit_commands {
         assert!(git_commit_status.success(), "git commit failed for edit_test.py in {:?}", repo_clone_path);
 
         let mut cmd_sync = env.cli_cmd()?;
-        cmd_sync.env("RAYON_NUM_THREADS", FAST_RAYON_THREADS); // Use fewer threads for faster sync
         cmd_sync.args(&["repo", "sync", repo_name]);
         cmd_sync.assert().success(); 
 

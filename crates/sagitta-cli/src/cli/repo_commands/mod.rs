@@ -228,7 +228,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
         };
         config
     }
@@ -299,7 +298,6 @@ mod tests {
             cors_allowed_origins: None,
             cors_allow_credentials: true,
             tenant_id: Some("test-tenant".to_string()),
-            rayon_num_threads: 4,
         }
     }
 
