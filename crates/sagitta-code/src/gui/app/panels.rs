@@ -1810,8 +1810,8 @@ impl ModelSelectionPanel {
             show_only_tool_capable: false,
             show_only_reasoning: false,
             show_only_vision: false,
-            sort_by: ModelSortBy::Name,
-            view_mode: ModelViewMode::Cards,
+            sort_by: ModelSortBy::Created, // Changed default to show newest first
+            view_mode: ModelViewMode::Table, // Changed default to Table
             loading: false,
             error_message: None,
             model_manager: None,
@@ -2222,21 +2222,16 @@ impl ModelSelectionPanel {
         }
 
         // Capability filters
+        if self.show_only_tool_capable {
+            models.retain(|model| self.is_tool_capable(model));
+        }
+
         if self.show_only_vision {
-            models.retain(|model| {
-                model.architecture.input_modalities.contains(&"image".to_string()) ||
-                model.id.to_lowercase().contains("vision") ||
-                model.description.to_lowercase().contains("vision")
-            });
+            models.retain(|model| self.is_vision_capable(model));
         }
 
         if self.show_only_reasoning {
-            models.retain(|model| {
-                model.id.to_lowercase().contains("reasoning") ||
-                model.id.to_lowercase().contains("think") ||
-                model.id.to_lowercase().contains("o1") ||
-                model.description.to_lowercase().contains("reasoning")
-            });
+            models.retain(|model| self.is_reasoning_capable(model));
         }
 
         // Sort models
@@ -2434,6 +2429,9 @@ impl ModelSelectionPanel {
 
                         // Capability filters
                         ui.horizontal(|ui| {
+                            if ui.checkbox(&mut self.show_only_tool_capable, "Tools/Functions").changed() {
+                                self.apply_filters();
+                            }
                             if ui.checkbox(&mut self.show_only_vision, "Vision").changed() {
                                 self.apply_filters();
                             }
@@ -2604,27 +2602,44 @@ impl ModelSelectionPanel {
                     // Model details
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            // Pricing
+                            // Creation date
+                            let creation_date = self.format_creation_date(model.created);
+                            let date_color = if model.created > (std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                                Color32::from_rgb(0, 180, 0) // Green for recent
+                            } else if model.created > (std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                                Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                            } else {
+                                Color32::from_rgb(128, 128, 128) // Gray for old
+                            };
+                            ui.colored_label(date_color, format!("📅 Added {}", creation_date));
+
+                            // Pricing - show per million tokens for readability
                             if let (Ok(prompt_price), Ok(completion_price)) = (
                                 model.pricing.prompt.parse::<f64>(),
                                 model.pricing.completion.parse::<f64>()
                             ) {
-                                ui.label(format!("💰 ${:.6} / ${:.6} per token", prompt_price, completion_price));
+                                ui.label(format!("💰 ${:.3} / ${:.3} per 1M tokens", 
+                                    prompt_price * 1_000_000.0, 
+                                    completion_price * 1_000_000.0));
                             }
                             
                             // Context length
                             ui.label(format!("📏 {}k context", model.context_length / 1000));
                             
                             // Capabilities
-                            let mut capabilities = Vec::new();
-                            if model.architecture.input_modalities.contains(&"image".to_string()) {
-                                capabilities.push("👁️ Vision");
-                            }
-                            if model.id.to_lowercase().contains("think") || model.id.to_lowercase().contains("reasoning") {
-                                capabilities.push("🧠 Reasoning");
-                            }
+                            let capabilities = self.get_model_capabilities(model);
                             if !capabilities.is_empty() {
-                                ui.label(capabilities.join(" "));
+                                ui.horizontal_wrapped(|ui| {
+                                    for capability in &capabilities {
+                                        ui.small(capability);
+                                    }
+                                });
                             }
                         });
                     });
@@ -2661,11 +2676,49 @@ impl ModelSelectionPanel {
                     selected_model = Some(model.id.clone());
                 }
                 
-                // Quick info
-                if let Ok(price) = model.pricing.prompt.parse::<f64>() {
-                    ui.label(format!("${:.6}", price));
+                // Creation date (compact)
+                let creation_date = self.format_creation_date(model.created);
+                let date_color = if model.created > (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                    Color32::from_rgb(0, 180, 0) // Green for recent
+                } else if model.created > (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                    Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                } else {
+                    Color32::from_rgb(128, 128, 128) // Gray for old
+                };
+                ui.colored_label(date_color, creation_date);
+                
+                // Quick info - show pricing per million tokens
+                if let (Ok(prompt_price), Ok(completion_price)) = (
+                    model.pricing.prompt.parse::<f64>(),
+                    model.pricing.completion.parse::<f64>()
+                ) {
+                    ui.label(format!("${:.3}/${:.3}/1M", 
+                        prompt_price * 1_000_000.0, 
+                        completion_price * 1_000_000.0));
+                } else {
+                    ui.label("N/A");
                 }
+                
                 ui.label(format!("{}k", model.context_length / 1000));
+                
+                // Show key capabilities
+                let capabilities = self.get_model_capabilities(model);
+                if !capabilities.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        for capability in capabilities.iter().take(3) { // Show first 3 capabilities
+                            ui.small(capability);
+                        }
+                        if capabilities.len() > 3 {
+                            ui.small("...");
+                        }
+                    });
+                }
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Favorite toggle
@@ -2694,7 +2747,8 @@ impl ModelSelectionPanel {
                 // Header
                 ui.label(RichText::new("Model").strong());
                 ui.label(RichText::new("Provider").strong());
-                ui.label(RichText::new("Price").strong());
+                ui.label(RichText::new("Created").strong());
+                ui.label(RichText::new("Price (per 1M)").strong());
                 ui.label(RichText::new("Context").strong());
                 ui.label(RichText::new("Capabilities").strong());
                 ui.label(RichText::new("Actions").strong());
@@ -2715,9 +2769,31 @@ impl ModelSelectionPanel {
                     // Provider
                     ui.label(model.id.split('/').next().unwrap_or("Unknown"));
                     
-                    // Price
-                    if let Ok(price) = model.pricing.prompt.parse::<f64>() {
-                        ui.label(format!("${:.6}", price));
+                    // Creation date
+                    let creation_date = self.format_creation_date(model.created);
+                    let date_color = if model.created > (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                        Color32::from_rgb(0, 180, 0) // Green for recent
+                    } else if model.created > (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                        Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                    } else {
+                        Color32::from_rgb(128, 128, 128) // Gray for old
+                    };
+                    ui.colored_label(date_color, creation_date);
+                    
+                    // Price (show both prompt and completion)
+                    if let (Ok(prompt_price), Ok(completion_price)) = (
+                        model.pricing.prompt.parse::<f64>(),
+                        model.pricing.completion.parse::<f64>()
+                    ) {
+                        ui.label(format!("${:.3} / ${:.3}", 
+                            prompt_price * 1_000_000.0, 
+                            completion_price * 1_000_000.0));
                     } else {
                         ui.label("N/A");
                     }
@@ -2726,14 +2802,16 @@ impl ModelSelectionPanel {
                     ui.label(format!("{}k", model.context_length / 1000));
                     
                     // Capabilities
-                    let mut caps = Vec::new();
-                    if model.architecture.input_modalities.contains(&"image".to_string()) {
-                        caps.push("Vision");
+                    let capabilities = self.get_model_capabilities(model);
+                    if capabilities.is_empty() {
+                        ui.label("Basic");
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            for capability in &capabilities {
+                                ui.small(capability);
+                            }
+                        });
                     }
-                    if model.id.to_lowercase().contains("think") {
-                        caps.push("Reasoning");
-                    }
-                    ui.label(caps.join(", "));
                     
                     // Actions
                     ui.horizontal(|ui| {
@@ -2748,6 +2826,174 @@ impl ModelSelectionPanel {
             });
         
         selected_model
+    }
+
+    /// Check if a model is tool/function calling capable
+    fn is_tool_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        // Check supported_parameters for "tools" capability
+        if let Some(ref params) = model.supported_parameters {
+            return params.iter().any(|p| p == "tools" || p == "tool_choice");
+        }
+        
+        // Fallback to heuristics for models without supported_parameters data
+        let id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+        
+        // Modern models that definitely support tools
+        id.contains("gpt-4") || 
+        id.contains("gpt-3.5-turbo") ||
+        id.contains("claude-3") || 
+        id.contains("claude-2") ||
+        id.contains("gemini") ||
+        id.contains("mistral") ||
+        (id.contains("llama") && (id.contains("3.") || id.contains("-3"))) ||
+        id.contains("deepseek") ||
+        description.contains("function") ||
+        description.contains("tool") ||
+        model.created > 1672531200 // After Jan 1, 2023
+    }
+
+    /// Check if a model supports reasoning mode
+    fn is_reasoning_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        if let Some(ref params) = model.supported_parameters {
+            return params.iter().any(|p| p == "reasoning" || p == "include_reasoning");
+        }
+        
+        // Fallback heuristics
+        let id = model.id.to_lowercase();
+        id.contains("o1") || 
+        id.contains("reasoning") ||
+        id.contains("think")
+    }
+
+    /// Check if a model supports vision/image inputs
+    fn is_vision_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        // Check architecture for image input modality
+        if model.architecture.input_modalities.contains(&"image".to_string()) {
+            return true;
+        }
+        
+        // Check supported_parameters (some models may support images without explicit architecture)
+        if let Some(ref params) = model.supported_parameters {
+            if params.iter().any(|p| p.contains("image")) {
+                return true;
+            }
+        }
+        
+        // Fallback heuristics
+        let id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+        id.contains("vision") || 
+        id.contains("gpt-4o") || 
+        id.contains("claude-3") ||
+        id.contains("gemini") ||
+        description.contains("vision") ||
+        description.contains("image")
+    }
+
+    /// Get a user-friendly list of supported capabilities for a model
+    fn get_model_capabilities(&self, model: &crate::llm::openrouter::api::ModelInfo) -> Vec<String> {
+        let mut capabilities = Vec::new();
+        
+        if let Some(ref params) = model.supported_parameters {
+            // Map supported parameters to user-friendly capability names
+            for param in params {
+                match param.as_str() {
+                    "tools" | "tool_choice" => {
+                        if !capabilities.contains(&"🔧 Tools".to_string()) {
+                            capabilities.push("🔧 Tools".to_string());
+                        }
+                    }
+                    "reasoning" | "include_reasoning" => {
+                        if !capabilities.contains(&"🧠 Reasoning".to_string()) {
+                            capabilities.push("🧠 Reasoning".to_string());
+                        }
+                    }
+                    "structured_outputs" | "response_format" => {
+                        if !capabilities.contains(&"📋 Structured".to_string()) {
+                            capabilities.push("📋 Structured".to_string());
+                        }
+                    }
+                    "max_tokens" => capabilities.push("📏 Length Control".to_string()),
+                    "temperature" => capabilities.push("🌡️ Temperature".to_string()),
+                    "top_p" => capabilities.push("🎯 Top-P".to_string()),
+                    "stop" => capabilities.push("🛑 Stop Sequences".to_string()),
+                    "frequency_penalty" => capabilities.push("🔄 Frequency Penalty".to_string()),
+                    "presence_penalty" => capabilities.push("🎭 Presence Penalty".to_string()),
+                    "seed" => capabilities.push("🎲 Deterministic".to_string()),
+                    _ => {} // Skip unknown parameters
+                }
+            }
+        }
+        
+        // Add vision capability if supported
+        if self.is_vision_capable(model) {
+            capabilities.insert(0, "👁️ Vision".to_string());
+        }
+        
+        // If no supported_parameters, fall back to basic heuristics
+        if capabilities.is_empty() {
+            if self.is_tool_capable(model) {
+                capabilities.push("🔧 Tools".to_string());
+            }
+            if self.is_reasoning_capable(model) {
+                capabilities.push("🧠 Reasoning".to_string());
+            }
+            if self.is_vision_capable(model) {
+                capabilities.push("👁️ Vision".to_string());
+            }
+        }
+        
+        capabilities
+    }
+
+    /// Format the model creation date in a user-friendly way
+    fn format_creation_date(&self, created_timestamp: u64) -> String {
+        use std::time::{SystemTime, UNIX_EPOCH, Duration};
+        
+        let created_time = UNIX_EPOCH + Duration::from_secs(created_timestamp);
+        let now = SystemTime::now();
+        
+        if let Ok(duration_since) = now.duration_since(created_time) {
+            let days_ago = duration_since.as_secs() / (24 * 60 * 60);
+            
+            if days_ago == 0 {
+                "Today".to_string()
+            } else if days_ago == 1 {
+                "Yesterday".to_string()
+            } else if days_ago < 7 {
+                format!("{} days ago", days_ago)
+            } else if days_ago < 30 {
+                let weeks_ago = days_ago / 7;
+                if weeks_ago == 1 {
+                    "1 week ago".to_string()
+                } else {
+                    format!("{} weeks ago", weeks_ago)
+                }
+            } else if days_ago < 365 {
+                let months_ago = days_ago / 30;
+                if months_ago == 1 {
+                    "1 month ago".to_string()
+                } else {
+                    format!("{} months ago", months_ago)
+                }
+            } else {
+                let years_ago = days_ago / 365;
+                if years_ago == 1 {
+                    "1 year ago".to_string()
+                } else {
+                    format!("{} years ago", years_ago)
+                }
+            }
+        } else {
+            // If timestamp is in the future, try to format as date
+            use chrono::{DateTime, Utc, TimeZone};
+            if let Some(datetime) = Utc.timestamp_opt(created_timestamp as i64, 0).single() {
+                datetime.format("%Y-%m-%d").to_string()
+            } else {
+                "Unknown".to_string()
+            }
+        }
     }
 }
 
