@@ -298,22 +298,48 @@ impl OpenRouterClient {
             if obj.get("type").and_then(|t| t.as_str()) == Some("object") {
                 obj.insert("additionalProperties".to_string(), serde_json::Value::Bool(false));
                 
-                // Recursively apply to nested properties
+                // Get the required fields list (if any)
+                let required_fields: std::collections::HashSet<String> = obj
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                
+                // Recursively apply to nested properties and handle optional fields
                 if let Some(properties) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
-                    for (_, prop_value) in properties.iter_mut() {
+                    for (prop_name, prop_value) in properties.iter_mut() {
+                        // If this property is not required, ensure it allows null
+                        if !required_fields.contains(prop_name) {
+                            if let Some(prop_obj) = prop_value.as_object_mut() {
+                                // Check if type is already an array
+                                if let Some(type_value) = prop_obj.get_mut("type") {
+                                    match type_value {
+                                        serde_json::Value::String(type_str) => {
+                                            // Convert single type to array with null
+                                            if type_str != "null" {
+                                                *type_value = serde_json::json!([type_str.clone(), "null"]);
+                                            }
+                                        }
+                                        serde_json::Value::Array(type_array) => {
+                                            // Ensure null is in the array if not already present
+                                            let has_null = type_array.iter().any(|v| v.as_str() == Some("null"));
+                                            if !has_null {
+                                                type_array.push(serde_json::Value::String("null".to_string()));
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Recursively process nested schemas
                         *prop_value = self.make_schema_strict_compliant(prop_value.clone());
                     }
                 }
                 
-                // Ensure all properties are marked as required for strict mode
-                // This is a simplification - in a real implementation you might want to 
-                // make optional fields have "null" as an additional type instead
-                if let Some(properties) = obj.get("properties").and_then(|p| p.as_object()) {
-                    if !obj.contains_key("required") {
-                        let required_fields: Vec<_> = properties.keys().cloned().collect();
-                        obj.insert("required".to_string(), serde_json::json!(required_fields));
-                    }
-                }
+                // Don't override the required array - respect what the tool definition specifies
+                // The tool definitions should already have the correct required fields
             }
             
             // Handle arrays
@@ -809,16 +835,16 @@ mod tests {
         let config = create_test_config();
         let client = OpenRouterClient::new(&config).unwrap();
         
-        let openrouter_response = ChatCompletionResponse {
+        let response = ChatCompletionResponse {
             id: "test-id".to_string(),
             object: "chat.completion".to_string(),
             created: 1234567890,
-            model: "openai/gpt-4o".to_string(),
+            model: "test-model".to_string(),
             choices: vec![Choice {
                 index: 0,
                 message: ChatMessage {
                     role: "assistant".to_string(),
-                    content: Some("Hello! I'm doing well, thank you for asking.".to_string()),
+                    content: Some("Hello, world!".to_string()),
                     tool_calls: None,
                     tool_call_id: None,
                     name: None,
@@ -826,28 +852,100 @@ mod tests {
                 finish_reason: Some("stop".to_string()),
             }],
             usage: Some(Usage {
-                prompt_tokens: 20,
-                completion_tokens: 15,
-                total_tokens: 35,
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
             }),
         };
         
-        let converted = client.convert_response(openrouter_response);
+        let converted = client.convert_response(response);
         
         assert_eq!(converted.message.role, Role::Assistant);
         assert_eq!(converted.message.parts.len(), 1);
         
         if let MessagePart::Text { text } = &converted.message.parts[0] {
-            assert_eq!(text, "Hello! I'm doing well, thank you for asking.");
+            assert_eq!(text, "Hello, world!");
         } else {
             panic!("Expected text message part");
         }
         
         assert!(converted.usage.is_some());
         let usage = converted.usage.unwrap();
-        assert_eq!(usage.prompt_tokens, 20);
-        assert_eq!(usage.completion_tokens, 15);
-        assert_eq!(usage.total_tokens, 35);
-        assert_eq!(usage.model_name, "openai/gpt-4o");
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 5);
+        assert_eq!(usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn test_make_schema_strict_compliant() {
+        let config = create_test_config();
+        let client = OpenRouterClient::new(&config).unwrap();
+        
+        // Test schema with optional fields (like our ReadFileTool)
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["file_path"],
+            "properties": {
+                "repository_name": {
+                    "type": ["string", "null"],
+                    "description": "Optional repository name"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Required file path"
+                },
+                "start_line": {
+                    "type": ["integer", "null"],
+                    "description": "Optional start line"
+                }
+            }
+        });
+        
+        let result = client.make_schema_strict_compliant(schema);
+        
+        // Should have additionalProperties: false
+        assert_eq!(result["additionalProperties"], false);
+        
+        // Should preserve the original required array
+        let required = result["required"].as_array().unwrap();
+        assert_eq!(required.len(), 1);
+        assert_eq!(required[0], "file_path");
+        
+        // Optional fields should already have null type, so they should be unchanged
+        let props = result["properties"].as_object().unwrap();
+        assert_eq!(props["repository_name"]["type"], serde_json::json!(["string", "null"]));
+        assert_eq!(props["file_path"]["type"], "string");
+        assert_eq!(props["start_line"]["type"], serde_json::json!(["integer", "null"]));
+    }
+
+    #[test]
+    fn test_make_schema_strict_compliant_converts_optional_fields() {
+        let config = create_test_config();
+        let client = OpenRouterClient::new(&config).unwrap();
+        
+        // Test schema where optional fields don't already have null type
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Required name"
+                },
+                "age": {
+                    "type": "integer",
+                    "description": "Optional age"
+                }
+            }
+        });
+        
+        let result = client.make_schema_strict_compliant(schema);
+        
+        // Required field should remain unchanged
+        let props = result["properties"].as_object().unwrap();
+        assert_eq!(props["name"]["type"], "string");
+        
+        // Optional field should now allow null
+        assert_eq!(props["age"]["type"], serde_json::json!(["integer", "null"]));
     }
 } 

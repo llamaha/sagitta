@@ -354,7 +354,7 @@ impl Tool for ShellExecutionTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["command", "language", "working_directory", "allow_network", "env_vars", "timeout_seconds"],
+                "required": ["command"],
                 "properties": {
                     "command": {
                         "type": "string",
@@ -453,7 +453,7 @@ impl Tool for StreamingShellExecutionTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["command", "language", "working_directory", "allow_network", "env_vars", "timeout_seconds"],
+                "required": ["command"],
                 "properties": {
                     "command": {
                         "type": "string",
@@ -539,25 +539,25 @@ mod tests {
         assert!(props["command"]["description"].is_string());
 
         assert!(props.contains_key("language"));
-        assert_eq!(props["language"]["type"], "string");
+        assert_eq!(props["language"]["type"], json!(["string", "null"]));
         assert!(props["language"]["description"].is_string());
         // Note: language field no longer has a default value since it's optional for backwards compatibility
 
         assert!(props.contains_key("working_directory"));
-        assert_eq!(props["working_directory"]["type"], "string");
+        assert_eq!(props["working_directory"]["type"], json!(["string", "null"]));
         assert!(props["working_directory"]["description"].is_string());
 
         assert!(props.contains_key("allow_network"));
-        assert_eq!(props["allow_network"]["type"], "boolean");
+        assert_eq!(props["allow_network"]["type"], json!(["boolean", "null"]));
         assert!(props["allow_network"]["description"].is_string());
         // Note: allow_network field no longer has a default value since it's optional for backwards compatibility
 
         assert!(props.contains_key("env_vars"));
-        assert_eq!(props["env_vars"]["type"], "object");
+        assert_eq!(props["env_vars"]["type"], json!(["object", "null"]));
         assert!(props["env_vars"]["description"].is_string());
 
         assert!(props.contains_key("timeout_seconds"));
-        assert_eq!(props["timeout_seconds"]["type"], "number");
+        assert_eq!(props["timeout_seconds"]["type"], json!(["number", "null"]));
         assert!(props["timeout_seconds"]["description"].is_string());
         
         let required = params_schema["required"].as_array().expect("Required should be an array");
@@ -1111,45 +1111,123 @@ exit 0
         }
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_tool_result_json_structure() {
         let temp_dir = TempDir::new().unwrap();
-        // Configure the tool to use the temp directory as the base directory for security validation
-        let config = LocalExecutorConfig {
-            base_dir: temp_dir.path().to_path_buf(),
-            auto_approve_safe_commands: true,
-            enable_approval_flow: false,
-            ..Default::default()
-        };
-        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
-        let params = serde_json::json!({
-            "command": "echo 'test output'",
-            "working_directory": temp_dir.path().to_string_lossy()
+        let params = json!({
+            "command": "echo 'test output'"
         });
         
         let result = tool.execute(params).await.unwrap();
         
         if let ToolResult::Success(value) = result {
-            // Verify the JSON structure that tool cards expect
-            assert!(value.is_object());
-            let obj = value.as_object().unwrap();
-            
-            // Required fields for tool result cards
-            assert!(obj.contains_key("exit_code"));
-            assert!(obj.contains_key("stdout"));
-            assert!(obj.contains_key("stderr"));
-            assert!(obj.contains_key("execution_time_ms"));
-            assert!(obj.contains_key("container_image"));
-            assert!(obj.contains_key("timed_out"));
+            // Verify the JSON structure matches ShellExecutionResult
+            assert!(value.get("exit_code").is_some());
+            assert!(value.get("stdout").is_some());
+            assert!(value.get("stderr").is_some());
+            assert!(value.get("execution_time_ms").is_some());
+            assert!(value.get("working_directory").is_some());
+            assert!(value.get("container_image").is_some());
+            assert!(value.get("timed_out").is_some());
             
             // Verify types
-            assert!(obj["exit_code"].is_number());
-            assert!(obj["stdout"].is_string());
-            assert!(obj["stderr"].is_string());
-            assert!(obj["execution_time_ms"].is_number());
-            assert!(obj["container_image"].is_string());
-            assert!(obj["timed_out"].is_boolean());
+            assert!(value["exit_code"].is_number());
+            assert!(value["stdout"].is_string());
+            assert!(value["stderr"].is_string());
+            assert!(value["execution_time_ms"].is_number());
+            assert!(value["working_directory"].is_string());
+            assert!(value["container_image"].is_string());
+            assert!(value["timed_out"].is_boolean());
+        } else {
+            panic!("Expected successful tool result");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_minimal_parameters_shell_execution() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Test with only the required "command" parameter
+        let params = json!({
+            "command": "echo 'minimal test'"
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with minimal parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["exit_code"], 0);
+            assert!(value["stdout"].as_str().unwrap().contains("minimal test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_minimal_parameters_streaming_shell_execution() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = StreamingShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Test with only the required "command" parameter
+        let params = json!({
+            "command": "echo 'minimal streaming test'"
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Streaming tool should work with minimal parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["exit_code"], 0);
+            assert!(value["stdout"].as_str().unwrap().contains("minimal streaming test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_optional_parameters_handling() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Test with some optional parameters provided
+        let params = json!({
+            "command": "echo 'optional test'",
+            "language": "shell",
+            "working_directory": temp_dir.path().to_str().unwrap(),
+            "env_vars": {
+                "TEST_VAR": "test_value"
+            }
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with optional parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["exit_code"], 0);
+            assert!(value["stdout"].as_str().unwrap().contains("optional test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_null_optional_parameters() {
+        let temp_dir = TempDir::new().unwrap();
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        
+        // Test with explicit null values for optional parameters
+        let params = json!({
+            "command": "echo 'null test'",
+            "language": null,
+            "working_directory": null,
+            "allow_network": null,
+            "env_vars": null,
+            "timeout_seconds": null
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with null optional parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["exit_code"], 0);
+            assert!(value["stdout"].as_str().unwrap().contains("null test"));
         }
     }
 } 

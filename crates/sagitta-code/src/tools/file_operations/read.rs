@@ -113,7 +113,7 @@ impl Tool for ReadFileTool {
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["repository_name", "file_path", "start_line", "end_line"],
+                "required": ["file_path"],
                 "properties": {
                     "repository_name": {
                         "type": ["string", "null"],
