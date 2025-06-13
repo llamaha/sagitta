@@ -116,7 +116,7 @@ impl Tool for RepositoryMapTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "repository_map".to_string(),
-            description: "Generate a high-level map of a repository's code structure. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.".to_string(),
+            description: "Generate a high-level map of a repository's code structure using the repo-mapper crate for reliable name extraction. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
             parameters: serde_json::json!({

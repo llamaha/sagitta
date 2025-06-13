@@ -719,28 +719,25 @@ mod tests {
 
     #[test]
     fn test_openrouter_client_creation_with_env_api_key() {
-        // Use a unique environment variable name to avoid conflicts with other tests
-        let env_var_name = "OPENROUTER_API_KEY_TEST_345";
+        // Save the current environment variable state
+        let original_env_key = std::env::var("OPENROUTER_API_KEY").ok();
         
         // Clear any existing environment variable first
-        std::env::remove_var(env_var_name);
         std::env::remove_var("OPENROUTER_API_KEY");
         
         // Test with API key from environment
-        std::env::set_var(env_var_name, "env-test-key");
+        std::env::set_var("OPENROUTER_API_KEY", "env-test-key");
         
-        // Modify the client creation to check our test variable first
         let mut config = create_test_config();
         config.openrouter.api_key = None; // No API key in config
         
-        // Temporarily override the API key lookup for this test
-        std::env::set_var("OPENROUTER_API_KEY", std::env::var(env_var_name).unwrap());
-        
         let client = OpenRouterClient::new(&config);
         
-        // Clean up environment variables immediately after creation attempt
-        std::env::remove_var(env_var_name);
-        std::env::remove_var("OPENROUTER_API_KEY");
+        // Restore the original environment variable state immediately
+        match original_env_key {
+            Some(key) => std::env::set_var("OPENROUTER_API_KEY", key),
+            None => std::env::remove_var("OPENROUTER_API_KEY"),
+        }
         
         match client {
             Ok(_) => {
@@ -754,6 +751,9 @@ mod tests {
 
     #[test]
     fn test_openrouter_client_creation_missing_api_key() {
+        // Save the current environment variable state
+        let original_env_key = std::env::var("OPENROUTER_API_KEY").ok();
+        
         let mut config = create_test_config();
         config.openrouter.api_key = None;
         
@@ -761,6 +761,13 @@ mod tests {
         std::env::remove_var("OPENROUTER_API_KEY");
         
         let client = OpenRouterClient::new(&config);
+        
+        // Restore the original environment variable state immediately
+        match original_env_key {
+            Some(key) => std::env::set_var("OPENROUTER_API_KEY", key),
+            None => std::env::remove_var("OPENROUTER_API_KEY"),
+        }
+        
         assert!(client.is_err(), "OpenRouter client creation should fail without API key");
         
         if let Err(e) = client {

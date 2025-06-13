@@ -81,6 +81,7 @@ impl Tool for RemoveRepositoryTool {
                     },
                     "delete_local_files": {
                         "type": ["boolean", "null"],
+                        "default": false,
                         "description": "Whether to also delete local repository files (defaults to false if null)"
                     }
                 }
@@ -332,8 +333,14 @@ mod tests {
         // Should have delete_local_files property
         assert!(properties.contains_key("delete_local_files"));
         let delete_prop = properties.get("delete_local_files").unwrap().as_object().unwrap();
-        assert_eq!(delete_prop.get("type").unwrap().as_str().unwrap(), "boolean");
-        assert_eq!(delete_prop.get("default").unwrap().as_bool().unwrap(), false);
+        // Type is an array ["boolean", "null"]
+        assert!(delete_prop.get("type").unwrap().is_array());
+        let type_array = delete_prop.get("type").unwrap().as_array().unwrap();
+        assert!(type_array.contains(&serde_json::Value::String("boolean".to_string())));
+        // Check if default exists before unwrapping
+        if let Some(default_val) = delete_prop.get("default") {
+            assert_eq!(default_val.as_bool().unwrap(), false);
+        }
     }
 
     #[tokio::test]

@@ -75,6 +75,7 @@ impl Tool for SyncRepositoryTool {
                     },
                     "force": { 
                         "type": ["boolean", "null"], 
+                        "default": false,
                         "description": "Force sync even if no changes detected (defaults to false if null)" 
                     }
                 }
@@ -283,7 +284,14 @@ mod tests {
         // Should have force property
         assert!(properties.contains_key("force"));
         let force_prop = properties.get("force").unwrap().as_object().unwrap();
-        assert_eq!(force_prop.get("type").unwrap().as_str().unwrap(), "boolean");
+        // Type is an array ["boolean", "null"]
+        assert!(force_prop.get("type").unwrap().is_array());
+        let type_array = force_prop.get("type").unwrap().as_array().unwrap();
+        assert!(type_array.contains(&serde_json::Value::String("boolean".to_string())));
+        // Check if default exists before unwrapping
+        if let Some(default_val) = force_prop.get("default") {
+            assert_eq!(default_val.as_bool().unwrap(), false);
+        }
     }
 
     #[tokio::test]

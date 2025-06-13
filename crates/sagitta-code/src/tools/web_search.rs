@@ -256,7 +256,7 @@ Focus on getting started quickly with this library.",
         
         // Default: general search with focus on actionable information
         format!(
-            "Search for: {}
+            "Find current, accurate information about: {}
 
 Be concise and provide actionable information. Include:
 1. Direct links to official sources
