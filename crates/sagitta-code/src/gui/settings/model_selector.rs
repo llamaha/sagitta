@@ -334,8 +334,12 @@ impl ModelSelector {
                 pricing: crate::llm::openrouter::api::Pricing {
                     prompt: prompt_price.to_string(),
                     completion: completion_price.to_string(),
-                    request: "0.0".to_string(),
-                    image: "0.0".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
                 },
                 context_length: ctx_len,
                 architecture: crate::llm::openrouter::api::Architecture {
@@ -346,6 +350,9 @@ impl ModelSelector {
                 top_provider: crate::llm::openrouter::api::TopProvider {
                     is_moderated: false,
                 },
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
             }
         }).collect()
     }

@@ -193,6 +193,12 @@ pub struct ModelInfo {
     pub architecture: Architecture,
     pub pricing: Pricing,
     pub top_provider: TopProvider,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hugging_face_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_request_limits: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_parameters: Option<Vec<String>>,
 }
 
 /// Model architecture details
@@ -208,8 +214,18 @@ pub struct Architecture {
 pub struct Pricing {
     pub prompt: String,
     pub completion: String,
-    pub request: String,
-    pub image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_cache_read: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_cache_write: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub internal_reasoning: Option<String>,
 }
 
 /// Top provider information
@@ -222,4 +238,119 @@ pub struct TopProvider {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelsResponse {
     pub data: Vec<ModelInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_info_deserialization() {
+        // Sample response based on OpenRouter API documentation
+        let json_response = r#"
+        {
+          "data": [
+            {
+              "id": "anthropic/claude-3.5-sonnet",
+              "name": "Claude 3.5 Sonnet",
+              "created": 1741818122,
+              "description": "Anthropic's most intelligent model",
+              "architecture": {
+                "input_modalities": [
+                  "text",
+                  "image"
+                ],
+                "output_modalities": [
+                  "text"
+                ],
+                "tokenizer": "GPT"
+              },
+              "top_provider": {
+                "is_moderated": true
+              },
+              "pricing": {
+                "prompt": "0.0000007",
+                "completion": "0.0000007",
+                "image": "0",
+                "request": "0",
+                "input_cache_read": "0",
+                "input_cache_write": "0",
+                "web_search": "0",
+                "internal_reasoning": "0"
+              },
+              "context_length": 128000,
+              "hugging_face_id": "anthropic/claude-3.5-sonnet",
+              "per_request_limits": {
+                "key": "value"
+              },
+              "supported_parameters": [
+                "temperature",
+                "max_tokens"
+              ]
+            }
+          ]
+        }
+        "#;
+
+        let result: Result<ModelsResponse, _> = serde_json::from_str(json_response);
+        assert!(result.is_ok(), "Failed to deserialize: {:?}", result.err());
+        
+        let response = result.unwrap();
+        assert_eq!(response.data.len(), 1);
+        
+        let model = &response.data[0];
+        assert_eq!(model.id, "anthropic/claude-3.5-sonnet");
+        assert_eq!(model.name, "Claude 3.5 Sonnet");
+        assert_eq!(model.context_length, 128000);
+        assert_eq!(model.pricing.prompt, "0.0000007");
+        assert_eq!(model.pricing.completion, "0.0000007");
+        assert!(model.pricing.input_cache_read.is_some());
+        assert!(model.hugging_face_id.is_some());
+        assert!(model.supported_parameters.is_some());
+    }
+
+    #[test]
+    fn test_model_info_minimal_deserialization() {
+        // Test with minimal required fields only
+        let json_response = r#"
+        {
+          "data": [
+            {
+              "id": "test/model",
+              "name": "Test Model",
+              "created": 1234567890,
+              "description": "A test model",
+              "architecture": {
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "tokenizer": "GPT"
+              },
+              "top_provider": {
+                "is_moderated": false
+              },
+              "pricing": {
+                "prompt": "0.001",
+                "completion": "0.002",
+                "image": "0",
+                "request": "0"
+              },
+              "context_length": 4096
+            }
+          ]
+        }
+        "#;
+
+        let result: Result<ModelsResponse, _> = serde_json::from_str(json_response);
+        assert!(result.is_ok(), "Failed to deserialize minimal model: {:?}", result.err());
+        
+        let response = result.unwrap();
+        assert_eq!(response.data.len(), 1);
+        
+        let model = &response.data[0];
+        assert_eq!(model.id, "test/model");
+        assert!(model.hugging_face_id.is_none());
+        assert!(model.per_request_limits.is_none());
+        assert!(model.supported_parameters.is_none());
+        assert!(model.pricing.input_cache_read.is_none());
+    }
 } 

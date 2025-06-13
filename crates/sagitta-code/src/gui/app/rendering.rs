@@ -111,6 +111,10 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         // Ctrl+P: Toggle create project panel
         app.panels.toggle_panel(ActivePanel::CreateProject);
     }
+    if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
+        // Ctrl+M: Toggle model selection panel
+        app.panels.toggle_panel(ActivePanel::ModelSelection);
+    }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
         app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
@@ -525,6 +529,36 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             // Render the settings panel
             app.settings_panel.render(ctx, app.state.current_theme);
         },
+        ActivePanel::ModelSelection => {
+            // Handle model selection
+            if let Some(selected_model) = app.panels.render_model_selection_panel(ctx, app.state.current_theme) {
+                // Update the current model in the app configuration
+                app.panels.set_current_model(selected_model.clone());
+                
+                // Update the OpenRouter configuration
+                let config = app.config.clone();
+                let model_id = selected_model.clone();
+                tokio::spawn(async move {
+                    let mut config_guard = config.lock().await;
+                    config_guard.openrouter.model = model_id.clone();
+                    
+                    if let Err(err) = crate::config::save_config(&*config_guard) {
+                        log::error!("Failed to save model selection: {}", err);
+                    } else {
+                        log::info!("Model selection saved: {}", model_id);
+                    }
+                });
+                
+                // Add event to events panel
+                app.panels.events_panel.add_event(
+                    super::panels::SystemEventType::Info,
+                    format!("Selected model: {}", selected_model)
+                );
+                
+                // Close the model selection panel
+                app.panels.toggle_panel(ActivePanel::None);
+            }
+        },
         ActivePanel::Conversation => {
             // Use the sophisticated ConversationSidebar component instead of basic UI
             let theme = app.state.current_theme;
@@ -563,6 +597,7 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.label(egui::RichText::new("Ctrl + E: Toggle Events Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + L: Toggle Logging Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
+                ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + Shift + A: Toggle Analytics Panel").color(theme.text_color()));
                 ui.label(egui::RichText::new("Ctrl + Shift + T: Toggle Theme Customizer").color(theme.text_color()));
                 ui.separator();
@@ -1074,6 +1109,7 @@ mod tests {
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
             ActivePanel::CreateProject,
+            ActivePanel::ModelSelection,
         ];
         
         // Test that we can match on all variants
@@ -1088,6 +1124,7 @@ mod tests {
                 ActivePanel::Analytics => {},
                 ActivePanel::ThemeCustomizer => {},
                 ActivePanel::CreateProject => {},
+                ActivePanel::ModelSelection => {},
             }
         }
     }
@@ -1183,6 +1220,11 @@ mod tests {
         app.panels.toggle_panel(ActivePanel::CreateProject);
         assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
         assert!(app.panels.create_project_panel.visible);
+        
+        // Test Ctrl+M for ModelSelection panel
+        app.panels.toggle_panel(ActivePanel::ModelSelection);
+        assert_eq!(app.panels.active_panel, ActivePanel::ModelSelection);
+        assert!(app.panels.model_selection_panel.visible);
         
         // Test F1 for hotkeys modal (simulated)
         app.state.show_hotkeys_modal = false;
