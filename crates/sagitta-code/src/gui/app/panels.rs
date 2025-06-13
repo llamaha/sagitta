@@ -21,6 +21,7 @@ pub enum ActivePanel {
     Analytics,
     ThemeCustomizer,
     CreateProject,
+    ModelSelection,
 }
 
 /// Create Project panel for creating new project workspaces
@@ -119,10 +120,11 @@ impl CreateProjectPanel {
                                 ui.add(TextEdit::singleline(&mut self.project_path)
                                     .hint_text("Enter or browse project path"));
                                 if ui.button("📁").clicked() {
-                                    // TODO: Implement file dialog for path selection
-                                    // For now, just use current directory
-                                    if let Ok(current_dir) = std::env::current_dir() {
-                                        self.project_path = current_dir.to_string_lossy().to_string();
+                                    // Use native file dialog if available, otherwise use current directory
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .set_directory(&self.project_path)
+                                        .pick_folder() {
+                                        self.project_path = path.to_string_lossy().to_string();
                                     }
                                 }
                             });
@@ -503,6 +505,7 @@ pub struct PanelManager {
     pub analytics_panel: AnalyticsPanel,
     pub theme_customizer: ThemeCustomizer,
     pub create_project_panel: CreateProjectPanel,
+    pub model_selection_panel: ModelSelectionPanel,
 }
 
 impl PanelManager {
@@ -515,7 +518,30 @@ impl PanelManager {
             analytics_panel: AnalyticsPanel::new(),
             theme_customizer: ThemeCustomizer::new(),
             create_project_panel: CreateProjectPanel::new(),
+            model_selection_panel: ModelSelectionPanel::new(),
         }
+    }
+
+    /// Create a new panel manager with model manager for enhanced model selection
+    pub fn with_model_manager(model_manager: std::sync::Arc<crate::llm::openrouter::models::ModelManager>) -> Self {
+        let mut manager = Self::new();
+        manager.model_selection_panel = ModelSelectionPanel::with_model_manager(model_manager);
+        manager
+    }
+
+    /// Set the current model in the model selection panel
+    pub fn set_current_model(&mut self, model: String) {
+        self.model_selection_panel.set_current_model(model);
+    }
+
+    /// Get the current model from the model selection panel
+    pub fn get_current_model(&self) -> &str {
+        self.model_selection_panel.get_current_model()
+    }
+
+    /// Render the model selection panel and return any selected model
+    pub fn render_model_selection_panel(&mut self, ctx: &Context, theme: AppTheme) -> Option<String> {
+        self.model_selection_panel.render(ctx, theme)
     }
 
     pub fn show_preview(&mut self, title: &str, content: &str) {
@@ -605,6 +631,16 @@ impl PanelManager {
                     self.active_panel = ActivePanel::CreateProject;
                 }
             },
+            ActivePanel::ModelSelection => {
+                if matches!(self.active_panel, ActivePanel::ModelSelection) {
+                    self.model_selection_panel.toggle(); // Close
+                    self.active_panel = ActivePanel::None;
+                } else {
+                    self.close_all_panels();
+                    self.model_selection_panel.toggle(); // Open
+                    self.active_panel = ActivePanel::ModelSelection;
+                }
+            },
             ActivePanel::None => {
                 self.close_all_panels();
             }
@@ -636,6 +672,11 @@ impl PanelManager {
             ActivePanel::CreateProject => {
                 if self.create_project_panel.visible {
                     self.create_project_panel.toggle(); // Close
+                }
+            },
+            ActivePanel::ModelSelection => {
+                if self.model_selection_panel.visible {
+                    self.model_selection_panel.toggle(); // Close
                 }
             },
             _ => {}
@@ -1702,6 +1743,1260 @@ impl AnalyticsPanel {
     }
 }
 
+/// Model selection panel for choosing OpenRouter models
+pub struct ModelSelectionPanel {
+    pub visible: bool,
+    pub current_model: String,
+    pub available_models: Vec<crate::llm::openrouter::api::ModelInfo>,
+    pub filtered_models: Vec<crate::llm::openrouter::api::ModelInfo>,
+    pub favorites: Vec<String>,
+    pub search_query: String,
+    pub selected_provider: Option<String>,
+    pub selected_category: Option<crate::llm::openrouter::models::ModelCategory>,
+    pub price_range: (f64, f64), // min, max price per million tokens
+    pub min_context_length: u64,
+    pub show_only_tool_capable: bool,
+    pub show_only_reasoning: bool,
+    pub show_only_vision: bool,
+    pub sort_by: ModelSortBy,
+    pub view_mode: ModelViewMode,
+    pub loading: bool,
+    pub error_message: Option<String>,
+    pub model_manager: Option<std::sync::Arc<crate::llm::openrouter::models::ModelManager>>,
+    pub last_refresh: std::time::Instant,
+    pub selected_for_comparison: Vec<String>, // Model IDs for comparison
+    pub show_comparison: bool,
+    // Channel for receiving async model loading results
+    pub pending_refresh_receiver: Option<std::sync::mpsc::Receiver<Result<Vec<crate::llm::openrouter::api::ModelInfo>, crate::llm::openrouter::error::OpenRouterError>>>,
+    // Manual model entry
+    pub manual_model_entry: String,
+    pub show_manual_entry: bool,
+    // Render loop optimization
+    pub last_pending_check: std::time::Instant,
+}
+
+/// How to sort the model list
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelSortBy {
+    Name,
+    Provider,
+    Price,
+    ContextLength,
+    Created,
+    Popularity,
+}
+
+/// How to display the models
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModelViewMode {
+    List,
+    Cards,
+    Table,
+}
+
+impl ModelSelectionPanel {
+    pub fn new() -> Self {
+        let mut panel = Self {
+            visible: false,
+            current_model: String::new(),
+            available_models: Vec::new(),
+            filtered_models: Vec::new(),
+            favorites: Vec::new(),
+            search_query: String::new(),
+            selected_provider: None,
+            selected_category: None,
+            price_range: (0.0, 1.0), // $0 to $1 per million tokens
+            min_context_length: 0,
+            show_only_tool_capable: false,
+            show_only_reasoning: false,
+            show_only_vision: false,
+            sort_by: ModelSortBy::Created, // Changed default to show newest first
+            view_mode: ModelViewMode::Table, // Changed default to Table
+            loading: false,
+            error_message: None,
+            model_manager: None,
+            last_refresh: std::time::Instant::now() - std::time::Duration::from_secs(3600),
+            selected_for_comparison: Vec::new(),
+            show_comparison: false,
+            pending_refresh_receiver: None,
+            manual_model_entry: String::new(),
+            show_manual_entry: false,
+            last_pending_check: std::time::Instant::now(),
+        };
+        
+        // Add some default popular models to avoid empty panel
+        panel.add_default_models();
+        panel
+    }
+
+    pub fn with_model_manager(model_manager: std::sync::Arc<crate::llm::openrouter::models::ModelManager>) -> Self {
+        let mut panel = Self::new();
+        panel.model_manager = Some(model_manager);
+        panel
+    }
+
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+        
+        // Auto-load models when panel is first opened
+        if self.visible && self.should_refresh() {
+            self.refresh_models();
+        }
+    }
+
+    pub fn set_current_model(&mut self, model: String) {
+        self.current_model = model;
+    }
+
+    pub fn get_current_model(&self) -> &str {
+        &self.current_model
+    }
+
+    fn add_default_models(&mut self) {
+        // Add only recent code-capable models with tool support (last 4 months)
+        // These are high-quality models suitable for coding tasks
+        use crate::llm::openrouter::api::{ModelInfo, Pricing, Architecture, TopProvider};
+        
+        let four_months_ago = 1725148800; // September 1, 2024 (approximate)
+        
+        let default_models = vec![
+            // Claude 3.5 Sonnet - Excellent for coding with tool support
+            ModelInfo {
+                id: "anthropic/claude-3.5-sonnet".to_string(),
+                name: "Claude 3.5 Sonnet".to_string(),
+                description: "Anthropic's most intelligent model with excellent coding capabilities and tool support".to_string(),
+                pricing: Pricing {
+                    prompt: "0.000003".to_string(),
+                    completion: "0.000015".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
+                },
+                context_length: 200000,
+                architecture: Architecture {
+                    input_modalities: vec!["text".to_string(), "image".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    tokenizer: "claude".to_string(),
+                },
+                top_provider: TopProvider {
+                    is_moderated: false,
+                },
+                created: 1719792000, // June 2024
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
+            },
+            // GPT-4o - Strong coding model with tool support
+            ModelInfo {
+                id: "openai/gpt-4o".to_string(),
+                name: "GPT-4o".to_string(),
+                description: "OpenAI's flagship model with excellent coding capabilities and comprehensive tool support".to_string(),
+                pricing: Pricing {
+                    prompt: "0.000005".to_string(),
+                    completion: "0.000015".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
+                },
+                context_length: 128000,
+                architecture: Architecture {
+                    input_modalities: vec!["text".to_string(), "image".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    tokenizer: "gpt".to_string(),
+                },
+                top_provider: TopProvider {
+                    is_moderated: false,
+                },
+                created: 1715040000, // May 2024
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
+            },
+            // GPT-4o Mini - Fast and efficient with tool support
+            ModelInfo {
+                id: "openai/gpt-4o-mini".to_string(),
+                name: "GPT-4o Mini".to_string(),
+                description: "Fast, efficient coding model with tool support and excellent value".to_string(),
+                pricing: Pricing {
+                    prompt: "0.00000015".to_string(),
+                    completion: "0.0000006".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
+                },
+                context_length: 128000,
+                architecture: Architecture {
+                    input_modalities: vec!["text".to_string(), "image".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    tokenizer: "gpt".to_string(),
+                },
+                top_provider: TopProvider {
+                    is_moderated: false,
+                },
+                created: 1721260800, // July 2024
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
+            },
+            // DeepSeek Coder V2 - Specialized coding model
+            ModelInfo {
+                id: "deepseek/deepseek-coder".to_string(),
+                name: "DeepSeek Coder V2".to_string(),
+                description: "Specialized coding model with excellent programming capabilities and tool support".to_string(),
+                pricing: Pricing {
+                    prompt: "0.00000014".to_string(),
+                    completion: "0.00000028".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
+                },
+                context_length: 64000,
+                architecture: Architecture {
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    tokenizer: "deepseek".to_string(),
+                },
+                top_provider: TopProvider {
+                    is_moderated: false,
+                },
+                created: 1730419200, // November 2024
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
+            },
+            // Llama 3.3 70B - Recent open-source model with tool support
+            ModelInfo {
+                id: "meta-llama/llama-3.3-70b-instruct".to_string(),
+                name: "Llama 3.3 70B Instruct".to_string(),
+                description: "Meta's latest open-source model with strong coding performance and tool support".to_string(),
+                pricing: Pricing {
+                    prompt: "0.00000059".to_string(),
+                    completion: "0.00000079".to_string(),
+                    request: Some("0.0".to_string()),
+                    image: Some("0.0".to_string()),
+                    input_cache_read: None,
+                    input_cache_write: None,
+                    web_search: None,
+                    internal_reasoning: None,
+                },
+                context_length: 128000,
+                architecture: Architecture {
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    tokenizer: "llama".to_string(),
+                },
+                top_provider: TopProvider {
+                    is_moderated: false,
+                },
+                created: 1733097600, // December 2024
+                hugging_face_id: None,
+                per_request_limits: None,
+                supported_parameters: None,
+            },
+        ];
+        
+        // Filter to only include models released in the last 4 months
+        self.available_models = default_models.into_iter()
+            .filter(|model| model.created >= four_months_ago)
+            .collect();
+        
+        self.apply_filters();
+    }
+
+    fn should_refresh(&self) -> bool {
+        // Only suggest refresh if we have very few models or it's been a long time
+        self.available_models.len() < 3 || 
+        self.last_refresh.elapsed() > std::time::Duration::from_secs(1800) // 30 minutes
+    }
+
+    fn refresh_models(&mut self) {
+        if let Some(ref model_manager) = self.model_manager {
+            self.loading = true;
+            self.error_message = None;
+            
+            // Clone the model manager for the async task
+            let model_manager_clone = model_manager.clone();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            
+            // Spawn async task to fetch models in a separate thread
+            std::thread::spawn(move || {
+                // Create a new runtime in this separate thread
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = sender.send(Err(crate::llm::openrouter::error::OpenRouterError::ConfigError(
+                            format!("Failed to create async runtime: {}", e)
+                        )));
+                        return;
+                    }
+                };
+                
+                let result = rt.block_on(model_manager_clone.get_available_models(None));
+                let _ = sender.send(result);
+            });
+            
+            // Try to receive the result immediately (non-blocking)
+            match receiver.try_recv() {
+                Ok(Ok(models)) => {
+                    log::info!("Successfully loaded {} models from OpenRouter API", models.len());
+                    self.available_models = models;
+                    self.loading = false;
+                    self.error_message = None;
+                }
+                Ok(Err(e)) => {
+                    log::error!("Failed to load models from OpenRouter API: {}", e);
+                    self.error_message = Some("Unable to connect to OpenRouter API, falling back to default models".to_string());
+                    self.loading = false;
+                    // Keep existing default models as fallback
+                }
+                Err(_) => {
+                    // Channel is empty, async task is still running
+                    // Store the receiver for checking in render loop
+                    log::info!("Model refresh in progress...");
+                    self.error_message = Some("Loading models from OpenRouter API...".to_string());
+                    self.pending_refresh_receiver = Some(receiver);
+                }
+            }
+            
+            self.apply_filters();
+            self.last_refresh = std::time::Instant::now();
+        } else {
+            self.error_message = Some("No model manager available. Check OpenRouter API configuration.".to_string());
+        }
+    }
+
+    /// Check for completed async model loading operations (optimized to prevent excessive calls)
+    fn check_pending_refresh(&mut self) {
+        // Throttle checking to once every 100ms to prevent excessive render loop calls
+        if self.last_pending_check.elapsed() < std::time::Duration::from_millis(100) {
+            return;
+        }
+        self.last_pending_check = std::time::Instant::now();
+        
+        // Only check if we actually have a pending operation
+        if let Some(receiver) = self.pending_refresh_receiver.take() {
+            match receiver.try_recv() {
+                Ok(Ok(models)) => {
+                    log::info!("Successfully loaded {} models from OpenRouter API (async)", models.len());
+                    self.available_models = models;
+                    self.loading = false;
+                    self.error_message = None;
+                    self.apply_filters();
+                }
+                Ok(Err(e)) => {
+                    log::error!("Failed to load models from OpenRouter API (async): {}", e);
+                    self.error_message = Some("Unable to connect to OpenRouter API, falling back to default models".to_string());
+                    self.loading = false;
+                    // Keep existing default models as fallback
+                }
+                Err(_) => {
+                    // Still waiting, put the receiver back
+                    self.pending_refresh_receiver = Some(receiver);
+                }
+            }
+        }
+    }
+
+    /// Force refresh models synchronously (for button clicks)
+    fn force_refresh_models(&mut self) {
+        if let Some(ref model_manager) = self.model_manager {
+            self.loading = true;
+            self.error_message = None;
+            
+            // Use a blocking approach for immediate refresh
+            let model_manager_clone = model_manager.clone();
+            
+            // Use spawn_blocking with a separate thread that creates its own runtime
+            // This avoids the "Cannot start a runtime from within a runtime" error
+            let (sender, receiver) = std::sync::mpsc::channel();
+            
+            std::thread::spawn(move || {
+                // Create a new runtime in this separate thread
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = sender.send(Err(crate::llm::openrouter::error::OpenRouterError::ConfigError(
+                            format!("Failed to create async runtime: {}", e)
+                        )));
+                        return;
+                    }
+                };
+                
+                let result = rt.block_on(model_manager_clone.get_available_models(None));
+                let _ = sender.send(result);
+            });
+            
+            // Wait for the result with a timeout
+            match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(Ok(models)) => {
+                    log::info!("Successfully loaded {} models from OpenRouter API", models.len());
+                    self.available_models = models;
+                    self.error_message = None;
+                }
+                Ok(Err(e)) => {
+                    log::error!("Failed to load models from OpenRouter API: {}", e);
+                    self.error_message = Some("Unable to connect to OpenRouter API, falling back to default models".to_string());
+                    // Keep existing default models as fallback
+                }
+                Err(_) => {
+                    log::error!("Timeout waiting for models from OpenRouter API");
+                    self.error_message = Some("Timeout loading models. Please try again.".to_string());
+                    // Keep existing default models as fallback
+                }
+            }
+            
+            self.loading = false;
+            self.apply_filters();
+            self.last_refresh = std::time::Instant::now();
+        } else {
+            self.error_message = Some("No model manager available. Check OpenRouter API configuration.".to_string());
+        }
+    }
+
+    fn is_programming_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        // Check if model is suitable for programming tasks
+        let model_id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+        
+        // Include models that are good for coding or general purpose
+        model_id.contains("code") || 
+        model_id.contains("gpt") ||
+        model_id.contains("claude") ||
+        model_id.contains("gemini") ||
+        model_id.contains("llama") ||
+        model_id.contains("mistral") ||
+        model_id.contains("deepseek") ||
+        description.contains("code") ||
+        description.contains("programming") ||
+        description.contains("general") ||
+        description.contains("assistant")
+    }
+
+    fn apply_filters(&mut self) {
+        let mut models = self.available_models.clone();
+
+        // Search filter
+        if !self.search_query.is_empty() {
+            let query = self.search_query.to_lowercase();
+            models.retain(|model| {
+                model.id.to_lowercase().contains(&query) ||
+                model.name.to_lowercase().contains(&query) ||
+                model.description.to_lowercase().contains(&query)
+            });
+        }
+
+        // Provider filter
+        if let Some(ref provider) = self.selected_provider {
+            models.retain(|model| model.id.starts_with(&format!("{}/", provider)));
+        }
+
+        // Category filter
+        if let Some(ref category) = self.selected_category {
+            models.retain(|model| self.model_matches_category(model, category));
+        }
+
+        // Price filter
+        models.retain(|model| {
+            if let Ok(price) = model.pricing.prompt.parse::<f64>() {
+                price >= self.price_range.0 && price <= self.price_range.1
+            } else {
+                true // Include models with unparseable pricing
+            }
+        });
+
+        // Context length filter
+        if self.min_context_length > 0 {
+            models.retain(|model| model.context_length >= self.min_context_length);
+        }
+
+        // Capability filters
+        if self.show_only_tool_capable {
+            models.retain(|model| self.is_tool_capable(model));
+        }
+
+        if self.show_only_vision {
+            models.retain(|model| self.is_vision_capable(model));
+        }
+
+        if self.show_only_reasoning {
+            models.retain(|model| self.is_reasoning_capable(model));
+        }
+
+        // Sort models
+        self.sort_models(&mut models);
+
+        self.filtered_models = models;
+    }
+
+    fn model_matches_category(&self, model: &crate::llm::openrouter::api::ModelInfo, category: &crate::llm::openrouter::models::ModelCategory) -> bool {
+        let model_id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+
+        match category {
+            crate::llm::openrouter::models::ModelCategory::Code => {
+                model_id.contains("code") || description.contains("code") || description.contains("programming")
+            }
+            crate::llm::openrouter::models::ModelCategory::Vision => {
+                model.architecture.input_modalities.contains(&"image".to_string()) ||
+                model_id.contains("vision") || description.contains("vision")
+            }
+            crate::llm::openrouter::models::ModelCategory::Reasoning => {
+                model_id.contains("reasoning") || model_id.contains("think") || 
+                model_id.contains("o1") || description.contains("reasoning")
+            }
+            crate::llm::openrouter::models::ModelCategory::Creative => {
+                description.contains("creative") || description.contains("writing")
+            }
+            crate::llm::openrouter::models::ModelCategory::Function => {
+                // Most modern models support function calling
+                true
+            }
+            crate::llm::openrouter::models::ModelCategory::Chat => {
+                // Default category for general conversation models
+                true
+            }
+        }
+    }
+
+    fn sort_models(&self, models: &mut Vec<crate::llm::openrouter::api::ModelInfo>) {
+        match self.sort_by {
+            ModelSortBy::Name => {
+                models.sort_by(|a, b| a.id.cmp(&b.id));
+            }
+            ModelSortBy::Provider => {
+                models.sort_by(|a, b| {
+                    let a_provider = a.id.split('/').next().unwrap_or("");
+                    let b_provider = b.id.split('/').next().unwrap_or("");
+                    a_provider.cmp(b_provider)
+                });
+            }
+            ModelSortBy::Price => {
+                models.sort_by(|a, b| {
+                    let a_price = a.pricing.prompt.parse::<f64>().unwrap_or(0.0);
+                    let b_price = b.pricing.prompt.parse::<f64>().unwrap_or(0.0);
+                    a_price.partial_cmp(&b_price).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            ModelSortBy::ContextLength => {
+                models.sort_by(|a, b| b.context_length.cmp(&a.context_length));
+            }
+            ModelSortBy::Created => {
+                models.sort_by(|a, b| b.created.cmp(&a.created));
+            }
+            ModelSortBy::Popularity => {
+                // Sort favorites first, then by name
+                models.sort_by(|a, b| {
+                    let a_fav = self.favorites.contains(&a.id);
+                    let b_fav = self.favorites.contains(&b.id);
+                    match (a_fav, b_fav) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a.id.cmp(&b.id),
+                    }
+                });
+            }
+        }
+    }
+
+    fn toggle_favorite(&mut self, model_id: &str) {
+        if let Some(pos) = self.favorites.iter().position(|id| id == model_id) {
+            self.favorites.remove(pos);
+        } else {
+            self.favorites.push(model_id.to_string());
+        }
+        self.apply_filters();
+    }
+
+    fn toggle_comparison(&mut self, model_id: &str) {
+        if let Some(pos) = self.selected_for_comparison.iter().position(|id| id == model_id) {
+            self.selected_for_comparison.remove(pos);
+        } else if self.selected_for_comparison.len() < 3 {
+            self.selected_for_comparison.push(model_id.to_string());
+        }
+    }
+
+    pub fn render(&mut self, ctx: &Context, theme: AppTheme) -> Option<String> {
+        if !self.visible {
+            return None;
+        }
+
+        // Check for completed async model loading operations
+        self.check_pending_refresh();
+
+        let mut selected_model = None;
+
+        egui::SidePanel::right("model_selection_panel")
+            .resizable(true)
+            .default_width(600.0)
+            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    // Header
+                    ui.horizontal(|ui| {
+                        ui.heading("🤖 Model Selection");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("×").clicked() {
+                                self.visible = false;
+                            }
+                            if ui.button("🔄 Refresh").clicked() {
+                                self.force_refresh_models();
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    // Current model display
+                    if !self.current_model.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label("Current:");
+                            ui.colored_label(theme.accent_color(), &self.current_model);
+                        });
+                        ui.separator();
+                    }
+
+                    // Error display
+                    if let Some(ref error) = self.error_message {
+                        ui.colored_label(theme.error_color(), format!("Error: {}", error));
+                        ui.separator();
+                    }
+
+                    // Loading indicator
+                    if self.loading {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Loading models...");
+                        });
+                        ui.separator();
+                    }
+
+                    // Filters and controls
+                    ui.collapsing("🔍 Filters & Search", |ui| {
+                        // Search
+                        ui.horizontal(|ui| {
+                            ui.label("Search:");
+                            if ui.add(TextEdit::singleline(&mut self.search_query)
+                                .hint_text("Search models...")).changed() {
+                                self.apply_filters();
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            // Provider filter
+                            ComboBox::from_label("Provider")
+                                .selected_text(self.selected_provider.as_deref().unwrap_or("All"))
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_value(&mut self.selected_provider, None, "All").changed() {
+                                        self.apply_filters();
+                                    }
+                                    let providers = self.get_available_providers();
+                                    for provider in providers {
+                                        if ui.selectable_value(&mut self.selected_provider, Some(provider.clone()), &provider).changed() {
+                                            self.apply_filters();
+                                        }
+                                    }
+                                });
+
+                            // Category filter
+                            ComboBox::from_label("Category")
+                                .selected_text(match &self.selected_category {
+                                    Some(cat) => format!("{:?}", cat),
+                                    None => "All".to_string(),
+                                })
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_value(&mut self.selected_category, None, "All").changed() {
+                                        self.apply_filters();
+                                    }
+                                    use crate::llm::openrouter::models::ModelCategory;
+                                    for category in [ModelCategory::Code, ModelCategory::Chat, ModelCategory::Vision, ModelCategory::Reasoning, ModelCategory::Creative, ModelCategory::Function] {
+                                        if ui.selectable_value(&mut self.selected_category, Some(category.clone()), format!("{:?}", category)).changed() {
+                                            self.apply_filters();
+                                        }
+                                    }
+                                });
+                        });
+
+                        // Capability filters
+                        ui.horizontal(|ui| {
+                            if ui.checkbox(&mut self.show_only_tool_capable, "Tools/Functions").changed() {
+                                self.apply_filters();
+                            }
+                            if ui.checkbox(&mut self.show_only_vision, "Vision").changed() {
+                                self.apply_filters();
+                            }
+                            if ui.checkbox(&mut self.show_only_reasoning, "Reasoning").changed() {
+                                self.apply_filters();
+                            }
+                        });
+
+                        // Sort and view options
+                        ui.horizontal(|ui| {
+                            ComboBox::from_label("Sort by")
+                                .selected_text(format!("{:?}", self.sort_by))
+                                .show_ui(ui, |ui| {
+                                    for sort_option in [ModelSortBy::Name, ModelSortBy::Provider, ModelSortBy::Price, ModelSortBy::ContextLength, ModelSortBy::Created, ModelSortBy::Popularity] {
+                                        if ui.selectable_value(&mut self.sort_by, sort_option.clone(), format!("{:?}", sort_option)).changed() {
+                                            self.apply_filters();
+                                        }
+                                    }
+                                });
+
+                            ComboBox::from_label("View")
+                                .selected_text(format!("{:?}", self.view_mode))
+                                .show_ui(ui, |ui| {
+                                    for view_option in [ModelViewMode::Cards, ModelViewMode::List, ModelViewMode::Table] {
+                                        ui.selectable_value(&mut self.view_mode, view_option.clone(), format!("{:?}", view_option));
+                                    }
+                                });
+                        });
+                    });
+
+                    ui.separator();
+
+                    // Model list/cards
+                    ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if self.filtered_models.is_empty() && !self.loading {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label("No models found. Try adjusting your filters or refresh the list.");
+                                });
+                            } else {
+                                match self.view_mode {
+                                    ModelViewMode::Cards => {
+                                        selected_model = self.render_model_cards(ui, theme);
+                                    }
+                                    ModelViewMode::List => {
+                                        selected_model = self.render_model_list(ui, theme);
+                                    }
+                                    ModelViewMode::Table => {
+                                        selected_model = self.render_model_table(ui, theme);
+                                    }
+                                }
+                            }
+                        });
+
+                    // Footer with model count
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Showing {} of {} models", 
+                            self.filtered_models.len(), 
+                            self.available_models.len()));
+                        
+                        if !self.selected_for_comparison.is_empty() {
+                            ui.separator();
+                            ui.label(format!("Compare ({})", self.selected_for_comparison.len()));
+                            if ui.button("Compare Selected").clicked() {
+                                self.show_comparison = true;
+                            }
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Manual model entry section
+                    ui.collapsing("✏️ Manual Model Entry", |ui| {
+                        ui.label("Enter any OpenRouter model ID directly:");
+                        ui.horizontal(|ui| {
+                            ui.add(TextEdit::singleline(&mut self.manual_model_entry)
+                                .hint_text("e.g., anthropic/claude-3.5-sonnet, openai/gpt-4o"));
+                            
+                            let use_enabled = !self.manual_model_entry.trim().is_empty();
+                            if ui.add_enabled(use_enabled, Button::new("Use Model")).clicked() {
+                                selected_model = Some(self.manual_model_entry.trim().to_string());
+                            }
+                        });
+                        
+                        ui.label(RichText::new("💡 Tip: You can use any model from OpenRouter's catalog, even if it's not in the list above.")
+                            .small().weak());
+                        
+                        // Quick access to popular models not in default list
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Quick access:");
+                            let quick_models = [
+                                "google/gemini-1.5-pro",
+                                "google/gemini-1.5-flash", 
+                                "mistralai/mistral-large",
+                                "anthropic/claude-3-haiku",
+                                "openai/o1-preview",
+                                "openai/o1-mini"
+                            ];
+                            
+                            for model in quick_models {
+                                if ui.small_button(model).clicked() {
+                                    self.manual_model_entry = model.to_string();
+                                }
+                            }
+                        });
+                    });
+
+                    ui.separator();
+                });
+            });
+
+        selected_model
+    }
+
+    fn get_available_providers(&self) -> Vec<String> {
+        let mut providers: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for model in &self.available_models {
+            if let Some(provider) = model.id.split('/').next() {
+                providers.insert(provider.to_string());
+            }
+        }
+        let mut provider_list: Vec<String> = providers.into_iter().collect();
+        provider_list.sort();
+        provider_list
+    }
+
+    fn render_model_cards(&mut self, ui: &mut egui::Ui, theme: AppTheme) -> Option<String> {
+        let mut selected_model = None;
+        
+        // Clone the filtered models to avoid borrowing issues
+        let models = self.filtered_models.clone();
+        let current_model = self.current_model.clone();
+        let favorites = self.favorites.clone();
+        let selected_for_comparison = self.selected_for_comparison.clone();
+        
+        for model in &models {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    // Model header
+                    ui.horizontal(|ui| {
+                        // Model name
+                        if ui.add(Button::new(&model.id)
+                            .fill(if current_model == model.id { 
+                                theme.accent_color() 
+                            } else { 
+                                Color32::TRANSPARENT 
+                            })).clicked() {
+                            selected_model = Some(model.id.clone());
+                        }
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Comparison toggle
+                            let compare_text = if selected_for_comparison.contains(&model.id) { "📊" } else { "📈" };
+                            if ui.small_button(compare_text).on_hover_text("Add to comparison").clicked() {
+                                // We'll handle this after the loop
+                            }
+                            
+                            // Favorite toggle
+                            let star_text = if favorites.contains(&model.id) { "⭐" } else { "☆" };
+                            if ui.small_button(star_text).on_hover_text("Toggle favorite").clicked() {
+                                // We'll handle this after the loop
+                            }
+                        });
+                    });
+                    
+                    // Model details
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            // Creation date
+                            let creation_date = self.format_creation_date(model.created);
+                            let date_color = if model.created > (std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                                Color32::from_rgb(0, 180, 0) // Green for recent
+                            } else if model.created > (std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                                Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                            } else {
+                                Color32::from_rgb(128, 128, 128) // Gray for old
+                            };
+                            ui.colored_label(date_color, format!("📅 Added {}", creation_date));
+
+                            // Pricing - show per million tokens for readability
+                            if let (Ok(prompt_price), Ok(completion_price)) = (
+                                model.pricing.prompt.parse::<f64>(),
+                                model.pricing.completion.parse::<f64>()
+                            ) {
+                                ui.label(format!("💰 ${:.3} / ${:.3} per 1M tokens", 
+                                    prompt_price * 1_000_000.0, 
+                                    completion_price * 1_000_000.0));
+                            }
+                            
+                            // Context length
+                            ui.label(format!("📏 {}k context", model.context_length / 1000));
+                            
+                            // Capabilities
+                            let capabilities = self.get_model_capabilities(model);
+                            if !capabilities.is_empty() {
+                                ui.horizontal_wrapped(|ui| {
+                                    for capability in &capabilities {
+                                        ui.small(capability);
+                                    }
+                                });
+                            }
+                        });
+                    });
+                    
+                    // Description
+                    if !model.description.is_empty() {
+                        ui.label(RichText::new(&model.description).small().weak());
+                    }
+                });
+            });
+            ui.add_space(4.0);
+        }
+        
+        selected_model
+    }
+
+    fn render_model_list(&mut self, ui: &mut egui::Ui, theme: AppTheme) -> Option<String> {
+        let mut selected_model = None;
+        
+        // Clone the filtered models to avoid borrowing issues
+        let models = self.filtered_models.clone();
+        let current_model = self.current_model.clone();
+        let favorites = self.favorites.clone();
+        
+        for model in &models {
+            ui.horizontal(|ui| {
+                // Model selection button
+                if ui.add(Button::new(&model.id)
+                    .fill(if current_model == model.id { 
+                        theme.accent_color() 
+                    } else { 
+                        Color32::TRANSPARENT 
+                    })).clicked() {
+                    selected_model = Some(model.id.clone());
+                }
+                
+                // Creation date (compact)
+                let creation_date = self.format_creation_date(model.created);
+                let date_color = if model.created > (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                    Color32::from_rgb(0, 180, 0) // Green for recent
+                } else if model.created > (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                    Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                } else {
+                    Color32::from_rgb(128, 128, 128) // Gray for old
+                };
+                ui.colored_label(date_color, creation_date);
+                
+                // Quick info - show pricing per million tokens
+                if let (Ok(prompt_price), Ok(completion_price)) = (
+                    model.pricing.prompt.parse::<f64>(),
+                    model.pricing.completion.parse::<f64>()
+                ) {
+                    ui.label(format!("${:.3}/${:.3}/1M", 
+                        prompt_price * 1_000_000.0, 
+                        completion_price * 1_000_000.0));
+                } else {
+                    ui.label("N/A");
+                }
+                
+                ui.label(format!("{}k", model.context_length / 1000));
+                
+                // Show key capabilities
+                let capabilities = self.get_model_capabilities(model);
+                if !capabilities.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        for capability in capabilities.iter().take(3) { // Show first 3 capabilities
+                            ui.small(capability);
+                        }
+                        if capabilities.len() > 3 {
+                            ui.small("...");
+                        }
+                    });
+                }
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Favorite toggle
+                    let star_text = if favorites.contains(&model.id) { "⭐" } else { "☆" };
+                    if ui.small_button(star_text).clicked() {
+                        // We'll handle this after the loop
+                    }
+                });
+            });
+        }
+        
+        selected_model
+    }
+
+    fn render_model_table(&mut self, ui: &mut egui::Ui, theme: AppTheme) -> Option<String> {
+        let mut selected_model = None;
+        
+        // Clone the filtered models to avoid borrowing issues
+        let models = self.filtered_models.clone();
+        let current_model = self.current_model.clone();
+        let favorites = self.favorites.clone();
+        
+        egui::Grid::new("model_table")
+            .striped(true)
+            .show(ui, |ui| {
+                // Header
+                ui.label(RichText::new("Model").strong());
+                ui.label(RichText::new("Provider").strong());
+                ui.label(RichText::new("Created").strong());
+                ui.label(RichText::new("Price (per 1M)").strong());
+                ui.label(RichText::new("Context").strong());
+                ui.label(RichText::new("Capabilities").strong());
+                ui.label(RichText::new("Actions").strong());
+                ui.end_row();
+                
+                // Rows
+                for model in &models {
+                    // Model name
+                    if ui.add(Button::new(&model.name)
+                        .fill(if current_model == model.id { 
+                            theme.accent_color() 
+                        } else { 
+                            Color32::TRANSPARENT 
+                        })).clicked() {
+                        selected_model = Some(model.id.clone());
+                    }
+                    
+                    // Provider
+                    ui.label(model.id.split('/').next().unwrap_or("Unknown"));
+                    
+                    // Creation date
+                    let creation_date = self.format_creation_date(model.created);
+                    let date_color = if model.created > (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() - 30 * 24 * 60 * 60) { // Last 30 days
+                        Color32::from_rgb(0, 180, 0) // Green for recent
+                    } else if model.created > (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() - 365 * 24 * 60 * 60) { // Last year
+                        Color32::from_rgb(255, 165, 0) // Orange for somewhat recent
+                    } else {
+                        Color32::from_rgb(128, 128, 128) // Gray for old
+                    };
+                    ui.colored_label(date_color, creation_date);
+                    
+                    // Price (show both prompt and completion)
+                    if let (Ok(prompt_price), Ok(completion_price)) = (
+                        model.pricing.prompt.parse::<f64>(),
+                        model.pricing.completion.parse::<f64>()
+                    ) {
+                        ui.label(format!("${:.3} / ${:.3}", 
+                            prompt_price * 1_000_000.0, 
+                            completion_price * 1_000_000.0));
+                    } else {
+                        ui.label("N/A");
+                    }
+                    
+                    // Context
+                    ui.label(format!("{}k", model.context_length / 1000));
+                    
+                    // Capabilities
+                    let capabilities = self.get_model_capabilities(model);
+                    if capabilities.is_empty() {
+                        ui.label("Basic");
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            for capability in &capabilities {
+                                ui.small(capability);
+                            }
+                        });
+                    }
+                    
+                    // Actions
+                    ui.horizontal(|ui| {
+                        let star_text = if favorites.contains(&model.id) { "⭐" } else { "☆" };
+                        if ui.small_button(star_text).clicked() {
+                            // We'll handle this after the loop
+                        }
+                    });
+                    
+                    ui.end_row();
+                }
+            });
+        
+        selected_model
+    }
+
+    /// Check if a model is tool/function calling capable
+    fn is_tool_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        // Check supported_parameters for "tools" capability
+        if let Some(ref params) = model.supported_parameters {
+            return params.iter().any(|p| p == "tools" || p == "tool_choice");
+        }
+        
+        // Fallback to heuristics for models without supported_parameters data
+        let id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+        
+        // Modern models that definitely support tools
+        id.contains("gpt-4") || 
+        id.contains("gpt-3.5-turbo") ||
+        id.contains("claude-3") || 
+        id.contains("claude-2") ||
+        id.contains("gemini") ||
+        id.contains("mistral") ||
+        (id.contains("llama") && (id.contains("3.") || id.contains("-3"))) ||
+        id.contains("deepseek") ||
+        description.contains("function") ||
+        description.contains("tool") ||
+        model.created > 1672531200 // After Jan 1, 2023
+    }
+
+    /// Check if a model supports reasoning mode
+    fn is_reasoning_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        if let Some(ref params) = model.supported_parameters {
+            return params.iter().any(|p| p == "reasoning" || p == "include_reasoning");
+        }
+        
+        // Fallback heuristics
+        let id = model.id.to_lowercase();
+        id.contains("o1") || 
+        id.contains("reasoning") ||
+        id.contains("think")
+    }
+
+    /// Check if a model supports vision/image inputs
+    fn is_vision_capable(&self, model: &crate::llm::openrouter::api::ModelInfo) -> bool {
+        // Check architecture for image input modality
+        if model.architecture.input_modalities.contains(&"image".to_string()) {
+            return true;
+        }
+        
+        // Check supported_parameters (some models may support images without explicit architecture)
+        if let Some(ref params) = model.supported_parameters {
+            if params.iter().any(|p| p.contains("image")) {
+                return true;
+            }
+        }
+        
+        // Fallback heuristics
+        let id = model.id.to_lowercase();
+        let description = model.description.to_lowercase();
+        id.contains("vision") || 
+        id.contains("gpt-4o") || 
+        id.contains("claude-3") ||
+        id.contains("gemini") ||
+        description.contains("vision") ||
+        description.contains("image")
+    }
+
+    /// Get a user-friendly list of supported capabilities for a model
+    fn get_model_capabilities(&self, model: &crate::llm::openrouter::api::ModelInfo) -> Vec<String> {
+        let mut capabilities = Vec::new();
+        
+        if let Some(ref params) = model.supported_parameters {
+            // Map supported parameters to user-friendly capability names
+            for param in params {
+                match param.as_str() {
+                    "tools" | "tool_choice" => {
+                        if !capabilities.contains(&"🔧 Tools".to_string()) {
+                            capabilities.push("🔧 Tools".to_string());
+                        }
+                    }
+                    "reasoning" | "include_reasoning" => {
+                        if !capabilities.contains(&"🧠 Reasoning".to_string()) {
+                            capabilities.push("🧠 Reasoning".to_string());
+                        }
+                    }
+                    "structured_outputs" | "response_format" => {
+                        if !capabilities.contains(&"📋 Structured".to_string()) {
+                            capabilities.push("📋 Structured".to_string());
+                        }
+                    }
+                    "max_tokens" => capabilities.push("📏 Length Control".to_string()),
+                    "temperature" => capabilities.push("🌡️ Temperature".to_string()),
+                    "top_p" => capabilities.push("🎯 Top-P".to_string()),
+                    "stop" => capabilities.push("🛑 Stop Sequences".to_string()),
+                    "frequency_penalty" => capabilities.push("🔄 Frequency Penalty".to_string()),
+                    "presence_penalty" => capabilities.push("🎭 Presence Penalty".to_string()),
+                    "seed" => capabilities.push("🎲 Deterministic".to_string()),
+                    _ => {} // Skip unknown parameters
+                }
+            }
+        }
+        
+        // Add vision capability if supported
+        if self.is_vision_capable(model) {
+            capabilities.insert(0, "👁️ Vision".to_string());
+        }
+        
+        // If no supported_parameters, fall back to basic heuristics
+        if capabilities.is_empty() {
+            if self.is_tool_capable(model) {
+                capabilities.push("🔧 Tools".to_string());
+            }
+            if self.is_reasoning_capable(model) {
+                capabilities.push("🧠 Reasoning".to_string());
+            }
+            if self.is_vision_capable(model) {
+                capabilities.push("👁️ Vision".to_string());
+            }
+        }
+        
+        capabilities
+    }
+
+    /// Format the model creation date in a user-friendly way
+    fn format_creation_date(&self, created_timestamp: u64) -> String {
+        use std::time::{SystemTime, UNIX_EPOCH, Duration};
+        
+        let created_time = UNIX_EPOCH + Duration::from_secs(created_timestamp);
+        let now = SystemTime::now();
+        
+        if let Ok(duration_since) = now.duration_since(created_time) {
+            let days_ago = duration_since.as_secs() / (24 * 60 * 60);
+            
+            if days_ago == 0 {
+                "Today".to_string()
+            } else if days_ago == 1 {
+                "Yesterday".to_string()
+            } else if days_ago < 7 {
+                format!("{} days ago", days_ago)
+            } else if days_ago < 30 {
+                let weeks_ago = days_ago / 7;
+                if weeks_ago == 1 {
+                    "1 week ago".to_string()
+                } else {
+                    format!("{} weeks ago", weeks_ago)
+                }
+            } else if days_ago < 365 {
+                let months_ago = days_ago / 30;
+                if months_ago == 1 {
+                    "1 month ago".to_string()
+                } else {
+                    format!("{} months ago", months_ago)
+                }
+            } else {
+                let years_ago = days_ago / 365;
+                if years_ago == 1 {
+                    "1 year ago".to_string()
+                } else {
+                    format!("{} years ago", years_ago)
+                }
+            }
+        } else {
+            // If timestamp is in the future, try to format as date
+            use chrono::{DateTime, Utc, TimeZone};
+            if let Some(datetime) = Utc.timestamp_opt(created_timestamp as i64, 0).single() {
+                datetime.format("%Y-%m-%d").to_string()
+            } else {
+                "Unknown".to_string()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1812,30 +3107,50 @@ mod tests {
         // Should start with no active panel
         assert_eq!(panel_manager.active_panel, ActivePanel::None);
         assert!(!panel_manager.create_project_panel.visible);
+        assert!(!panel_manager.model_selection_panel.visible);
         
         // Toggle create project panel
         panel_manager.toggle_panel(ActivePanel::CreateProject);
         assert_eq!(panel_manager.active_panel, ActivePanel::CreateProject);
         assert!(panel_manager.create_project_panel.visible);
         
+        // Toggle model selection panel
+        panel_manager.toggle_panel(ActivePanel::ModelSelection);
+        assert_eq!(panel_manager.active_panel, ActivePanel::ModelSelection);
+        assert!(panel_manager.model_selection_panel.visible);
+        assert!(!panel_manager.create_project_panel.visible); // Should be closed
+        
         // Toggle again should close it
-        panel_manager.toggle_panel(ActivePanel::CreateProject);
+        panel_manager.toggle_panel(ActivePanel::ModelSelection);
         assert_eq!(panel_manager.active_panel, ActivePanel::None);
-        assert!(!panel_manager.create_project_panel.visible);
+        assert!(!panel_manager.model_selection_panel.visible);
     }
 
     #[test]
-    fn test_panel_manager_close_all_includes_create_project() {
+    fn test_panel_manager_close_all_includes_model_selection() {
         let mut panel_manager = PanelManager::new();
         
-        // Open create project panel
-        panel_manager.toggle_panel(ActivePanel::CreateProject);
-        assert!(panel_manager.create_project_panel.visible);
+        // Open model selection panel
+        panel_manager.toggle_panel(ActivePanel::ModelSelection);
+        assert!(panel_manager.model_selection_panel.visible);
         
         // Close all panels
         panel_manager.close_all_panels();
-        assert!(!panel_manager.create_project_panel.visible);
+        assert!(!panel_manager.model_selection_panel.visible);
         assert_eq!(panel_manager.active_panel, ActivePanel::None);
+    }
+
+    #[test]
+    fn test_model_selection_panel_model_management() {
+        let mut panel_manager = PanelManager::new();
+        
+        // Test setting and getting current model
+        panel_manager.set_current_model("test-model".to_string());
+        assert_eq!(panel_manager.get_current_model(), "test-model");
+        
+        // Test model selection panel state
+        assert!(!panel_manager.model_selection_panel.visible);
+        assert_eq!(panel_manager.model_selection_panel.current_model, "test-model");
     }
 
     // ===== Phase 7 Analytics Dashboard Tests =====

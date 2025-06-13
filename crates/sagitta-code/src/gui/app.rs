@@ -111,7 +111,7 @@ impl SagittaCodeApp {
         let app_core_config_arc = Arc::new(app_core_config.clone());
 
         // Create OpenRouter client to get ModelManager for settings panel
-        let settings_panel = match crate::llm::openrouter::OpenRouterClient::new(&sagitta_code_config) {
+        let (settings_panel, model_manager_for_panels) = match crate::llm::openrouter::OpenRouterClient::new(&sagitta_code_config) {
             Ok(openrouter_client) => {
                 // Get the model manager from the client by cloning it
                 // Since ModelManager doesn't have Clone, we need to create a new one with the same config
@@ -151,20 +151,22 @@ impl SagittaCodeApp {
                     ));
                     
                     // Create settings panel with model manager for dropdown functionality
-                    SettingsPanel::with_model_manager(
+                    let settings_panel = SettingsPanel::with_model_manager(
                         sagitta_code_config.clone(), 
                         app_core_config.clone(),
-                        model_manager
-                    )
+                        model_manager.clone()
+                    );
+                    
+                    (settings_panel, Some(model_manager))
                 } else {
                     log::warn!("No OpenRouter API key available. Using basic settings panel.");
-                    SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone())
+                    (SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone()), None)
                 }
             }
             Err(e) => {
                 log::warn!("Failed to create OpenRouter client for model selection: {}. Using basic settings panel.", e);
                 // Fallback to basic settings panel without model manager
-                SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone())
+                (SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone()), None)
             }
         };
 
@@ -193,6 +195,16 @@ impl SagittaCodeApp {
 
         let workspace_manager = Arc::new(Mutex::new(WorkspaceManagerImpl::new(workspace_storage_path)));
 
+        // Create panel manager with model manager if available
+        let mut panels = if let Some(model_manager) = model_manager_for_panels {
+            PanelManager::with_model_manager(model_manager)
+        } else {
+            PanelManager::new()
+        };
+        
+        // Set the current model from config
+        panels.set_current_model(sagitta_code_config.openrouter.model.clone());
+
         Self {
             agent: None,
             repo_panel: RepoPanel::new(repo_manager.clone()),
@@ -206,8 +218,8 @@ impl SagittaCodeApp {
             // Initialize state management with theme from config
             state: initial_state,
             
-            // Initialize panel management
-            panels: PanelManager::new(),
+            // Initialize panel management with model manager
+            panels,
             
             // Event handling
             agent_event_receiver: None,

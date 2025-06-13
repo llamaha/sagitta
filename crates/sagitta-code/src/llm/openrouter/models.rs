@@ -199,7 +199,27 @@ impl ModelManager {
             ));
         }
 
-        let models_response: super::api::ModelsResponse = response.json().await?;
+        // Get the response text first for debugging
+        let response_text = response.text().await?;
+        log::debug!("OpenRouter API response length: {} bytes", response_text.len());
+        
+        // Try to parse the JSON response
+        let models_response: super::api::ModelsResponse = match serde_json::from_str(&response_text) {
+            Ok(response) => response,
+            Err(e) => {
+                log::error!("Failed to parse OpenRouter API response: {}", e);
+                log::debug!("Response text (first 1000 chars): {}", 
+                    if response_text.len() > 1000 { 
+                        &response_text[..1000] 
+                    } else { 
+                        &response_text 
+                    });
+                return Err(OpenRouterError::SerializationError(
+                    format!("error decoding response body: {}", e)
+                ));
+            }
+        };
+        
         let models = models_response.data;
         
         log::info!("Fetched {} models from OpenRouter API", models.len());
