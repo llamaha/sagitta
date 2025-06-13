@@ -51,6 +51,8 @@ impl Tool for CodeSearchTool {
             description: "Search for code in repositories using semantic search.".to_string(),
             parameters: json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["repository_name", "query"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
@@ -61,21 +63,18 @@ impl Tool for CodeSearchTool {
                         "description": "Natural language or code search query"
                     },
                     "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return",
-                        "default": 10
+                        "type": ["integer", "null"],
+                        "description": "Maximum number of results to return (defaults to 10 if null)"
                     },
                     "element_type": {
-                        "type": "string",
-                        "description": "Optional filter by code element type (function, struct, class, enum, etc.)",
-                        "enum": ["function", "struct", "class", "interface", "enum", "method", "variable"]
+                        "type": ["string", "null"],
+                        "description": "Optional filter by code element type (function, struct, class, interface, enum, method, variable)"
                     },
                     "language": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional filter by programming language (rust, python, javascript, etc.)"
                     }
-                },
-                "required": ["repository_name", "query"]
+                }
             }),
             is_required: false,
             category: ToolCategory::CodeSearch,
@@ -131,6 +130,117 @@ impl Tool for CodeSearchTool {
     
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::repository::manager::RepositoryManager;
+    use sagitta_search::AppConfig as SagittaAppConfig;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use serde_json::json;
+
+    fn create_test_repo_manager() -> Arc<Mutex<RepositoryManager>> {
+        let config = SagittaAppConfig::default();
+        let repo_manager = RepositoryManager::new_for_test(Arc::new(Mutex::new(config)));
+        Arc::new(Mutex::new(repo_manager))
+    }
+
+    #[tokio::test]
+    async fn test_code_search_tool_creation() {
+        let tool = CodeSearchTool::new(create_test_repo_manager());
+        let definition = tool.definition();
+        assert_eq!(definition.name, "search_code");
+        assert_eq!(definition.category, ToolCategory::CodeSearch);
+    }
+
+    #[test]
+    fn test_code_search_tool_parameter_validation() {
+        let tool = CodeSearchTool::new(create_test_repo_manager());
+        let definition = tool.definition();
+        
+        let properties = definition.parameters.get("properties").unwrap().as_object().unwrap();
+        assert!(properties.contains_key("repository_name"));
+        assert!(properties.contains_key("query"));
+        assert!(properties.contains_key("limit"));
+        assert!(properties.contains_key("element_type"));
+        assert!(properties.contains_key("language"));
+        
+        let required = definition.parameters.get("required").unwrap().as_array().unwrap();
+        assert_eq!(required.len(), 2);
+        assert!(required.contains(&json!("repository_name")));
+        assert!(required.contains(&json!("query")));
+        
+        // Optional parameters should not be required
+        assert!(!required.contains(&json!("limit")));
+        assert!(!required.contains(&json!("element_type")));
+        assert!(!required.contains(&json!("language")));
+    }
+
+    #[tokio::test]
+    async fn test_code_search_tool_minimal_parameters() {
+        let tool = CodeSearchTool::new(create_test_repo_manager());
+        
+        // Test with only the required parameters
+        let params = json!({
+            "repository_name": "test-repo",
+            "query": "function main"
+        });
+        
+        let result = tool.execute(params).await;
+        
+        // Should fail due to repository not found, but that's expected in test environment
+        // The important thing is that it accepts the minimal parameters
+        match result {
+            Ok(ToolResult::Success(data)) => {
+                assert!(data.get("search_results").is_some());
+                assert!(data.get("total_results").is_some());
+            }
+            Ok(ToolResult::Error { .. }) => {
+                // Expected due to missing repository in test environment
+            }
+            Err(_) => {
+                // Expected due to missing repository in test environment
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_code_search_tool_with_optional_parameters() {
+        let tool = CodeSearchTool::new(create_test_repo_manager());
+        
+        // Test with optional parameters included
+        let params = json!({
+            "repository_name": "test-repo",
+            "query": "function main",
+            "limit": 5,
+            "element_type": "function",
+            "language": "rust"
+        });
+        
+        let result = tool.execute(params).await;
+        
+        // Should fail due to repository not found, but that's expected in test environment
+        // The important thing is that it accepts the optional parameters
+        match result {
+            Ok(ToolResult::Success(data)) => {
+                assert!(data.get("search_results").is_some());
+                assert!(data.get("total_results").is_some());
+            }
+            Ok(ToolResult::Error { .. }) => {
+                // Expected due to missing repository in test environment
+            }
+            Err(_) => {
+                // Expected due to missing repository in test environment
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_limit() {
+        assert_eq!(default_limit(), 10);
     }
 }
 

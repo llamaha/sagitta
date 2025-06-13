@@ -1,5 +1,5 @@
 pub mod client;
-pub mod gemini;
+pub mod openrouter;
 pub mod title;
 
 #[cfg(test)]

@@ -229,8 +229,18 @@ extern crate log;
 
 /// Helper function to convert AppConfig to EmbeddingConfig for the new sagitta-embed crate
 pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig {
-    // Determine the model type based on the paths provided
-    let model_type = if app_config.onnx_model_path.is_some() && app_config.onnx_tokenizer_path.is_some() {
+    // Helper function to convert Option<String> to Option<PathBuf>, treating empty strings as None
+    let string_to_pathbuf = |s: &Option<String>| -> Option<std::path::PathBuf> {
+        s.as_ref()
+            .filter(|s| !s.trim().is_empty()) // Filter out empty or whitespace-only strings
+            .map(std::path::PathBuf::from)
+    };
+
+    // Determine the model type based on the paths provided (after filtering empty strings)
+    let onnx_model_path = string_to_pathbuf(&app_config.onnx_model_path);
+    let onnx_tokenizer_path = string_to_pathbuf(&app_config.onnx_tokenizer_path);
+    
+    let model_type = if onnx_model_path.is_some() && onnx_tokenizer_path.is_some() {
         EmbeddingModelType::Onnx
     } else {
         EmbeddingModelType::Default
@@ -238,8 +248,8 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
 
     EmbeddingConfig {
         model_type,
-        onnx_model_path: app_config.onnx_model_path.as_ref().map(std::path::PathBuf::from),
-        onnx_tokenizer_path: app_config.onnx_tokenizer_path.as_ref().map(std::path::PathBuf::from),
+        onnx_model_path,
+        onnx_tokenizer_path,
         max_sessions: app_config.embedding.max_sessions,
         max_sequence_length: app_config.embedding.max_sequence_length,
         session_timeout_seconds: app_config.embedding.session_timeout_seconds,

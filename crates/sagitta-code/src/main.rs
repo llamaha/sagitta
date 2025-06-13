@@ -163,7 +163,7 @@ mod cli_app {
     use sagitta_embed::EmbeddingModelType;
     use qdrant_client::Payload;
     use sagitta_code::llm::client::LlmClient; // Corrected path
-    use sagitta_code::llm::gemini::client::GeminiClient; // Corrected path
+    use sagitta_code::llm::openrouter::client::OpenRouterClient; // Updated path
 
     pub async fn run(config: SagittaCodeConfig) -> Result<()> {
         log::info!("Starting Sagitta Code CLI");
@@ -207,8 +207,8 @@ mod cli_app {
         
         // Create the LLM client first for tools that need it
         let llm_client_cli: Arc<dyn LlmClient> = Arc::new(
-            GeminiClient::new(&config)
-                .map_err(|e| anyhow!("Failed to create GeminiClient for CLI: {}", e))?
+            OpenRouterClient::new(&config)
+                .map_err(|e| anyhow!("Failed to create OpenRouterClient for CLI: {}", e))?
         );
         
         // Register AnalyzeInputTool first, passing the qdrant_client

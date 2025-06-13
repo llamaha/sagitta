@@ -9,7 +9,7 @@ use super::super::repository::RepoPanel;
 use super::super::theme::AppTheme;
 use super::super::chat::view::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
-use crate::llm::gemini::client::GeminiClient;
+use crate::llm::openrouter::client::OpenRouterClient;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
@@ -29,7 +29,7 @@ use crate::tools::analyze_input::TOOLS_COLLECTION_NAME; // Import the const
 use crate::tools::code_edit::edit::EditTool; // Corrected import for EditTool
 use crate::config::SagittaCodeConfig;
 use crate::tools::registry::ToolRegistry;
-use crate::tools::shell_execution::ShellExecutionTool;
+use crate::tools::shell_execution::{ShellExecutionTool, StreamingShellExecutionTool};
 // Add imports for concrete persistence/search and traits
 use crate::agent::conversation::persistence::{
     ConversationPersistence, 
@@ -42,6 +42,18 @@ use crate::agent::conversation::search::{
 use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
 use sagitta_search::{EmbeddingPool, EmbeddingProcessor};
 use std::path::PathBuf;
+// Add missing imports for additional tools
+use crate::tools::code_edit::validate::ValidateTool;
+use crate::tools::code_edit::semantic_edit::SemanticEditTool;
+use crate::tools::file_operations::direct_read::DirectFileReadTool;
+use crate::tools::file_operations::direct_edit::DirectFileEditTool;
+use crate::tools::working_directory_tools::{GetCurrentDirectoryTool, ChangeDirectoryTool};
+use crate::tools::git::{GitCreateBranchTool, GitListBranchesTool};
+use crate::tools::repository::switch_branch::SwitchBranchTool;
+use crate::tools::repository::pull_changes::PullChangesTool;
+use crate::tools::repository::push_changes::PushChangesTool;
+use crate::tools::repository::commit_changes::CommitChangesTool;
+use crate::tools::repository::create_branch::CreateBranchTool;
 
 // Imports for sagitta-search components for embedding provider
 use std::path::Path; // For Path::new
@@ -104,16 +116,16 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
 
 /// Create LLM client from config
 pub fn create_llm_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>> {
-    let gemini_client_result = GeminiClient::new(config);
+    let openrouter_client_result = OpenRouterClient::new(config);
     
-    match gemini_client_result {
+    match openrouter_client_result {
         Ok(client) => Ok(Arc::new(client)),
         Err(e) => {
             log::error!(
-                "Failed to create GeminiClient: {}. Agent will not be initialized properly. Some features may be disabled.",
+                "Failed to create OpenRouterClient: {}. Agent will not be initialized properly. Some features may be disabled.",
                 e
             );
-            Err(anyhow::anyhow!("Failed to create GeminiClient for Agent: {}", e))
+            Err(anyhow::anyhow!("Failed to create OpenRouterClient for Agent: {}", e))
         }
     }
 }
@@ -150,9 +162,13 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Load both sagitta-code and sagitta-search configs
     let (code_config, core_config) = match load_all_configs() {
-        Ok(configs) => {
+        Ok((code_cfg, core_cfg_opt)) => {
             log::info!("SagittaCodeApp: Loaded both configurations successfully");
-            configs
+            let core_cfg = core_cfg_opt.unwrap_or_else(|| {
+                log::warn!("SagittaCodeApp: sagitta-search config not found, using default");
+                sagitta_search::config::AppConfig::default()
+            });
+            (code_cfg, core_cfg)
         }
         Err(e) => {
             log::warn!("SagittaCodeApp: Could not load configurations: {}. Using defaults.", e);
@@ -180,7 +196,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let llm_client = create_llm_client(&*config_guard).map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
-            format!("CRITICAL: Failed to initialize LLM Client (Gemini): {}. Agent is disabled.", e),
+            format!("CRITICAL: Failed to initialize LLM Client (OpenRouter): {}. Agent is disabled.", e),
         );
         app.chat_manager.add_complete_message(error_message);
         e
@@ -211,59 +227,53 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // Use the locally scoped embedding_handler_arc, which is correctly typed.
     let vector_size = embedding_handler_arc.dimension() as u64;
 
-    // Ensure Qdrant "tools" collection exists
-    match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
-        Ok(exists) => {
-            if !exists {
-                log::info!("GUI: Creating Qdrant tool collection: {}", TOOLS_COLLECTION_NAME);
-                let create_collection_request = CreateCollection {
-                    collection_name: TOOLS_COLLECTION_NAME.to_string(),
-                    vectors_config: Some(VectorsConfig {
-                        config: Some(VectorsConfigEnum::ParamsMap(
-                            qdrant_client::qdrant::VectorParamsMap {
-                                map: std::collections::HashMap::from([
-                                    ("dense".to_string(), VectorParams {
-                                        size: vector_size,
-                                        distance: Distance::Cosine.into(),
-                                        hnsw_config: None,
-                                        quantization_config: None,
-                                        on_disk: None,
-                                        datatype: None,
-                                        multivector_config: None,
-                                    })
-                                ])
-                            }
-                        ))
-                    }),
-                    shard_number: None,
-                    sharding_method: None,
-                    replication_factor: None,
-                    write_consistency_factor: None,
-                    on_disk_payload: None,
-                    hnsw_config: None,
-                    wal_config: None,
-                    optimizers_config: None,
-                    init_from_collection: None,
-                    quantization_config: None,
-                    sparse_vectors_config: None,
-                    timeout: None,
-                    strict_mode_config: None,
-                };
-
-                if let Err(e) = qdrant_client.create_collection_detailed(create_collection_request).await {
-                    log::error!("GUI: Failed to create Qdrant tool collection '{}': {}", TOOLS_COLLECTION_NAME, e);
-                    app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant collection creation failed: {}", e));
-                    // Not returning error here, as agent might still function partially
+    // Ensure Qdrant "tools" collection exists - ALWAYS RECREATE FOR CLEAN STATE
+    log::info!("GUI: Deleting existing Qdrant tool collection '{}' for clean state", TOOLS_COLLECTION_NAME);
+    let _ = qdrant_client.delete_collection(TOOLS_COLLECTION_NAME.to_string()).await; // Ignore error if not found
+    
+    log::info!("GUI: Creating fresh Qdrant tool collection: {}", TOOLS_COLLECTION_NAME);
+    let create_collection_request = CreateCollection {
+        collection_name: TOOLS_COLLECTION_NAME.to_string(),
+        vectors_config: Some(VectorsConfig {
+            config: Some(VectorsConfigEnum::ParamsMap(
+                qdrant_client::qdrant::VectorParamsMap {
+                    map: std::collections::HashMap::from([
+                        ("dense".to_string(), VectorParams {
+                            size: vector_size,
+                            distance: Distance::Cosine.into(),
+                            hnsw_config: None,
+                            quantization_config: None,
+                            on_disk: None,
+                            datatype: None,
+                            multivector_config: None,
+                        })
+                    ])
                 }
-            } else {
-                log::info!("GUI: Qdrant tool collection '{}' already exists.", TOOLS_COLLECTION_NAME);
-            }
-        }
-        Err(e) => {
-            log::error!("GUI: Failed to check Qdrant tool collection '{}': {}", TOOLS_COLLECTION_NAME, e);
-            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant collection check failed: {}", e));
-        }
+            ))
+        }),
+        shard_number: None,
+        sharding_method: None,
+        replication_factor: None,
+        write_consistency_factor: None,
+        on_disk_payload: None,
+        hnsw_config: None,
+        wal_config: None,
+        optimizers_config: None,
+        init_from_collection: None,
+        quantization_config: None,
+        sparse_vectors_config: None,
+        timeout: None,
+        strict_mode_config: None,
+    };
+
+    if let Err(e) = qdrant_client.create_collection_detailed(create_collection_request).await {
+        log::error!("GUI: Failed to create Qdrant tool collection '{}': {}", TOOLS_COLLECTION_NAME, e);
+        app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant collection creation failed: {}", e));
+        // Not returning error here, as agent might still function partially
+    } else {
+        log::info!("GUI: Successfully created fresh Qdrant tool collection '{}'", TOOLS_COLLECTION_NAME);
     }
+
     // Populate/update tools in Qdrant. This should ideally be done *after* all tools are registered in tool_registry.
     // For now, we'll do a pre-registration population based on constructing them here, 
     // or assume tool_registry is populated by this point (which it isn't yet fully).
@@ -288,40 +298,49 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let working_dir_manager = Arc::new(crate::tools::WorkingDirectoryManager::new(working_dir.clone())
         .map_err(|e| anyhow::anyhow!("Failed to create WorkingDirectoryManager: {}", e))?);
 
-    // Register tools first
+    // Register tools first - ALL TOOLS TO CAPTURE ALL SCHEMA ERRORS
     tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
-    tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
     
-    // Register working directory tools
-    tool_registry.register(Arc::new(crate::tools::GetCurrentDirectoryTool::new(working_dir_manager.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::ChangeDirectoryTool::new(working_dir_manager.clone()))).await?;
-    
+    // Register shell execution tools (same as CLI)
+    tool_registry.register(Arc::new(StreamingShellExecutionTool::new(working_dir.clone()))).await?;
+
+    // Repository tools
     tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone(), working_dir.clone()))).await?;
-    tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(SearchFileInRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(ViewFileInRepositoryTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(AddExistingRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(SyncRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RemoveRepositoryTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(SearchFileInRepositoryTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(RepositoryMapTool::new(repo_manager.clone()))).await?;
     tool_registry.register(Arc::new(TargetedViewTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
+
+    // Web search tool
     tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
-    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone(), working_dir.clone()))).await?; // Added EditTool registration
-    tool_registry.register(Arc::new(crate::tools::repository::SwitchBranchTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::repository::CreateBranchTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::repository::CommitChangesTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::repository::PushChangesTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(crate::tools::repository::PullChangesTool::new(repo_manager.clone()))).await?;
 
-    tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(working_dir.clone()))).await?;
+    // Code editing tool
+    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone(), working_dir.clone()))).await?;
 
-    // Register streaming shell execution tool for terminal integration
-    tool_registry.register(Arc::new(crate::tools::shell_execution::StreamingShellExecutionTool::new(working_dir.clone()))).await?;
+    // Add missing tools to capture ALL schema errors:
+    
+    // Code editing validation tools
+    tool_registry.register(Arc::new(ValidateTool::new(repo_manager.clone()))).await?;
+    tool_registry.register(Arc::new(SemanticEditTool::new(repo_manager.clone()))).await?;
 
-    // Note: Project creation and test execution functionality is now available through shell_execution tool
-    // Examples:
-    // - Project creation: Use shell_execution with commands like "cargo init my-project", "npm init", "python -m venv myenv"
-    // - Test execution: Use shell_execution with commands like "cargo test", "npm test", "pytest", "go test"
+    // Comment out problematic tools for now
+    // tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(working_dir.clone()))).await?;
+    // tool_registry.register(Arc::new(DirectFileReadTool::new(working_dir.clone()))).await?;
+    // tool_registry.register(Arc::new(DirectFileEditTool::new(working_dir.clone()))).await?;
+    // tool_registry.register(Arc::new(GetCurrentDirectoryTool::new(working_dir_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(ChangeDirectoryTool::new(working_dir_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(GitCreateBranchTool::new(working_dir.clone()))).await?;
+    // tool_registry.register(Arc::new(GitListBranchesTool::new(working_dir.clone()))).await?;
+    // tool_registry.register(Arc::new(SwitchBranchTool::new(repo_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(PullChangesTool::new(repo_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(PushChangesTool::new(repo_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(CommitChangesTool::new(repo_manager.clone()))).await?;
+    // tool_registry.register(Arc::new(CreateBranchTool::new(repo_manager.clone()))).await?;
 
     // Now populate Qdrant with all registered tools
     let all_tool_defs_for_qdrant = tool_registry.get_definitions().await;
@@ -431,7 +450,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             // Add to events panel instead of chat
             app.panels.events_panel.add_event(
                 super::SystemEventType::Error,
-                format!("Failed to initialize agent: {}. Check your Gemini API key in settings.", err)
+                format!("Failed to initialize agent: {}. Check your OpenRouter API key in settings.", err)
             );
         }
     }
@@ -545,7 +564,7 @@ mod tests {
         let mut config = SagittaCodeConfig::default();
         
         // Set invalid API key to force failure
-        config.gemini.api_key = Some("invalid_key".to_string());
+        config.openrouter.api_key = Some("invalid_key".to_string());
         
         let result = create_llm_client(&config);
         
@@ -557,7 +576,7 @@ mod tests {
             }
             Err(e) => {
                 // Expected failure with invalid config
-                assert!(e.to_string().contains("Failed to create GeminiClient"));
+                assert!(e.to_string().contains("Failed to create OpenRouterClient"));
             }
         }
     }

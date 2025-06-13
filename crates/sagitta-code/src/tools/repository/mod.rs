@@ -74,7 +74,7 @@ mod tests {
         // Test SearchFileInRepositoryTool
         let search_tool = SearchFileInRepositoryTool::new(repo_manager.clone());
         let search_def = search_tool.definition();
-        assert_eq!(search_def.name, "search_file");
+        assert_eq!(search_def.name, "search_file_in_repository");
         assert!(!search_def.description.is_empty());
         assert!(!search_def.parameters.is_null());
 

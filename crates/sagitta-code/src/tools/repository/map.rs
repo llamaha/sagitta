@@ -116,38 +116,36 @@ impl Tool for RepositoryMapTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "repository_map".to_string(),
-            description: "Generates a comprehensive map of code structure in a repository using the repo-mapper crate. **Best for getting an overview of large repositories or understanding project structure** - shows functions, structs, classes, and their relationships with reliable name extraction and no 'unnamed' objects. Supports multiple languages including Rust, Python, JavaScript, TypeScript, Go, Ruby, Vue.js, YAML, and Markdown. Use verbosity levels to control detail: 0=minimal overview, 1=normal detail, 2=full context.".to_string(),
+            description: "Generate a high-level map of a repository's code structure using the repo-mapper crate for reliable name extraction. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
                 "properties": {
                     "name": {
                         "type": "string",
                         "description": "Name of the repository to map"
                     },
                     "verbosity": {
-                        "type": "integer",
-                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed)",
-                        "default": 1,
-                        "minimum": 0,
-                        "maximum": 2
+                        "type": ["integer", "null"],
+                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed)"
                     },
                     "paths": {
-                        "type": "array",
-                        "items": { "type": "string" },
+                        "type": ["array", "null"],
+                        "items": {"type": "string"},
                         "description": "Optional: Specific paths to scan within the repository"
                     },
                     "file_extension": {
-                        "type": "string",
-                        "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js', 'ts', 'go', 'rb', 'vue', 'yaml', 'md')"
+                        "type": ["string", "null"],
+                        "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js')"
                     },
                     "content_pattern": {
-                        "type": "string",
-                        "description": "Optional: Only scan files containing this pattern"
+                        "type": ["string", "null"],
+                        "description": "Optional: Content pattern to filter files by"
                     }
-                },
-                "required": ["name"]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

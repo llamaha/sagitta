@@ -12,11 +12,12 @@ use uuid::Uuid;
 use log::{info, warn, error};
 
 use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
-use crate::config::types::GeminiConfig;
+use crate::config::types::OpenRouterConfig;
 use crate::config::paths::{get_sagitta_code_app_config_path};
+use crate::llm::openrouter::models::ModelManager;
+use super::model_selector::ModelSelector;
 
 /// Settings panel for configuring Sagitta core settings
-#[derive(Clone)]
 pub struct SettingsPanel {
     // Sagitta config
     sagitta_config: Arc<Mutex<AppConfig>>,
@@ -39,9 +40,12 @@ pub struct SettingsPanel {
     rayon_num_threads: u32,
     
     // Sagitta Code config fields
-    pub gemini_api_key: String,
-    pub gemini_model: String,
-    pub gemini_max_reasoning_steps: u32,
+    pub openrouter_api_key: String,
+    pub openrouter_model: String,
+    pub openrouter_max_reasoning_steps: u32,
+    
+    // Model selector for dynamic model selection
+    model_selector: Option<ModelSelector>,
 }
 
 impl SettingsPanel {
@@ -67,10 +71,24 @@ impl SettingsPanel {
             rayon_num_threads: initial_app_config.rayon_num_threads as u32,
             
             // Sagitta Code config fields from initial_sagitta_code_config
-            gemini_api_key: initial_sagitta_code_config.gemini.api_key.clone().unwrap_or_default(),
-            gemini_model: initial_sagitta_code_config.gemini.model.clone(),
-            gemini_max_reasoning_steps: initial_sagitta_code_config.gemini.max_reasoning_steps,
+            openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
+            openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
+            openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
+            
+            // Initialize model selector as None (will be lazy-loaded)
+            model_selector: None,
         }
+    }
+    
+    /// Create a new settings panel with model manager for enhanced model selection
+    pub fn with_model_manager(
+        initial_sagitta_code_config: SagittaCodeConfig, 
+        initial_app_config: AppConfig,
+        model_manager: Arc<ModelManager>
+    ) -> Self {
+        let mut panel = Self::new(initial_sagitta_code_config, initial_app_config);
+        panel.model_selector = Some(ModelSelector::new(model_manager));
+        panel
     }
     
     /// Toggle the panel visibility
@@ -117,29 +135,58 @@ impl SettingsPanel {
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            // Gemini Configuration
-                            ui.heading("Gemini Configuration");
-                            Grid::new("gemini_config_grid")
+                            // OpenRouter Configuration
+                            ui.heading("OpenRouter Configuration");
+                            Grid::new("openrouter_config_grid")
                                 .num_columns(2)
                                 .spacing([8.0, 8.0])
                                 .show(ui, |ui| {
                                     ui.label("API Key:");
-                                    ui.add(TextEdit::singleline(&mut self.gemini_api_key)
+                                    ui.add(TextEdit::singleline(&mut self.openrouter_api_key)
                                         .password(true)
-                                        .hint_text("Enter your Gemini API key"));
-                                    ui.end_row();
-                                    
-                                    ui.label("Model:");
-                                    ui.add(TextEdit::singleline(&mut self.gemini_model)
-                                        .hint_text("e.g., gemini-2.0-flash-thinking-exp"));
+                                        .hint_text("Enter your OpenRouter API key"));
                                     ui.end_row();
                                     
                                     ui.label("Max Reasoning Steps:");
-                                    ui.add(egui::DragValue::new(&mut self.gemini_max_reasoning_steps)
+                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_reasoning_steps)
                                         .range(1..=100)
                                         .speed(1.0));
                                     ui.end_row();
                                 });
+                            
+                            // Model selector (enhanced UI)
+                            ui.add_space(8.0);
+                            if let Some(ref mut model_selector) = self.model_selector {
+                                // Check if we need to refresh models when first shown
+                                if model_selector.state().show_dropdown && model_selector.state().loading == false {
+                                    // If dropdown is being shown and we haven't loaded models yet, trigger refresh
+                                    let should_refresh = model_selector.state().loading == false && 
+                                        (model_selector.state().error_message.is_none() || 
+                                         model_selector.state().search_query.is_empty());
+                                    
+                                    if should_refresh {
+                                        // This is a bit of a hack - we'll trigger refresh on first show
+                                        // In a real app, this would be handled more elegantly
+                                        info!("Triggering model refresh for first-time dropdown display");
+                                    }
+                                }
+                                
+                                // Use the dynamic model selector
+                                if model_selector.render(ui, &mut self.openrouter_model, &theme) {
+                                    // Model was changed - you can add any callback logic here
+                                    info!("Model changed to: {}", self.openrouter_model);
+                                }
+                            } else {
+                                // Fallback to simple text input if no model manager available
+                                ui.horizontal(|ui| {
+                                    ui.label("Model:");
+                                    ui.add(TextEdit::singleline(&mut self.openrouter_model)
+                                        .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
+                                    
+                                    // Note about enhanced selection
+                                    ui.small("💡 Enhanced model selection available with API key");
+                                });
+                            }
                             
                             ui.separator();
                             ui.add_space(8.0);
@@ -392,23 +439,39 @@ impl SettingsPanel {
     
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
-        let sagitta_code_config = match self.sagitta_code_config.try_lock() {
-            Ok(config) => config.clone(),
-            Err(_) => {
-                log::warn!("Failed to acquire config lock, using default");
-                SagittaCodeConfig::default()
-            }
-        };
-        SagittaCodeConfig {
-            gemini: GeminiConfig {
-                api_key: if self.gemini_api_key.is_empty() { None } else { Some(self.gemini_api_key.clone()) },
-                model: self.gemini_model.clone(),
-                max_history_size: sagitta_code_config.gemini.max_history_size,
-                max_reasoning_steps: self.gemini_max_reasoning_steps,
+        let mut updated_config = SagittaCodeConfig {
+            openrouter: OpenRouterConfig {
+                api_key: if self.openrouter_api_key.is_empty() { 
+                    None 
+                } else { 
+                    Some(self.openrouter_api_key.clone()) 
+                },
+                model: self.openrouter_model.clone(),
+                provider_preferences: None,
+                max_history_size: 20,
+                max_reasoning_steps: self.openrouter_max_reasoning_steps,
+                request_timeout: 30,
             },
-            workspaces: sagitta_code_config.workspaces.clone(),
-            ..sagitta_code_config
+            sagitta: Default::default(),
+            ui: Default::default(),
+            logging: Default::default(),
+            conversation: Default::default(),
+            workspaces: Default::default(),
+        };
+        
+        // Copy other fields from current config using try_lock to avoid blocking runtime
+        if let Ok(current_config) = self.sagitta_code_config.try_lock() {
+            updated_config.sagitta = current_config.sagitta.clone();
+            updated_config.ui = current_config.ui.clone();
+            updated_config.logging = current_config.logging.clone();
+            updated_config.conversation = current_config.conversation.clone();
+            updated_config.workspaces = current_config.workspaces.clone();
+        } else {
+            // If we can't get the lock immediately, log a warning but use defaults
+            log::warn!("SettingsPanel: Could not acquire config lock immediately, using defaults for non-OpenRouter fields");
         }
+        
+        updated_config
     }
 }
 
@@ -418,7 +481,7 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, GeminiConfig, UiConfig, LoggingConfig, ConversationConfig, WorkspaceConfig};
+    use crate::config::types::{SagittaCodeConfig, OpenRouterConfig, UiConfig, LoggingConfig, ConversationConfig, WorkspaceConfig};
     // Import specific loader functions for more direct testing of file operations
     use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 
@@ -455,11 +518,13 @@ mod tests {
 
     fn create_test_sagitta_code_config() -> SagittaCodeConfig {
         SagittaCodeConfig {
-            gemini: GeminiConfig {
+            openrouter: OpenRouterConfig {
                 api_key: Some("test-api-key".to_string()),
                 model: "test-model".to_string(),
+                provider_preferences: None,
                 max_history_size: 20,
                 max_reasoning_steps: 10,
+                request_timeout: 30,
             },
             sagitta: Default::default(),
             ui: UiConfig::default(),
@@ -487,9 +552,9 @@ mod tests {
         assert_eq!(panel.rayon_num_threads, 8);
 
         // Check values from create_test_sagitta_code_config()
-        assert_eq!(panel.gemini_api_key, "test-api-key");
-        assert_eq!(panel.gemini_model, "test-model");
-        assert_eq!(panel.gemini_max_reasoning_steps, 10);
+        assert_eq!(panel.openrouter_api_key, "test-api-key");
+        assert_eq!(panel.openrouter_model, "test-model");
+        assert_eq!(panel.openrouter_max_reasoning_steps, 10);
 
         assert!(!panel.is_open);
     }
@@ -515,9 +580,9 @@ mod tests {
     async fn test_settings_panel_sagitta_code_config_population() {
         let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
-        assert_eq!(panel.gemini_api_key, "test-api-key");
-        assert_eq!(panel.gemini_model, "test-model");
-        assert_eq!(panel.gemini_max_reasoning_steps, 10);
+        assert_eq!(panel.openrouter_api_key, "test-api-key");
+        assert_eq!(panel.openrouter_model, "test-model");
+        assert_eq!(panel.openrouter_max_reasoning_steps, 10);
     }
 
     #[test]
@@ -570,15 +635,15 @@ mod tests {
         let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set some test values
-        panel.gemini_api_key = "updated-api-key".to_string();
-        panel.gemini_model = "updated-model".to_string();
-        panel.gemini_max_reasoning_steps = 100;
+        panel.openrouter_api_key = "updated-api-key".to_string();
+        panel.openrouter_model = "updated-model".to_string();
+        panel.openrouter_max_reasoning_steps = 100;
         
         let config = panel.create_updated_sagitta_code_config();
         
-        assert_eq!(config.gemini.api_key, Some("updated-api-key".to_string()));
-        assert_eq!(config.gemini.model, "updated-model");
-        assert_eq!(config.gemini.max_reasoning_steps, 100);
+        assert_eq!(config.openrouter.api_key, Some("updated-api-key".to_string()));
+        assert_eq!(config.openrouter.model, "updated-model");
+        assert_eq!(config.openrouter.max_reasoning_steps, 100);
     }
 
     #[test]
@@ -586,13 +651,13 @@ mod tests {
         let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set empty API key
-        panel.gemini_api_key = "".to_string();
-        panel.gemini_model = "test-model".to_string();
+        panel.openrouter_api_key = "".to_string();
+        panel.openrouter_model = "test-model".to_string();
         
         let config = panel.create_updated_sagitta_code_config();
         
-        assert_eq!(config.gemini.api_key, None);
-        assert_eq!(config.gemini.model, "test-model");
+        assert_eq!(config.openrouter.api_key, None);
+        assert_eq!(config.openrouter.model, "test-model");
     }
 
     #[test]
@@ -616,9 +681,9 @@ mod tests {
         assert_eq!(panel.rayon_num_threads as usize, default_app_config.rayon_num_threads);
 
         // Check SagittaCodeConfig derived fields
-        assert_eq!(panel.gemini_api_key, default_sagitta_code_config.gemini.api_key.unwrap_or_default());
-        assert_eq!(panel.gemini_model, default_sagitta_code_config.gemini.model);
-        assert_eq!(panel.gemini_max_reasoning_steps, default_sagitta_code_config.gemini.max_reasoning_steps);
+        assert_eq!(panel.openrouter_api_key, default_sagitta_code_config.openrouter.api_key.unwrap_or_default());
+        assert_eq!(panel.openrouter_model, default_sagitta_code_config.openrouter.model);
+        assert_eq!(panel.openrouter_max_reasoning_steps, default_sagitta_code_config.openrouter.max_reasoning_steps);
     }
 
     #[test]
@@ -637,7 +702,7 @@ mod tests {
             ..Default::default()
         };
         let initial_sagitta_code_config = SagittaCodeConfig {
-            gemini: GeminiConfig {
+            openrouter: OpenRouterConfig {
                 api_key: Some("initial-api-key".to_string()),
                 model: "initial-gemini-model".to_string(),
                 max_reasoning_steps: 30,
@@ -658,9 +723,9 @@ mod tests {
         assert_eq!(panel.tenant_id, initial_app_config.tenant_id);
         assert_eq!(panel.rayon_num_threads as usize, initial_app_config.rayon_num_threads);
 
-        assert_eq!(panel.gemini_api_key, initial_sagitta_code_config.gemini.api_key.unwrap_or_default());
-        assert_eq!(panel.gemini_model, initial_sagitta_code_config.gemini.model);
-        assert_eq!(panel.gemini_max_reasoning_steps, initial_sagitta_code_config.gemini.max_reasoning_steps);
+        assert_eq!(panel.openrouter_api_key, initial_sagitta_code_config.openrouter.api_key.unwrap_or_default());
+        assert_eq!(panel.openrouter_model, initial_sagitta_code_config.openrouter.model);
+        assert_eq!(panel.openrouter_max_reasoning_steps, initial_sagitta_code_config.openrouter.max_reasoning_steps);
         // Test theme string parsing
         match initial_sagitta_code_config.ui.theme.as_str() {
             "dark" => {
@@ -682,18 +747,18 @@ mod tests {
         panel.onnx_model_path = Some("updated/model.onnx".to_string());
         panel.tenant_id = Some("updated-tenant".to_string());
         panel.rayon_num_threads = 6;
-        panel.gemini_api_key = "updated-api-key".to_string();
-        panel.gemini_model = "updated-gemini-model".to_string();
-        panel.gemini_max_reasoning_steps = 90;
+        panel.openrouter_api_key = "updated-api-key".to_string();
+        panel.openrouter_model = "updated-gemini-model".to_string();
+        panel.openrouter_max_reasoning_steps = 90;
 
         // 4. Generate Configs from Modified Panel State
         let updated_sagitta_config = panel.create_updated_sagitta_config();
         let updated_sagitta_code_config = panel.create_updated_sagitta_code_config();
         
         // 5. Verify Updated Configs Match Modified Panel State
-        assert_eq!(updated_sagitta_code_config.gemini.api_key, Some("updated-api-key".to_string()));
-        assert_eq!(updated_sagitta_code_config.gemini.model, "updated-gemini-model".to_string());
-        assert_eq!(updated_sagitta_code_config.gemini.max_reasoning_steps, 90);
+        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("updated-api-key".to_string()));
+        assert_eq!(updated_sagitta_code_config.openrouter.model, "updated-gemini-model".to_string());
+        assert_eq!(updated_sagitta_code_config.openrouter.max_reasoning_steps, 90);
         
         // Verify sagitta config updates
         assert_eq!(updated_sagitta_config.qdrant_url, "http://updated-qdrant:6334");
@@ -715,9 +780,9 @@ mod tests {
         assert_eq!(loaded_app_config_from_file.rayon_num_threads, updated_sagitta_config.rayon_num_threads);
         // Add more AppConfig fields if necessary
 
-        assert_eq!(loaded_sagitta_code_config_from_file.gemini.api_key, updated_sagitta_code_config.gemini.api_key);
-        assert_eq!(loaded_sagitta_code_config_from_file.gemini.model, updated_sagitta_code_config.gemini.model);
-        assert_eq!(loaded_sagitta_code_config_from_file.gemini.max_reasoning_steps, updated_sagitta_code_config.gemini.max_reasoning_steps);
+        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.api_key, updated_sagitta_code_config.openrouter.api_key);
+        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.model, updated_sagitta_code_config.openrouter.model);
+        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.max_reasoning_steps, updated_sagitta_code_config.openrouter.max_reasoning_steps);
         assert_eq!(loaded_sagitta_code_config_from_file.ui.theme, updated_sagitta_code_config.ui.theme);
         // Add more SagittaCodeConfig fields if necessary
     }

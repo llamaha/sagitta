@@ -17,7 +17,7 @@ mod tests {
     use std::time::Duration;
     use futures_util::{StreamExt, Stream};
     use crate::agent::state::types::AgentMode;
-    use crate::llm::gemini::client::GeminiClient;
+    use crate::llm::openrouter::client::OpenRouterClient;
     use crate::tools::registry::ToolRegistry;
     use crate::agent::recovery::RecoveryConfig;
     use std::sync::Arc;
@@ -561,8 +561,8 @@ mod tests {
         
         // Create a real configuration with the API key
         let mut config = SagittaCodeConfig::default();
-        config.gemini.api_key = Some(api_key);
-        config.gemini.model = "gemini-2.0-flash-exp".to_string(); // Use the latest model
+        config.openrouter.api_key = Some(api_key);
+        config.openrouter.model = "openai/gpt-4".to_string(); // Use OpenRouter model
         
         // Create tool registry with mock tools that simulate the real tools
         let tool_registry = Arc::new(ToolRegistry::new());
@@ -646,7 +646,7 @@ mod tests {
 
         // Create the LlmClient (GeminiClient in this case)
         // The config already has the API key loaded if the test isn't skipped.
-        let llm_client = Arc::new(GeminiClient::new(&config)
+        let llm_client = Arc::new(OpenRouterClient::new(&config)
             .expect("Failed to create GeminiClient for test"));
         
         let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, llm_client).await.unwrap();

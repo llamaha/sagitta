@@ -4,9 +4,9 @@ use std::path::PathBuf;
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SagittaCodeConfig {
-    /// Gemini API configuration
+    /// OpenRouter API configuration
     #[serde(default)]
-    pub gemini: GeminiConfig,
+    pub openrouter: OpenRouterConfig,
     
     /// Vector DB configuration
     #[serde(default)]
@@ -32,7 +32,7 @@ pub struct SagittaCodeConfig {
 impl Default for SagittaCodeConfig {
     fn default() -> Self {
         Self {
-            gemini: GeminiConfig::default(),
+            openrouter: OpenRouterConfig::default(),
             sagitta: SagittaDbConfig::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
@@ -79,15 +79,18 @@ impl SagittaCodeConfig {
     }
 }
 
-/// Configuration for Gemini API
+/// Configuration for OpenRouter API
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeminiConfig {
-    /// Gemini API key
+pub struct OpenRouterConfig {
+    /// OpenRouter API key
     pub api_key: Option<String>,
     
-    /// Gemini model to use
-    #[serde(default = "default_gemini_model")]
+    /// Selected model (e.g., "openai/gpt-4", "anthropic/claude-3-5-sonnet")
+    #[serde(default = "default_openrouter_model")]
     pub model: String,
+    
+    /// Provider preferences (optional routing configuration)
+    pub provider_preferences: Option<ProviderPreferences>,
     
     /// Maximum message history size
     #[serde(default = "default_max_history_size")]
@@ -96,17 +99,36 @@ pub struct GeminiConfig {
     /// Maximum reasoning steps to prevent infinite loops
     #[serde(default = "default_max_reasoning_steps")]
     pub max_reasoning_steps: u32,
+    
+    /// Request timeout in seconds
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout: u64,
 }
 
-impl Default for GeminiConfig {
+impl Default for OpenRouterConfig {
     fn default() -> Self {
         Self {
             api_key: None,
-            model: default_gemini_model(),
+            model: default_openrouter_model(),
+            provider_preferences: None,
             max_history_size: default_max_history_size(),
             max_reasoning_steps: default_max_reasoning_steps(),
+            request_timeout: default_request_timeout(),
         }
     }
+}
+
+/// Provider preferences for OpenRouter routing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderPreferences {
+    /// Preferred providers in order
+    pub order: Option<Vec<String>>,
+    /// Whether to allow fallbacks
+    pub allow_fallbacks: Option<bool>,
+    /// Sort by price, throughput, or latency
+    pub sort: Option<String>,
+    /// Data collection policy
+    pub data_collection: Option<String>,
 }
 
 /// Configuration for Sagitta Core
@@ -399,8 +421,8 @@ impl Default for WorkspaceConfig {
     }
 }
 
-fn default_gemini_model() -> String {
-    "gemini-2.5-flash-preview-05-20".to_string()
+fn default_openrouter_model() -> String {
+    "openai/gpt-4".to_string()
 }
 
 fn default_max_history_size() -> usize {
@@ -481,6 +503,10 @@ fn default_enable_lazy_loading() -> bool {
 
 fn default_search_debounce_ms() -> u64 {
     300
+}
+
+fn default_request_timeout() -> u64 {
+    30
 }
 
 // Configuration structures will go here

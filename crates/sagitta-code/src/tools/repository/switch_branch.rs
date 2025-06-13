@@ -53,35 +53,30 @@ impl Tool for SwitchBranchTool {
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["repository_name", "branch_name", "target_ref", "force", "auto_resync"],
                 "properties": {
                     "repository_name": {
                         "type": "string",
                         "description": "Name of the repository"
                     },
                     "branch_name": {
-                        "type": "string", 
+                        "type": ["string", "null"], 
                         "description": "Name of the branch to switch to. Either this or target_ref must be provided, but not both."
                     },
                     "target_ref": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "Optional specific Git ref (tag, commit hash, branch name) to check out. If provided, this ref will be checked out instead of branch_name. Supports any valid git reference including tags, commits, and remote branches."
                     },
                     "force": {
-                        "type": "boolean",
-                        "description": "Force switch even with uncommitted changes",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Force switch even with uncommitted changes (defaults to false if null)"
                     },
                     "auto_resync": {
-                        "type": "boolean",
-                        "description": "Enable automatic resync after switch",
-                        "default": true
+                        "type": ["boolean", "null"],
+                        "description": "Enable automatic resync after switch (defaults to true if null)"
                     }
-                },
-                "required": ["repository_name"],
-                "oneOf": [
-                    {"required": ["branch_name"]},
-                    {"required": ["target_ref"]}
-                ]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

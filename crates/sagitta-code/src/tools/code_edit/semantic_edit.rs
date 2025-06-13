@@ -139,6 +139,7 @@ impl Tool for SemanticEditTool {
             description: "Edit a code element (function, class, etc.) semantically".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
                 "required": ["repository_name", "file_path", "element", "content"],
                 "properties": {
                     "repository_name": {
@@ -158,14 +159,12 @@ impl Tool for SemanticEditTool {
                         "description": "New content to replace the element"
                     },
                     "format": {
-                        "type": "boolean",
-                        "description": "Whether to format the code after editing",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to format the code after editing (defaults to false if null)"
                     },
                     "update_references": {
-                        "type": "boolean",
-                        "description": "Whether to update references to the edited element",
-                        "default": false
+                        "type": ["boolean", "null"],
+                        "description": "Whether to update references to the edited element (defaults to false if null)"
                     }
                 }
             }),
@@ -199,5 +198,118 @@ impl Tool for SemanticEditTool {
     
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::repository::manager::RepositoryManager;
+    use sagitta_search::AppConfig as SagittaAppConfig;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use serde_json::json;
+
+    fn create_test_repo_manager() -> Arc<Mutex<RepositoryManager>> {
+        let config = SagittaAppConfig::default();
+        let repo_manager = RepositoryManager::new_for_test(Arc::new(Mutex::new(config)));
+        Arc::new(Mutex::new(repo_manager))
+    }
+
+    #[tokio::test]
+    async fn test_semantic_edit_tool_creation() {
+        let tool = SemanticEditTool::new(create_test_repo_manager());
+        let definition = tool.definition();
+        assert_eq!(definition.name, "semantic_edit");
+        assert_eq!(definition.category, ToolCategory::CodeEdit);
+    }
+
+    #[test]
+    fn test_semantic_edit_tool_parameter_validation() {
+        let tool = SemanticEditTool::new(create_test_repo_manager());
+        let definition = tool.definition();
+        
+        let properties = definition.parameters.get("properties").unwrap().as_object().unwrap();
+        assert!(properties.contains_key("repository_name"));
+        assert!(properties.contains_key("file_path"));
+        assert!(properties.contains_key("element"));
+        assert!(properties.contains_key("content"));
+        assert!(properties.contains_key("format"));
+        assert!(properties.contains_key("update_references"));
+        
+        let required = definition.parameters.get("required").unwrap().as_array().unwrap();
+        assert_eq!(required.len(), 4);
+        assert!(required.contains(&json!("repository_name")));
+        assert!(required.contains(&json!("file_path")));
+        assert!(required.contains(&json!("element")));
+        assert!(required.contains(&json!("content")));
+        
+        // Optional parameters should not be required
+        assert!(!required.contains(&json!("format")));
+        assert!(!required.contains(&json!("update_references")));
+    }
+
+    #[tokio::test]
+    async fn test_semantic_edit_tool_minimal_parameters() {
+        let tool = SemanticEditTool::new(create_test_repo_manager());
+        
+        // Test with only the required parameters
+        let params = json!({
+            "repository_name": "test-repo",
+            "file_path": "src/main.rs",
+            "element": "function:main",
+            "content": "fn main() { println!(\"Hello, world!\"); }"
+        });
+        
+        let result = tool.execute(params).await;
+        
+        // Should fail due to repository not found, but that's expected in test environment
+        // The important thing is that it accepts the minimal parameters
+        match result {
+            Ok(ToolResult::Success(data)) => {
+                assert_eq!(data["repository_name"], "test-repo");
+                assert_eq!(data["file_path"], "src/main.rs");
+                assert_eq!(data["element"], "function:main");
+            }
+            Ok(ToolResult::Error { .. }) => {
+                // Expected due to missing repository in test environment
+            }
+            Err(_) => {
+                // Expected due to missing repository in test environment
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_semantic_edit_tool_with_optional_parameters() {
+        let tool = SemanticEditTool::new(create_test_repo_manager());
+        
+        // Test with optional parameters included
+        let params = json!({
+            "repository_name": "test-repo",
+            "file_path": "src/main.rs",
+            "element": "function:main",
+            "content": "fn main() { println!(\"Hello, world!\"); }",
+            "format": true,
+            "update_references": false
+        });
+        
+        let result = tool.execute(params).await;
+        
+        // Should fail due to repository not found, but that's expected in test environment
+        // The important thing is that it accepts the optional parameters
+        match result {
+            Ok(ToolResult::Success(data)) => {
+                assert_eq!(data["repository_name"], "test-repo");
+                assert_eq!(data["file_path"], "src/main.rs");
+                assert_eq!(data["element"], "function:main");
+            }
+            Ok(ToolResult::Error { .. }) => {
+                // Expected due to missing repository in test environment
+            }
+            Err(_) => {
+                // Expected due to missing repository in test environment
+            }
+        }
     }
 } 

@@ -1439,6 +1439,30 @@ const DIFF_COLLAPSING_THRESHOLD_LINES: usize = 10;
 const EXPANDED_DIFF_SCROLL_AREA_MAX_HEIGHT: f32 = 360.0;
 const MIN_ALLOCATED_HEIGHT_FOR_DIFF_FRAME: f32 = 400.0;
 
+/// Helper function to wrap text at specified line length
+fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
+    text.lines()
+        .map(|line| {
+            if line.len() <= max_line_length {
+                line.to_string()
+            } else {
+                let mut result = String::new();
+                let mut current_pos = 0;
+                while current_pos < line.len() {
+                    let end_pos = std::cmp::min(current_pos + max_line_length, line.len());
+                    result.push_str(&line[current_pos..end_pos]);
+                    if end_pos < line.len() {
+                        result.push('\n');
+                    }
+                    current_pos = end_pos;
+                }
+                result
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Render mixed content (text + code blocks) compactly
 fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
     if let Some((old_content, new_content, language)) = detect_diff_content(content) {

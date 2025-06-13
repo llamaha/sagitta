@@ -27,7 +27,7 @@ use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
-use crate::llm::gemini::client::GeminiClient;
+use crate::llm::openrouter::client::OpenRouterClient;
 use crate::tools::executor::{ToolExecutor as SagittaCodeToolExecutorInternal, ToolExecutionEvent};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{ToolResult, ToolDefinition as ToolDefinitionType};
@@ -77,7 +77,7 @@ use crate::agent::conversation::search::ConversationSearchEngine;
 use terminal_stream::events::StreamEvent;
 
 /// The system prompt instructing the agent how to respond
-const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by Gemini and sagitta-search.
+const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by OpenRouter and sagitta-search.
 You help developers understand and work with code repositories efficiently.
 You have access to tools that can search and retrieve code, view file contents, and more.
 When asked about code, use your tools to look up accurate and specific information.
@@ -699,20 +699,29 @@ impl AgentStreamHandler {
 impl ReasoningStreamHandlerTrait for AgentStreamHandler {
     // This now correctly receives reasoning_engine::streaming::StreamChunk (the struct)
     async fn handle_chunk(&self, chunk: reasoning_engine::streaming::StreamChunk) -> Result<(), ReasoningError> {
-        log::debug!("AgentStreamHandler: Processing chunk with type='{}', data_len={}, is_final={}", 
-                   chunk.chunk_type, chunk.data.len(), chunk.is_final);
+        // Only log for substantial chunks or errors, not every tiny token
+        if chunk.data.len() > 20 || !chunk.chunk_type.starts_with("text") {
+            log::debug!("AgentStreamHandler: Processing chunk type='{}', data_len={}, is_final={}", 
+                       chunk.chunk_type, chunk.data.len(), chunk.is_final);
+        }
 
         let sagitta_code_chunk_part_result: Result<Option<SagittaCodeMessagePart>, SagittaCodeError> = match chunk.chunk_type.as_str() {
             "text" | "llm_text" | "llm_output" => {
                 match String::from_utf8(chunk.data.clone()) {
                     Ok(text_content) => {
-                        log::debug!("AgentStreamHandler: Text chunk content: '{}'", text_content);
+                        // Only log non-trivial text chunks
+                        if text_content.len() > 10 {
+                            log::trace!("AgentStreamHandler: Text chunk content: '{}'", text_content.chars().take(100).collect::<String>());
+                        }
                         
                         // NEW: Buffer the text content for assistant message
                         if !text_content.trim().is_empty() {
                             let mut buffer = self.buffered_response.lock().await;
                             buffer.push_str(&text_content);
-                            log::debug!("AgentStreamHandler: Buffered text, total length: {}", buffer.len());
+                            // Only log buffer size periodically or for final chunks
+                            if chunk.is_final || buffer.len() % 100 == 0 {
+                                log::trace!("AgentStreamHandler: Buffered text, total length: {}", buffer.len());
+                            }
                         }
                         
                         // CRITICAL FIX: Always create a text part for non-empty text content
@@ -793,16 +802,23 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
             }
             // Other chunk_types like "tool_result" could be handled if the ReasoningEngine sends them.
             _ => {
-                log::debug!("AgentStreamHandler: Received chunk_type: '{}' with {} bytes", chunk.chunk_type, chunk.data.len());
+                if chunk.data.len() > 10 { // Only log substantial unknown chunks
+                    log::debug!("AgentStreamHandler: Received chunk_type: '{}' with {} bytes", chunk.chunk_type, chunk.data.len());
+                }
                 // CRITICAL FIX: Try to parse unknown chunk types as text if they contain valid UTF-8
                 if let Ok(text_content) = String::from_utf8(chunk.data.clone()) {
                     if !text_content.trim().is_empty() {
-                        log::debug!("AgentStreamHandler: Treating unknown chunk_type '{}' as text: '{}'", chunk.chunk_type, text_content);
+                        if text_content.len() > 10 {
+                            log::trace!("AgentStreamHandler: Treating unknown chunk_type '{}' as text: '{}'", 
+                                       chunk.chunk_type, text_content.chars().take(50).collect::<String>());
+                        }
                         
                         // NEW: Buffer unknown text content too
                         let mut buffer = self.buffered_response.lock().await;
                         buffer.push_str(&text_content);
-                        log::debug!("AgentStreamHandler: Buffered unknown text, total length: {}", buffer.len());
+                        if chunk.is_final || buffer.len() % 100 == 0 {
+                            log::trace!("AgentStreamHandler: Buffered unknown text, total length: {}", buffer.len());
+                        }
                         
                         Ok(Some(SagittaCodeMessagePart::Text { text: text_content }))
                     } else {
@@ -832,20 +848,18 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 
                 // Save the complete assistant message to history
                 self.history.add_assistant_message(assistant_content.clone()).await;
-                log::info!("AgentStreamHandler: Successfully saved assistant message to history");
+                log::debug!("AgentStreamHandler: Successfully saved assistant message to history");
                 
-                // Emit an AgentEvent::LlmMessage for GUI consumption
-                let assistant_message = AgentMessage::assistant(assistant_content);
-                if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmMessage(assistant_message)) {
-                    log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmMessage: {}", e);
-                }
+                // CRITICAL FIX: DO NOT emit AgentEvent::LlmMessage here - it causes duplicate responses
+                // The GUI should only process AgentEvent::LlmChunk events for streaming display
+                // The complete message is already saved to history above
                 
                 // Clear the buffer for next conversation turn
                 let mut buffer = self.buffered_response.lock().await;
                 buffer.clear();
-                log::debug!("AgentStreamHandler: Cleared response buffer");
+                log::trace!("AgentStreamHandler: Cleared response buffer");
             } else {
-                log::debug!("AgentStreamHandler: Stream is final but buffer is empty, not saving to history");
+                log::trace!("AgentStreamHandler: Stream is final but buffer is empty, not saving to history");
             }
         }
 
@@ -864,13 +878,20 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                     // Don't return an error when receiver is dropped - this is expected when stream completes
                     // return Err(ReasoningError::streaming("raw_sender_dropped".to_string(), "Failed to send to raw_chunk_sender".to_string()));
                 } else {
-                    log::debug!("AgentStreamHandler: Successfully sent chunk to stream");
+                    // Only log successful sends for substantial chunks or final chunks
+                    if chunk.is_final || chunk.data.len() > 20 {
+                        log::trace!("AgentStreamHandler: Successfully sent chunk to stream");
+                    }
                 }
                 
                 // ALSO emit AgentEvent::LlmChunk for GUI consumption
                 match &sagitta_code_part {
                     SagittaCodeMessagePart::Text { text } => {
-                        log::debug!("AgentStreamHandler: Emitting LlmChunk event for text: '{}'", text);
+                        // Only log for substantial text or final chunks
+                        if chunk.is_final || text.len() > 10 {
+                            log::trace!("AgentStreamHandler: Emitting LlmChunk event for text: '{}'", 
+                                       text.chars().take(50).collect::<String>());
+                        }
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: text.clone(),
                             is_final: chunk.is_final,
@@ -1001,7 +1022,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                 }
             }
             Ok(None) => {
-                log::debug!("AgentStreamHandler: Skipping chunk (no content to forward)");
+                log::trace!("AgentStreamHandler: Skipping chunk (no content to forward)");
                 // Unhandled or intentionally skipped chunk type
             }
             Err(e) => {
@@ -1015,7 +1036,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
     }
 
     async fn handle_stream_complete(&self, _stream_id: Uuid) -> Result<(), ReasoningError> {
-        debug!("AgentStreamHandler: Stream complete notification received for stream_id: {}", _stream_id);
+        log::debug!("AgentStreamHandler: Stream complete notification received for stream_id: {}", _stream_id);
 
         // NEW: Ensure any buffered assistant content is persisted even if the ReasoningEngine
         // did not flag the final chunk with `is_final = true`. This provides an additional
@@ -1042,7 +1063,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
             // Clear buffer for safety.
             buffer_guard.clear();
         } else {
-            log::debug!("AgentStreamHandler: No buffered content to persist on stream_complete");
+            log::trace!("AgentStreamHandler: No buffered content to persist on stream_complete");
         }
 
         Ok(())

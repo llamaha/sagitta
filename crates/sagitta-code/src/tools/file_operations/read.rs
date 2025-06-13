@@ -112,10 +112,11 @@ impl Tool for ReadFileTool {
             description: "Read the contents of a file from a repository or directly from filesystem".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
                 "required": ["file_path"],
                 "properties": {
                     "repository_name": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "The repository containing the file (optional - will fallback to direct file access if not provided or if repository is not found)"
                     },
                     "file_path": {
@@ -123,11 +124,11 @@ impl Tool for ReadFileTool {
                         "description": "The path to the file within the repository or filesystem"
                     },
                     "start_line": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional start line (1-indexed)"
                     },
                     "end_line": {
-                        "type": "integer",
+                        "type": ["integer", "null"],
                         "description": "Optional end line (1-indexed, inclusive)"
                     }
                 }

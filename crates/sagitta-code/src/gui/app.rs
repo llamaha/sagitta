@@ -110,8 +110,63 @@ impl SagittaCodeApp {
         let sagitta_code_config_arc = Arc::new(sagitta_code_config.clone());
         let app_core_config_arc = Arc::new(app_core_config.clone());
 
-        // Create settings panel and initialize it with the current configs
-        let settings_panel = SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone());
+        // Create OpenRouter client to get ModelManager for settings panel
+        let settings_panel = match crate::llm::openrouter::OpenRouterClient::new(&sagitta_code_config) {
+            Ok(openrouter_client) => {
+                // Get the model manager from the client by cloning it
+                // Since ModelManager doesn't have Clone, we need to create a new one with the same config
+                let api_key = sagitta_code_config.openrouter.api_key.clone()
+                    .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
+                    .unwrap_or_default();
+                
+                if !api_key.is_empty() {
+                    // Create HTTP client with proper headers for the model manager
+                    let mut headers = reqwest::header::HeaderMap::new();
+                    headers.insert(
+                        reqwest::header::AUTHORIZATION,
+                        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", api_key)).unwrap()
+                    );
+                    headers.insert(
+                        reqwest::header::CONTENT_TYPE,
+                        reqwest::header::HeaderValue::from_static("application/json")
+                    );
+                    headers.insert(
+                        "HTTP-Referer",
+                        reqwest::header::HeaderValue::from_static("https://github.com/user/sagitta")
+                    );
+                    headers.insert(
+                        "X-Title",
+                        reqwest::header::HeaderValue::from_static("Sagitta Code AI")
+                    );
+
+                    let http_client = reqwest::Client::builder()
+                        .default_headers(headers)
+                        .timeout(std::time::Duration::from_secs(sagitta_code_config.openrouter.request_timeout))
+                        .build()
+                        .unwrap_or_else(|_| reqwest::Client::new());
+
+                    let model_manager = Arc::new(crate::llm::openrouter::models::ModelManager::new(
+                        http_client,
+                        "https://openrouter.ai/api/v1".to_string()
+                    ));
+                    
+                    // Create settings panel with model manager for dropdown functionality
+                    SettingsPanel::with_model_manager(
+                        sagitta_code_config.clone(), 
+                        app_core_config.clone(),
+                        model_manager
+                    )
+                } else {
+                    log::warn!("No OpenRouter API key available. Using basic settings panel.");
+                    SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone())
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to create OpenRouter client for model selection: {}. Using basic settings panel.", e);
+                // Fallback to basic settings panel without model manager
+                SettingsPanel::new(sagitta_code_config.clone(), app_core_config.clone())
+            }
+        };
 
         // Create conversation event channel
         let (conversation_sender, conversation_receiver) = mpsc::unbounded_channel();

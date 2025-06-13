@@ -7,7 +7,7 @@ use crate::config::types::SagittaCodeConfig;
 
 pub fn create_reasoning_config(agent_config: &SagittaCodeConfig) -> ReasoningConfig {
     ReasoningConfig {
-        max_iterations: agent_config.gemini.max_reasoning_steps, // Respect user's configured setting
+        max_iterations: agent_config.openrouter.max_reasoning_steps, // Respect user's configured setting
         confidence_threshold: 0.7,
         step_timeout: Duration::from_secs(30),
         session_timeout: Duration::from_secs(300), // 5 minute session timeout

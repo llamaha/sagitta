@@ -256,7 +256,7 @@ Focus on getting started quickly with this library.",
         
         // Default: general search with focus on actionable information
         format!(
-            "Search for: {}
+            "Find current, accurate information about: {}
 
 Be concise and provide actionable information. Include:
 1. Direct links to official sources
@@ -449,6 +449,7 @@ impl Tool for WebSearchTool {
 The tool provides both human-readable results and structured data that can be used for automated actions. Use this for any current information not in your training data.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
                 "required": ["search_term"],
                 "properties": {
                     "search_term": {
@@ -456,7 +457,7 @@ The tool provides both human-readable results and structured data that can be us
                         "description": "The search query. Be specific about what you need:\n• For git repos: 'tokio rust library github' or 'express.js repository'\n• For docs: 'rust tokio documentation' or 'python requests library docs'\n• For examples: 'rust async http client example' or 'python rest api code sample'\n• For APIs: 'stripe api endpoints' or 'twitter api authentication'\n• For installation: 'install rust tokio' or 'npm install express setup'\nSpecific queries get faster, more accurate results."
                     },
                     "explanation": {
-                        "type": "string",
+                        "type": ["string", "null"],
                         "description": "One sentence explanation as to why this tool is being used, and how it contributes to the goal."
                     }
                 }
@@ -526,8 +527,9 @@ mod tests {
         let params = &definition.parameters;
         assert_eq!(params["type"], "object");
         assert!(params["required"].as_array().unwrap().contains(&json!("search_term")));
+        assert!(!params["required"].as_array().unwrap().contains(&json!("explanation")));
         assert!(params["properties"]["search_term"]["type"] == "string");
-        assert!(params["properties"]["explanation"]["type"] == "string");
+        assert!(params["properties"]["explanation"]["type"] == json!(["string", "null"]));
     }
 
     #[tokio::test]
@@ -789,18 +791,172 @@ mod tests {
         let mock_client = MockTestLlmClient::new();
         let tool = WebSearchTool::new(Arc::new(mock_client));
         
-        // Test queries that don't match specific patterns
-        let general_queries = vec![
-            "latest news about rust programming",
-            "best practices for web development",
-            "performance comparison between databases",
-        ];
+        let prompt = tool.create_targeted_prompt("random query about something");
         
-        for query in general_queries {
-            let prompt = tool.create_targeted_prompt(query);
-            assert!(prompt.contains("Be concise"));
-            assert!(prompt.contains("actionable information"));
-            assert!(prompt.contains("take action"));
+        // Should use the default fallback prompt
+        assert!(prompt.contains("Find current, accurate information"));
+        assert!(prompt.contains("random query about something"));
+    }
+
+    #[tokio::test]
+    async fn test_minimal_parameters_web_search() {
+        let mut mock_client = MockTestLlmClient::new();
+        
+        // Mock successful response
+        let mock_response = LlmResponse {
+            message: Message {
+                id: uuid::Uuid::new_v4(),
+                role: Role::Assistant,
+                parts: vec![MessagePart::Text { 
+                    text: "Test search result".to_string() 
+                }],
+                metadata: Default::default(),
+            },
+            tool_calls: vec![],
+            usage: Some(TokenUsage {
+                prompt_tokens: 10,
+                completion_tokens: 15,
+                total_tokens: 25,
+                thinking_tokens: None,
+                cached_tokens: None,
+                model_name: "".to_string(),
+            }),
+            grounding: None,
+        };
+        
+        mock_client
+            .expect_generate_with_grounding()
+            .times(1)
+            .returning(move |_, _, _| Ok(mock_response.clone()));
+        
+        let tool = WebSearchTool::new(Arc::new(mock_client));
+        
+        // Test with only the required "search_term" parameter
+        let params = json!({
+            "search_term": "minimal test query"
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with minimal parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["query"], "minimal test query");
+            assert!(value["answer"].is_string());
+            assert!(value["timestamp"].is_string());
         }
+    }
+
+    #[tokio::test]
+    async fn test_optional_explanation_parameter() {
+        let mut mock_client = MockTestLlmClient::new();
+        
+        // Mock successful response
+        let mock_response = LlmResponse {
+            message: Message {
+                id: uuid::Uuid::new_v4(),
+                role: Role::Assistant,
+                parts: vec![MessagePart::Text { 
+                    text: "Test search result with explanation".to_string() 
+                }],
+                metadata: Default::default(),
+            },
+            tool_calls: vec![],
+            usage: None,
+            grounding: None,
+        };
+        
+        mock_client
+            .expect_generate_with_grounding()
+            .times(1)
+            .returning(move |_, _, _| Ok(mock_response.clone()));
+        
+        let tool = WebSearchTool::new(Arc::new(mock_client));
+        
+        // Test with optional explanation parameter provided
+        let params = json!({
+            "search_term": "test query with explanation",
+            "explanation": "Testing optional parameter handling"
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with optional parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["query"], "test query with explanation");
+            assert!(value["answer"].is_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_null_explanation_parameter() {
+        let mut mock_client = MockTestLlmClient::new();
+        
+        // Mock successful response
+        let mock_response = LlmResponse {
+            message: Message {
+                id: uuid::Uuid::new_v4(),
+                role: Role::Assistant,
+                parts: vec![MessagePart::Text { 
+                    text: "Test search result with null explanation".to_string() 
+                }],
+                metadata: Default::default(),
+            },
+            tool_calls: vec![],
+            usage: None,
+            grounding: None,
+        };
+        
+        mock_client
+            .expect_generate_with_grounding()
+            .times(1)
+            .returning(move |_, _, _| Ok(mock_response.clone()));
+        
+        let tool = WebSearchTool::new(Arc::new(mock_client));
+        
+        // Test with explicit null explanation parameter
+        let params = json!({
+            "search_term": "test query with null explanation",
+            "explanation": null
+        });
+        
+        let result = tool.execute(params).await;
+        assert!(result.is_ok(), "Tool should work with null optional parameters");
+        
+        if let Ok(ToolResult::Success(value)) = result {
+            assert_eq!(value["query"], "test query with null explanation");
+            assert!(value["answer"].is_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_web_search_params_deserialization() {
+        // Test minimal parameters
+        let minimal_json = json!({
+            "search_term": "test query"
+        });
+        
+        let params: WebSearchParams = serde_json::from_value(minimal_json).unwrap();
+        assert_eq!(params.search_term, "test query");
+        assert!(params.explanation.is_none());
+        
+        // Test with explanation
+        let full_json = json!({
+            "search_term": "test query",
+            "explanation": "test explanation"
+        });
+        
+        let params: WebSearchParams = serde_json::from_value(full_json).unwrap();
+        assert_eq!(params.search_term, "test query");
+        assert_eq!(params.explanation, Some("test explanation".to_string()));
+        
+        // Test with null explanation
+        let null_json = json!({
+            "search_term": "test query",
+            "explanation": null
+        });
+        
+        let params: WebSearchParams = serde_json::from_value(null_json).unwrap();
+        assert_eq!(params.search_term, "test query");
+        assert!(params.explanation.is_none());
     }
 } 

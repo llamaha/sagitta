@@ -7,8 +7,8 @@ use tokio::sync::Mutex;
 use tempfile::TempDir;
 use tokio::fs;
 use std::path::PathBuf;
-use sagitta_code::llm::gemini::streaming::GeminiStream;
-use sagitta_code::llm::gemini::api::GeminiResponse;
+use sagitta_code::llm::openrouter::streaming::OpenRouterStream;
+use sagitta_code::llm::openrouter::api::ChatCompletionResponse;
 use futures_util::StreamExt;
 use egui;
 use sagitta_code::agent::Agent;
@@ -18,7 +18,7 @@ use sagitta_code::agent::conversation::persistence::ConversationPersistence;
 use sagitta_code::agent::conversation::search::text::TextConversationSearchEngine;
 use sagitta_embed::provider::onnx::OnnxEmbeddingModel;
 use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
-use sagitta_code::llm::gemini::client::GeminiClient;
+use sagitta_code::llm::openrouter::client::OpenRouterClient;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -26,12 +26,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_sagitta_code_message_overwriting_issue() {
     let temp_dir = TempDir::new().unwrap();
-    let config_path = temp_dir.path().join("sagitta_code_config.json");
     
-    // Create a test config
+    // Use default test config instead of creating a JSON file
     let test_config = SagittaCodeConfig::default();
-    let config_json = serde_json::to_string_pretty(&test_config).unwrap();
-    fs::write(&config_path, config_json).await.unwrap();
     
     // Create app
     let app_core_config = sagitta_search::config::AppConfig::default();
@@ -87,28 +84,28 @@ async fn test_settings_not_loading_from_config() {
     let temp_dir = TempDir::new().unwrap();
     
     // Create sagitta_code_config.json with specific values
-    let app_config_path = temp_dir.path().join("sagitta_code_config.json");
-    let app_config_content = r#"{
-  "gemini": {
-    "api_key": "test-api-key-123",
-    "model": "test-model-name",
-    "max_history_size": 50
-  },
-  "ui": {
-    "theme": "light",
-    "dark_mode": false,
-    "window_width": 1200,
-    "window_height": 900
-  }
-}"#;
+    let app_config_path = temp_dir.path().join("sagitta_code_config.toml");
+    let app_config_content = r#"[openrouter]
+api_key = "test-api-key-123"
+model = "test-model-name"
+max_history_size = 50
+max_reasoning_steps = 10
+request_timeout = 30
+
+[ui]
+theme = "light"
+dark_mode = false
+window_width = 1200
+window_height = 900
+"#;
     fs::write(&app_config_path, app_config_content).await.unwrap();
     
     // Load the config directly from the file
     let loaded_config = load_config_from_path(&app_config_path).expect("Should load config from test file");
     
     // CRITICAL TEST: Settings should be loaded from the files
-    assert_eq!(loaded_config.gemini.api_key, Some("test-api-key-123".to_string()));
-    assert_eq!(loaded_config.gemini.model, "test-model-name");
+    assert_eq!(loaded_config.openrouter.api_key, Some("test-api-key-123".to_string()));
+    assert_eq!(loaded_config.openrouter.model, "test-model-name");
     assert_eq!(loaded_config.ui.theme, "light");
     assert_eq!(loaded_config.ui.window_width, 1200);
     
@@ -120,8 +117,8 @@ async fn test_settings_not_loading_from_config() {
     let mut app = SagittaCodeApp::new(repo_manager, loaded_config.clone(), app_core_config_for_loaded);
     
     // CRITICAL TEST: App should be created with the loaded config values
-    assert_eq!(app.settings_panel.gemini_api_key, "test-api-key-123");
-    assert_eq!(app.settings_panel.gemini_model, "test-model-name");
+    assert_eq!(app.settings_panel.openrouter_api_key, "test-api-key-123");
+    assert_eq!(app.settings_panel.openrouter_model, "test-model-name");
     
     // The theme should be set correctly in the app constructor
     let expected_theme_name = "Light";
@@ -220,23 +217,21 @@ async fn test_config_loading_direct() {
     let temp_dir = TempDir::new().unwrap();
     
     // Create sagitta_code_config.json
-    let app_config_path = temp_dir.path().join("sagitta_code_config.json");
-    fs::write(&app_config_path, r#"{
-  "gemini": {
-    "api_key": "custom-api-key",
-    "model": "custom-model"
-  },
-  "ui": {
-    "theme": "macchiato"
-  }
-}"#).await.unwrap();
+    let app_config_path = temp_dir.path().join("sagitta_code_config.toml");
+    fs::write(&app_config_path, r#"[openrouter]
+api_key = "custom-api-key"
+model = "custom-model"
+
+[ui]
+theme = "macchiato"
+"#).await.unwrap();
     
     // Test loading the config directly
     let config = load_config_from_path(&app_config_path).expect("Should load config");
     
     // Verify values were loaded correctly
-    assert_eq!(config.gemini.api_key, Some("custom-api-key".to_string()));
-    assert_eq!(config.gemini.model, "custom-model");
+    assert_eq!(config.openrouter.api_key, Some("custom-api-key".to_string()));
+    assert_eq!(config.openrouter.model, "custom-model");
     assert_eq!(config.ui.theme, "macchiato");
 }
 
@@ -352,7 +347,7 @@ async fn test_exact_user_conversation_scenario() {
     
     // Simulate the long response about being a code assistant
     app.handle_llm_chunk("Hello! I'm Sagitta Code AI, a code assistant".to_string(), false, &ctx);
-    app.handle_llm_chunk(" powered by Gemini and sagitta-search.".to_string(), false, &ctx);
+    app.handle_llm_chunk(" powered by OpenRouter and sagitta-search.".to_string(), false, &ctx);
     app.handle_llm_chunk(" I can help you understand and work with code repositories.".to_string(), true, &ctx);
     
     // First response should be complete now
@@ -427,31 +422,58 @@ async fn test_exact_user_conversation_scenario() {
     println!("✅ FIXED: Exact user scenario - Sagitta Code creates separate messages with different timestamps!");
 }
 
-/// Test that verifies the Gemini streaming parser handles empty parts arrays
+/// Test that verifies the OpenRouter streaming parser handles proper response format
 #[tokio::test]
-async fn test_gemini_streaming_empty_parts_handling() {
-    // Create a mock response that simulates the problematic JSON from Gemini
-    let mock_response_json = r#"{"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 5050,"candidatesTokenCount": 19,"totalTokenCount": 5069}}"#;
+async fn test_openrouter_streaming_response_handling() {
+    // Create a mock response that simulates the OpenRouter response format
+    let mock_response_json = r#"{
+        "id": "chatcmpl-123",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "openai/gpt-4o",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello! How can I help you today?"
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 15,
+            "total_tokens": 35
+        }
+    }"#;
     
-    // This test verifies that the JSON can be parsed with empty parts array
-    let parsed: Result<GeminiResponse, _> = serde_json::from_str(mock_response_json);
+    // This test verifies that the JSON can be parsed correctly
+    let parsed: Result<ChatCompletionResponse, _> = serde_json::from_str(mock_response_json);
     
     match parsed {
         Ok(response) => {
-            assert_eq!(response.candidates.len(), 1);
-            let candidate = &response.candidates[0];
-            assert_eq!(candidate.content.parts.len(), 0); // Empty parts array
+            assert_eq!(response.choices.len(), 1);
+            let choice = &response.choices[0];
+            assert_eq!(choice.message.content, Some("Hello! How can I help you today?".to_string()));
+            assert_eq!(choice.finish_reason, Some("stop".to_string()));
             
             // Debug what we actually got
-            println!("Parsed finish_reason: {:?}", candidate.finish_reason);
-            println!("Parsed content role: {:?}", candidate.content.role);
-            println!("Parsed parts length: {}", candidate.content.parts.len());
+            println!("Parsed finish_reason: {:?}", choice.finish_reason);
+            println!("Parsed content: {:?}", choice.message.content);
+            println!("Parsed model: {}", response.model);
             
-            // The key fix is that empty parts arrays don't cause parsing errors
-            println!("✅ FIXED: Gemini response with empty parts array parses correctly!");
+            // Verify usage information
+            if let Some(usage) = response.usage {
+                assert_eq!(usage.prompt_tokens, 20);
+                assert_eq!(usage.completion_tokens, 15);
+                assert_eq!(usage.total_tokens, 35);
+            }
+            
+            println!("✅ FIXED: OpenRouter response parses correctly!");
         },
         Err(e) => {
-            panic!("Failed to parse Gemini response with empty parts: {}", e);
+            panic!("Failed to parse OpenRouter response: {}", e);
         }
     }
 }

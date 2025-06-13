@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uuid;
+use uuid::{self, Uuid};
 
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
@@ -63,19 +63,26 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
             match event {
                 AgentEvent::LlmMessage(message) => {
                     // CRITICAL FIX: Only add complete messages if we're NOT currently streaming
-                    // This prevents overwriting streaming responses
-                    if app.state.current_response_id.is_none() {
+                    // This prevents overwriting streaming responses AND prevents duplication
+                    if app.state.current_response_id.is_none() && !app.state.is_streaming_response {
                         let chat_message = make_chat_message_from_agent_message(&message);
                         let streaming_message: StreamingMessage = chat_message.into();
                         app.chat_manager.add_complete_message(streaming_message);
                         log::info!("SagittaCodeApp: Added complete LlmMessage as new message");
                     } else {
-                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?})", app.state.current_response_id);
+                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?}, is_streaming: {})", app.state.current_response_id, app.state.is_streaming_response);
                     }
                     app.state.is_waiting_for_response = false;
                 },
                 AgentEvent::LlmChunk { content, is_final } => {
-                    log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", content.chars().take(70).collect::<String>(), is_final);
+                    // Only log substantial chunks or final chunks to reduce noise
+                    if is_final || content.len() > 20 {
+                        log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", 
+                                  content.chars().take(50).collect::<String>(), is_final);
+                    } else {
+                        log::trace!("SagittaCodeApp: GUI received small LlmChunk - length: {}, is_final: {}", 
+                                   content.len(), is_final);
+                    }
                     handle_llm_chunk(app, content, is_final, None);
                 },
                 AgentEvent::ToolCall { tool_call } => {
@@ -271,87 +278,57 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
     chat_message
 }
 
-/// Handle LLM chunk events
-pub fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, message_type: Option<MessageType>) {
-    // CRITICAL FIX: Always start a new response for each new conversation turn
-    // Don't reuse existing response IDs from previous messages
-    if app.state.current_response_id.is_none() {
-        let response_id = app.chat_manager.start_agent_response();
-        app.state.current_response_id = Some(response_id);
-        app.state.is_streaming_response = true; // Set streaming state
-        log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", app.state.current_response_id.as_ref().unwrap());
-    }
+/// Handle LLM chunk events from the agent
+fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, tool_call_id: Option<String>) {
+    let current_response_id = app.state.current_response_id.clone();
     
-    // Check if this is thinking content
-    if let Some(ref response_id) = app.state.current_response_id {
-        if content.starts_with("THINKING:") {
-            // This is thinking content - use new streaming thinking in conversation view
-            let thinking_text = content.strip_prefix("THINKING:").unwrap_or(&content);
+    match current_response_id {
+        Some(current_id) => {
+            // We have an ongoing response, append to it
+            log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
+                       current_id, content.chars().take(50).collect::<String>());
+            app.chat_manager.append_content(&current_id, content.clone());
             
-            // Use the new streaming thinking functionality
-            log::info!("handle_llm_chunk: Appending THINKING content for ID: {}", response_id);
-            app.chat_manager.append_thinking(response_id, thinking_text.to_string());
-            
-            // Add to events panel for system tracking
-            app.panels.events_panel.add_event(
-                SystemEventType::Info,
-                format!("Thinking: {}", thinking_text.chars().take(100).collect::<String>())
-            );
-            
-            log::info!("SagittaCodeApp: Added thinking content to conversation stream: {} chars", thinking_text.len());
-            
-            // Clear the old modal thinking indicator since we're now using inline thinking
-            app.state.thinking_message = None;
-            app.state.thinking_start_time = None;
-        } else if !content.is_empty() {
-            // This is regular text content (only append if not empty)
-            // When regular content starts, the thinking will automatically start fading
-            log::info!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", response_id, content.chars().take(70).collect::<String>());
-            
-            // Check if this is a summary message from the reasoning engine
-            let detected_message_type = message_type.or_else(|| {
-                // Detect summary messages from reasoning engine based on content patterns
-                if content.contains("Okay, I've finished those tasks") || 
-                   content.contains("Successfully completed:") ||
-                   content.contains("What would you like to do next?") {
-                    Some(MessageType::Summary)
+            if is_final {
+                app.chat_manager.finish_streaming(&current_id);
+                app.state.current_response_id = None;
+                app.state.is_streaming_response = false;
+                app.state.is_waiting_for_response = false;
+                if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                    log::debug!("handle_llm_chunk: Completed streaming response for ID: '{}'", current_id);
                 } else {
-                    None
+                    log::trace!("handle_llm_chunk: Completed streaming response");
                 }
-            });
+            }
+        },
+        None => {
+            // Start a new response stream
+            let response_id = app.chat_manager.start_agent_response();
+            app.state.current_response_id = Some(response_id.clone());
+            app.state.is_streaming_response = true;
             
-            // Propagate message_type if provided or detected
-            if let Some(mt) = detected_message_type {
-                if mt == MessageType::Summary {
-                    app.chat_manager.append_content(response_id, content.clone());
-                    app.chat_manager.set_message_type(response_id, MessageType::Summary);
-                    log::info!("handle_llm_chunk: Tagged message as Summary type");
-                } else {
-                    app.chat_manager.append_content(response_id, content);
-                }
+            // Only log for substantial content or final chunks
+            if is_final || content.len() > 20 {
+                log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
             } else {
-                app.chat_manager.append_content(response_id, content);
+                log::trace!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
             }
             
-            // Clear the old modal thinking indicator
-            app.state.thinking_message = None;
-            app.state.thinking_start_time = None;
-        }
-        // Note: Empty content is allowed for final chunks to signal completion
-        
-        if is_final {
-            // Finish thinking stream if it was active
-            app.chat_manager.finish_thinking_stream(response_id);
+            app.chat_manager.append_content(&response_id, content.clone());
             
-            app.chat_manager.finish_streaming(response_id);
-            app.state.current_response_id = None;
-            app.state.is_streaming_response = false; // Clear streaming state
-            app.state.is_waiting_for_response = false;
-            log::info!("SagittaCodeApp: Finished streaming response, cleared current_response_id for NEXT response");
-            
-            // Trigger automatic analysis for checkpoint and branch suggestions
-            if let Some(conversation_id) = app.state.current_conversation_id {
-                analyze_conversation_for_suggestions(app, conversation_id);
+            if is_final {
+                app.chat_manager.finish_streaming(&response_id);
+                app.state.current_response_id = None;
+                app.state.is_streaming_response = false;
+                app.state.is_waiting_for_response = false;
+                if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                    log::debug!("handle_llm_chunk: Immediately completed response for ID: '{}'", response_id);
+                } else {
+                    log::trace!("handle_llm_chunk: Immediately completed response");
+                }
+            } else {
+                log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
+                           response_id, content.chars().take(50).collect::<String>());
             }
         }
     }
@@ -448,7 +425,11 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     // Store the result for potential preview display
     app.state.tool_results.insert(tool_call_id.clone(), result_string);
     
-    log::info!("Tool call {} ({}) completed with result stored", tool_call_id, tool_name);
+    if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+        log::debug!("Tool call {} ({}) completed with result stored", tool_call_id, tool_name);
+    } else {
+        log::trace!("Tool call '{}' completed", tool_name);
+    }
 }
 
 /// Handle agent state changes

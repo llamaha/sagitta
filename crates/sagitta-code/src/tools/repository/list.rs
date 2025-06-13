@@ -31,14 +31,16 @@ impl Tool for ListRepositoriesTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "list_repositories".to_string(),
-            description: "List all available repositories".to_string(),
+            description: "List all repositories currently registered in the management system".to_string(),
+            category: ToolCategory::Repository,
+            is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": [],
                 "properties": {}
             }),
-            is_required: false,
-            category: ToolCategory::Repository,
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::new(),
         }
     }
     
@@ -93,7 +95,7 @@ mod tests {
         let definition = tool.definition();
         
         assert_eq!(definition.name, "list_repositories");
-        assert!(definition.description.contains("List all available repositories"));
+        assert!(definition.description.contains("List all repositories currently registered in the management system"));
         assert_eq!(definition.category, ToolCategory::Repository);
         assert!(!definition.is_required);
         
