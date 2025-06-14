@@ -430,7 +430,7 @@ impl SettingsPanel {
             ui: Default::default(),
             logging: Default::default(),
             conversation: Default::default(),
-            workspaces: Default::default(),
+
         };
         
         // Copy other fields from current config using try_lock to avoid blocking runtime
@@ -439,7 +439,7 @@ impl SettingsPanel {
             updated_config.ui = current_config.ui.clone();
             updated_config.logging = current_config.logging.clone();
             updated_config.conversation = current_config.conversation.clone();
-            updated_config.workspaces = current_config.workspaces.clone();
+
         } else {
             // If we can't get the lock immediately, log a warning but use defaults
             log::warn!("SettingsPanel: Could not acquire config lock immediately, using defaults for non-OpenRouter fields");
@@ -455,7 +455,7 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, OpenRouterConfig, UiConfig, LoggingConfig, ConversationConfig, WorkspaceConfig};
+    use crate::config::types::{SagittaCodeConfig, OpenRouterConfig, UiConfig, LoggingConfig, ConversationConfig};
     // Import specific loader functions for more direct testing of file operations
     use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 
@@ -503,7 +503,7 @@ mod tests {
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
-            workspaces: WorkspaceConfig::default(),
+
         }
     }
 

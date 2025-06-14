@@ -26,7 +26,7 @@ use crate::agent::conversation::analytics::{ConversationAnalyticsManager, Analyt
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
-use crate::project::workspace::manager::{WorkspaceManager, WorkspaceManagerImpl};
+
 use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
 use crate::llm::title::TitleGenerator;
 
@@ -77,8 +77,7 @@ pub struct SagittaCodeApp {
     config: Arc<Mutex<SagittaCodeConfig>>,
     app_core_config: Arc<AppConfig>,
     
-    // Workspace Manager
-    pub workspace_manager: Arc<Mutex<WorkspaceManagerImpl>>,
+
 
     // Conversation service for cluster management
     conversation_service: Option<Arc<ConversationService>>,
@@ -182,18 +181,7 @@ impl SagittaCodeApp {
             "dark" | _ => initial_state.current_theme = AppTheme::Dark, // Default to Dark
         }
 
-        // Initialize Workspace Manager
-        let workspace_storage_path = sagitta_code_config.workspaces.storage_path
-            .clone()
-            .unwrap_or_else(|| {
-                // Default path if not set in config, e.g., in user's data directory
-                dirs::data_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("sagitta")
-                    .join("workspaces")
-            });
 
-        let workspace_manager = Arc::new(Mutex::new(WorkspaceManagerImpl::new(workspace_storage_path)));
 
         // Create panel manager with model manager if available
         let mut panels = if let Some(model_manager) = model_manager_for_panels {
@@ -213,7 +201,6 @@ impl SagittaCodeApp {
             conversation_sidebar: ConversationSidebar::with_default_config(),
             config: Arc::new(Mutex::new(sagitta_code_config)),
             app_core_config: app_core_config_arc,
-            workspace_manager,
             
             // Initialize state management with theme from config
             state: initial_state,
@@ -281,13 +268,6 @@ impl SagittaCodeApp {
 
     /// Initialize application state, including loading configurations and setting up the agent
     pub async fn initialize(&mut self) -> Result<()> {
-        let mut workspace_manager = self.workspace_manager.lock().await;
-        if let Err(e) = workspace_manager.load_workspaces().await {
-            log::error!("Failed to load workspaces: {}", e);
-            // Decide if you want to bail out or continue with an empty workspace list
-        }
-        self.state.workspaces = workspace_manager.list_workspaces().await?;
-        drop(workspace_manager);
         initialization::initialize(self).await
     }
 

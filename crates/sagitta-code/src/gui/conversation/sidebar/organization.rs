@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::agent::conversation::types::ConversationSummary;
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::state::types::ConversationStatus;
-use crate::project::workspace::types::WorkspaceSummary;
+
 use super::types::{
     ConversationSidebar, OrganizedConversations, ConversationGroup, OrganizationMode,
     ConversationItem, ConversationDisplay, StatusIndicator, VisualIndicator, IndicatorType,
@@ -19,8 +19,6 @@ impl ConversationSidebar {
         &self,
         conversations: &[ConversationSummary],
         clusters: Option<&[ConversationCluster]>,
-        workspaces: &[WorkspaceSummary],
-        active_workspace_id: Option<Uuid>,
     ) -> Result<OrganizedConversations> {
         // Apply search and filters first
         let filtered_conversations = self.apply_filters(conversations);
@@ -39,7 +37,7 @@ impl ConversationSidebar {
         // Organize into groups based on mode
         let groups = match &self.organization_mode {
             OrganizationMode::Recency => self.organize_by_recency(&searched_conversations),
-            OrganizationMode::Project => self.organize_by_project(&searched_conversations, workspaces, active_workspace_id),
+            OrganizationMode::Project => self.organize_by_project(&searched_conversations),
             OrganizationMode::Status => self.organize_by_status(&searched_conversations),
             OrganizationMode::Clusters => self.organize_by_clusters(&searched_conversations, clusters),
             OrganizationMode::Tags => self.organize_by_tags(&searched_conversations),
@@ -110,42 +108,24 @@ impl ConversationSidebar {
     fn organize_by_project(
         &self,
         conversations: &[ConversationSummary],
-        workspaces: &[WorkspaceSummary],
-        active_workspace_id: Option<Uuid>,
     ) -> Result<Vec<ConversationGroup>> {
-        let mut groups: HashMap<Option<Uuid>, Vec<ConversationSummary>> = HashMap::new();
+        let mut groups: HashMap<Option<String>, Vec<ConversationSummary>> = HashMap::new();
 
-        // Filter conversations by active workspace if one is selected
-        let conversations_to_organize = if let Some(active_id) = active_workspace_id {
-            conversations
-                .iter()
-                .filter(|c| c.workspace_id == Some(active_id))
-                .cloned()
-                .collect()
-        } else {
-            conversations.to_vec()
-        };
-
-        for conv in conversations_to_organize {
-            groups.entry(conv.workspace_id).or_default().push(conv);
+        for conv in conversations {
+            // Group by project name if available
+            let project_key = conv.project_name.clone();
+            groups.entry(project_key).or_default().push(conv.clone());
         }
 
         let mut conversation_groups = Vec::new();
-        for (workspace_id, convs) in groups {
-            let (group_name, priority) = match workspace_id {
-                Some(id) => {
-                    let name = workspaces
-                        .iter()
-                        .find(|ws| ws.id == id)
-                        .map(|ws| ws.name.clone())
-                        .unwrap_or_else(|| "Unknown Workspace".to_string());
-                    (name, 0)
-                }
-                None => ("No Workspace".to_string(), 1),
+        for (project_name, convs) in groups {
+            let (group_name, group_id, priority) = match &project_name {
+                Some(name) => (name.clone(), name.clone(), 0),
+                None => ("No Project".to_string(), "no-project".to_string(), 1),
             };
 
             let group = self.create_group(
-                &workspace_id.map(|id| id.to_string()).unwrap_or_else(|| "no-workspace".to_string()),
+                &group_id,
                 &group_name,
                 convs,
                 priority,

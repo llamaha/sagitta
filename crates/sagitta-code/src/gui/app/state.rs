@@ -12,7 +12,7 @@ use terminal_stream::{
     events::StreamEvent,
     TerminalWidget, TerminalConfig,
 };
-use crate::project::workspace::types::WorkspaceSummary;
+
 
 /// Application state management
 pub struct AppState {
@@ -64,9 +64,7 @@ pub struct AppState {
     pub sidebar_action: Option<SidebarAction>,
     pub editing_conversation_id: Option<Uuid>,
     
-    // Workspace state
-    pub workspaces: Vec<WorkspaceSummary>,
-    pub active_workspace_id: Option<Uuid>,
+
     
     // Loop control features
     pub is_in_loop: bool,
@@ -134,9 +132,7 @@ impl AppState {
             sidebar_action: None,
             editing_conversation_id: None,
             
-            // Workspace state
-            workspaces: Vec::new(),
-            active_workspace_id: None,
+
             
             // Loop control features
             is_in_loop: false,
@@ -240,10 +236,7 @@ impl AppState {
         self.terminal_event_sender.clone()
     }
 
-    /// Set the active workspace
-    pub fn set_active_workspace(&mut self, workspace_id: Option<Uuid>) {
-        self.active_workspace_id = workspace_id;
-    }
+
 
     /// Process terminal events (call this in the main update loop)
     pub fn process_terminal_events(&mut self) {
@@ -331,8 +324,8 @@ mod tests {
         assert!(state.terminal_event_sender.is_some());
         assert!(state.terminal_event_receiver.is_some());
         assert!(!state.show_terminal);
-        assert!(state.workspaces.is_empty());
-        assert!(state.active_workspace_id.is_none());
+
+
     }
 
     #[test]
@@ -656,16 +649,5 @@ mod tests {
         assert!(state.messages.is_empty());
     }
 
-    #[test]
-    fn test_set_active_workspace() {
-        let mut state = AppState::new();
-        assert_eq!(state.active_workspace_id, None);
-
-        let workspace_id = Uuid::new_v4();
-        state.set_active_workspace(Some(workspace_id));
-        assert_eq!(state.active_workspace_id, Some(workspace_id));
-
-        state.set_active_workspace(None);
-        assert_eq!(state.active_workspace_id, None);
-    }
+    
 } 

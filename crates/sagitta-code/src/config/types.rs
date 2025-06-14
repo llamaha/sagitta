@@ -24,9 +24,7 @@ pub struct SagittaCodeConfig {
     #[serde(default)]
     pub conversation: ConversationConfig,
 
-    /// Workspace configuration
-    #[serde(default)]
-    pub workspaces: WorkspaceConfig,
+
 }
 
 impl Default for SagittaCodeConfig {
@@ -37,7 +35,6 @@ impl Default for SagittaCodeConfig {
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
-            workspaces: WorkspaceConfig::default(),
         }
     }
 }
@@ -58,24 +55,18 @@ impl SagittaCodeConfig {
     /// Gets the repositories base path with proper fallback logic
     /// Order of precedence:
     /// 1. config.sagitta.repositories_base_path (if set)
-    /// 2. config.workspaces.storage_path (if set)  
-    /// 3. default ~/.local/share/sagitta/workspaces
+    /// 2. default ~/.local/share/sagitta/repositories
     pub fn repositories_base_path(&self) -> PathBuf {
         // First try sagitta.repositories_base_path
         if let Some(ref path) = self.sagitta.repositories_base_path {
             return path.clone();
         }
         
-        // Then try workspaces.storage_path
-        if let Some(ref path) = self.workspaces.storage_path {
-            return path.clone();
-        }
-        
-        // Finally fall back to default workspaces path
-        crate::config::paths::get_workspaces_path()
-            .unwrap_or_else(|_| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            })
+        // Finally fall back to default repositories path
+        dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("sagitta")
+            .join("repositories")
     }
 }
 
@@ -402,24 +393,7 @@ impl Default for ConversationConfig {
 }
 
 /// Configuration for project workspaces
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceConfig {
-    /// Directory to store workspace data
-    pub storage_path: Option<PathBuf>,
-    
-    /// Automatically detect and switch workspaces
-    #[serde(default = "default_auto_detect_workspaces")]
-    pub auto_detect: bool,
-}
 
-impl Default for WorkspaceConfig {
-    fn default() -> Self {
-        Self {
-            storage_path: crate::config::paths::get_workspaces_path().ok(),
-            auto_detect: default_auto_detect_workspaces(),
-        }
-    }
-}
 
 fn default_openrouter_model() -> String {
     "openai/gpt-4".to_string()
@@ -465,9 +439,7 @@ fn default_auto_checkpoints() -> bool {
     true
 }
 
-fn default_auto_detect_workspaces() -> bool {
-    true
-}
+
 
 fn default_organization_mode() -> String {
     "Recency".to_string()
