@@ -136,6 +136,11 @@ edition = "2021"
 /// Test helper to create a repository manager with proper configuration
 async fn create_test_repo_manager_with_real_config() -> Result<(Arc<Mutex<RepositoryManager>>, TempDir)> {
     let temp_dir = TempDir::new()?;
+    
+    // Set up test isolation for config saves
+    let test_config_path = temp_dir.path().join("test_config.toml");
+    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", test_config_path.to_string_lossy().to_string());
+    
     let mut config = SagittaAppConfig::default();
     
     // Set up temporary paths
@@ -147,7 +152,7 @@ async fn create_test_repo_manager_with_real_config() -> Result<(Arc<Mutex<Reposi
     config.qdrant_url = "http://localhost:6334".to_string();
     
     // Set up tenant ID
-    config.tenant_id = Some("test-tenant".to_string());
+            // tenant_id is hardcoded to "local" in sagitta-code operational code
     
     let config_arc = Arc::new(Mutex::new(config));
     let mut repo_manager = RepositoryManager::new(config_arc);
@@ -280,7 +285,7 @@ mod tests {
             (
                 config.repositories_base_path.clone(),
                 config.qdrant_url.clone(),
-                config.tenant_id.clone()
+                Some("local".to_string()) // hardcoded in sagitta-code
             )
         };
         

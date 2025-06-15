@@ -278,13 +278,18 @@ impl RepositoryManager {
     
     // Helper to save config when we already have the guard
     async fn save_core_config_with_guard(&self, config: &AppConfig) -> Result<()> {
-        let shared_config_path = sagitta_search::config::get_config_path()
-            .unwrap_or_else(|_| {
-                dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("sagitta")
-                    .join("config.toml")
-            });
+        // Respect test isolation by checking for SAGITTA_TEST_CONFIG_PATH
+        let shared_config_path = if let Ok(test_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
+            PathBuf::from(test_path)
+        } else {
+            sagitta_search::config::get_config_path()
+                .unwrap_or_else(|_| {
+                    dirs::config_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("sagitta")
+                        .join("config.toml")
+                })
+        };
         
         log::info!("Saving config to path: {}", shared_config_path.display());
         log::debug!("Config has {} repositories", config.repositories.len());
@@ -1093,7 +1098,7 @@ mod tests {
     async fn test_query_uses_branch_aware_collection_naming() {
         let temp_dir = TempDir::new().unwrap();
         let mut config = AppConfig::default();
-        config.tenant_id = Some("test-tenant".to_string());
+        // tenant_id is hardcoded to "local" in sagitta-code operational code
         config.performance.collection_name_prefix = "test_repo_".to_string();
         
         // Add a test repository to the config

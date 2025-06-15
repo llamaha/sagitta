@@ -477,6 +477,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                         let mut config_guard = config.lock().await;
                         config_guard.ui.theme = "custom".to_string();
                         
+                        // Respect test isolation by using save_config which handles test paths
                         if let Err(err) = crate::config::save_config(&*config_guard) {
                             log::error!("Failed to save custom theme config: {}", err);
                         }
@@ -542,6 +543,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                     let mut config_guard = config.lock().await;
                     config_guard.openrouter.model = model_id.clone();
                     
+                    // Respect test isolation by using save_config which handles test paths
                     if let Err(err) = crate::config::save_config(&*config_guard) {
                         log::error!("Failed to save model selection: {}", err);
                     } else {

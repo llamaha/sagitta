@@ -25,7 +25,7 @@ async fn test_tools_use_configured_base_directory() {
     
     // Configure sagitta to use our temp workspace
     let mut config = SagittaCodeConfig::default();
-    config.workspaces.storage_path = Some(workspace_path.clone());
+    config.conversation.storage_path = Some(workspace_path.clone());
     
     // Create tool registry with tools that should use the workspace
     let tool_registry = Arc::new(ToolRegistry::new());

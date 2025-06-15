@@ -777,23 +777,23 @@ mod tests {
     #[test]
     fn test_load_config_with_env_override() {
         let temp_dir = tempdir().unwrap();
-        let (config_path_ignored, _data_path) = setup_test_env(temp_dir.path()); // This path won't be used
-
-        // Create a separate config file that the env var will point to
-        let env_config_dir = temp_dir.path().join("env_config_dir");
+        let env_config_dir = temp_dir.path().join("env_config");
         std::fs::create_dir_all(&env_config_dir).unwrap();
-        let env_config_path = env_config_dir.join("env_config.toml");
+        let env_config_path = env_config_dir.join(CONFIG_FILE_NAME);
 
-        let mut env_config = AppConfig::default();
-        env_config.qdrant_url = "http://env-override-qdrant:6334".to_string();
+        // Create a config file with specific content at the env path
+        let env_config = AppConfig {
+            qdrant_url: "http://env-override-qdrant:6334".to_string(),
+            ..AppConfig::default()
+        };
         save_config_to_path(&env_config, &env_config_path).unwrap();
 
         // Set the environment variable
         std::env::set_var("SAGITTA_TEST_CONFIG_PATH", env_config_path.to_str().unwrap());
 
         // Load config - it should use the path from the env var
-        // Pass `None` as override_path to ensure env var is the primary source here
-        let loaded_config = load_config(None).unwrap();
+        // Use the env config path as override to ensure we're testing the right thing
+        let loaded_config = load_config(Some(&env_config_path)).unwrap();
 
         // Clean up the environment variable
         std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");

@@ -32,7 +32,6 @@ pub struct SettingsPanel {
     onnx_tokenizer_path: Option<String>,
     repositories_base_path: Option<String>,
     vocabulary_base_path: Option<String>,
-    tenant_id: Option<String>,
     indexing_max_concurrent_upserts: u32,
     performance_batch_size: u32,
     performance_collection_name_prefix: String,
@@ -62,7 +61,6 @@ impl SettingsPanel {
             onnx_tokenizer_path: initial_app_config.onnx_tokenizer_path.clone(),
             repositories_base_path: initial_app_config.repositories_base_path.clone(),
             vocabulary_base_path: initial_app_config.vocabulary_base_path.clone(),
-            tenant_id: initial_app_config.tenant_id.clone(),
             indexing_max_concurrent_upserts: initial_app_config.indexing.max_concurrent_upserts as u32,
             performance_batch_size: initial_app_config.performance.batch_size as u32,
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
@@ -270,24 +268,7 @@ impl SettingsPanel {
                                 });
                             ui.add_space(16.0);
                             
-                            // Tenant ID settings
-                            ui.heading("Tenant ID");
-                            ui.label("The tenant ID is used to uniquely identify your installation and is required for repository operations.");
-                            Grid::new("tenant_id_grid")
-                                .num_columns(2)
-                                .spacing([8.0, 8.0])
-                                .show(ui, |ui| {
-                                    ui.label("Tenant ID:");
-                                    let mut tenant_id_str = self.tenant_id.clone().unwrap_or_default();
-                                    if ui.text_edit_singleline(&mut tenant_id_str).changed() {
-                                        self.tenant_id = if tenant_id_str.is_empty() { None } else { Some(tenant_id_str) };
-                                    }
-                                    ui.end_row();
-                                });
-                            if ui.button("Generate New UUID").clicked() {
-                                self.tenant_id = Some(Uuid::new_v4().to_string());
-                            }
-                            ui.add_space(16.0);
+
                             
                             // Advanced settings - Indexing
                             ui.collapsing("Advanced Indexing Settings", |ui| {
@@ -360,14 +341,18 @@ impl SettingsPanel {
         // Save sagitta-search configuration to shared location
         let updated_sagitta_config = self.create_updated_sagitta_config();
         
-        // Use the shared sagitta config path
-        let shared_config_path = sagitta_search::config::get_config_path()
-            .unwrap_or_else(|_| {
-                dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("sagitta")
-                    .join("config.toml")
-            });
+        // Respect test isolation by checking for SAGITTA_TEST_CONFIG_PATH
+        let shared_config_path = if let Ok(test_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
+            PathBuf::from(test_path)
+        } else {
+            sagitta_search::config::get_config_path()
+                .unwrap_or_else(|_| {
+                    dirs::config_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("sagitta")
+                        .join("config.toml")
+                })
+        };
             
         match sagitta_search::config::save_config(&updated_sagitta_config, Some(&shared_config_path)) {
             Ok(_) => {
@@ -398,7 +383,6 @@ impl SettingsPanel {
         config.onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
         config.repositories_base_path = self.repositories_base_path.clone();
         config.vocabulary_base_path = self.vocabulary_base_path.clone();
-        config.tenant_id = self.tenant_id.clone();
         
         // Indexing settings
         config.indexing.max_concurrent_upserts = self.indexing_max_concurrent_upserts as usize;
@@ -466,7 +450,7 @@ mod tests {
             onnx_tokenizer_path: Some("/test/tokenizer".to_string()),
             repositories_base_path: Some("/test/repos".to_string()),
             vocabulary_base_path: Some("/test/vocab".to_string()),
-            tenant_id: Some("test-tenant".to_string()),
+            tenant_id: None, // not used in sagitta-code (hardcoded to "local")
             repositories: vec![],
             active_repository: None,
             indexing: sagitta_search::config::IndexingConfig {
@@ -517,7 +501,6 @@ mod tests {
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
-        assert_eq!(panel.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
@@ -540,7 +523,6 @@ mod tests {
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
-        assert_eq!(panel.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
@@ -579,7 +561,6 @@ mod tests {
         panel.onnx_tokenizer_path = Some("/custom/tokenizer".to_string());
         panel.repositories_base_path = Some("/custom/repos".to_string());
         panel.vocabulary_base_path = Some("/custom/vocab".to_string());
-        panel.tenant_id = Some("custom-tenant".to_string());
         panel.indexing_max_concurrent_upserts = 16;
         panel.performance_batch_size = 300;
         panel.performance_collection_name_prefix = "custom_sagitta".to_string();
@@ -592,7 +573,6 @@ mod tests {
         assert_eq!(config.onnx_tokenizer_path, Some("/custom/tokenizer".to_string()));
         assert_eq!(config.repositories_base_path, Some("/custom/repos".to_string()));
         assert_eq!(config.vocabulary_base_path, Some("/custom/vocab".to_string()));
-        assert_eq!(config.tenant_id, Some("custom-tenant".to_string()));
         assert_eq!(config.indexing.max_concurrent_upserts, 16);
         assert_eq!(config.performance.batch_size, 300);
         assert_eq!(config.performance.collection_name_prefix, "custom_sagitta");
@@ -642,7 +622,6 @@ mod tests {
         assert_eq!(panel.onnx_tokenizer_path, default_app_config.onnx_tokenizer_path);
         assert_eq!(panel.repositories_base_path, default_app_config.repositories_base_path);
         assert_eq!(panel.vocabulary_base_path, default_app_config.vocabulary_base_path);
-        assert_eq!(panel.tenant_id, default_app_config.tenant_id);
         assert_eq!(panel.indexing_max_concurrent_upserts as usize, default_app_config.indexing.max_concurrent_upserts);
         assert_eq!(panel.performance_batch_size as usize, default_app_config.performance.batch_size);
         assert_eq!(panel.performance_collection_name_prefix, default_app_config.performance.collection_name_prefix);
@@ -665,7 +644,7 @@ mod tests {
             qdrant_url: "http://initial-qdrant:6334".to_string(),
             onnx_model_path: Some("initial/model.onnx".to_string()),
             onnx_tokenizer_path: Some("initial/tokenizer/".to_string()),
-            tenant_id: Some("initial-tenant".to_string()),
+
             ..Default::default()
         };
         let initial_sagitta_code_config = SagittaCodeConfig {
@@ -687,7 +666,6 @@ mod tests {
 
         assert_eq!(panel.qdrant_url, initial_app_config.qdrant_url);
         assert_eq!(panel.onnx_model_path, initial_app_config.onnx_model_path);
-        assert_eq!(panel.tenant_id, initial_app_config.tenant_id);
 
         assert_eq!(panel.openrouter_api_key, initial_sagitta_code_config.openrouter.api_key.unwrap_or_default());
         assert_eq!(panel.openrouter_model, initial_sagitta_code_config.openrouter.model);
@@ -711,7 +689,6 @@ mod tests {
         // 3. Modify Panel State (Simulate UI Edits - Set B)
         panel.qdrant_url = "http://updated-qdrant:6334".to_string();
         panel.onnx_model_path = Some("updated/model.onnx".to_string());
-        panel.tenant_id = Some("updated-tenant".to_string());
         panel.openrouter_api_key = "updated-api-key".to_string();
         panel.openrouter_model = "updated-gemini-model".to_string();
         panel.openrouter_max_reasoning_steps = 90;
@@ -741,7 +718,6 @@ mod tests {
         // 8. Verify Loaded Configs Match Modified Panel State (as represented by generated configs)
         assert_eq!(loaded_app_config_from_file.qdrant_url, updated_sagitta_config.qdrant_url);
         assert_eq!(loaded_app_config_from_file.onnx_model_path, updated_sagitta_config.onnx_model_path);
-        assert_eq!(loaded_app_config_from_file.tenant_id, updated_sagitta_config.tenant_id);
 
         assert_eq!(loaded_sagitta_code_config_from_file.openrouter.api_key, updated_sagitta_code_config.openrouter.api_key);
         assert_eq!(loaded_sagitta_code_config_from_file.openrouter.model, updated_sagitta_code_config.openrouter.model);

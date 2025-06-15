@@ -1,3 +1,11 @@
+mod common;
+
+// Initialize test isolation for this integration test binary
+#[ctor::ctor]
+fn init_test_isolation() {
+    common::init_test_isolation();
+}
+
 use sagitta_code::config::{SagittaCodeConfig, load_merged_config, load_config_from_path};
 use sagitta_code::gui::app::SagittaCodeApp;
 use sagitta_code::gui::repository::manager::RepositoryManager;
@@ -21,6 +29,8 @@ use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use sagitta_code::llm::openrouter::client::OpenRouterClient;
 use std::path::Path;
 use uuid::Uuid;
+
+// Test isolation is handled globally by tests/mod.rs
 
 /// Test that demonstrates Sagitta Code overwriting messages instead of creating new ones
 #[tokio::test]

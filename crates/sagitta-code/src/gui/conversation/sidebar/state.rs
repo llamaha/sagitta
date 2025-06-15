@@ -151,8 +151,8 @@ impl ConversationSidebar {
         config.enable_accessibility = self.accessibility_enabled;
         config.color_blind_friendly = self.color_blind_friendly;
         
-        // Save configuration to disk
-        save_config(app_config)?;
+        // Save configuration to disk - respect test isolation
+        crate::config::save_config(app_config)?;
         self.last_state_save = Some(Instant::now());
         
         Ok(())
