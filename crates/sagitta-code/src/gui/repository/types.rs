@@ -315,6 +315,7 @@ pub struct SimpleSyncStatus {
     pub final_message: String,
     pub started_at: Option<std::time::Instant>,
     pub final_elapsed_seconds: Option<f64>, // Store final elapsed time when sync completes
+    pub last_progress_time: Option<std::time::Instant>, // Last time progress was updated (for watchdog)
 }
 
 /// State for the repository panel
@@ -574,6 +575,10 @@ impl DisplayableSyncProgress {
             }
             CoreSyncStage::Error { message } => {
                 displayable.stage_detail.name = "Error".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+            }
+            CoreSyncStage::Heartbeat { message } => {
+                displayable.stage_detail.name = "Heartbeat".to_string();
                 displayable.stage_detail.overall_message = message.clone();
             }
         }
@@ -1129,14 +1134,16 @@ mod tests {
 
     #[test]
     fn test_sync_status_final_elapsed_time() {
+        let now = std::time::Instant::now();
         let mut status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["Starting sync...".to_string()],
             final_message: String::new(),
-            started_at: Some(std::time::Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now),
         };
 
         // Simulate completion

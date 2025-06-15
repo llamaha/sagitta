@@ -173,15 +173,13 @@ pub async fn delete_points_for_files<
         relative_paths.len(), branch_name, collection_name);
 
     // Report start of deletion stage
-    reporter.report(SyncProgress {
-        stage: SyncStage::DeleteFile {
-            current_file: None,
-            total_files: relative_paths.len(),
-            current_file_num: 0,
-            files_per_second: None,
-            message: Some(format!("Starting deletion scan for {} files.", relative_paths.len())),
-        }
-    }).await;
+    reporter.report(SyncProgress::new(SyncStage::DeleteFile {
+        current_file: None,
+        total_files: relative_paths.len(),
+        current_file_num: 0,
+        files_per_second: None,
+        message: Some(format!("Starting deletion scan for {} files.", relative_paths.len())),
+    })).await;
 
     let mut point_ids_to_delete: Vec<PointId> = Vec::new();
     let filter = Filter::must([
@@ -248,15 +246,13 @@ pub async fn delete_points_for_files<
         log::debug!("Deleted batch of {} points for branch '{}'.", chunk.len(), branch_name);
         deleted_points_count += chunk.len();
         // Report progress after each batch deletion
-        reporter.report(SyncProgress {
-            stage: SyncStage::DeleteFile {
-                current_file: None,
-                total_files: relative_paths.len(),
-                current_file_num: relative_paths.len(),
-                files_per_second: None,
-                message: Some(format!("Deleted {}/{} points associated with scanned files.", deleted_points_count, total_points_to_delete)),
-            }
-        }).await;
+        reporter.report(SyncProgress::new(SyncStage::DeleteFile {
+            current_file: None,
+            total_files: relative_paths.len(),
+            current_file_num: relative_paths.len(),
+            files_per_second: None,
+            message: Some(format!("Deleted {}/{} points associated with scanned files.", deleted_points_count, total_points_to_delete)),
+        })).await;
     }
     log::info!("Successfully deleted {} points for {} files in branch '{}'.",
         point_ids_to_delete.len(), relative_paths.len(), branch_name);

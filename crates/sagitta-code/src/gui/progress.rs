@@ -46,10 +46,14 @@ impl CoreSyncProgressReporter for GuiProgressReporter {
             SyncStage::DeleteFile { .. } | 
             SyncStage::CollectFiles { .. } | 
             SyncStage::QueryLanguages { .. } | 
-            SyncStage::VerifyingCollection { .. }
+            SyncStage::VerifyingCollection { .. } |
+            SyncStage::Heartbeat { .. }
         );
         simple.is_complete = matches!(progress.stage, SyncStage::Completed { .. } | SyncStage::Error { .. });
         simple.is_success  = matches!(progress.stage, SyncStage::Completed { .. });
+        
+        // Update last progress time for watchdog monitoring
+        simple.last_progress_time = progress.timestamp.or_else(|| Some(std::time::Instant::now()));
 
         if simple.output_lines.len() > 100 { // Limit log lines
             simple.output_lines.remove(0);
@@ -87,9 +91,7 @@ mod tests {
         let repo_id = format!("test_repo_global_state_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
         let reporter = GuiProgressReporter::new(repo_id.clone());
 
-        let core_progress = SyncProgress {
-            stage: SyncStage::Idle,
-        };
+        let core_progress = SyncProgress::new(SyncStage::Idle);
 
         reporter.report(core_progress.clone()).await;
 

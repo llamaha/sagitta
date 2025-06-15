@@ -52,6 +52,9 @@ impl SyncProgressReporter for LoggingProgressReporter {
             SyncStage::Idle => {
                 log::debug!("[Idle]");
             }
+            SyncStage::Heartbeat { message } => {
+                log::debug!("[Heartbeat] {}", message);
+            }
         }
     }
 }
@@ -74,12 +77,10 @@ mod tests {
     async fn test_report_git_fetch_with_progress() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::GitFetch {
-                message: "Fetching objects".to_string(),
-                progress: Some((50, 100)),
-            },
-        };
+        let progress = SyncProgress::new(SyncStage::GitFetch {
+            message: "Fetching objects".to_string(),
+            progress: Some((50, 100)),
+        });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [GitFetch] Fetching objects: 50/100
     }
@@ -88,12 +89,10 @@ mod tests {
     async fn test_report_git_fetch_no_progress() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::GitFetch {
-                message: "Receiving objects".to_string(),
-                progress: None,
-            },
-        };
+        let progress = SyncProgress::new(SyncStage::GitFetch {
+            message: "Receiving objects".to_string(),
+            progress: None,
+        });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [GitFetch] Receiving objects
     }
@@ -102,15 +101,13 @@ mod tests {
     async fn test_report_index_file_with_fps() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::IndexFile {
-                current_file: Some(PathBuf::from("src/module/file.rs")),
-                total_files: 200,
-                current_file_num: 25,
-                files_per_second: Some(15.756),
-                message: None,
-            },
-        };
+        let progress = SyncProgress::new(SyncStage::IndexFile {
+            current_file: Some(PathBuf::from("src/module/file.rs")),
+            total_files: 200,
+            current_file_num: 25,
+            files_per_second: Some(15.756),
+            message: None,
+        });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [IndexFile] Processing file 25/200 (15.76 files/s): src/module/file.rs
     }
@@ -119,15 +116,13 @@ mod tests {
     async fn test_report_index_file_no_fps() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::IndexFile {
-                current_file: Some(PathBuf::from("README.md")),
-                total_files: 5,
-                current_file_num: 1,
-                files_per_second: None,
-                message: None,
-            },
-        };
+        let progress = SyncProgress::new(SyncStage::IndexFile {
+            current_file: Some(PathBuf::from("README.md")),
+            total_files: 5,
+            current_file_num: 1,
+            files_per_second: None,
+            message: None,
+        });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [IndexFile] Processing file 1/5: README.md
     }
@@ -136,15 +131,13 @@ mod tests {
     async fn test_report_delete_file_with_fps() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::DeleteFile {
-                current_file: Some(PathBuf::from("old_file.txt")),
-                total_files: 10,
-                current_file_num: 2,
-                files_per_second: Some(5.123),
-                message: None,
-            },
-        };
+        let progress = SyncProgress::new(SyncStage::DeleteFile {
+            current_file: Some(PathBuf::from("old_file.txt")),
+            total_files: 10,
+            current_file_num: 2,
+            files_per_second: Some(5.123),
+            message: None,
+        });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [DeleteFile] Deleting file 2/10 (5.12 files/s): old_file.txt
     }
@@ -153,9 +146,7 @@ mod tests {
     async fn test_report_error() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::Error { message: "A critical error happened".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::Error { message: "A critical error happened".to_string() });
         reporter.report(progress).await;
         // Expected log: ERROR [sagitta_mcp::progress] [Error] A critical error happened
     }
@@ -164,9 +155,7 @@ mod tests {
     async fn test_report_completed() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::Completed { message: "All operations finished.".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::Completed { message: "All operations finished.".to_string() });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [Completed] All operations finished.
     }
@@ -175,9 +164,7 @@ mod tests {
     async fn test_report_idle() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::Idle,
-        };
+        let progress = SyncProgress::new(SyncStage::Idle);
         reporter.report(progress).await;
         // Expected log: DEBUG [sagitta_mcp::progress] [Idle]
     }
@@ -186,9 +173,7 @@ mod tests {
     async fn test_report_diff_calculation() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::DiffCalculation { message: "Calculating differences...".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::DiffCalculation { message: "Calculating differences...".to_string() });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [DiffCalculation] Calculating differences...
     }
@@ -197,9 +182,7 @@ mod tests {
     async fn test_report_collect_files() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::CollectFiles { total_files: 150, message: "Gathering files for indexing".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::CollectFiles { total_files: 150, message: "Gathering files for indexing".to_string() });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [CollectFiles] Gathering files for indexing: 150 files
     }
@@ -208,9 +191,7 @@ mod tests {
     async fn test_report_query_languages() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::QueryLanguages { message: "Identifying languages in repository".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::QueryLanguages { message: "Identifying languages in repository".to_string() });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [QueryLanguages] Identifying languages in repository
     }
@@ -219,9 +200,7 @@ mod tests {
     async fn test_report_verifying_collection() {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
-        let progress = SyncProgress {
-            stage: SyncStage::VerifyingCollection { message: "Ensuring collection exists and is ready".to_string() },
-        };
+        let progress = SyncProgress::new(SyncStage::VerifyingCollection { message: "Ensuring collection exists and is ready".to_string() });
         reporter.report(progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [VerifyingCollection] Ensuring collection exists and is ready
     }

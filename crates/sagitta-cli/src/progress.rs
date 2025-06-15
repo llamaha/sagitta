@@ -54,6 +54,7 @@ impl IndicatifProgressReporter {
             SyncStage::Completed { .. } => "completed".to_string(),
             SyncStage::Error { .. } => "error".to_string(),
             SyncStage::Idle => "idle".to_string(),
+            SyncStage::Heartbeat { .. } => "heartbeat".to_string(),
         }
     }
 
@@ -193,6 +194,14 @@ impl IndicatifProgressReporter {
                 // Don't create progress bars for Idle state - it's not useful
                 return;
             }
+            SyncStage::Heartbeat { message } => {
+                // Heartbeat stage - update existing progress bars or create a simple one
+                stage_progress.pb.set_style(simple_style.clone());
+                stage_progress.message_template = format!("[Heartbeat] {}", message);
+                stage_progress.pb.set_length(1);
+                stage_progress.pb.set_position(0);
+                stage_progress.pb.tick();
+            }
         }
         stage_progress.pb.set_message(stage_progress.message_template.clone());
     }
@@ -281,7 +290,7 @@ mod tests {
     use sagitta_search::sync_progress::{SyncProgress, SyncStage};
 
     fn create_progress(stage: SyncStage) -> SyncProgress {
-        SyncProgress { stage }
+        SyncProgress::new(stage)
     }
 
     #[tokio::test]

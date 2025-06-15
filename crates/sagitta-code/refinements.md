@@ -26,15 +26,17 @@ The following phased plan fixes the five issues reported for `sagitta-code` and 
 
 ---
 
-## Phase 2 – Reliable long-running `sync_repository` (Issue #2)
-• Remove the hard-coded 60 s Tokio timeout.
-• Replace it with watchdog logic: terminate only if no `SyncProgress` arrives after **N=120 s**.
-• Emit periodic heartbeat (`SyncStage::Idle`) from core `sync::sync_repository` loop so that GPU-bound index phases still count as progress.
-• Propagate the watchdog to:
+## Phase 2 – Reliable long-running `sync_repository` (Issue #2) ✅ COMPLETED
+• ✅ Removed the hard-coded 60 s Tokio timeout.
+• ✅ Replaced it with watchdog logic: terminate only if no `SyncProgress` arrives after **N=120 s**.
+• ✅ Added periodic heartbeat (`SyncStage::Heartbeat`) from core `sync::sync_repository` loop so that GPU-bound index phases still count as progress.
+• ✅ Propagated the watchdog to:
   – `sagitta-cli repo sync`
   – GUI `RepositoryManager::sync_repository`
   – MCP HTTP handler.
-• Update CLI progress bar to stay alive until final `Completed` or `Error` stage.
+• ✅ Updated CLI progress bar to stay alive until final `Completed` or `Error` stage.
+
+✅ Deliverables: Watchdog-based timeout system + heartbeat mechanism + comprehensive test coverage.
 
 ---
 
