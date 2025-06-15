@@ -17,12 +17,12 @@ The following phased plan fixes the five issues reported for `sagitta-code` and 
 
 ---
 
-## Phase 1 – Reactive copy-buttons (Issue #1)
-• Add transient "✔ Copied" state that lasts 800 ms.
-• Provide subtle colour / scale animation via egui `AnimationTick` helper.
-• Re-use global `Toasts` queue for additional feedback.
+## Phase 1 – Reactive copy-buttons (Issue #1) ✅ COMPLETED
+• ✅ Added transient "✔ Copied" state that lasts 800 ms.
+• ✅ Provided subtle colour animation (success_color() feedback).
+• ✅ Implemented CopyButtonState with visual feedback system.
 
-Deliverables: UI change + unit test in `gui/chat/view.rs`.
+✅ Deliverables: UI change + unit test in `gui/chat/view.rs` + integration in app state.
 
 ---
 

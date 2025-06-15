@@ -3,6 +3,7 @@
 use crate::agent::state::types::{AgentMode, AgentState, ConversationStatus};
 use crate::agent::message::types::{ToolCall, AgentMessage};
 use crate::gui::conversation::sidebar::SidebarAction;
+use crate::gui::chat::view::CopyButtonState;
 use super::super::theme::AppTheme;
 use egui_notify::Toasts;
 use uuid::Uuid;
@@ -27,6 +28,7 @@ pub struct AppState {
     pub show_hotkeys_modal: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
+    pub copy_button_state: CopyButtonState,
     
     // Terminal state
     pub terminal_widget: TerminalWidget,
@@ -95,6 +97,7 @@ impl AppState {
             show_hotkeys_modal: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
+            copy_button_state: CopyButtonState::default(),
             
             // Terminal state
             terminal_widget,
