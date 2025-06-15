@@ -1,6 +1,6 @@
 // Application initialization for the Sagitta Code
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use super::SagittaCodeApp;
@@ -80,10 +80,46 @@ pub fn get_default_conversation_storage_path() -> PathBuf {
 
 /// Configure theme from config
 pub async fn configure_theme_from_config(app: &mut SagittaCodeApp) {
-    match app.config.lock().await.ui.theme.as_str() {
+    let config_guard = app.config.lock().await;
+    match config_guard.ui.theme.as_str() {
         "light" => app.state.current_theme = AppTheme::Light,
+        "custom" => {
+            app.state.current_theme = AppTheme::Custom;
+            
+            // Load custom theme colors if path is specified
+            if let Some(theme_path) = &config_guard.ui.custom_theme_path {
+                match load_custom_theme_from_file(theme_path).await {
+                    Ok(custom_colors) => {
+                        crate::gui::theme::set_custom_theme_colors(custom_colors);
+                        log::info!("Loaded custom theme from: {}", theme_path.display());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load custom theme from {}: {}. Using default custom colors.", theme_path.display(), e);
+                        // Fall back to default custom colors
+                        crate::gui::theme::set_custom_theme_colors(crate::gui::theme::CustomThemeColors::default());
+                    }
+                }
+            } else {
+                log::warn!("Custom theme selected but no theme file path specified. Using default custom colors.");
+                crate::gui::theme::set_custom_theme_colors(crate::gui::theme::CustomThemeColors::default());
+            }
+        }
         "dark" | _ => app.state.current_theme = AppTheme::Dark, // Default to Dark
     }
+    drop(config_guard);
+}
+
+/// Load custom theme colors from a JSON file
+async fn load_custom_theme_from_file(path: &std::path::Path) -> Result<crate::gui::theme::CustomThemeColors> {
+    use tokio::fs;
+    
+    let content = fs::read_to_string(path).await
+        .with_context(|| format!("Failed to read theme file: {}", path.display()))?;
+    
+    let colors: crate::gui::theme::CustomThemeColors = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse theme file: {}", path.display()))?;
+    
+    Ok(colors)
 }
 
 /// Create repository manager with config

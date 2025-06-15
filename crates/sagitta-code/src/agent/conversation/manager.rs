@@ -113,8 +113,7 @@ pub struct ArchiveCriteria {
     /// Archive conversations with fewer than this many messages
     pub fewer_than_messages: Option<usize>,
     
-    /// Archive conversations in specific workspaces
-    pub workspace_ids: Option<Vec<Uuid>>,
+
     
     /// Archive conversations with specific statuses
     pub statuses: Option<Vec<ConversationStatus>>,
@@ -590,14 +589,7 @@ impl ConversationManager for ConversationManagerImpl {
                 }
             }
             
-            // Check workspace criteria
-            if let Some(ref workspace_ids) = criteria.workspace_ids {
-                if let Some(workspace_id) = conversation.workspace_id {
-                    if workspace_ids.contains(&workspace_id) {
-                        should_archive = true;
-                    }
-                }
-            }
+
             
             // Check status criteria
             if let Some(ref statuses) = criteria.statuses {

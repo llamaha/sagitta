@@ -199,6 +199,20 @@ impl ThemeCustomizer {
                     
                     ui.add_space(8.0);
                     
+                    // Export/Import buttons
+                    ui.horizontal(|ui| {
+                        ui.label("Share:");
+                        if ui.button("📤 Export").on_hover_text("Export theme to .sagitta-theme.json file").clicked() {
+                            self.export_theme();
+                        }
+                        if ui.button("📥 Import").on_hover_text("Import theme from .sagitta-theme.json file").clicked() {
+                            self.import_theme();
+                            theme_changed = true;
+                        }
+                    });
+                    
+                    ui.add_space(8.0);
+                    
                     // Test section toggles
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.show_test_section, "Show Test Section");
@@ -982,6 +996,61 @@ impl ThemeCustomizer {
         if self.preview_enabled {
             self.apply_colors();
         }
+    }
+    
+    /// Export current theme to a JSON file
+    pub fn export_theme(&self) {
+        // Use native file dialog to save theme
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Sagitta Theme", &["sagitta-theme.json"])
+            .set_file_name("my_theme.sagitta-theme.json")
+            .save_file()
+        {
+            match self.export_theme_to_file(&path) {
+                Ok(_) => {
+                    log::info!("Theme exported successfully to: {}", path.display());
+                }
+                Err(e) => {
+                    log::error!("Failed to export theme to {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+    
+    /// Import theme from a JSON file
+    pub fn import_theme(&mut self) {
+        // Use native file dialog to open theme
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Sagitta Theme", &["sagitta-theme.json"])
+            .pick_file()
+        {
+            match self.import_theme_from_file(&path) {
+                Ok(_) => {
+                    log::info!("Theme imported successfully from: {}", path.display());
+                    if self.preview_enabled {
+                        self.apply_colors();
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to import theme from {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+    
+    /// Export theme to a specific file path
+    fn export_theme_to_file(&self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        let json = serde_json::to_string_pretty(&self.colors)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+    
+    /// Import theme from a specific file path
+    fn import_theme_from_file(&mut self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let colors: CustomThemeColors = serde_json::from_str(&content)?;
+        self.colors = colors;
+        Ok(())
     }
     
     /// Generate a theme using the golden ratio for hue distribution

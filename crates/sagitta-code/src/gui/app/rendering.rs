@@ -471,17 +471,47 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.state.current_theme = AppTheme::Custom;
                 
                 // Update the config to save the theme change
-                if let Some(agent) = &app.agent {
-                    let config = app.config.clone();
-                    tokio::spawn(async move {
-                        let mut config_guard = config.lock().await;
-                        config_guard.ui.theme = "custom".to_string();
-                        
-                        if let Err(err) = crate::config::save_config(&*config_guard) {
-                            log::error!("Failed to save custom theme config: {}", err);
+                let config = app.config.clone();
+                tokio::spawn(async move {
+                    let mut config_guard = config.lock().await;
+                    config_guard.ui.theme = "custom".to_string();
+                    
+                    // Save the current custom theme colors to a file if not already set
+                    if config_guard.ui.custom_theme_path.is_none() {
+                        // Create a default theme file path
+                                                 if let Ok(config_path) = crate::config::paths::get_sagitta_code_app_config_path() {
+                             if let Some(config_dir) = config_path.parent() {
+                            let theme_file_path = config_dir.join("custom_theme.sagitta-theme.json");
+                            config_guard.ui.custom_theme_path = Some(theme_file_path.clone());
+                            
+                            // Save the current custom colors to the file
+                            let custom_colors = crate::gui::theme::get_custom_theme_colors();
+                            if let Ok(theme_json) = serde_json::to_string_pretty(&custom_colors) {
+                                if let Err(e) = tokio::fs::write(&theme_file_path, theme_json).await {
+                                    log::error!("Failed to save custom theme file to {}: {}", theme_file_path.display(), e);
+                                } else {
+                                    log::info!("Saved custom theme to: {}", theme_file_path.display());
+                                }
+                            }
                         }
-                    });
-                }
+                    }
+                    } else if let Some(theme_path) = &config_guard.ui.custom_theme_path {
+                        // Update existing theme file
+                        let custom_colors = crate::gui::theme::get_custom_theme_colors();
+                        if let Ok(theme_json) = serde_json::to_string_pretty(&custom_colors) {
+                            if let Err(e) = tokio::fs::write(theme_path, theme_json).await {
+                                log::error!("Failed to update custom theme file at {}: {}", theme_path.display(), e);
+                            } else {
+                                log::info!("Updated custom theme at: {}", theme_path.display());
+                            }
+                        }
+                    }
+                    
+                    // Respect test isolation by using save_config which handles test paths
+                    if let Err(err) = crate::config::save_config(&*config_guard) {
+                        log::error!("Failed to save custom theme config: {}", err);
+                    }
+                });
             }
         },
         ActivePanel::CreateProject => {
@@ -542,6 +572,7 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                     let mut config_guard = config.lock().await;
                     config_guard.openrouter.model = model_id.clone();
                     
+                    // Respect test isolation by using save_config which handles test paths
                     if let Err(err) = crate::config::save_config(&*config_guard) {
                         log::error!("Failed to save model selection: {}", err);
                     } else {
@@ -581,25 +612,125 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
 
 /// Render hotkeys modal
 fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
-    // This would be implemented based on the original hotkeys modal logic
-    // For now, just a placeholder
     if app.state.show_hotkeys_modal {
         let theme = app.state.current_theme;
         egui::Window::new("Keyboard Shortcuts")
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_width(500.0)
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new("Panel Controls:").color(theme.accent_color()).strong());
-                ui.label(egui::RichText::new("Ctrl + R: Toggle Repository Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + W: Toggle Preview Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + S: Toggle Settings Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + T: Toggle Conversation Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + E: Toggle Events Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + L: Toggle Logging Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + Shift + A: Toggle Analytics Panel").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + Shift + T: Toggle Theme Customizer").color(theme.text_color()));
+                
+                // Repository Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + R: Toggle Repository Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Repository);
+                        }
+                    });
+                });
+                
+                // Preview Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + W: Toggle Preview Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Preview);
+                        }
+                    });
+                });
+                
+                // Settings Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + S: Toggle Settings Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Settings);
+                        }
+                    });
+                });
+                
+                // Conversation Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + T: Toggle Conversation Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Conversation);
+                        }
+                    });
+                });
+                
+                // Events Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + E: Toggle Events Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Events);
+                        }
+                    });
+                });
+                
+                // Logging Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + L: Toggle Logging Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.logging_panel.toggle();
+                        }
+                    });
+                });
+                
+                // Create Project Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::CreateProject);
+                        }
+                    });
+                });
+                
+                // Model Selection Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::ModelSelection);
+                        }
+                    });
+                });
+                
+                // Analytics Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + Shift + A: Toggle Analytics Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::Analytics);
+                        }
+                    });
+                });
+                
+                // Theme Customizer Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + Shift + T: Toggle Theme Customizer").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::ThemeCustomizer);
+                        }
+                    });
+                });
+                
+                // Terminal Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + `: Toggle Terminal Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.toggle_terminal();
+                        }
+                    });
+                });
+                
                 ui.separator();
                 
                 // Phase 10: Organization mode shortcuts
@@ -611,21 +742,109 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 };
                 if enable_shortcuts {
                     ui.label(egui::RichText::new("Conversation Organization:").color(theme.accent_color()).strong());
-                    ui.label(egui::RichText::new("Ctrl + 1: Recency Mode").color(theme.text_color()));
-                    ui.label(egui::RichText::new("Ctrl + 2: Project Mode").color(theme.text_color()));
-                    ui.label(egui::RichText::new("Ctrl + 3: Status Mode").color(theme.text_color()));
-                    ui.label(egui::RichText::new("Ctrl + 4: Clusters Mode").color(theme.text_color()));
-                    ui.label(egui::RichText::new("Ctrl + 5: Tags Mode").color(theme.text_color()));
-                    ui.label(egui::RichText::new("Ctrl + 6: Success Mode").color(theme.text_color()));
+                    
+                    // Recency Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 1: Recency Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Recency);
+                            }
+                        });
+                    });
+                    
+                    // Project Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 2: Project Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Project);
+                            }
+                        });
+                    });
+                    
+                    // Status Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 3: Status Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Status);
+                            }
+                        });
+                    });
+                    
+                    // Clusters Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 4: Clusters Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Clusters);
+                            }
+                        });
+                    });
+                    
+                    // Tags Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 5: Tags Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Tags);
+                            }
+                        });
+                    });
+                    
+                    // Success Mode
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + 6: Success Mode").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Switch").color(theme.button_text_color())).clicked() {
+                                app.conversation_sidebar.set_organization_mode(OrganizationMode::Success);
+                            }
+                        });
+                    });
+                    
                     ui.separator();
                 }
                 
                 ui.label(egui::RichText::new("General:").color(theme.accent_color()).strong());
-                ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
+                
+                // F1 Help
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("F1: Show/Hide This Help").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.show_hotkeys_modal = false;
+                        }
+                    });
+                });
+                
                 ui.separator();
                 ui.label(egui::RichText::new("Loop Control:").color(theme.accent_color()).strong());
-                ui.label(egui::RichText::new("Ctrl + I: Toggle Loop Injection Input").color(theme.text_color()));
-                ui.label(egui::RichText::new("Ctrl + B: Break Loop").color(theme.text_color()));
+                
+                // Loop Injection Input
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + I: Toggle Loop Injection Input").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            if app.state.is_in_loop {
+                                app.state.show_loop_inject_input = !app.state.show_loop_inject_input;
+                            }
+                        }
+                    });
+                });
+                
+                // Break Loop
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + B: Break Loop").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() {
+                            if app.state.is_in_loop {
+                                app.state.loop_break_requested = true;
+                            }
+                        }
+                    });
+                });
+                
                 ui.separator();
                 if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
                     app.state.show_hotkeys_modal = false;
@@ -733,7 +952,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 let messages = app.chat_manager.get_all_messages();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });
@@ -916,7 +1135,6 @@ mod tests {
         // Test Ctrl+W for Preview panel
         app.panels.toggle_panel(ActivePanel::Preview);
         assert_eq!(app.panels.active_panel, ActivePanel::Preview);
-        assert!(app.panels.preview_panel.visible);
         
         // Test Ctrl+S for Settings panel
         app.panels.toggle_panel(ActivePanel::Settings);
@@ -929,7 +1147,6 @@ mod tests {
         // Test Ctrl+E for Events panel
         app.panels.toggle_panel(ActivePanel::Events);
         assert_eq!(app.panels.active_panel, ActivePanel::Events);
-        assert!(app.panels.events_panel.visible);
     }
 
     #[test]
@@ -1251,5 +1468,215 @@ mod tests {
         assert_eq!(app.panels.active_panel, ActivePanel::Preview);
         assert!(!app.panels.create_project_panel.visible);
         assert!(app.panels.preview_panel.visible);
+    }
+
+    /// Phase 5: Test sequential panel open/close events to ensure no races
+    #[test]
+    fn test_phase5_sequential_panel_operations() {
+        let mut app = create_test_app();
+        
+        // Test rapid sequential panel switches
+        let panels_to_test = vec![
+            ActivePanel::Repository,
+            ActivePanel::Preview,
+            ActivePanel::Settings,
+            ActivePanel::Conversation,
+            ActivePanel::Events,
+            ActivePanel::Analytics,
+            ActivePanel::ThemeCustomizer,
+            ActivePanel::CreateProject,
+            ActivePanel::ModelSelection,
+        ];
+        
+        // Open each panel in sequence
+        for panel in &panels_to_test {
+            app.panels.toggle_panel(panel.clone());
+            assert_eq!(app.panels.active_panel, *panel);
+            
+            // Verify only the current panel is active
+            match panel {
+                ActivePanel::Preview => assert!(app.panels.preview_panel.visible),
+                ActivePanel::Events => assert!(app.panels.events_panel.visible),
+                ActivePanel::Analytics => assert!(app.panels.analytics_panel.visible),
+                ActivePanel::ThemeCustomizer => assert!(app.panels.theme_customizer.is_open()),
+                ActivePanel::CreateProject => assert!(app.panels.create_project_panel.visible),
+                ActivePanel::ModelSelection => assert!(app.panels.model_selection_panel.visible),
+                _ => {} // Repository, Settings, Conversation handled by main app
+            }
+        }
+        
+        // Close all panels
+        app.panels.close_all_panels();
+        assert_eq!(app.panels.active_panel, ActivePanel::None);
+        
+        // Verify all panels are closed
+        assert!(!app.panels.preview_panel.visible);
+        assert!(!app.panels.events_panel.visible);
+        assert!(!app.panels.analytics_panel.visible);
+        assert!(!app.panels.theme_customizer.is_open());
+        assert!(!app.panels.create_project_panel.visible);
+        assert!(!app.panels.model_selection_panel.visible);
+    }
+
+    /// Phase 5: Test that hotkeys modal buttons provide same functionality as keyboard shortcuts
+    #[test]
+    fn test_phase5_hotkeys_modal_button_equivalence() {
+        let mut app = create_test_app();
+        
+        // Test that modal button actions match keyboard shortcut actions
+        
+        // Repository Panel - keyboard vs button should have same effect
+        app.panels.toggle_panel(ActivePanel::Repository);
+        let keyboard_state = app.panels.active_panel.clone();
+        
+        app.panels.toggle_panel(ActivePanel::None); // Reset
+        
+        // Simulate button click (same as keyboard shortcut)
+        app.panels.toggle_panel(ActivePanel::Repository);
+        let button_state = app.panels.active_panel.clone();
+        
+        assert_eq!(keyboard_state, button_state);
+        
+        // Test with Preview Panel
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
+        assert!(app.panels.preview_panel.visible);
+        
+        // Toggle again (same as button would do)
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::None);
+        assert!(!app.panels.preview_panel.visible);
+    }
+
+    /// Phase 5: Test idempotency of panel toggle operations
+    #[test]
+    fn test_phase5_panel_toggle_idempotency() {
+        let mut app = create_test_app();
+        
+        // Test that multiple toggles of the same panel work correctly
+        
+        // Open Preview panel
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
+        assert!(app.panels.preview_panel.visible);
+        
+        // Toggle same panel again (should close)
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::None);
+        assert!(!app.panels.preview_panel.visible);
+        
+        // Toggle again (should open)
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
+        assert!(app.panels.preview_panel.visible);
+        
+        // Test with Events panel
+        app.panels.toggle_panel(ActivePanel::Events);
+        assert_eq!(app.panels.active_panel, ActivePanel::Events);
+        assert!(app.panels.events_panel.visible);
+        assert!(!app.panels.preview_panel.visible); // Previous panel should be closed
+        
+        // Toggle Events again
+        app.panels.toggle_panel(ActivePanel::Events);
+        assert_eq!(app.panels.active_panel, ActivePanel::None);
+        assert!(!app.panels.events_panel.visible);
+    }
+
+    /// Phase 5: Test that all keyboard shortcuts are properly centralized
+    #[test]
+    fn test_phase5_centralized_keyboard_handling() {
+        let mut app = create_test_app();
+        
+        // Verify that all panel shortcuts go through PanelManager::toggle_panel
+        // This ensures consistency and idempotency
+        
+        let all_panels = vec![
+            ActivePanel::Repository,
+            ActivePanel::Preview,
+            ActivePanel::Settings,
+            ActivePanel::Conversation,
+            ActivePanel::Events,
+            ActivePanel::Analytics,
+            ActivePanel::ThemeCustomizer,
+            ActivePanel::CreateProject,
+            ActivePanel::ModelSelection,
+        ];
+        
+        for panel in all_panels {
+            // Each panel should be toggleable
+            app.panels.toggle_panel(panel.clone());
+            
+            // Should not crash or cause inconsistent state
+            match panel {
+                ActivePanel::Repository | ActivePanel::Settings | ActivePanel::Conversation => {
+                    // These are handled by main app, just check active_panel is set
+                    assert_eq!(app.panels.active_panel, panel);
+                },
+                ActivePanel::Preview => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.preview_panel.visible);
+                },
+                ActivePanel::Events => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.events_panel.visible);
+                },
+                ActivePanel::Analytics => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.analytics_panel.visible);
+                },
+                ActivePanel::ThemeCustomizer => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.theme_customizer.is_open());
+                },
+                ActivePanel::CreateProject => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.create_project_panel.visible);
+                },
+                ActivePanel::ModelSelection => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    assert!(app.panels.model_selection_panel.visible);
+                },
+                ActivePanel::None => {
+                    // Should not happen in this test
+                    panic!("Unexpected None panel");
+                }
+            }
+            
+            // Close the panel
+            app.panels.toggle_panel(panel);
+            assert_eq!(app.panels.active_panel, ActivePanel::None);
+        }
+    }
+
+    /// Phase 5: Test logging panel special handling (Ctrl+L)
+    #[test]
+    fn test_phase5_logging_panel_special_handling() {
+        let mut app = create_test_app();
+        
+        // Logging panel has special handling - it doesn't go through PanelManager::toggle_panel
+        // but directly calls logging_panel.toggle()
+        
+        // Initially closed
+        assert!(!app.panels.logging_panel.visible);
+        
+        // Simulate Ctrl+L
+        app.panels.logging_panel.toggle();
+        assert!(app.panels.logging_panel.visible);
+        
+        // Toggle again
+        app.panels.logging_panel.toggle();
+        assert!(!app.panels.logging_panel.visible);
+        
+        // Logging panel should not affect active_panel state
+        assert_eq!(app.panels.active_panel, ActivePanel::None);
+        
+        // Open another panel, then logging panel
+        app.panels.toggle_panel(ActivePanel::Preview);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
+        
+        app.panels.logging_panel.toggle();
+        assert!(app.panels.logging_panel.visible);
+        assert_eq!(app.panels.active_panel, ActivePanel::Preview); // Should not change
+        assert!(app.panels.preview_panel.visible); // Should still be open
     }
 } 

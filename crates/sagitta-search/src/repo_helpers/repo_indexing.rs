@@ -21,7 +21,7 @@ use std::fs;
 use git2::Repository;
 use std::os::unix::fs::PermissionsExt;
 use tokio;
-use crate::sync_progress::{SyncProgressReporter, SyncStage};
+use crate::sync_progress::{SyncProgressReporter, SyncStage, AddProgressReporter, AddProgress, RepoAddStage, NoOpAddProgressReporter};
 use sagitta_embed::{EmbeddingPool, EmbeddingProcessor};
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
@@ -150,6 +150,7 @@ pub async fn prepare_repository<C>(
     embedding_dim: u64,
     config: &AppConfig,
     tenant_id: &str,
+    add_progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 ) -> Result<RepositoryConfig, SagittaError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -179,6 +180,14 @@ where
         info!("Ensuring Qdrant collection '{collection_name}' exists (dim={embedding_dim})...");
         ensure_collection_exists(client.clone(), &collection_name, embedding_dim).await?;
         info!("Qdrant collection ensured for new clone.");
+
+        // Report clone start
+        if let Some(reporter) = &add_progress_reporter {
+            reporter.report(AddProgress::new(RepoAddStage::Clone {
+                message: format!("Starting clone of repository '{}'", repo_name_str),
+                progress: None,
+            })).await;
+        }
 
         info!("Cloning repository '{repo_name_str}' from {url_str} into {}...", final_local_path.display());
         
@@ -251,6 +260,14 @@ where
             Ok(output) => output,
             Err(e) => {
                 error!("Failed to clone repository: {}", e);
+                
+                // Report clone error
+                if let Some(reporter) = &add_progress_reporter {
+                    reporter.report(AddProgress::new(RepoAddStage::Error {
+                        message: format!("Git clone failed: {}", e),
+                    })).await;
+                }
+                
                 return Err(SagittaError::GitMessageError(format!("Git clone failed: {}", e)));
             }
         };
@@ -259,6 +276,15 @@ where
             was_cloned = true;
             let path_str = final_local_path.display().to_string();
             info!("Successfully cloned repository to {path_str}.");
+            
+            // Report clone completion
+            if let Some(reporter) = &add_progress_reporter {
+                reporter.report(AddProgress::new(RepoAddStage::Clone {
+                    message: format!("Successfully cloned repository to {}", path_str),
+                    progress: Some((1, 1)), // Mark as complete
+                })).await;
+            }
+            
             let stdout = String::from_utf8_lossy(&clone_status.stdout);
             let stderr = String::from_utf8_lossy(&clone_status.stderr);
             if !stdout.is_empty() {
@@ -271,6 +297,14 @@ where
             // If we cloned without specifying a branch, we might need to checkout the desired branch
             if final_branch != "main" && final_branch != "master" {
                 info!("Checking if we need to checkout branch '{}'...", final_branch);
+                
+                // Report checkout start
+                if let Some(reporter) = &add_progress_reporter {
+                    reporter.report(AddProgress::new(RepoAddStage::Checkout {
+                        message: format!("Checking out branch '{}'", final_branch),
+                    })).await;
+                }
+                
                 let checkout_result = tokio::time::timeout(
                     std::time::Duration::from_secs(30),
                     tokio::process::Command::new("git")
@@ -303,6 +337,14 @@ where
             let stderr_cow = String::from_utf8_lossy(&clone_status.stderr);
             let stderr = stderr_cow.as_ref();
             error!("Failed to clone repository: {stderr}");
+            
+            // Report clone error
+            if let Some(reporter) = &add_progress_reporter {
+                reporter.report(AddProgress::new(RepoAddStage::Error {
+                    message: format!("Git clone command failed: {}", stderr),
+                })).await;
+            }
+            
             // Attempt to clean up partially cloned directory
             if final_local_path.exists() {
                 let path_str = final_local_path.display().to_string();
@@ -328,6 +370,14 @@ where
     if let Some(target_ref) = target_ref_opt {
         info!("Attempting to checkout target ref '{}' for repository '{}'...", target_ref, repo_name);
         
+        // Report fetch start
+        if let Some(reporter) = &add_progress_reporter {
+            reporter.report(AddProgress::new(RepoAddStage::Fetch {
+                message: format!("Fetching latest changes for target ref '{}'", target_ref),
+                progress: None,
+            })).await;
+        }
+        
         // Fetch before checkout to ensure the ref is available locally, especially if it's a remote branch/tag
         // Don't prune here, might remove the ref we want if it's only remote
         let fetch_status = Command::new("git")
@@ -346,6 +396,13 @@ where
             warn!("Git fetch before checkout failed for {}: {}. Checkout might still succeed if ref is local.", repo_name, stderr);
         } else {
             info!("Git fetch before checkout successful for {}", repo_name);
+        }
+
+        // Report checkout start
+        if let Some(reporter) = &add_progress_reporter {
+            reporter.report(AddProgress::new(RepoAddStage::Checkout {
+                message: format!("Checking out target ref '{}'", target_ref),
+            })).await;
         }
 
         // Now attempt checkout
@@ -375,6 +432,14 @@ where
             let stderr_cow = String::from_utf8_lossy(&checkout_status.stderr);
             let stderr = stderr_cow.as_ref();
             error!("Failed to checkout target ref '{}' for repository '{}': {}", target_ref, repo_name, stderr);
+            
+            // Report checkout error
+            if let Some(reporter) = &add_progress_reporter {
+                reporter.report(AddProgress::new(RepoAddStage::Error {
+                    message: format!("Failed to checkout target ref '{}': {}", target_ref, stderr),
+                })).await;
+            }
+            
              // If we cloned the repo just now and checkout failed, clean up.
             if was_cloned {
                 warn!("Attempting to remove repository directory {} due to failed checkout of target ref.", final_local_path.display());
@@ -418,6 +483,13 @@ where
                 warn!("Failed to open local repo at '{}' to check for remote URL: {}. URL will be empty.", final_local_path.display(), e);
             }
         }
+    }
+
+    // Report completion
+    if let Some(reporter) = &add_progress_reporter {
+        reporter.report(AddProgress::new(RepoAddStage::Completed {
+            message: format!("Repository '{}' successfully prepared at {}", repo_name, final_local_path.display()),
+        })).await;
     }
 
     Ok(RepositoryConfig {
@@ -1166,6 +1238,7 @@ mod tests {
             384, // embedding_dim
             &config,
             "test-tenant",
+            None, // No progress reporter for test
         ).await;
         
         // Should fail with a git error (simulating timeout)
@@ -1211,6 +1284,7 @@ mod tests {
             384,
             &config,
             "test-tenant",
+            None, // No progress reporter for test
         ).await;
         
         assert!(result.is_ok());

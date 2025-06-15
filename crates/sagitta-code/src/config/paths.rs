@@ -3,14 +3,28 @@ use directories::ProjectDirs;
 use anyhow::Result; // Ensure anyhow::Result is used
 
 /// Gets the path to Sagitta Code's application configuration file.
-/// This will be ~/.config/sagitta/sagitta_code_config.json (moved from sagitta_code subdirectory)
+/// This will be ~/.config/sagitta/sagitta_code_config.toml (moved from sagitta_code subdirectory)
+/// In test environments, respects SAGITTA_TEST_CONFIG_PATH for isolation.
 pub fn get_sagitta_code_app_config_path() -> Result<PathBuf> {
+    // Check for test isolation environment variable
+    if let Ok(test_config_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
+        let test_path = PathBuf::from(test_config_path);
+        // For sagitta-code config, use the same directory but with sagitta_code_config.toml filename
+        if let Some(parent) = test_path.parent() {
+            let sagitta_code_config_path = parent.join("sagitta_code_config.toml");
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| anyhow::anyhow!("Failed to create test config directory {:?}: {}", parent, e))?;
+            }
+            return Ok(sagitta_code_config_path);
+        }
+    }
+    
     if let Some(proj_dirs) = ProjectDirs::from("", "", "sagitta") { // Changed from "sagitta_code" to "sagitta"
         let config_dir = proj_dirs.config_dir();
         if !config_dir.exists() {
             std::fs::create_dir_all(config_dir).map_err(|e| anyhow::anyhow!("Failed to create config directory {:?}: {}", config_dir, e))?;
         }
-        Ok(config_dir.join("sagitta_code_config.json")) // Keep the filename for app-specific config
+        Ok(config_dir.join("sagitta_code_config.toml")) // Changed from .json to .toml to match the actual format
     } else {
         Err(anyhow::anyhow!("Unable to determine Sagitta config directory"))
     }
@@ -50,16 +64,6 @@ pub fn get_logs_path() -> Result<PathBuf> {
     Ok(logs_dir)
 }
 
-/// Gets the path for workspace storage
-/// This will be ~/.local/share/sagitta/workspaces/
-pub fn get_workspaces_path() -> Result<PathBuf> {
-    let workspaces_dir = get_sagitta_data_dir()?.join("workspaces");
-    if !workspaces_dir.exists() {
-        std::fs::create_dir_all(&workspaces_dir).map_err(|e| anyhow::anyhow!("Failed to create workspaces directory {:?}: {}", workspaces_dir, e))?;
-    }
-    Ok(workspaces_dir)
-}
-
 /// Migrates configuration from old locations to new unified structure
 pub fn migrate_old_config() -> Result<()> {
     // Old paths
@@ -67,7 +71,8 @@ pub fn migrate_old_config() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?
         .join("sagitta_code");
     
-    let old_app_config = old_config_dir.join("sagitta_code_config.json");
+    let old_app_config_json = old_config_dir.join("sagitta_code_config.json");
+    let old_app_config_toml = old_config_dir.join("sagitta_code_config.toml");
     let old_core_config = old_config_dir.join("core_config.toml");
     
     // New paths
@@ -76,12 +81,34 @@ pub fn migrate_old_config() -> Result<()> {
     
     let mut migrated = false;
     
-    // Migrate app config
-    if old_app_config.exists() && !new_app_config.exists() {
-        std::fs::rename(&old_app_config, &new_app_config)
-            .map_err(|e| anyhow::anyhow!("Failed to migrate app config: {}", e))?;
-        log::info!("Migrated sagitta-code config from {} to {}", old_app_config.display(), new_app_config.display());
-        migrated = true;
+    // Migrate app config - prefer TOML over JSON if both exist
+    if !new_app_config.exists() {
+        if old_app_config_toml.exists() {
+            std::fs::rename(&old_app_config_toml, &new_app_config)
+                .map_err(|e| anyhow::anyhow!("Failed to migrate app config: {}", e))?;
+            log::info!("Migrated sagitta-code config from {} to {}", old_app_config_toml.display(), new_app_config.display());
+            migrated = true;
+        } else if old_app_config_json.exists() {
+            // Convert JSON to TOML during migration
+            let json_content = std::fs::read_to_string(&old_app_config_json)
+                .map_err(|e| anyhow::anyhow!("Failed to read old JSON config: {}", e))?;
+            
+            // Try to parse as JSON and convert to TOML
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_content) {
+                if let Ok(toml_content) = toml::to_string_pretty(&json_value) {
+                    std::fs::write(&new_app_config, toml_content)
+                        .map_err(|e| anyhow::anyhow!("Failed to write converted TOML config: {}", e))?;
+                    log::info!("Migrated and converted sagitta-code config from JSON {} to TOML {}", old_app_config_json.display(), new_app_config.display());
+                    migrated = true;
+                } else {
+                    // Fallback: just copy the file
+                    std::fs::rename(&old_app_config_json, &new_app_config)
+                        .map_err(|e| anyhow::anyhow!("Failed to migrate app config: {}", e))?;
+                    log::info!("Migrated sagitta-code config from {} to {}", old_app_config_json.display(), new_app_config.display());
+                    migrated = true;
+                }
+            }
+        }
     }
     
     // Migrate core config if it exists and shared config doesn't exist
@@ -121,7 +148,7 @@ mod tests {
         match result {
             Ok(path) => {
                 // Should end with the correct filename
-                assert!(path.to_string_lossy().ends_with("sagitta_code_config.json"));
+                assert!(path.to_string_lossy().ends_with("sagitta_code_config.toml"));
                 
                 // Should contain the .config directory and sagitta (not sagitta_code)
                 assert!(path.to_string_lossy().contains(".config"));
@@ -170,27 +197,6 @@ mod tests {
             Ok(path) => {
                 // Should end with logs
                 assert!(path.to_string_lossy().ends_with("logs"));
-                
-                // Should be in data directory
-                assert!(path.to_string_lossy().contains("sagitta"));
-                
-                // Path should be absolute
-                assert!(path.is_absolute());
-            },
-            Err(e) => {
-                assert!(!e.to_string().is_empty());
-            }
-        }
-    }
-
-    #[test]
-    fn test_get_workspaces_path() {
-        let result = get_workspaces_path();
-        
-        match result {
-            Ok(path) => {
-                // Should end with workspaces
-                assert!(path.to_string_lossy().ends_with("workspaces"));
                 
                 // Should be in data directory
                 assert!(path.to_string_lossy().contains("sagitta"));

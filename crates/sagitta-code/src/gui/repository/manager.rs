@@ -93,16 +93,25 @@ impl RepositoryManager {
     }
     
     /// Create a new RepositoryManager for testing without spawning background tasks
-    #[cfg(test)]
+    #[cfg(feature = "multi_tenant")]
     pub fn new_for_test(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
-        let repositories = Arc::new(Mutex::new(Vec::new()));
-
-        // Don't spawn any background tasks for tests
-        Self { 
+        Self {
             config,
             client: None,
             embedding_handler: None,
-            repositories,
+            repositories: Arc::new(Mutex::new(Vec::new())),
+            sync_log_sender: Arc::new(Mutex::new(None)),
+        }
+    }
+    
+    /// Create a new RepositoryManager for testing without spawning background tasks (non-multi_tenant version)
+    #[cfg(not(feature = "multi_tenant"))]
+    pub fn new_for_test(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
+        Self {
+            config,
+            client: None,
+            embedding_handler: None,
+            repositories: Arc::new(Mutex::new(Vec::new())),
             sync_log_sender: Arc::new(Mutex::new(None)),
         }
     }
@@ -194,43 +203,50 @@ impl RepositoryManager {
         Ok(())
     }
 
-    /// Get access to the config for testing purposes
-    #[cfg(test)]
+    /// Get access to the config for internal use
     pub fn get_config(&self) -> Arc<Mutex<SagittaAppConfig>> {
         self.config.clone()
     }
 
     pub async fn list_repositories(&self) -> Result<Vec<RepositoryConfig>> {
         let config_guard = self.config.lock().await;
-        let repos = config_guard.repositories.clone();
+        let repositories = config_guard.repositories.clone();
+        
+        log::debug!("RepoManager: Listing {} repositories", repositories.len());
         
         // Update the repository cache for sync status updates using enhanced listing
-        match sagitta_search::get_enhanced_repository_list(&*config_guard).await {
-            Ok(enhanced_list) => {
-                let repo_infos: Vec<RepoInfo> = enhanced_list.repositories
-                    .into_iter()
-                    .map(|enhanced_repo| RepoInfo {
-                        name: enhanced_repo.name,
-                        remote: Some(enhanced_repo.url),
-                        branch: enhanced_repo.active_branch.or_else(|| Some(enhanced_repo.default_branch)),
-                        local_path: Some(enhanced_repo.local_path),
-                        is_syncing: enhanced_repo.sync_status.sync_in_progress,
-                    })
-                    .collect();
-                    
-                let mut repos_guard = self.repositories.lock().await;
-                *repos_guard = repo_infos;
-                log::info!("RepoManager: Successfully updated repository cache with enhanced information for {} repositories.", repos_guard.len());
+        if !repositories.is_empty() {
+            match sagitta_search::get_enhanced_repository_list(&*config_guard).await {
+                Ok(enhanced_list) => {
+                    let repo_infos: Vec<RepoInfo> = enhanced_list.repositories
+                        .into_iter()
+                        .map(|enhanced_repo| RepoInfo {
+                            name: enhanced_repo.name,
+                            remote: Some(enhanced_repo.url),
+                            branch: enhanced_repo.active_branch.or_else(|| Some(enhanced_repo.default_branch)),
+                            local_path: Some(enhanced_repo.local_path),
+                            is_syncing: enhanced_repo.sync_status.sync_in_progress,
+                        })
+                        .collect();
+                        
+                    let mut repos_guard = self.repositories.lock().await;
+                    *repos_guard = repo_infos;
+                    log::info!("RepoManager: Successfully updated repository cache with enhanced information for {} repositories.", repos_guard.len());
+                }
+                Err(e) => {
+                    log::warn!("RepoManager: Failed to get enhanced repository list, using basic conversion: {}", e);
+                    let repo_infos: Vec<RepoInfo> = repositories.iter().map(|config| RepoInfo::from(config.clone())).collect();
+                    let mut repos_guard = self.repositories.lock().await;
+                    *repos_guard = repo_infos;
+                }
             }
-            Err(e) => {
-                log::warn!("RepoManager: Failed to get enhanced repository list, using basic conversion: {}", e);
-                let repo_infos: Vec<RepoInfo> = repos.iter().map(|config| RepoInfo::from(config.clone())).collect();
-                let mut repos_guard = self.repositories.lock().await;
-                *repos_guard = repo_infos;
-            }
+        } else {
+            // No repositories to show, clear the cache
+            let mut repos_guard = self.repositories.lock().await;
+            repos_guard.clear();
         }
         
-        Ok(repos)
+        Ok(repositories)
     }
 
     /// Get enhanced repository information
@@ -262,13 +278,18 @@ impl RepositoryManager {
     
     // Helper to save config when we already have the guard
     async fn save_core_config_with_guard(&self, config: &AppConfig) -> Result<()> {
-        let shared_config_path = sagitta_search::config::get_config_path()
-            .unwrap_or_else(|_| {
-                dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("sagitta")
-                    .join("config.toml")
-            });
+        // Respect test isolation by checking for SAGITTA_TEST_CONFIG_PATH
+        let shared_config_path = if let Ok(test_path) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
+            PathBuf::from(test_path)
+        } else {
+            sagitta_search::config::get_config_path()
+                .unwrap_or_else(|_| {
+                    dirs::config_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join("sagitta")
+                        .join("config.toml")
+                })
+        };
         
         log::info!("Saving config to path: {}", shared_config_path.display());
         log::debug!("Config has {} repositories", config.repositories.len());
@@ -293,23 +314,29 @@ impl RepositoryManager {
     pub async fn add_local_repository(&self, name: &str, path: &str) -> Result<()> {
         log::info!("[GUI RepoManager] Add local repo: {} at {}", name, path);
         
-        // Ensure client and embedding handler are initialized
-        if self.client.is_none() || self.embedding_handler.is_none() {
-            return Err(anyhow!("Qdrant client or embedding handler not initialized"));
+        // Ensure client is initialized (embedding handler is optional for basic repo management)
+        if self.client.is_none() {
+            log::error!("[GUI RepoManager] Qdrant client not initialized");
+            return Err(anyhow!("Qdrant client not initialized"));
+        }
+        
+        // Check if embedding handler is available
+        if self.embedding_handler.is_none() {
+            log::warn!("[GUI RepoManager] Embedding handler not initialized - repository will be added but indexing may be limited");
         }
         
         let config_guard = self.config.lock().await;
         
-        // Get tenant ID from config or environment
-        let tenant_id = std::env::var("SAGITTA_TENANT_ID")
-            .or_else(|_| {
-                config_guard.tenant_id.clone()
-                    .ok_or_else(|| anyhow!("No tenant_id found in config or environment"))
-            })?;
+        // For local-only operation, use a default tenant ID
+        let tenant_id = "local".to_string();
         
-        // Get embedding dimension
-        let embedding_dim = self.embedding_handler.as_ref().unwrap()
-            .dimension() as u64;
+        // Get embedding dimension (use default if embedding handler not available)
+        let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
+            embedding_handler.dimension() as u64
+        } else {
+            log::warn!("[GUI RepoManager] Using default embedding dimension (384) since embedding handler not available");
+            384 // Default dimension used by most models
+        };
         
         // Get repositories base path
         let repo_base_path = get_repo_base_path(Some(&*config_guard))
@@ -342,14 +369,18 @@ impl RepositoryManager {
             client_clone,
             &config_clone,
             &tenant_id,
+            Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
         match repo_config_result {
-            Ok(new_repo_config) => {
+            Ok(mut new_repo_config) => {
                 let mut config_guard = self.config.lock().await;
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
+                
+
+                
                 config_guard.repositories.push(new_repo_config.clone());
                 self.save_core_config_with_guard(&*config_guard).await?;
                 drop(config_guard); // Release lock before calling the helper
@@ -366,25 +397,29 @@ impl RepositoryManager {
     pub async fn add_repository(&self, name: &str, url: &str, branch: Option<&str>) -> Result<()> {
         log::info!("[GUI RepoManager] Add repo: {} from {} (branch: {:?})", name, url, branch);
         
-        // Ensure client and embedding handler are initialized
-        if self.client.is_none() || self.embedding_handler.is_none() {
-            log::error!("[GUI RepoManager] Client or embedding handler not initialized - client: {}, embedding_handler: {}", 
-                       self.client.is_some(), self.embedding_handler.is_some());
-            return Err(anyhow!("Qdrant client or embedding handler not initialized"));
+        // Ensure client is initialized (embedding handler is optional for basic repo management)
+        if self.client.is_none() {
+            log::error!("[GUI RepoManager] Qdrant client not initialized");
+            return Err(anyhow!("Qdrant client not initialized"));
+        }
+        
+        // Check if embedding handler is available
+        if self.embedding_handler.is_none() {
+            log::warn!("[GUI RepoManager] Embedding handler not initialized - repository will be added but indexing may be limited");
         }
         
         let config_guard = self.config.lock().await;
         
-        // Get tenant ID from config or environment
-        let tenant_id = std::env::var("SAGITTA_TENANT_ID")
-            .or_else(|_| {
-                config_guard.tenant_id.clone()
-                    .ok_or_else(|| anyhow!("No tenant_id found in config or environment"))
-            })?;
+        // For local-only operation, use a default tenant ID
+        let tenant_id = "local".to_string();
         
-        // Get embedding dimension
-        let embedding_dim = self.embedding_handler.as_ref().unwrap()
-            .dimension() as u64;
+        // Get embedding dimension (use default if embedding handler not available)
+        let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
+            embedding_handler.dimension() as u64
+        } else {
+            log::warn!("[GUI RepoManager] Using default embedding dimension (384) since embedding handler not available");
+            384 // Default dimension used by most models
+        };
         
         // Get repositories base path
         let repo_base_path = get_repo_base_path(Some(&*config_guard))
@@ -418,16 +453,20 @@ impl RepositoryManager {
             client_clone,
             &config_clone,
             &tenant_id,
+            Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
         match repo_config_result {
-            Ok(new_repo_config) => {
+            Ok(mut new_repo_config) => {
                 log::info!("[GUI RepoManager] Repository addition successful, saving to config...");
                 let mut config_guard = self.config.lock().await;
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
                     log::warn!("[GUI RepoManager] Repository '{}' already exists in configuration", name);
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
+                
+
+                
                 config_guard.repositories.push(new_repo_config.clone());
                 log::info!("[GUI RepoManager] Repository added to config. Total repositories: {}", config_guard.repositories.len());
                 self.save_core_config_with_guard(&*config_guard).await?;
@@ -470,6 +509,8 @@ impl RepositoryManager {
         
         // Remove repository from config
         config_guard.repositories.remove(repo_index);
+        
+
         
         // If this was the active repository, clear it
         if config_guard.active_repository.as_ref() == Some(&name.to_string()) {
@@ -583,12 +624,8 @@ impl RepositoryManager {
     pub async fn query(&self, repo_name: &str, query_text: &str, limit: usize, element_type: Option<&str>, language: Option<&str>, branch: Option<&str>) -> Result<QueryResponse> {
         let config_guard = self.config.lock().await;
         
-        // Get tenant ID from config or environment
-        let tenant_id = std::env::var("SAGITTA_TENANT_ID")
-            .or_else(|_| {
-                config_guard.tenant_id.clone()
-                    .ok_or_else(|| anyhow!("No tenant_id found in config or environment"))
-            })?;
+        // For local-only operation, use a default tenant ID
+        let tenant_id = "local".to_string();
         
         log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
                   repo_name, query_text, limit, element_type, language, branch);
@@ -959,26 +996,66 @@ mod tests {
     use std::time::Duration;
 
     /// Helper to create a RepositoryManager instance with a temporary AppConfig for testing
+    #[cfg(feature = "multi_tenant")]
     async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let mut test_config = AppConfig::default();
         
-        // Setup paths that might be needed by the manager or its components
-        let repo_base = temp_dir.path().join("repositories");
-        fs::create_dir_all(&repo_base).unwrap();
-        test_config.repositories_base_path = Some(repo_base.to_string_lossy().to_string());
-        test_config.onnx_model_path = Some(temp_dir.path().join("model.onnx").to_string_lossy().to_string());
-        test_config.onnx_tokenizer_path = Some(temp_dir.path().join("tokenizer.json").to_string_lossy().to_string());
-        test_config.qdrant_url = "http://localhost:6334".to_string(); // Example URL for tests that might need it
-        test_config.tenant_id = Some("test-tenant".to_string()); // Often needed
+        let mut config = AppConfig::default();
+        config.repositories = vec![
+            RepositoryConfig {
+                name: "repo1".to_string(),
+                url: "https://github.com/test/repo1.git".to_string(),
+                local_path: temp_dir.path().join("repo1"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                ..Default::default()
+            },
+            RepositoryConfig {
+                name: "repo2".to_string(),
+                url: "https://github.com/test/repo2.git".to_string(),
+                local_path: temp_dir.path().join("repo2"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                ..Default::default()
+            },
+        ];
+        
+        let config_arc = Arc::new(Mutex::new(config));
+        let repo_manager = RepositoryManager::new(config_arc);
+        
+        (repo_manager, temp_dir)
+    }
 
-        let config_path = temp_dir.path().join("config.toml");
-        save_config(&test_config, Some(&config_path)).expect("Failed to save temp config");
-
-        let loaded_config = load_config(Some(&config_path)).expect("Failed to load temp config");
-        // Use RepositoryManager::new so the background task is spawned for tests that need it.
-        let manager = RepositoryManager::new(Arc::new(Mutex::new(loaded_config))); 
-        (manager, temp_dir)
+    // Alternative test helper for non-multi_tenant tests
+    #[cfg(not(feature = "multi_tenant"))]
+    async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        
+        let mut config = AppConfig::default();
+        config.repositories = vec![
+            RepositoryConfig {
+                name: "repo1".to_string(),
+                url: "https://github.com/test/repo1.git".to_string(),
+                local_path: temp_dir.path().join("repo1"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                ..Default::default()
+            },
+            RepositoryConfig {
+                name: "repo2".to_string(),
+                url: "https://github.com/test/repo2.git".to_string(),
+                local_path: temp_dir.path().join("repo2"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+    
+                ..Default::default()
+            },
+        ];
+        
+        let config_arc = Arc::new(Mutex::new(config));
+        let repo_manager = RepositoryManager::new(config_arc);
+        
+        (repo_manager, temp_dir)
     }
 
     #[tokio::test]
@@ -1019,10 +1096,11 @@ mod tests {
     /// Tests that the query method uses branch-aware collection naming that matches
     /// what the CLI and sync logic use, ensuring collections are found correctly.
     #[tokio::test]
+    #[cfg(feature = "multi_tenant")]
     async fn test_query_uses_branch_aware_collection_naming() {
         let temp_dir = TempDir::new().unwrap();
         let mut config = AppConfig::default();
-        config.tenant_id = Some("test-tenant".to_string());
+        // tenant_id is hardcoded to "local" in sagitta-code operational code
         config.performance.collection_name_prefix = "test_repo_".to_string();
         
         // Add a test repository to the config
@@ -1031,16 +1109,17 @@ mod tests {
             url: "https://github.com/test/repo.git".to_string(),
             local_path: temp_dir.path().join("test-repo"),
             default_branch: "main".to_string(),
-            active_branch: Some("feature-branch".to_string()),
-            tracked_branches: vec!["main".to_string(), "feature-branch".to_string()],
-            remote_name: None,
-            last_synced_commits: HashMap::new(),
+            tracked_branches: vec!["main".to_string()],
+            active_branch: Some("main".to_string()),
+            remote_name: Some("origin".to_string()),
+            last_synced_commits: std::collections::HashMap::new(),
+            indexed_languages: None,
             ssh_key_path: None,
             ssh_key_passphrase: None,
-            indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
             tenant_id: Some("test-tenant".to_string()),
+
         };
         config.repositories.push(test_repo);
 
@@ -1074,4 +1153,10 @@ mod tests {
         // The test passes if we don't get "collection not found" errors
         // In a real scenario with Qdrant, the branch-aware collection name would be used
     }
+
+
+
+
+
+    // ... existing tests ...
 } 

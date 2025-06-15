@@ -17,8 +17,9 @@ use thiserror::Error;
 use log::{info, error, warn};
 use crate::config::AppConfig;
 use crate::config::EmbeddingEngineConfig;
- // Use ManualMock
+// Use ManualMock
 use std::io::Write;
+use crate::sync_progress::{AddProgressReporter, NoOpAddProgressReporter};
 
 /// Arguments for the `repo add` command.
 #[derive(Args, Debug)]
@@ -113,6 +114,7 @@ pub async fn handle_repo_add<C>(
     client: Arc<C>,
     config: &AppConfig,
     tenant_id: &str,
+    progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 ) -> Result<RepositoryConfig, AddRepoError>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -218,6 +220,7 @@ where
         embedding_dim,
         config,      // Pass AppConfig for collection_name_prefix and other settings
         tenant_id,   // Pass tenant_id
+        progress_reporter,
     ).await.map_err(|e| {
         error!("[handle_repo_add] prepare_repository failed: {}", e);
         // Map internal Error to AddRepoError
@@ -390,6 +393,7 @@ mod tests {
             client_arc,
             &config,
             "test_tenant", // Pass hardcoded tenant_id for this test
+            None, // No progress reporter for test
         )
         .await;
 
@@ -482,6 +486,7 @@ mod tests {
             client_arc,
             &config,
             "test_tenant", // Pass hardcoded tenant_id for this test
+            None, // No progress reporter for test
         )
         .await;
 
@@ -586,6 +591,7 @@ mod tests {
             client_arc,
             &config,
             "test_tenant", // Pass hardcoded tenant_id for this test
+            None, // No progress reporter for test
         )
         .await;
 
@@ -676,6 +682,7 @@ mod tests {
             client_arc,
             &config,
             "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in logs
+            None, // No progress reporter for test
         )
         .await;
 
@@ -705,6 +712,107 @@ mod tests {
                 assert_eq!(manual_mock_client.verify_collection_exists_called_times(), 1);
                 assert_eq!(manual_mock_client.get_collection_exists_args()[0], expected_collection_name);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_repo_add_with_progress_reporting() {
+        let temp_dir = tempdir().unwrap();
+        let local_repo_path = temp_dir.path().join("test_repo_progress");
+        fs::create_dir_all(&local_repo_path).unwrap();
+        let git_repo = git2::Repository::init(&local_repo_path).unwrap();
+        create_initial_commit(&git_repo, "README.md", "Test repo for progress reporting").expect("Failed to create initial commit");
+
+        let manual_mock_client = ManualMockQdrantClient::new();
+        let client_arc = Arc::new(manual_mock_client.clone());
+
+        let config = AppConfig {
+            qdrant_url: "http://localhost:6334".to_string(),
+            repositories: vec![],
+            active_repository: None,
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            server_api_key_path: None,
+            repositories_base_path: Some(temp_dir.path().to_str().unwrap().to_string()),
+            vocabulary_base_path: None,
+            indexing: IndexingConfig::default(),
+            performance: PerformanceConfig {
+                 vector_dimension: 10,
+                 collection_name_prefix: "test_progress_".to_string(),
+                 ..PerformanceConfig::default()
+            },
+            embedding: EmbeddingEngineConfig::default(),
+            oauth: None,
+            tls_enable: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            cors_allowed_origins: None,
+            cors_allow_credentials: true,
+            tenant_id: Some("test-tenant".to_string()),
+        };
+
+        // Set up mock expectations
+        manual_mock_client.expect_collection_exists(Ok(false));
+        manual_mock_client.expect_create_collection(Ok(true));
+
+        // Create a test progress reporter
+        let progress_updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let progress_updates_clone = Arc::clone(&progress_updates);
+
+        struct TestProgressReporter {
+            updates: Arc<std::sync::Mutex<Vec<crate::sync_progress::AddProgress>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl crate::sync_progress::AddProgressReporter for TestProgressReporter {
+            async fn report(&self, progress: crate::sync_progress::AddProgress) {
+                self.updates.lock().unwrap().push(progress);
+            }
+        }
+
+        let progress_reporter = Arc::new(TestProgressReporter {
+            updates: progress_updates_clone,
+        });
+
+        let add_args = AddRepoArgs {
+            local_path: Some(local_repo_path.clone()),
+            url: None,
+            name: Some("test_repo_progress".to_string()),
+            branch: None,
+            remote: None,
+            ssh_key: None,
+            ssh_passphrase: None,
+            repositories_base_path: None,
+            target_ref: None,
+        };
+        
+        let result = handle_repo_add(
+            add_args,
+            temp_dir.path().to_path_buf(),
+            config.performance.vector_dimension,
+            client_arc,
+            &config,
+            "test_tenant",
+            Some(progress_reporter),
+        )
+        .await;
+
+        // Verify the operation succeeded
+        assert!(result.is_ok(), "handle_repo_add failed: {:?}", result.err());
+
+        // Verify progress updates were received
+        let updates = progress_updates.lock().unwrap();
+        assert!(!updates.is_empty(), "No progress updates were received");
+
+        // Check that we got a completion update
+        let has_completion = updates.iter().any(|update| {
+            matches!(update.stage, crate::sync_progress::RepoAddStage::Completed { .. })
+        });
+        assert!(has_completion, "No completion progress update was received");
+
+        // Verify all updates have timestamps
+        for update in updates.iter() {
+            assert!(update.timestamp.is_some(), "Progress update missing timestamp");
         }
     }
 }

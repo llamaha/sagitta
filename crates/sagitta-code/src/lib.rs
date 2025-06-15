@@ -25,8 +25,7 @@ pub mod gui;
 /// Reasoning module
 pub mod reasoning;
 
-/// Project management
-pub mod project;
+
 
 /// Tasks
 pub mod tasks;

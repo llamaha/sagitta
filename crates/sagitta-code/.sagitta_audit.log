@@ -1,1 +1,1 @@
-{"timestamp":"2025-06-13T22:49:45.416427707Z","user":"adam","working_directory":"/home/adam/repos/sagitta/crates/sagitta-code","command":["echo","'test'"],"exit_code":0,"duration_ms":1,"prompted":false,"approved_by":null}
+{"timestamp":"2025-06-15T08:25:25.812555027Z","user":"adam","working_directory":"/home/adam/repos/sagitta/crates/sagitta-code","command":["echo","'test'"],"exit_code":0,"duration_ms":2,"prompted":false,"approved_by":null}

@@ -91,7 +91,7 @@ where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let reporter = reporter.unwrap_or_else(|| Arc::new(NoOpProgressReporter));
-    reporter.report(SyncProgress { stage: SyncStage::Idle }).await;
+    reporter.report(SyncProgress::new(SyncStage::Idle)).await;
 
     info!("Synchronizing repository: {}", repo_config.name);
     
@@ -311,31 +311,31 @@ where
     
     // Report progress for diff calculation if it happened
     if let Some(message) = diff_message {
-        reporter.report(SyncProgress { 
-            stage: SyncStage::DiffCalculation { message }
-        }).await;
+        reporter.report(SyncProgress::new(
+            SyncStage::DiffCalculation { message }
+        )).await;
     }
     
     // Report progress for file collection if it was a full sync
     if !files_to_index.is_empty() && !sync_needed {
         // This means it was already synced, no progress to report
     } else if !files_to_index.is_empty() {
-        reporter.report(SyncProgress { 
-            stage: SyncStage::CollectFiles {
+        reporter.report(SyncProgress::new(
+            SyncStage::CollectFiles {
                 total_files: files_to_index.len(),
                 message: "Collected files for sync".to_string(),
             }
-        }).await;
+        )).await;
     }
     
     if !sync_needed {
         // Send completion progress update for already synced repositories
-        reporter.report(SyncProgress { 
-            stage: SyncStage::Completed { 
+        reporter.report(SyncProgress::new(
+            SyncStage::Completed { 
                 message: format!("Repository '{}' branch/ref '{}' already synced to commit {}", 
                     repo_name, target_ref.unwrap_or(active_branch), commit_oid_str)
             }
-        }).await;
+        )).await;
         
         return Ok(SyncResult {
             success: true,
@@ -470,11 +470,11 @@ where
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     let embedding_dim = embedding_pool.dimension();
     
-    reporter.report(SyncProgress { // Added
-        stage: SyncStage::VerifyingCollection {
+    reporter.report(SyncProgress::new(
+        SyncStage::VerifyingCollection {
             message: format!("Ensuring collection '{}' exists with dimension {}", collection_name, embedding_dim)
         }
-    }).await;
+    )).await;
     repo_helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim as u64).await?;
     
     // Handle Deletions
@@ -514,14 +514,16 @@ where
     // --- Query Indexed Languages --- 
     // (This logic remains largely the same, using the QdrantClientTrait)
     info!("Querying for current set of indexed languages...");
-    reporter.report(SyncProgress { // Added
-        stage: SyncStage::QueryLanguages { 
+    reporter.report(SyncProgress::new(
+        SyncStage::QueryLanguages { 
             message: "Querying Qdrant for currently indexed languages".to_string()
         }
-    }).await;
+    )).await;
     let mut indexed_languages_set = HashSet::new();
     let scroll_filter = repo_helpers::create_branch_filter(current_sync_branch_or_ref);
     let mut scroll_offset: Option<qdrant_client::qdrant::PointId> = None;
+    let mut scroll_count = 0;
+    let heartbeat_interval = 10; // Send heartbeat every 10 scroll operations
     
     loop {
         let mut scroll_request = ScrollPointsBuilder::new(collection_name.clone())
@@ -548,6 +550,17 @@ where
             }
         }
         
+        scroll_count += 1;
+        
+        // Send heartbeat periodically during long language queries
+        if scroll_count % heartbeat_interval == 0 {
+            reporter.report(SyncProgress::new(
+                SyncStage::Heartbeat { 
+                    message: format!("Querying languages... processed {} batches", scroll_count)
+                }
+            )).await;
+        }
+        
         scroll_offset = response.next_page_offset;
         if scroll_offset.is_none() {
             break;
@@ -560,9 +573,9 @@ where
     
     let success_message = format!("Successfully synced repository '{}' branch/ref '{}' to commit {}", 
             repo_name, current_sync_branch_or_ref, commit_oid_str);
-    reporter.report(SyncProgress { // Added
-        stage: SyncStage::Completed { message: success_message.clone() }
-    }).await;
+    reporter.report(SyncProgress::new(
+        SyncStage::Completed { message: success_message.clone() }
+    )).await;
 
     Ok(SyncResult {
         success: true,

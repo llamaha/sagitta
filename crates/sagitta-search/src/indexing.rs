@@ -71,7 +71,7 @@ impl EmbedProgressReporter for FileProcessingProgressBridge {
             ProcessingStage::Error { message } => SyncStage::Error { message },
         };
 
-        self.reporter.report(SyncProgress { stage }).await;
+        self.reporter.report(SyncProgress::new(stage)).await;
     }
 }
 
@@ -113,7 +113,7 @@ impl EmbedProgressReporter for EmbeddingProgressBridge {
             },
         };
 
-        self.reporter.report(SyncProgress { stage }).await;
+        self.reporter.report(SyncProgress::new(stage)).await;
     }
 }
 
@@ -160,11 +160,9 @@ pub async fn index_paths<
 
     if files_to_process.is_empty() {
         log::warn!("Core: No files found matching the criteria. Indexing complete.");
-        reporter.report(SyncProgress {
-            stage: SyncStage::Error {
-                message: format!("No files found to index"),
-            }
-        }).await;
+        reporter.report(SyncProgress::new(SyncStage::Error {
+            message: format!("No files found to index"),
+        })).await;
         return Ok((0, 0));
     }
 
@@ -208,11 +206,9 @@ pub async fn index_paths<
     
     if processed_chunks.is_empty() {
         log::warn!("Core: No chunks generated from processed files. Indexing complete.");
-        reporter.report(SyncProgress {
-            stage: SyncStage::Error {
-                message: format!("No indexable content found in {} files", files_to_process.len()),
-            }
-        }).await;
+        reporter.report(SyncProgress::new(SyncStage::Error {
+            message: format!("No indexable content found in {} files", files_to_process.len()),
+        })).await;
         return Ok((files_to_process.len(), 0));
     }
 
@@ -337,11 +333,9 @@ pub async fn index_paths<
         log::info!("Vocabulary saved to {}", vocab_path.display());
     }
 
-    reporter.report(SyncProgress {
-        stage: SyncStage::Completed {
-            message: format!("Indexed {} files ({} points) using decoupled processing", files_to_process.len(), points_processed_count),
-        }
-    }).await;
+    reporter.report(SyncProgress::new(SyncStage::Completed {
+        message: format!("Indexed {} files ({} points) using decoupled processing", files_to_process.len(), points_processed_count),
+    })).await;
 
     log::info!(
         "Core: Finished indexing {} files, {} points processed into collection \"{}\" using decoupled processing",
@@ -395,11 +389,9 @@ pub async fn index_repo_files<
 
     if relative_paths.is_empty() {
         log::warn!("Core: No relative paths provided for repo indexing.");
-        reporter.report(SyncProgress {
-            stage: SyncStage::Error {
-                message: format!("No files provided to index"),
-            }
-        }).await;
+        reporter.report(SyncProgress::new(SyncStage::Error {
+            message: format!("No files provided to index"),
+        })).await;
         return Ok(0);
     }
 
@@ -602,12 +594,12 @@ pub async fn index_repo_files<
                  let error_msg = format!("Qdrant batch upsert failed: {}", e);
                  log::error!("Batch upsert task failed: {}", e);
                  upsert_errors.push(e.into()); 
-                 reporter.report(SyncProgress { stage: SyncStage::Error { message: error_msg }}).await;
+                 reporter.report(SyncProgress::new(SyncStage::Error { message: error_msg })).await;
              },
              Err(join_err) => { 
                  log::error!("Tokio task join error during upsert: {}", join_err);
                  upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {}", join_err)));
-                 reporter.report(SyncProgress { stage: SyncStage::Error { message: format!("Tokio task join error during upsert: {}", join_err) }}).await;
+                 reporter.report(SyncProgress::new(SyncStage::Error { message: format!("Tokio task join error during upsert: {}", join_err) })).await;
              },
          }
     }

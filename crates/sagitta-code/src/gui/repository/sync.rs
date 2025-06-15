@@ -10,8 +10,9 @@ use super::types::{RepoPanelState, RepoInfo, SimpleSyncStatus, DisplayableSyncPr
 use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 use crate::gui::theme::AppTheme;
 
-/// Timeout for sync operations that appear stuck (in seconds)
-const SYNC_TIMEOUT_SECONDS: u64 = 300; // Increased timeout
+/// Watchdog configuration for sync operations
+/// Maximum time without progress updates before considering sync stuck (in seconds)
+const SYNC_WATCHDOG_TIMEOUT_SECONDS: u64 = 120; // 2 minutes without progress updates
 
 /// Channel for sync completion notifications
 #[derive(Debug)]
@@ -259,12 +260,12 @@ pub fn render_sync_repo(
                             status_color = if ss.is_success { theme.success_color() } else { theme.error_color() };
                             current_progress_val = 1.0;
                         } else if ss.is_running {
-                            // Check for timeout if sync appears stuck
-                            if let Some(started_at) = ss.started_at {
-                                let elapsed = started_at.elapsed();
-                                if !ss.is_complete && elapsed.as_secs() > SYNC_TIMEOUT_SECONDS {
-                                    // Sync appears stuck, mark as timed out
-                                    status_text_str = "Timed Out".to_string();
+                            // Check for watchdog timeout based on last progress update
+                            if let Some(last_progress_time) = ss.last_progress_time {
+                                let time_since_progress = last_progress_time.elapsed();
+                                if !ss.is_complete && time_since_progress.as_secs() > SYNC_WATCHDOG_TIMEOUT_SECONDS {
+                                    // Sync appears stuck based on lack of progress updates
+                                    status_text_str = "Watchdog Timeout".to_string();
                                     status_color = theme.warning_color();
                                     current_progress_val = 0.0;
                                     is_running = false;
@@ -274,15 +275,37 @@ pub fn render_sync_repo(
                                         s.is_running = false;
                                         s.is_complete = true;
                                         s.is_success = false;
-                                        s.final_message = "Sync operation timed out".to_string();
-                                        s.output_lines.push("⚠️ Sync timed out - clearing stuck status".to_string());
-                                        s.final_elapsed_seconds = Some(elapsed.as_secs_f64());
+                                        s.final_message = format!("Sync operation timed out - no progress for {} seconds", time_since_progress.as_secs());
+                                        s.output_lines.push("⚠️ Watchdog timeout - no progress updates received".to_string());
+                                        s.final_elapsed_seconds = Some(ss.started_at.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0));
                                     });
 
                                 } else {
                                     status_text_str = "Running".to_string();
                                     status_color = theme.warning_color();
                                     current_progress_val = 0.1; // Show some progress to indicate it's running
+                                }
+                            } else if let Some(started_at) = ss.started_at {
+                                // Fallback to started_at if no progress time is available
+                                let elapsed = started_at.elapsed();
+                                if elapsed.as_secs() > SYNC_WATCHDOG_TIMEOUT_SECONDS {
+                                    status_text_str = "Watchdog Timeout".to_string();
+                                    status_color = theme.warning_color();
+                                    current_progress_val = 0.0;
+                                    is_running = false;
+                                    
+                                    SIMPLE_STATUS.entry(repo_name.clone()).and_modify(|s| {
+                                        s.is_running = false;
+                                        s.is_complete = true;
+                                        s.is_success = false;
+                                        s.final_message = format!("Sync operation timed out - no progress for {} seconds", elapsed.as_secs());
+                                        s.output_lines.push("⚠️ Watchdog timeout - no progress updates received".to_string());
+                                        s.final_elapsed_seconds = Some(elapsed.as_secs_f64());
+                                    });
+                                } else {
+                                    status_text_str = "Running".to_string();
+                                    status_color = theme.warning_color();
+                                    current_progress_val = 0.1;
                                 }
                             } else {
                                 status_text_str = "Starting".to_string();
@@ -370,14 +393,16 @@ pub fn render_sync_repo(
 fn trigger_sync(repo_names: &[String], repo_manager: Arc<Mutex<RepositoryManager>>, force_sync: bool) {
     for repo_name in repo_names {
         // Insert an immediate placeholder so the progress bar appears instantly
+        let now = std::time::Instant::now();
         SIMPLE_STATUS.insert(repo_name.to_string(), SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["⏳ Preparing sync...".into()],
             final_message: String::new(),
-            started_at: Some(std::time::Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now), // Initialize watchdog timer
         });
         
         // Clear any old detailed status
@@ -420,21 +445,22 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn test_sync_timeout_detection() {
+    fn test_sync_watchdog_timeout_detection() {
         let mut status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["Starting sync...".to_string()],
             final_message: String::new(),
-            started_at: Some(Instant::now() - Duration::from_secs(SYNC_TIMEOUT_SECONDS + 1)),
+            started_at: Some(Instant::now()),
             final_elapsed_seconds: None,
+            last_progress_time: Some(Instant::now() - Duration::from_secs(SYNC_WATCHDOG_TIMEOUT_SECONDS + 1)),
         };
 
-        // Simulate the timeout check logic
-        if let Some(started_at) = status.started_at {
-            let elapsed = started_at.elapsed();
-            assert!(elapsed.as_secs() > SYNC_TIMEOUT_SECONDS, "Should detect timeout");
+        // Simulate the watchdog timeout check logic
+        if let Some(last_progress_time) = status.last_progress_time {
+            let time_since_progress = last_progress_time.elapsed();
+            assert!(time_since_progress.as_secs() > SYNC_WATCHDOG_TIMEOUT_SECONDS, "Should detect watchdog timeout");
         }
     }
 
@@ -446,14 +472,15 @@ mod tests {
             is_success: false,
             output_lines: vec!["Starting sync...".to_string()],
             final_message: String::new(),
-            started_at: Some(Instant::now() - Duration::from_secs(5)),
+            started_at: Some(Instant::now()),
             final_elapsed_seconds: None,
+            last_progress_time: Some(Instant::now() - Duration::from_secs(5)),
         };
 
-        // Simulate the timeout check logic
-        if let Some(started_at) = status.started_at {
-            let elapsed = started_at.elapsed();
-            assert!(elapsed.as_secs() <= SYNC_TIMEOUT_SECONDS, "Should not detect timeout");
+        // Simulate the watchdog timeout check logic
+        if let Some(last_progress_time) = status.last_progress_time {
+            let time_since_progress = last_progress_time.elapsed();
+            assert!(time_since_progress.as_secs() <= SYNC_WATCHDOG_TIMEOUT_SECONDS, "Should not detect watchdog timeout");
         }
     }
 
@@ -467,10 +494,12 @@ mod tests {
             final_message: String::new(),
             started_at: None,
             final_elapsed_seconds: None,
+            last_progress_time: None,
         };
 
-        // Should handle missing start time gracefully
+        // Should handle missing start time and progress time gracefully
         assert!(status.started_at.is_none(), "Should handle missing start time");
+        assert!(status.last_progress_time.is_none(), "Should handle missing progress time");
     }
 
     #[test]
@@ -714,14 +743,16 @@ mod tests {
         use std::time::Instant;
         
         // Test that sync shows immediate feedback when started
+        let now = Instant::now();
         let mut status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["🔄 Starting repository sync...".to_string()],
             final_message: String::new(),
-            started_at: Some(Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now),
         };
         
         // Should show as running immediately
@@ -817,14 +848,16 @@ mod tests {
         use std::time::Instant;
         
         // Test that simple status is shown immediately, then detailed status overrides
+        let now = Instant::now();
         let simple_status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["🔄 Starting repository sync...".to_string()],
             final_message: String::new(),
-            started_at: Some(Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now),
         };
         
         let detailed_progress = DisplayableSyncProgress {
@@ -973,6 +1006,7 @@ mod tests {
         use std::time::Instant;
         
         // Test error status display
+        let now = Instant::now();
         let error_status = SimpleSyncStatus {
             is_running: false,
             is_complete: true,
@@ -983,8 +1017,9 @@ mod tests {
                 "❌ Sync Failed.".to_string(),
             ],
             final_message: "Failed to fetch from remote: connection timeout".to_string(),
-            started_at: Some(Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now),
         };
         
         // Verify error state
@@ -1002,14 +1037,16 @@ mod tests {
         use std::time::Instant;
         
         // Test that sync status is created immediately when sync is triggered
+        let now = Instant::now();
         let immediate_status = SimpleSyncStatus {
             is_running: true,
             is_complete: false,
             is_success: false,
             output_lines: vec!["🔄 Sync requested - initializing...".to_string()],
             final_message: String::new(),
-            started_at: Some(Instant::now()),
+            started_at: Some(now),
             final_elapsed_seconds: None,
+            last_progress_time: Some(now),
         };
         
         // Verify immediate feedback

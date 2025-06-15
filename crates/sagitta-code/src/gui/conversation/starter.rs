@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::agent::conversation::types::{ConversationSummary, ProjectContext, ProjectType};
 use crate::gui::app::AppState;
 use crate::gui::theme::AppTheme;
-use crate::project::workspace::types::ProjectWorkspace;
+
 
 /// Smart conversation starter with intent detection and context pre-loading
 #[derive(Debug, Clone)]
@@ -258,9 +258,6 @@ pub enum ContextType {
     /// Previous conversation
     Conversation,
     
-    /// Project workspace
-    Workspace,
-    
     /// Code symbol (function, class, etc.)
     Symbol,
     
@@ -277,7 +274,6 @@ impl ContextType {
             Self::File => "File",
             Self::Repository => "Repository",
             Self::Conversation => "Conversation",
-            Self::Workspace => "Workspace",
             Self::Symbol => "Symbol",
             Self::Documentation => "Documentation",
             Self::Issue => "Issue",
@@ -289,7 +285,6 @@ impl ContextType {
             Self::File => "📄",
             Self::Repository => "📁",
             Self::Conversation => "💬",
-            Self::Workspace => "🏢",
             Self::Symbol => "🔤",
             Self::Documentation => "📖",
             Self::Issue => "🎯",
@@ -303,7 +298,7 @@ pub enum ContextData {
     File { path: String, content_preview: Option<String> },
     Repository { name: String, branch: String },
     Conversation { summary: ConversationSummary },
-    Workspace { workspace: ProjectWorkspace },
+    Project { name: String, path: String },
     Symbol { name: String, location: String },
     Documentation { title: String, url: Option<String> },
     Issue { title: String, id: String },
@@ -359,7 +354,7 @@ impl ConversationStarter {
                 intent: Some(ConversationIntent::FeatureDevelopment),
                 content: "I want to implement a new feature: [Feature name]\n\nRequirements:\n- [Requirement 1]\n- [Requirement 2]\n\nAcceptance criteria:\n- [Criteria 1]\n- [Criteria 2]\n\nCan you help me plan the implementation approach?".to_string(),
                 suggested_tags: vec!["feature".to_string(), "development".to_string()],
-                required_context: vec![ContextType::Workspace, ContextType::Repository],
+                required_context: vec![ContextType::Repository],
                 category: TemplateCategory::Development,
                 usage_count: 0,
                 last_used: None,

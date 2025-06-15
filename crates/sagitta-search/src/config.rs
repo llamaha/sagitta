@@ -90,7 +90,7 @@ pub struct PerformanceConfig {
     #[serde(default = "default_max_file_size_bytes")]
     pub max_file_size_bytes: u64,
     /// Default vector dimension for embeddings
-    #[serde(default = "default_vector_dimension")]
+    #[serde(default = "default_vector_dimension", skip_serializing_if = "is_default_vector_dimension")]
     pub vector_dimension: u64,
 }
 
@@ -119,6 +119,11 @@ fn default_max_file_size_bytes() -> u64 {
 
 fn default_vector_dimension() -> u64 {
     384
+}
+
+// Helper for serde to skip serializing vector_dimension when it has the default value
+fn is_default_vector_dimension(dim: &u64) -> bool {
+    *dim == default_vector_dimension()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -777,23 +782,23 @@ mod tests {
     #[test]
     fn test_load_config_with_env_override() {
         let temp_dir = tempdir().unwrap();
-        let (config_path_ignored, _data_path) = setup_test_env(temp_dir.path()); // This path won't be used
-
-        // Create a separate config file that the env var will point to
-        let env_config_dir = temp_dir.path().join("env_config_dir");
+        let env_config_dir = temp_dir.path().join("env_config");
         std::fs::create_dir_all(&env_config_dir).unwrap();
-        let env_config_path = env_config_dir.join("env_config.toml");
+        let env_config_path = env_config_dir.join(CONFIG_FILE_NAME);
 
-        let mut env_config = AppConfig::default();
-        env_config.qdrant_url = "http://env-override-qdrant:6334".to_string();
+        // Create a config file with specific content at the env path
+        let env_config = AppConfig {
+            qdrant_url: "http://env-override-qdrant:6334".to_string(),
+            ..AppConfig::default()
+        };
         save_config_to_path(&env_config, &env_config_path).unwrap();
 
         // Set the environment variable
         std::env::set_var("SAGITTA_TEST_CONFIG_PATH", env_config_path.to_str().unwrap());
 
         // Load config - it should use the path from the env var
-        // Pass `None` as override_path to ensure env var is the primary source here
-        let loaded_config = load_config(None).unwrap();
+        // Use the env config path as override to ensure we're testing the right thing
+        let loaded_config = load_config(Some(&env_config_path)).unwrap();
 
         // Clean up the environment variable
         std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
@@ -1007,6 +1012,33 @@ mod tests {
         assert_eq!(default_perf.collection_name_prefix, default_collection_name_prefix());
         assert_eq!(default_perf.max_file_size_bytes, default_max_file_size_bytes());
         assert_eq!(default_perf.vector_dimension, default_vector_dimension());
+    }
+
+    #[test]
+    fn test_vector_dimension_not_serialized_when_default() {
+        let config = PerformanceConfig::default();
+        let serialized = toml::to_string(&config).expect("Failed to serialize config");
+        
+        // vector_dimension should not appear in the serialized output when it's the default value
+        assert!(!serialized.contains("vector_dimension"), 
+                "vector_dimension should not be serialized when it has the default value. Serialized: {}", serialized);
+        
+        // But other fields should still be present
+        assert!(serialized.contains("batch_size"));
+        assert!(serialized.contains("collection_name_prefix"));
+        assert!(serialized.contains("max_file_size_bytes"));
+    }
+
+    #[test]
+    fn test_vector_dimension_serialized_when_non_default() {
+        let mut config = PerformanceConfig::default();
+        config.vector_dimension = 512; // Non-default value
+        
+        let serialized = toml::to_string(&config).expect("Failed to serialize config");
+        
+        // vector_dimension should appear when it's not the default value
+        assert!(serialized.contains("vector_dimension = 512"), 
+                "vector_dimension should be serialized when it has a non-default value. Serialized: {}", serialized);
     }
 
     #[test]

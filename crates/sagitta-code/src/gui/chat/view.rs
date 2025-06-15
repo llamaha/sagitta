@@ -15,6 +15,11 @@ use egui::{
     Response,
     Rect,
     CornerRadius,
+    TextStyle,
+    FontId,
+    FontFamily,
+    Sense,
+    Pos2,
 };
 use syntect::{
     highlighting::{ThemeSet, Style as SyntectStyle, Theme},
@@ -32,6 +37,7 @@ use std::cell::RefCell;
 use std::thread::LocalKey;
 use serde_json;
 use uuid;
+use std::time::Instant;
 
 #[cfg(feature = "gui")]
 use egui_notify::Toasts;
@@ -318,16 +324,16 @@ impl From<ChatMessage> for StreamingMessage {
     }
 }
 
-pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppTheme) {
+pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState) {
     // Convert legacy messages to streaming messages for modern rendering
     let streaming_messages: Vec<StreamingMessage> = messages.iter()
         .map(|msg| msg.clone().into())
         .collect();
     
-    modern_chat_view_ui(ui, &streaming_messages, app_theme);
+    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -346,14 +352,26 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
             // Add "Copy Entire Conversation" button at the top
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let copy_all_button = egui::Button::new("📋 Copy Entire Conversation")
-                        .fill(app_theme.accent_color())
+                    // Update copy state
+                    copy_state.update();
+                    
+                    let button_text = copy_state.get_button_text("📋 Copy Entire Conversation");
+                    let button_color = if copy_state.is_copying {
+                        app_theme.success_color()
+                    } else {
+                        app_theme.accent_color()
+                    };
+                    
+                    let copy_all_button = egui::Button::new(&button_text)
+                        .fill(button_color)
                         .stroke(Stroke::new(1.0, app_theme.border_color()))
                         .rounding(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
                         let conversation_text = format_conversation_for_copying(messages);
-                        ui.output_mut(|o| o.copied_text = conversation_text);
+                        ui.output_mut(|o| o.copied_text = conversation_text.clone());
+                        copy_state.start_copy_feedback(conversation_text);
+                        ui.ctx().request_repaint(); // Request repaint for animation
                     }
                 });
             });
@@ -381,7 +399,7 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                         }
                         
                         // Render the message group with adjusted width for margins
-                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme) {
+                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state) {
                             clicked_tool = Some(tool_info);
                         }
                     }
@@ -428,6 +446,7 @@ fn render_message_group(
     bg_color: &Color32,
     total_width: f32,
     app_theme: AppTheme,
+    copy_state: &mut CopyButtonState,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -493,8 +512,15 @@ fn render_message_group(
         
         // Copy all messages button for the group
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let copy_button = egui::Button::new("📋")
-                .fill(app_theme.input_background())
+            let button_text = if copy_state.is_copying {
+                "✔"
+            } else {
+                "📋"
+            };
+            let button_color = copy_state.get_button_color(app_theme);
+            
+            let copy_button = egui::Button::new(button_text)
+                .fill(button_color)
                 .stroke(Stroke::new(1.0, app_theme.border_color()))
                 .rounding(CornerRadius::same(4));
             
@@ -503,7 +529,9 @@ fn render_message_group(
                     .map(|msg| msg.content.clone())
                     .collect::<Vec<_>>()
                     .join("\n\n");
-                ui.output_mut(|o| o.copied_text = combined_content);
+                ui.output_mut(|o| o.copied_text = combined_content.clone());
+                copy_state.start_copy_feedback(combined_content);
+                ui.ctx().request_repaint(); // Request repaint for animation
             }
         });
     });
@@ -2112,5 +2140,62 @@ fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
     }
     
     conversation.join("\n")
+}
+
+/// State for managing copy button visual feedback
+#[derive(Debug, Clone)]
+pub struct CopyButtonState {
+    pub is_copying: bool,
+    pub copy_feedback_start: Option<Instant>,
+    pub last_copied_text: String,
+}
+
+impl Default for CopyButtonState {
+    fn default() -> Self {
+        Self {
+            is_copying: false,
+            copy_feedback_start: None,
+            last_copied_text: String::new(),
+        }
+    }
+}
+
+impl CopyButtonState {
+    /// Start the copy feedback animation
+    pub fn start_copy_feedback(&mut self, text: String) {
+        self.is_copying = true;
+        self.copy_feedback_start = Some(Instant::now());
+        self.last_copied_text = text;
+    }
+    
+    /// Update the copy button state, returns true if UI should be repainted
+    pub fn update(&mut self) -> bool {
+        if let Some(start_time) = self.copy_feedback_start {
+            if start_time.elapsed().as_millis() > 800 {
+                self.is_copying = false;
+                self.copy_feedback_start = None;
+                return true; // Request repaint to clear feedback
+            }
+        }
+        false
+    }
+    
+    /// Get the current button text based on state
+    pub fn get_button_text(&self, default_text: &str) -> String {
+        if self.is_copying {
+            "✔ Copied".to_string()
+        } else {
+            default_text.to_string()
+        }
+    }
+    
+    /// Get the current button color based on state
+    pub fn get_button_color(&self, theme: AppTheme) -> Color32 {
+        if self.is_copying {
+            theme.success_color()
+        } else {
+            theme.input_background()
+        }
+    }
 }
 
