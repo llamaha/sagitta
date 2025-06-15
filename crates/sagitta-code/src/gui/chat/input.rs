@@ -26,6 +26,10 @@ pub fn chat_input_ui(
     show_hotkeys_modal: &mut bool,
     current_agent_mode: crate::agent::state::types::AgentMode,
     on_agent_mode_change: &mut Option<crate::agent::state::types::AgentMode>,
+    // Repository context parameters
+    current_repository_context: &Option<String>,
+    available_repositories: &[String],
+    on_repository_context_change: &mut Option<String>,
     // Loop control parameters
     is_in_loop: bool,
     loop_break_requested: &mut bool,
@@ -123,14 +127,49 @@ pub fn chat_input_ui(
                     }
                 });
             
-            // Add help text for the current mode
             ui.add_space(8.0);
-            let help_text = match current_agent_mode {
-                crate::agent::state::types::AgentMode::ChatOnly => "No tools will be used",
-                crate::agent::state::types::AgentMode::ToolsWithConfirmation => "Tools require your approval",
-                crate::agent::state::types::AgentMode::FullyAutonomous => "Tools execute automatically",
+
+            // Repository context selector
+            let repo_text = match current_repository_context {
+                Some(repo) => format!("📁 {}", repo),
+                None => "📁 No Repository".to_string(),
             };
-            ui.small(RichText::new(help_text).color(hint_color).weak());
+            
+            let repo_color = if current_repository_context.is_some() {
+                success_color
+            } else {
+                hint_color
+            };
+
+            egui::ComboBox::from_id_source("repository_context_selector")
+                .selected_text(RichText::new(&repo_text).color(repo_color).small())
+                .width(180.0)
+                .show_ui(ui, |ui| {
+                    ui.style_mut().wrap = Some(false);
+                    ui.set_min_width(200.0);
+                    
+                    // "No Repository" option
+                    if ui.selectable_value(
+                        &mut *on_repository_context_change,
+                        Some("".to_string()),
+                        RichText::new("📁 No Repository").color(hint_color)
+                    ).clicked() {
+                        *on_repository_context_change = Some("".to_string());
+                    }
+                    
+                    // Available repositories
+                    for repo in available_repositories {
+                        if ui.selectable_value(
+                            &mut *on_repository_context_change,
+                            Some(repo.clone()),
+                            RichText::new(format!("📁 {}", repo)).color(success_color)
+                        ).clicked() {
+                            *on_repository_context_change = Some(repo.clone());
+                        }
+                    }
+                });
+            
+            // Removed help text for cleaner UI
             
             // Add Message Sagitta Code and help button on the same line (right side)
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -40,6 +40,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
     
+    // Refresh repository list periodically (every 30 seconds)
+    refresh_repository_list_periodically(app);
+    
     // Handle temporary thinking indicator timeout (3 seconds)
     if let Some(start_time) = app.state.thinking_start_time {
         if start_time.elapsed() > std::time::Duration::from_secs(3) {
@@ -886,6 +889,10 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.show_hotkeys_modal,
                 app.state.current_agent_mode,
                 &mut app.state.pending_agent_mode_change,
+                // Repository context parameters
+                &app.state.current_repository_context,
+                &app.state.available_repositories,
+                &mut app.state.pending_repository_context_change,
                 // Loop control parameters
                 app.state.is_in_loop,
                 &mut app.state.loop_break_requested,
@@ -907,6 +914,16 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         }
                     });
                 }
+            }
+
+            // Handle repository context changes
+            if let Some(new_repo) = app.state.pending_repository_context_change.take() {
+                let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
+                app.state.set_repository_context(repo_context);
+                
+                // TODO: Trigger set_repository_context tool call to update working directory
+                // This will be handled by the agent when it processes the context change
+                log::info!("Repository context changed to: {:?}", new_repo);
             }
             
             // Store the input ID for potential future use
@@ -1076,6 +1093,52 @@ fn refresh_clusters_periodically(app: &mut SagittaCodeApp) {
         
         // Update the last refresh time
         app.state.last_conversation_refresh = Some(std::time::Instant::now());
+    }
+}
+
+/// Refresh repository list periodically
+fn refresh_repository_list_periodically(app: &mut SagittaCodeApp) {
+    // Check if we should refresh repository list (every 30 seconds)
+    static mut LAST_REPO_REFRESH: Option<std::time::Instant> = None;
+    
+    let should_refresh = unsafe {
+        LAST_REPO_REFRESH
+            .map(|last| last.elapsed().as_secs() >= 30)
+            .unwrap_or(true)
+    };
+    
+    if should_refresh {
+        log::debug!("Refreshing repository list...");
+        let repo_manager = app.repo_panel.get_repo_manager();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            log::debug!("Starting repository list refresh task");
+            match repo_manager.lock().await.list_repositories().await {
+                Ok(repositories) => {
+                    let repo_names: Vec<String> = repositories
+                        .iter()
+                        .map(|repo| repo.name.clone())
+                        .collect();
+                    
+                    log::info!("Refreshed repository list: {:?}", repo_names);
+                    
+                    // Send the repository list update event
+                    if let Err(e) = app_event_sender.send(super::events::AppEvent::RepositoryListUpdated(repo_names)) {
+                        log::error!("Failed to send repository list update event: {}", e);
+                    } else {
+                        log::debug!("Successfully sent repository list update event");
+                    }
+                },
+                Err(e) => {
+                    log::error!("Failed to refresh repository list: {}", e);
+                }
+            }
+        });
+        
+        unsafe {
+            LAST_REPO_REFRESH = Some(std::time::Instant::now());
+        }
     }
 }
 

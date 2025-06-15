@@ -496,234 +496,178 @@ impl CommandExecutor for LocalExecutor {
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
         let start_time = std::time::Instant::now();
         
-        // Parse the command
+        // Resolve working directory
+        let working_dir = self.config.resolve_and_check(
+            &params.working_directory.clone().unwrap_or_else(|| self.config.execution_dir.clone())
+        )?;
+
+        // Parse command
         let command_parts = self.parse_command(&params.command);
         if command_parts.is_empty() {
             return Err(SagittaCodeError::ToolError("Empty command".to_string()));
         }
-        
+
+        // Check for git commands and validate repository context
+        if command_parts[0] == "git" && !working_dir.join(".git").exists() {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Git command cannot be executed: not in a git repository.\n\
+                Current directory: {}\n\
+                Hint: Use 'set_repository_context' tool to switch to a repository first.",
+                working_dir.display()
+            )));
+        }
+
         let program = &command_parts[0];
         let args = &command_parts[1..];
-        
-        // Classify the command
-        let command_class = self.classify_command(&params.command);
-        
-        // Check approval policy
-        let needs_approval = match (self.config.approval_policy, command_class) {
-            (ApprovalPolicy::Auto, CommandClass::Safe) => false,
-            (ApprovalPolicy::Auto, CommandClass::NeedsApproval) => true,
-            (ApprovalPolicy::Auto, CommandClass::Forbidden) => {
-                return Err(SagittaCodeError::ToolError(
-                    format!("Command '{}' is forbidden for security reasons", params.command)
-                ));
-            }
-            (ApprovalPolicy::AlwaysAsk, CommandClass::Forbidden) => {
-                return Err(SagittaCodeError::ToolError(
-                    format!("Command '{}' is forbidden for security reasons", params.command)
-                ));
-            }
-            (ApprovalPolicy::AlwaysAsk, _) => true,
-            (ApprovalPolicy::Paranoid, _) => true,
-        };
-        
-        // If approval is needed, send approval request
-        if needs_approval {
-            let approval_event = StreamEvent::ApprovalRequest {
-                id: uuid::Uuid::new_v4().to_string(),
-                command: params.command.clone(),
-                reason: "Command requires user approval".to_string(),
-            };
-            
-            if let Err(_) = event_sender.send(approval_event).await {
-                return Err(SagittaCodeError::ToolError("Failed to send approval request".to_string()));
-            }
-            
-            // For now, we'll assume approval is granted
-            // In a real implementation, this would wait for user response
-        }
-        
-        // Check tool availability
-        if let Err(advice) = self.check_tool_availability(program).await {
-            let missing_tool_event = StreamEvent::MissingTool {
-                tool: advice.tool_name.clone(),
-                advice: serde_json::to_value(advice)
-                    .map_err(|e| SagittaCodeError::ToolError(format!("Failed to serialize tool advice: {}", e)))?,
-            };
-            
-            if let Err(_) = event_sender.send(missing_tool_event).await {
-                log::warn!("Failed to send missing tool event");
-            }
-            
-            return Err(SagittaCodeError::ToolError(
-                format!("Required tool '{}' is not available", program)
-            ));
-        }
-        
-        // Resolve and validate working directory
-        let working_dir = if let Some(ref wd) = params.working_directory {
-            // Caller provided an explicit working directory path.
-            self.config.resolve_and_check(wd)?
-        } else {
-            // No explicit working directory – assume the *current* process cwd that may have been
-            // changed via WorkingDirectoryManager.  This allows users (or the ChangeDirectoryTool)
-            // to `cd` and then run shell commands without needing to always pass the
-            // `working_directory` parameter.
-            match std::env::current_dir() {
-                Ok(cwd) => {
-                    // If cwd is within the workspace base, use it. Otherwise fall back to base.
-                    match self.config.resolve_and_check(&cwd) {
-                        Ok(valid) => valid,
-                        Err(_) => self.config.base_dir.clone(),
-                    }
-                }
-                Err(_) => self.config.base_dir.clone(),
-            }
-        };
-        
-        // Create the command
+
+        // Send initial progress
+        let _ = event_sender.send(StreamEvent::Progress {
+            message: format!("Executing: {}", params.command),
+            percentage: Some(0.0),
+        }).await;
+
+        // Create command
         let mut cmd = Command::new(program);
         cmd.args(args)
-           .current_dir(&working_dir)
-           .stdout(Stdio::piped())
-           .stderr(Stdio::piped());
-        
+            .current_dir(&working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+
         // Add environment variables
         if let Some(ref env_vars) = params.env_vars {
             for (key, value) in env_vars {
                 cmd.env(key, value);
             }
         }
-        
-        // Add OS information as environment variables
-        cmd.env("SAGITTA_OS_NAME", std::env::consts::OS);
-        cmd.env("SAGITTA_OS_VERSION", "unknown"); // Could use os_info crate for more detail
-        
+        cmd.envs(&self.config.env_vars);
+
         // Spawn the process
         let mut child = cmd.spawn()
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to spawn command: {}", e)))?;
-        
-        // Get stdout and stderr streams
-        let stdout = child.stdout.take()
-            .ok_or_else(|| SagittaCodeError::ToolError("Failed to get stdout".to_string()))?;
-        let stderr = child.stderr.take()
-            .ok_or_else(|| SagittaCodeError::ToolError("Failed to get stderr".to_string()))?;
-        
+
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+
         let stdout_reader = BufReader::new(stdout);
         let stderr_reader = BufReader::new(stderr);
-        
+
         let mut stdout_lines = stdout_reader.lines();
         let mut stderr_lines = stderr_reader.lines();
-        
+
         let mut stdout_output = String::new();
         let mut stderr_output = String::new();
+        let mut line_count = 0;
+        let mut error_detected = false;
+
+        // Use timeout for the entire operation
+        let timeout_duration = std::time::Duration::from_secs(self.config.timeout_seconds);
         
-        // Read output streams concurrently
-        let mut stdout_closed = false;
-        let mut stderr_closed = false;
-        let mut process_exited = false;
-        let mut exit_code = 0;
-        let mut execution_time = start_time.elapsed();
-        
-        loop {
-            tokio::select! {
-                stdout_line = stdout_lines.next_line(), if !stdout_closed => {
-                    match stdout_line {
-                        Ok(Some(line)) => {
-                            stdout_output.push_str(&line);
-                            stdout_output.push('\n');
-                            
-                            let stdout_event = StreamEvent::Stdout { content: line };
-                            if let Err(_) = event_sender.send(stdout_event).await {
-                                log::warn!("Failed to send stdout event");
+        let execution_result = tokio::time::timeout(timeout_duration, async {
+            loop {
+                tokio::select! {
+                    stdout_line = stdout_lines.next_line() => {
+                        match stdout_line {
+                            Ok(Some(line)) => {
+                                stdout_output.push_str(&line);
+                                stdout_output.push('\n');
+                                
+                                // Send progress update every 10 lines
+                                line_count += 1;
+                                if line_count % 10 == 0 {
+                                    let _ = event_sender.send(StreamEvent::Progress {
+                                        message: format!("Processing... ({} lines)", line_count),
+                                        percentage: None,
+                                    }).await;
+                                }
+                                
+                                // Send stdout line
+                                let _ = event_sender.send(StreamEvent::Stdout { content: line }).await;
                             }
-                        }
-                        Ok(None) => {
-                            stdout_closed = true;
-                        }
-                        Err(e) => {
-                            log::warn!("Error reading stdout: {}", e);
-                            stdout_closed = true;
+                            Ok(None) => break,
+                            Err(e) => return Err(SagittaCodeError::ToolError(format!("Error reading stdout: {}", e))),
                         }
                     }
-                }
-                stderr_line = stderr_lines.next_line(), if !stderr_closed => {
-                    match stderr_line {
-                        Ok(Some(line)) => {
-                            stderr_output.push_str(&line);
-                            stderr_output.push('\n');
-                            
-                            // Improved stderr classification - not all stderr is errors
-                            let is_actual_error = classify_stderr_as_error(&line);
-                            let stderr_event = if is_actual_error {
-                                StreamEvent::Stderr { content: line }
-                            } else {
-                                // Treat as informational output (e.g., cargo/npm progress messages)
-                                StreamEvent::Stdout { content: line }
-                            };
-                            if let Err(_) = event_sender.send(stderr_event).await {
-                                log::warn!("Failed to send stderr event");
+                    stderr_line = stderr_lines.next_line() => {
+                        match stderr_line {
+                            Ok(Some(line)) => {
+                                stderr_output.push_str(&line);
+                                stderr_output.push('\n');
+                                
+                                // Check for early error indicators
+                                if !error_detected && (
+                                    line.contains("fatal: not a git repository") ||
+                                    line.contains("command not found") ||
+                                    line.contains("No such file or directory")
+                                ) {
+                                    error_detected = true;
+                                    let _ = event_sender.send(StreamEvent::Progress {
+                                        message: "Early error detected, terminating...".to_string(),
+                                        percentage: None,
+                                    }).await;
+                                    
+                                    // Kill the process
+                                    let _ = child.kill().await;
+                                    break;
+                                }
+                                
+                                // Send stderr line
+                                let _ = event_sender.send(StreamEvent::Stderr { content: line }).await;
                             }
-                        }
-                        Ok(None) => {
-                            stderr_closed = true;
-                        }
-                        Err(e) => {
-                            log::warn!("Error reading stderr: {}", e);
-                            stderr_closed = true;
-                        }
-                    }
-                }
-                // Also wait for the process to complete
-                status = child.wait(), if !process_exited => {
-                    match status {
-                        Ok(exit_status) => {
-                            exit_code = exit_status.code().unwrap_or(-1);
-                            execution_time = start_time.elapsed();
-                            process_exited = true;
-                            
-                            // Send exit event
-                            let exit_event = StreamEvent::Exit { code: exit_code };
-                            if let Err(_) = event_sender.send(exit_event).await {
-                                log::warn!("Failed to send exit event");
-                            }
-                        }
-                        Err(e) => {
-                            return Err(SagittaCodeError::ToolError(format!("Failed to wait for command: {}", e)));
+                            Ok(None) => break,
+                            Err(e) => return Err(SagittaCodeError::ToolError(format!("Error reading stderr: {}", e))),
                         }
                     }
                 }
             }
             
-            // Exit the loop when both streams are closed and process has exited
-            if stdout_closed && stderr_closed && process_exited {
-                break;
+            // Wait for process to complete
+            child.wait().await
+                .map_err(|e| SagittaCodeError::ToolError(format!("Failed to wait for command: {}", e)))
+        }).await;
+
+        let execution_time = start_time.elapsed();
+        let timed_out = execution_result.is_err();
+        
+        let exit_status = match execution_result {
+            Ok(Ok(status)) => status,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                // Timeout occurred
+                let _ = child.kill().await;
+                let _ = event_sender.send(StreamEvent::Progress {
+                    message: format!("Command timed out after {} seconds", self.config.timeout_seconds),
+                    percentage: Some(100.0),
+                }).await;
+                
+                return Ok(ShellExecutionResult {
+                    exit_code: 124, // Standard timeout exit code
+                    stdout: stdout_output,
+                    stderr: format!("{}Command timed out after {} seconds", stderr_output, self.config.timeout_seconds),
+                    execution_time_ms: execution_time.as_millis() as u64,
+                    working_directory: working_dir,
+                    container_image: "local".to_string(),
+                    timed_out: true,
+                });
             }
-        }
-        
-        // Write audit log
-        let audit_entry = AuditLogEntry {
-            timestamp: Utc::now(),
-            user: std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()),
-            working_directory: working_dir.clone(),
-            command: command_parts,
-            exit_code: Some(exit_code),
-            duration_ms: execution_time.as_millis() as u64,
-            prompted: needs_approval,
-            approved_by: if needs_approval { Some("user".to_string()) } else { None },
         };
-        
-        if let Err(e) = self.write_audit_log(&audit_entry).await {
-            log::warn!("Failed to write audit log: {}", e);
-        }
-        
+
+        let exit_code = exit_status.code().unwrap_or(-1);
+
+        // Send completion progress
+        let _ = event_sender.send(StreamEvent::Progress {
+            message: format!("Command completed with exit code {}", exit_code),
+            percentage: Some(100.0),
+        }).await;
+
         Ok(ShellExecutionResult {
-            exit_code: exit_code,
+            exit_code,
             stdout: stdout_output,
             stderr: stderr_output,
             execution_time_ms: execution_time.as_millis() as u64,
-            working_directory: working_dir.clone(),
+            working_directory: working_dir,
             container_image: "local".to_string(),
-            timed_out: false,
+            timed_out,
         })
     }
 }

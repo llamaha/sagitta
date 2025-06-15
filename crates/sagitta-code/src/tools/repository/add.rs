@@ -4,12 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use std::path::Path;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::utils::errors::SagittaCodeError;
+use terminal_stream::events::StreamEvent;
 
 /// Parameters for adding a repository
 #[derive(Debug, Deserialize, Serialize)]
@@ -31,6 +32,7 @@ pub struct AddExistingRepositoryParams {
 #[derive(Debug)]
 pub struct AddExistingRepositoryTool {
     repo_manager: Arc<Mutex<RepositoryManager>>,
+    progress_sender: Option<mpsc::Sender<StreamEvent>>,
 }
 
 impl AddExistingRepositoryTool {
@@ -38,6 +40,18 @@ impl AddExistingRepositoryTool {
     pub fn new(repo_manager: Arc<Mutex<RepositoryManager>>) -> Self {
         Self {
             repo_manager,
+            progress_sender: None,
+        }
+    }
+    
+    /// Create a new add existing repository tool with progress reporting
+    pub fn new_with_progress_sender(
+        repo_manager: Arc<Mutex<RepositoryManager>>, 
+        progress_sender: Option<mpsc::Sender<StreamEvent>>
+    ) -> Self {
+        Self {
+            repo_manager,
+            progress_sender,
         }
     }
     
@@ -170,71 +184,133 @@ impl AddExistingRepositoryTool {
         Ok(())
     }
     
-    /// Add an existing repository
+    /// Add an existing repository and automatically sync it
     async fn add_existing_repository(&self, params: &AddExistingRepositoryParams) -> Result<String, SagittaCodeError> {
         // Validate parameters first
         self.validate_parameters(params)?;
 
+        // Send initial progress update
+        if let Some(ref sender) = self.progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: format!("Adding repository '{}'...", params.name),
+                percentage: Some(10.0),
+            }).await;
+        }
+
         let mut repo_manager = self.repo_manager.lock().await;
         
-        if let Some(local_path) = &params.local_path {
+        // Step 1: Add the repository
+        let add_result = if let Some(local_path) = &params.local_path {
             // Add local repository
-            match repo_manager.add_local_repository(&params.name, local_path).await {
-                Ok(_) => Ok(format!("Successfully added local repository '{}' from path: {}", params.name, local_path)),
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("already exists in configuration") {
-                        // Treat "already exists" as success since the repository is available
-                        Ok(format!("Repository '{}' already exists and is available for use", params.name))
-                    } else {
-                        // Enhanced error message with suggestions
-                        Err(SagittaCodeError::ToolError(format!(
-                            "Failed to add local repository '{}' from path '{}': {}\n\n\
-                            Possible solutions:\n\
-                            1. Check if you have read permissions to the directory\n\
-                            2. Verify the path exists and contains code files\n\
-                            3. Try using a different repository name\n\
-                            4. Check if the directory is already registered under a different name", 
-                            params.name, local_path, e
-                        )))
-                    }
-                }
+            if let Some(ref sender) = self.progress_sender {
+                let _ = sender.send(StreamEvent::Progress {
+                    message: format!("Registering local repository from '{}'...", local_path),
+                    percentage: Some(25.0),
+                }).await;
             }
+            
+            repo_manager.add_local_repository(&params.name, local_path).await
         } else if let Some(url) = &params.url {
             // Add remote repository
+            if let Some(ref sender) = self.progress_sender {
+                let _ = sender.send(StreamEvent::Progress {
+                    message: format!("Cloning repository from '{}'...", url),
+                    percentage: Some(25.0),
+                }).await;
+            }
+            
             let branch = params.branch.as_deref();
-            match repo_manager.add_repository(&params.name, url, branch).await {
-                Ok(_) => {
-            let branch_msg = if let Some(b) = branch {
-                format!(" (branch: {})", b)
-            } else {
-                String::new()
-            };
-            Ok(format!("Successfully added repository '{}' from URL: {}{}", params.name, url, branch_msg))
+            repo_manager.add_repository(&params.name, url, branch).await
+        } else {
+            return Err(SagittaCodeError::ToolError("Either URL or local_path must be provided".to_string()));
+        };
+
+        // Handle add result
+        let was_already_existing = match add_result {
+            Ok(_) => {
+                if let Some(ref sender) = self.progress_sender {
+                    let _ = sender.send(StreamEvent::Progress {
+                        message: format!("Repository '{}' added successfully", params.name),
+                        percentage: Some(50.0),
+                    }).await;
                 }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("already exists in configuration") {
-                        // Treat "already exists" as success since the repository is available
-                        Ok(format!("Repository '{}' already exists and is available for use", params.name))
-                    } else {
-                        // Enhanced error message with suggestions
-                        Err(SagittaCodeError::ToolError(format!(
-                            "Failed to add repository '{}' from URL '{}': {}\n\n\
-                            Possible solutions:\n\
-                            1. Check if the URL is correct and accessible\n\
-                            2. Verify you have network connectivity\n\
-                            3. For private repositories, ensure you have proper authentication\n\
-                            4. Try using a different branch name if specified\n\
-                            5. Check if the repository name is already in use", 
-                            params.name, url, e
-                        )))
+                false
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                if error_msg.contains("already exists in configuration") {
+                    // Repository already exists - that's fine, we can still sync it
+                    if let Some(ref sender) = self.progress_sender {
+                        let _ = sender.send(StreamEvent::Progress {
+                            message: format!("Repository '{}' already exists, proceeding to sync", params.name),
+                            percentage: Some(50.0),
+                        }).await;
                     }
+                    true
+                } else {
+                    // Real error - return it
+                    if let Some(ref sender) = self.progress_sender {
+                        let _ = sender.send(StreamEvent::Progress {
+                            message: format!("Failed to add repository '{}': {}", params.name, e),
+                            percentage: None,
+                        }).await;
+                    }
+                    
+                    return Err(SagittaCodeError::ToolError(format!(
+                        "Failed to add repository '{}': {}\n\n\
+                        Possible solutions:\n\
+                        1. Check if you have proper permissions\n\
+                        2. Verify the path/URL is correct and accessible\n\
+                        3. For remote repositories, ensure you have network connectivity\n\
+                        4. Try using a different repository name", 
+                        params.name, e
+                    )));
                 }
             }
-        } else {
-            // This should never happen due to validation, but include for safety
-            Err(SagittaCodeError::ToolError("Either URL or local_path must be provided".to_string()))
+        };
+
+        // Step 2: Automatically sync the repository
+        if let Some(ref sender) = self.progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: format!("Starting sync for repository '{}'...", params.name),
+                percentage: Some(60.0),
+            }).await;
+        }
+
+        match repo_manager.sync_repository(&params.name).await {
+            Ok(_) => {
+                if let Some(ref sender) = self.progress_sender {
+                    let _ = sender.send(StreamEvent::Progress {
+                        message: format!("Successfully synced repository '{}'", params.name),
+                        percentage: Some(100.0),
+                    }).await;
+                }
+                
+                let status_msg = if was_already_existing {
+                    format!("Repository '{}' was already configured and has been synced successfully", params.name)
+                } else {
+                    format!("Successfully added and synced repository '{}'", params.name)
+                };
+                
+                Ok(status_msg)
+            }
+            Err(e) => {
+                if let Some(ref sender) = self.progress_sender {
+                    let _ = sender.send(StreamEvent::Progress {
+                        message: format!("Sync failed for repository '{}': {}", params.name, e),
+                        percentage: None,
+                    }).await;
+                }
+                
+                // Repository was added but sync failed - still return success but mention sync failure
+                let warning_msg = if was_already_existing {
+                    format!("Repository '{}' is available but sync failed: {}. You can try syncing manually later.", params.name, e)
+                } else {
+                    format!("Repository '{}' was added successfully but sync failed: {}. You can try syncing manually later.", params.name, e)
+                };
+                
+                Ok(warning_msg)
+            }
         }
     }
 }
@@ -310,14 +386,24 @@ impl Tool for AddExistingRepositoryTool {
         };
         
         match self.add_existing_repository(&params).await {
-            Ok(message) => Ok(ToolResult::Success(serde_json::json!({
-                "repository_name": params.name,
-                "repository_url": params.url,
-                "local_path": params.local_path,
-                "branch": params.branch,
-                "status": "added",
-                "message": message
-            }))),
+            Ok(message) => {
+                let status = if message.contains("synced successfully") {
+                    "added_and_synced"
+                } else if message.contains("sync failed") {
+                    "added_sync_failed"
+                } else {
+                    "added"
+                };
+                
+                Ok(ToolResult::Success(serde_json::json!({
+                    "repository_name": params.name,
+                    "repository_url": params.url,
+                    "local_path": params.local_path,
+                    "branch": params.branch,
+                    "status": status,
+                    "message": message
+                })))
+            }
             Err(SagittaCodeError::ToolError(msg)) => Ok(ToolResult::Error { error: msg }),
             Err(e) => Err(e) // Only propagate non-tool errors
         }
