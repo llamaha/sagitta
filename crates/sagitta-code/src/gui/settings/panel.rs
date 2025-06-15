@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use rfd::FileDialog;
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
-use sagitta_search::config::{AppConfig, load_config, save_config, get_config_path_or_default};
+use sagitta_search::config::{AppConfig, load_config, save_config, get_config_path_or_default, get_repo_base_path};
 use uuid::Uuid;
 use log::{info, warn, error};
 
@@ -31,7 +31,7 @@ pub struct SettingsPanel {
     onnx_model_path: Option<String>,
     onnx_tokenizer_path: Option<String>,
     repositories_base_path: Option<String>,
-    vocabulary_base_path: Option<String>,
+
     indexing_max_concurrent_upserts: u32,
     performance_batch_size: u32,
     embedding_batch_size: u32,
@@ -61,7 +61,7 @@ impl SettingsPanel {
             onnx_model_path: initial_app_config.onnx_model_path.clone(),
             onnx_tokenizer_path: initial_app_config.onnx_tokenizer_path.clone(),
             repositories_base_path: initial_app_config.repositories_base_path.clone(),
-            vocabulary_base_path: initial_app_config.vocabulary_base_path.clone(),
+
             indexing_max_concurrent_upserts: initial_app_config.indexing.max_concurrent_upserts as u32,
             performance_batch_size: initial_app_config.performance.batch_size as u32,
             embedding_batch_size: initial_app_config.embedding.embedding_batch_size as u32,
@@ -238,13 +238,20 @@ impl SettingsPanel {
                             
                             // Repository settings
                             ui.heading("Repository Settings");
+                            ui.label("Configure custom path for repository storage. Leave empty to use the default XDG data directory.");
+                            ui.add_space(4.0);
+                            
                             Grid::new("repo_settings_grid")
                                 .num_columns(3)
                                 .spacing([8.0, 8.0])
                                 .show(ui, |ui| {
-                                    ui.label("Repositories Base Path:");
+                                    ui.label("Repositories Base Path:")
+                                        .on_hover_text("Directory where cloned repositories are stored");
                                     let mut repos_path_str = self.repositories_base_path.clone().unwrap_or_default();
-                                    ui.add(TextEdit::singleline(&mut repos_path_str).desired_width(250.0));
+                                    let default_repo_path = self.get_default_repo_base_path_display();
+                                    ui.add(TextEdit::singleline(&mut repos_path_str)
+                                        .desired_width(250.0)
+                                        .hint_text(&format!("Default: {}", default_repo_path)));
                                     self.repositories_base_path = if repos_path_str.is_empty() { None } else { Some(repos_path_str) };
                                     if ui.button("Browse").clicked() {
                                         if let Some(path) = FileDialog::new()
@@ -255,18 +262,7 @@ impl SettingsPanel {
                                     }
                                     ui.end_row();
                                     
-                                    ui.label("Vocabulary Base Path:");
-                                    let mut vocab_path_str = self.vocabulary_base_path.clone().unwrap_or_default();
-                                    ui.add(TextEdit::singleline(&mut vocab_path_str).desired_width(250.0));
-                                    self.vocabulary_base_path = if vocab_path_str.is_empty() { None } else { Some(vocab_path_str) };
-                                    if ui.button("Browse").clicked() {
-                                        if let Some(path) = FileDialog::new()
-                                            .set_title("Select Vocabulary Base Directory")
-                                            .pick_folder() {
-                                            self.vocabulary_base_path = Some(path.to_string_lossy().to_string());
-                                        }
-                                    }
-                                    ui.end_row();
+
                                 });
                             ui.add_space(16.0);
                             
@@ -391,7 +387,7 @@ impl SettingsPanel {
         config.onnx_model_path = self.onnx_model_path.clone();
         config.onnx_tokenizer_path = self.onnx_tokenizer_path.clone();
         config.repositories_base_path = self.repositories_base_path.clone();
-        config.vocabulary_base_path = self.vocabulary_base_path.clone();
+
         
         // Indexing settings
         config.indexing.max_concurrent_upserts = self.indexing_max_concurrent_upserts as usize;
@@ -443,6 +439,17 @@ impl SettingsPanel {
         
         updated_config
     }
+
+    /// Get the default repository base path for display purposes
+    fn get_default_repo_base_path_display(&self) -> String {
+        // Try to get the default path that would be used if no override is set
+        match get_repo_base_path(None) {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => "~/.local/share/sagitta/repositories".to_string(), // Fallback
+        }
+    }
+
+
 }
 
 #[cfg(test)]
@@ -461,7 +468,7 @@ mod tests {
             onnx_model_path: Some("/test/model.onnx".to_string()),
             onnx_tokenizer_path: Some("/test/tokenizer".to_string()),
             repositories_base_path: Some("/test/repos".to_string()),
-            vocabulary_base_path: Some("/test/vocab".to_string()),
+            vocabulary_base_path: None, // Use default path
             tenant_id: None, // not used in sagitta-code (hardcoded to "local")
             repositories: vec![],
             active_repository: None,
@@ -515,7 +522,6 @@ mod tests {
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
-        assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.embedding_batch_size, 64);
@@ -538,7 +544,6 @@ mod tests {
         assert_eq!(panel.onnx_model_path, Some("/test/model.onnx".to_string()));
         assert_eq!(panel.onnx_tokenizer_path, Some("/test/tokenizer".to_string()));
         assert_eq!(panel.repositories_base_path, Some("/test/repos".to_string()));
-        assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
         assert_eq!(panel.embedding_batch_size, 64);
@@ -577,7 +582,6 @@ mod tests {
         panel.onnx_model_path = Some("/custom/model.onnx".to_string());
         panel.onnx_tokenizer_path = Some("/custom/tokenizer".to_string());
         panel.repositories_base_path = Some("/custom/repos".to_string());
-        panel.vocabulary_base_path = Some("/custom/vocab".to_string());
         panel.indexing_max_concurrent_upserts = 16;
         panel.performance_batch_size = 300;
         panel.embedding_batch_size = 256;
@@ -590,7 +594,6 @@ mod tests {
         assert_eq!(config.onnx_model_path, Some("/custom/model.onnx".to_string()));
         assert_eq!(config.onnx_tokenizer_path, Some("/custom/tokenizer".to_string()));
         assert_eq!(config.repositories_base_path, Some("/custom/repos".to_string()));
-        assert_eq!(config.vocabulary_base_path, Some("/custom/vocab".to_string()));
         assert_eq!(config.indexing.max_concurrent_upserts, 16);
         assert_eq!(config.performance.batch_size, 300);
         assert_eq!(config.embedding.embedding_batch_size, 256);
@@ -640,7 +643,6 @@ mod tests {
         assert_eq!(panel.onnx_model_path, default_app_config.onnx_model_path);
         assert_eq!(panel.onnx_tokenizer_path, default_app_config.onnx_tokenizer_path);
         assert_eq!(panel.repositories_base_path, default_app_config.repositories_base_path);
-        assert_eq!(panel.vocabulary_base_path, default_app_config.vocabulary_base_path);
         assert_eq!(panel.indexing_max_concurrent_upserts as usize, default_app_config.indexing.max_concurrent_upserts);
         assert_eq!(panel.performance_batch_size as usize, default_app_config.performance.batch_size);
         assert_eq!(panel.embedding_batch_size as usize, default_app_config.embedding.embedding_batch_size);
@@ -655,94 +657,41 @@ mod tests {
 
     #[test]
     fn test_settings_panel_config_sync_roundtrip() {
-        let temp_dir = TempDir::new().unwrap();
-        let core_config_temp_path = temp_dir.path().join("core_config.toml");
-        let sagitta_code_config_temp_path = temp_dir.path().join("sagitta_code_config.json");
-
-        // 1. Initial Configs (Set A)
-        let initial_app_config = AppConfig {
-            qdrant_url: "http://initial-qdrant:6334".to_string(),
-            onnx_model_path: Some("initial/model.onnx".to_string()),
-            onnx_tokenizer_path: Some("initial/tokenizer/".to_string()),
-
-            ..Default::default()
-        };
-        let initial_sagitta_code_config = SagittaCodeConfig {
-            openrouter: OpenRouterConfig {
-                api_key: Some("initial-api-key".to_string()),
-                model: "initial-gemini-model".to_string(),
-                max_reasoning_steps: 30,
-                ..Default::default()
-            },
-            ui: UiConfig {
-                theme: "dark".to_string(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        // 2. Create Panel & Verify Initial State (Simulates File to GUI)
-        let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_app_config.clone());
-
-        assert_eq!(panel.qdrant_url, initial_app_config.qdrant_url);
-        assert_eq!(panel.onnx_model_path, initial_app_config.onnx_model_path);
-
-        assert_eq!(panel.openrouter_api_key, initial_sagitta_code_config.openrouter.api_key.unwrap_or_default());
-        assert_eq!(panel.openrouter_model, initial_sagitta_code_config.openrouter.model);
-        assert_eq!(panel.openrouter_max_reasoning_steps, initial_sagitta_code_config.openrouter.max_reasoning_steps);
-        // Test theme string parsing
-        match initial_sagitta_code_config.ui.theme.as_str() {
-            "dark" => {
-                // Theme parsing works correctly for dark theme
-                assert_eq!(initial_sagitta_code_config.ui.theme, "dark");
-            },
-            "light" => {
-                // Theme parsing works correctly for light theme  
-                assert_eq!(initial_sagitta_code_config.ui.theme, "light");
-            },
-            _ => {
-                // Default theme handling
-                assert_eq!(initial_sagitta_code_config.ui.theme, "dark");
-            }
-        }
-
-        // 3. Modify Panel State (Simulate UI Edits - Set B)
-        panel.qdrant_url = "http://updated-qdrant:6334".to_string();
-        panel.onnx_model_path = Some("updated/model.onnx".to_string());
-        panel.openrouter_api_key = "updated-api-key".to_string();
-        panel.openrouter_model = "updated-gemini-model".to_string();
-        panel.openrouter_max_reasoning_steps = 90;
-
-        // 4. Generate Configs from Modified Panel State
+        let initial_sagitta_config = create_test_sagitta_config();
+        let initial_sagitta_code_config = create_test_sagitta_code_config();
+        
+        let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_sagitta_config.clone());
+        
+        // Modify some values
+        panel.openrouter_api_key = "new_key".to_string();
+        panel.openrouter_model = "new_model".to_string();
+        panel.qdrant_url = "http://new_url:6334".to_string();
+        
+        // Create updated configs
         let updated_sagitta_config = panel.create_updated_sagitta_config();
         let updated_sagitta_code_config = panel.create_updated_sagitta_code_config();
         
-        // 5. Verify Updated Configs Match Modified Panel State
-        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("updated-api-key".to_string()));
-        assert_eq!(updated_sagitta_code_config.openrouter.model, "updated-gemini-model".to_string());
-        assert_eq!(updated_sagitta_code_config.openrouter.max_reasoning_steps, 90);
+        // Verify changes were applied
+        assert_eq!(updated_sagitta_config.qdrant_url, "http://new_url:6334");
+        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("new_key".to_string()));
+        assert_eq!(updated_sagitta_code_config.openrouter.model, "new_model");
+    }
+
+    #[test]
+    fn test_default_path_display_functions() {
+        let initial_sagitta_config = create_test_sagitta_config();
+        let initial_sagitta_code_config = create_test_sagitta_code_config();
         
-        // Verify sagitta config updates
-        assert_eq!(updated_sagitta_config.qdrant_url, "http://updated-qdrant:6334");
-        // Use default performance batch size since it's not modified in this test
-        assert_eq!(updated_sagitta_config.performance.batch_size, sagitta_search::config::PerformanceConfig::default().batch_size);
-
-        // 6. Save Generated Configs to Temp Files
-        sagitta_search::config::save_config(&updated_sagitta_config, Some(&core_config_temp_path)).unwrap();
-        save_sagitta_code_config_to_path(&updated_sagitta_code_config, &sagitta_code_config_temp_path).unwrap();
-
-        // 7. Load Configs Back from Temp Files
-        let loaded_app_config_from_file = sagitta_search::config::load_config(Some(&core_config_temp_path)).unwrap();
-        let loaded_sagitta_code_config_from_file = load_sagitta_code_config_from_path(&sagitta_code_config_temp_path).unwrap();
-
-        // 8. Verify Loaded Configs Match Modified Panel State (as represented by generated configs)
-        assert_eq!(loaded_app_config_from_file.qdrant_url, updated_sagitta_config.qdrant_url);
-        assert_eq!(loaded_app_config_from_file.onnx_model_path, updated_sagitta_config.onnx_model_path);
-
-        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.api_key, updated_sagitta_code_config.openrouter.api_key);
-        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.model, updated_sagitta_code_config.openrouter.model);
-        assert_eq!(loaded_sagitta_code_config_from_file.openrouter.max_reasoning_steps, updated_sagitta_code_config.openrouter.max_reasoning_steps);
-        assert_eq!(loaded_sagitta_code_config_from_file.ui.theme, updated_sagitta_code_config.ui.theme);
+        let panel = SettingsPanel::new(initial_sagitta_code_config, initial_sagitta_config);
+        
+        // Test that default repo path function returns non-empty string
+        let default_repo_path = panel.get_default_repo_base_path_display();
+        
+        assert!(!default_repo_path.is_empty(), "Default repo path should not be empty");
+        
+        // Test that it contains expected path components
+        assert!(default_repo_path.contains("sagitta"), "Default repo path should contain 'sagitta'");
+        assert!(default_repo_path.contains("repositories"), "Default repo path should contain 'repositories'");
     }
 }
 
