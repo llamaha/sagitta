@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter as CoreSyncProgressReporter, SyncStage};
+use sagitta_search::sync_progress::{AddProgress, AddProgressReporter as CoreAddProgressReporter, RepoAddStage};
 use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
-use crate::gui::repository::types::{SimpleSyncStatus, DisplayableSyncProgress};
+use crate::gui::repository::types::{SimpleSyncStatus, DisplayableSyncProgress, DisplayableAddProgress};
 
 // Using String for RepositoryId as per observations in manager.rs
 pub type RepositoryId = String;
@@ -79,11 +80,43 @@ impl CoreSyncProgressReporter for GuiProgressReporter {
     }
 }
 
+#[async_trait]
+impl CoreAddProgressReporter for GuiProgressReporter {
+    async fn report(&self, progress: AddProgress) {
+        // Convert add progress into a displayable format similar to sync progress
+        let displayable = DisplayableAddProgress::from_core_progress(&progress, 0.0);
+
+        // Update the global maps (reuse the same infrastructure as sync)
+        DETAILED_STATUS.insert(self.repo_id.clone(), displayable.clone().into());
+
+        // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
+        let mut simple = SIMPLE_STATUS
+            .entry(self.repo_id.clone())
+            .or_insert_with(SimpleSyncStatus::default);
+
+        simple.is_running = matches!(progress.stage, 
+            RepoAddStage::Clone { .. } | 
+            RepoAddStage::Fetch { .. } | 
+            RepoAddStage::Checkout { .. }
+        );
+        simple.is_complete = matches!(progress.stage, RepoAddStage::Completed { .. } | RepoAddStage::Error { .. });
+        simple.is_success  = matches!(progress.stage, RepoAddStage::Completed { .. });
+        
+        // Update last progress time for watchdog monitoring
+        simple.last_progress_time = progress.timestamp.or_else(|| Some(std::time::Instant::now()));
+
+        if simple.output_lines.len() > 100 { // Limit log lines
+            simple.output_lines.remove(0);
+        }
+        simple.output_lines.push(displayable.message.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
-    use sagitta_search::sync_progress::SyncStage;
+    use sagitta_search::sync_progress::{SyncStage, SyncProgressReporter};
     use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 
     #[tokio::test]
@@ -93,7 +126,7 @@ mod tests {
 
         let core_progress = SyncProgress::new(SyncStage::Idle);
 
-        reporter.report(core_progress.clone()).await;
+        SyncProgressReporter::report(&reporter, core_progress.clone()).await;
 
         // Simple checks that don't depend on complex state
         assert!(SIMPLE_STATUS.contains_key(&repo_id), "Simple status should be in the map");

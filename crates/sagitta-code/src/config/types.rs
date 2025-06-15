@@ -153,6 +153,9 @@ pub struct UiConfig {
     #[serde(default = "default_theme")]
     pub theme: String,
     
+    /// Path to custom theme file (*.sagitta-theme.json)
+    pub custom_theme_path: Option<PathBuf>,
+    
     /// Window width
     #[serde(default = "default_window_width")]
     pub window_width: u32,
@@ -167,6 +170,7 @@ impl Default for UiConfig {
         Self {
             dark_mode: default_dark_mode(),
             theme: default_theme(),
+            custom_theme_path: None,
             window_width: default_window_width(),
             window_height: default_window_height(),
         }

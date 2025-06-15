@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter, SyncStage};
+use sagitta_search::sync_progress::{AddProgress, AddProgressReporter, RepoAddStage};
 use log;
 use std::path::PathBuf;
 
@@ -59,10 +60,42 @@ impl SyncProgressReporter for LoggingProgressReporter {
     }
 }
 
+#[async_trait]
+impl AddProgressReporter for LoggingProgressReporter {
+    async fn report(&self, progress: AddProgress) {
+        match progress.stage {
+            RepoAddStage::Clone { message, progress: Some((received, total)) } => {
+                log::info!("[Clone] {}: {}/{}", message, received, total);
+            }
+            RepoAddStage::Clone { message, progress: None } => {
+                log::info!("[Clone] {}", message);
+            }
+            RepoAddStage::Fetch { message, progress: Some((received, total)) } => {
+                log::info!("[Fetch] {}: {}/{}", message, received, total);
+            }
+            RepoAddStage::Fetch { message, progress: None } => {
+                log::info!("[Fetch] {}", message);
+            }
+            RepoAddStage::Checkout { message } => {
+                log::info!("[Checkout] {}", message);
+            }
+            RepoAddStage::Completed { message } => {
+                log::info!("[Completed] {}", message);
+            }
+            RepoAddStage::Error { message } => {
+                log::error!("[Error] {}", message);
+            }
+            RepoAddStage::Idle => {
+                log::debug!("[Idle]");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sagitta_search::sync_progress::{SyncProgress, SyncStage};
+    use sagitta_search::sync_progress::{SyncProgress, SyncStage, AddProgress, RepoAddStage, SyncProgressReporter, AddProgressReporter};
     use std::path::PathBuf;
     use env_logger;
 
@@ -81,7 +114,7 @@ mod tests {
             message: "Fetching objects".to_string(),
             progress: Some((50, 100)),
         });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [GitFetch] Fetching objects: 50/100
     }
 
@@ -93,7 +126,7 @@ mod tests {
             message: "Receiving objects".to_string(),
             progress: None,
         });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [GitFetch] Receiving objects
     }
 
@@ -108,7 +141,7 @@ mod tests {
             files_per_second: Some(15.756),
             message: None,
         });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [IndexFile] Processing file 25/200 (15.76 files/s): src/module/file.rs
     }
 
@@ -123,7 +156,7 @@ mod tests {
             files_per_second: None,
             message: None,
         });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [IndexFile] Processing file 1/5: README.md
     }
 
@@ -138,7 +171,7 @@ mod tests {
             files_per_second: Some(5.123),
             message: None,
         });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [DeleteFile] Deleting file 2/10 (5.12 files/s): old_file.txt
     }
 
@@ -147,7 +180,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::Error { message: "A critical error happened".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: ERROR [sagitta_mcp::progress] [Error] A critical error happened
     }
 
@@ -156,7 +189,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::Completed { message: "All operations finished.".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [Completed] All operations finished.
     }
 
@@ -165,7 +198,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::Idle);
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: DEBUG [sagitta_mcp::progress] [Idle]
     }
 
@@ -174,7 +207,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::DiffCalculation { message: "Calculating differences...".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [DiffCalculation] Calculating differences...
     }
 
@@ -183,7 +216,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::CollectFiles { total_files: 150, message: "Gathering files for indexing".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [CollectFiles] Gathering files for indexing: 150 files
     }
 
@@ -192,7 +225,7 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::QueryLanguages { message: "Identifying languages in repository".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [QueryLanguages] Identifying languages in repository
     }
 
@@ -201,8 +234,31 @@ mod tests {
         setup_test_logger();
         let reporter = LoggingProgressReporter;
         let progress = SyncProgress::new(SyncStage::VerifyingCollection { message: "Ensuring collection exists and is ready".to_string() });
-        reporter.report(progress).await;
+        SyncProgressReporter::report(&reporter, progress).await;
         // Expected log: INFO [sagitta_mcp::progress] [VerifyingCollection] Ensuring collection exists and is ready
     }
 
+    // Add progress reporter tests
+    #[tokio::test]
+    async fn test_report_add_clone() {
+        setup_test_logger();
+        let reporter = LoggingProgressReporter;
+        let progress = AddProgress::new(RepoAddStage::Clone {
+            message: "Cloning repository".to_string(),
+            progress: Some((30, 100)),
+        });
+        AddProgressReporter::report(&reporter, progress).await;
+        // Expected log: INFO [sagitta_mcp::progress] [Clone] Cloning repository: 30/100
+    }
+
+    #[tokio::test]
+    async fn test_report_add_completed() {
+        setup_test_logger();
+        let reporter = LoggingProgressReporter;
+        let progress = AddProgress::new(RepoAddStage::Completed {
+            message: "Repository added successfully".to_string(),
+        });
+        AddProgressReporter::report(&reporter, progress).await;
+        // Expected log: INFO [sagitta_mcp::progress] [Completed] Repository added successfully
+    }
 }

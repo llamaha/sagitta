@@ -161,6 +161,7 @@ pub async fn handle_repository_add<C: QdrantClientTrait + Send + Sync + 'static>
         qdrant_client.clone(),
         &config_clone, // Use the cloned config instead of the guard
         &tenant_id_for_core,    // Pass resolved tenant_id string
+        Some(Arc::new(LoggingProgressReporter)), // Add MCP progress reporter
     )
     .await;
 

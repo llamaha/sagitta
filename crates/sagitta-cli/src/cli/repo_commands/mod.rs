@@ -105,6 +105,7 @@ where
                 Arc::clone(&client),
                 config,
                 &tenant_id,
+                Some(Arc::new(crate::progress::IndicatifProgressReporter::new())),
             ).await;
             match repo_config_result {
                 Ok(new_repo_config) => {

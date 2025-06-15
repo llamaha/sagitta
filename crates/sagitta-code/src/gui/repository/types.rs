@@ -4,6 +4,7 @@ use sagitta_search::RepositoryConfig;
 use tokio::sync::mpsc;
 pub use sagitta_search::sync_progress::SyncProgress as CoreSyncProgress;
 use sagitta_search::sync_progress::SyncStage as CoreSyncStage;
+use sagitta_search::sync_progress::{AddProgress as CoreAddProgress, RepoAddStage as CoreRepoAddStage};
 
 /// Enum representing the different tabs in the repository panel
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,6 +655,109 @@ pub struct DeleteBranchResult {
     pub branch_name: String,
     pub success: bool,
     pub error_message: Option<String>,
+}
+
+/// Displayable progress for repository addition operations
+#[derive(Debug, Clone, Default)]
+pub struct DisplayableAddProgress {
+    pub stage_detail: GuiAddStageDisplay,
+    pub current_overall: u64,
+    pub total_overall: u64,
+    pub percentage_overall: f32,
+    pub message: String,
+    pub elapsed_seconds: f64,
+}
+
+impl DisplayableAddProgress {
+    /// Conversion from the core AddProgress type
+    pub fn from_core_progress(core_progress: &CoreAddProgress, elapsed_seconds: f64) -> Self {
+        let mut displayable = DisplayableAddProgress {
+            elapsed_seconds,
+            ..Default::default()
+        };
+
+        let mut current_overall = 0u64;
+        let mut total_overall = 0u64;
+
+        match &core_progress.stage {
+            CoreRepoAddStage::Idle => {
+                displayable.stage_detail.name = "Idle".to_string();
+                displayable.stage_detail.overall_message = "Waiting for repository addition to start.".to_string();
+            }
+            CoreRepoAddStage::Clone { message, progress } => {
+                displayable.stage_detail.name = "Cloning".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+                if let Some((received, total)) = progress {
+                    displayable.stage_detail.current_progress = Some((*received, *total));
+                    current_overall = *received as u64;
+                    total_overall = *total as u64;
+                }
+            }
+            CoreRepoAddStage::Fetch { message, progress } => {
+                displayable.stage_detail.name = "Fetching".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+                if let Some((received, total)) = progress {
+                    displayable.stage_detail.current_progress = Some((*received, *total));
+                    current_overall = *received as u64;
+                    total_overall = *total as u64;
+                }
+            }
+            CoreRepoAddStage::Checkout { message } => {
+                displayable.stage_detail.name = "Checkout".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+            }
+            CoreRepoAddStage::Completed { message } => {
+                displayable.stage_detail.name = "Completed".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+                total_overall = 1;
+                current_overall = 1;
+            }
+            CoreRepoAddStage::Error { message } => {
+                displayable.stage_detail.name = "Error".to_string();
+                displayable.stage_detail.overall_message = message.clone();
+            }
+        }
+
+        displayable.message = displayable.stage_detail.overall_message.clone();
+        displayable.current_overall = current_overall;
+        displayable.total_overall = total_overall;
+        if total_overall > 0 {
+            displayable.percentage_overall = (current_overall as f32 / total_overall as f32).min(1.0);
+        } else if matches!(core_progress.stage, CoreRepoAddStage::Completed {..}) {
+            displayable.percentage_overall = 1.0;
+        } else {
+            displayable.percentage_overall = 0.0;
+        }
+
+        displayable
+    }
+}
+
+impl From<DisplayableAddProgress> for DisplayableSyncProgress {
+    fn from(add_progress: DisplayableAddProgress) -> Self {
+        DisplayableSyncProgress {
+            stage_detail: GuiSyncStageDisplay {
+                name: add_progress.stage_detail.name,
+                current_file: None,
+                current_progress: add_progress.stage_detail.current_progress,
+                files_per_second: None,
+                overall_message: add_progress.stage_detail.overall_message,
+            },
+            current_overall: add_progress.current_overall,
+            total_overall: add_progress.total_overall,
+            percentage_overall: add_progress.percentage_overall,
+            message: add_progress.message,
+            elapsed_seconds: add_progress.elapsed_seconds,
+        }
+    }
+}
+
+/// GUI display information for repository addition stages
+#[derive(Debug, Clone, Default)]
+pub struct GuiAddStageDisplay {
+    pub name: String,
+    pub current_progress: Option<(u32, u32)>,
+    pub overall_message: String,
 }
 
 #[cfg(test)]

@@ -369,6 +369,7 @@ impl RepositoryManager {
             client_clone,
             &config_clone,
             &tenant_id,
+            Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
         match repo_config_result {
@@ -452,6 +453,7 @@ impl RepositoryManager {
             client_clone,
             &config_clone,
             &tenant_id,
+            Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
         match repo_config_result {

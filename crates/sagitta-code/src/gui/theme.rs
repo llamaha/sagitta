@@ -1,4 +1,39 @@
 use egui::{Color32, Visuals, Style};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
+
+/// Custom serialization for Color32
+mod color32_serde {
+    use super::*;
+    
+    #[derive(Serialize, Deserialize)]
+    struct Color32Rgba {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    }
+    
+    pub fn serialize<S>(color: &Color32, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let rgba = Color32Rgba {
+            r: color.r(),
+            g: color.g(),
+            b: color.b(),
+            a: color.a(),
+        };
+        rgba.serialize(serializer)
+    }
+    
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Color32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let rgba = Color32Rgba::deserialize(deserializer)?;
+        Ok(Color32::from_rgba_unmultiplied(rgba.r, rgba.g, rgba.b, rgba.a))
+    }
+}
 
 /// Theme options for the application - includes custom theme support
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,53 +44,84 @@ pub enum AppTheme {
 }
 
 /// Customizable theme colors for all UI components
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CustomThemeColors {
     // Background colors
+    #[serde(with = "color32_serde")]
     pub panel_background: Color32,
+    #[serde(with = "color32_serde")]
     pub input_background: Color32,
+    #[serde(with = "color32_serde")]
     pub button_background: Color32,
+    #[serde(with = "color32_serde")]
     pub code_background: Color32,
+    #[serde(with = "color32_serde")]
     pub thinking_background: Color32,
     
     // Text colors
+    #[serde(with = "color32_serde")]
     pub text_color: Color32,
+    #[serde(with = "color32_serde")]
     pub hint_text_color: Color32,
+    #[serde(with = "color32_serde")]
     pub code_text_color: Color32,
+    #[serde(with = "color32_serde")]
     pub thinking_text_color: Color32,
+    #[serde(with = "color32_serde")]
     pub timestamp_color: Color32,
     
     // Accent and highlight colors
+    #[serde(with = "color32_serde")]
     pub accent_color: Color32,
+    #[serde(with = "color32_serde")]
     pub success_color: Color32,
+    #[serde(with = "color32_serde")]
     pub warning_color: Color32,
+    #[serde(with = "color32_serde")]
     pub error_color: Color32,
     
     // Border and stroke colors
+    #[serde(with = "color32_serde")]
     pub border_color: Color32,
+    #[serde(with = "color32_serde")]
     pub focus_border_color: Color32,
     
     // Button states
+    #[serde(with = "color32_serde")]
     pub button_hover_color: Color32,
+    #[serde(with = "color32_serde")]
     pub button_disabled_color: Color32,
+    #[serde(with = "color32_serde")]
     pub button_text_color: Color32,
+    #[serde(with = "color32_serde")]
     pub button_disabled_text_color: Color32,
     
     // Author colors
+    #[serde(with = "color32_serde")]
     pub user_color: Color32,
+    #[serde(with = "color32_serde")]
     pub agent_color: Color32,
+    #[serde(with = "color32_serde")]
     pub system_color: Color32,
+    #[serde(with = "color32_serde")]
     pub tool_color: Color32,
     
     // Status indicators
+    #[serde(with = "color32_serde")]
     pub streaming_color: Color32,
+    #[serde(with = "color32_serde")]
     pub thinking_indicator_color: Color32,
+    #[serde(with = "color32_serde")]
     pub complete_color: Color32,
     
     // Diff colors
+    #[serde(with = "color32_serde")]
     pub diff_added_bg: Color32,
+    #[serde(with = "color32_serde")]
     pub diff_removed_bg: Color32,
+    #[serde(with = "color32_serde")]
     pub diff_added_text: Color32,
+    #[serde(with = "color32_serde")]
     pub diff_removed_text: Color32,
 }
 
