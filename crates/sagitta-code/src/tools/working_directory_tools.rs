@@ -19,6 +19,13 @@ pub struct ChangeDirectoryParams {
     pub path: String,
 }
 
+/// Parameters for setting repository context
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetRepositoryContextParams {
+    /// The name of the repository to switch to
+    pub repository_name: String,
+}
+
 /// Tool to get the current working directory context
 #[derive(Debug)]
 pub struct GetCurrentDirectoryTool {
@@ -126,6 +133,80 @@ impl Tool for ChangeDirectoryTool {
             Err(e) => {
                 Ok(ToolResult::Error { 
                     error: format!("Failed to change directory: {}", e)
+                })
+            }
+        }
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Tool to set the current working directory to a specific repository
+#[derive(Debug)]
+pub struct SetRepositoryContextTool {
+    working_dir_manager: Arc<WorkingDirectoryManager>,
+    repo_manager: Arc<tokio::sync::Mutex<crate::gui::repository::manager::RepositoryManager>>,
+}
+
+impl SetRepositoryContextTool {
+    pub fn new(
+        working_dir_manager: Arc<WorkingDirectoryManager>,
+        repo_manager: Arc<tokio::sync::Mutex<crate::gui::repository::manager::RepositoryManager>>,
+    ) -> Self {
+        Self { 
+            working_dir_manager,
+            repo_manager,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for SetRepositoryContextTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "set_repository_context".to_string(),
+            description: "Set the working directory context to a specific repository for subsequent git and file operations".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repository_name": {
+                        "type": "string",
+                        "description": "The name of the repository to switch to (must be in the repository list)"
+                    }
+                },
+                "required": ["repository_name"]
+            }),
+            is_required: false,
+            category: ToolCategory::FileOperations,
+            metadata: Default::default(),
+        }
+    }
+    
+    async fn execute(&self, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
+        let params: SetRepositoryContextParams = serde_json::from_value(parameters)
+            .map_err(|e| SagittaCodeError::ToolError(format!("Invalid parameters: {}", e)))?;
+        
+        let repo_manager = self.repo_manager.lock().await;
+        
+        match self.working_dir_manager.set_repository_context(&params.repository_name, &*repo_manager).await {
+            Ok(result) => {
+                let result_value = serde_json::json!({
+                    "success": result.success,
+                    "repository_name": params.repository_name,
+                    "previous_directory": result.previous_directory,
+                    "new_directory": result.new_directory,
+                    "message": result.message.unwrap_or_else(|| 
+                        format!("Switched to repository '{}' at {}", params.repository_name, result.new_directory.display())
+                    )
+                });
+                
+                Ok(ToolResult::Success(result_value))
+            }
+            Err(e) => {
+                Ok(ToolResult::Error { 
+                    error: format!("Failed to switch to repository '{}': {}", params.repository_name, e)
                 })
             }
         }

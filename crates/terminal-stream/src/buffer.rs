@@ -153,6 +153,19 @@ impl TerminalLine {
                     command_id: None,
                 })
             },
+            StreamEvent::Progress { message, percentage } => {
+                let progress_text = match percentage {
+                    Some(pct) => format!("⏳ {} ({:.1}%)", message, pct),
+                    None => format!("⏳ {}", message),
+                };
+                Some(Self {
+                    id: Uuid::new_v4(),
+                    content: progress_text,
+                    line_type: LineType::System,
+                    timestamp: Utc::now(),
+                    command_id: None,
+                })
+            },
         }
     }
 

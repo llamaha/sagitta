@@ -30,6 +30,7 @@ pub enum AppEvent {
         conversation_id: uuid::Uuid,
         suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>,
     },
+    RepositoryListUpdated(Vec<String>),
     // Add other app-level UI events here if needed
 }
 
@@ -258,6 +259,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::BranchSuggestionsReady { conversation_id, suggestions } => {
                 log::info!("Received BranchSuggestionsReady event for conversation {}", conversation_id);
                 app.handle_branch_suggestions(conversation_id, suggestions);
+            },
+            AppEvent::RepositoryListUpdated(repo_list) => {
+                log::info!("Received RepositoryListUpdated event with {} repositories: {:?}", repo_list.len(), repo_list);
+                app.handle_repository_list_update(repo_list);
             },
         }
     }
@@ -1057,6 +1062,12 @@ impl SagittaCodeApp {
             log::warn!("Conversation {} is no longer current, skipping message loading", conversation_id);
         }
     }
+
+    /// Handle repository list update
+    pub fn handle_repository_list_update(&mut self, repo_list: Vec<String>) {
+        log::info!("Received repository list update with {} repositories: {:?}", repo_list.len(), repo_list);
+        self.state.update_available_repositories(repo_list);
+    }
 }
 
 #[cfg(test)]
@@ -1128,6 +1139,7 @@ mod tests {
             AppEvent::SwitchToConversation(_) => assert!(true),
             AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
+            AppEvent::RepositoryListUpdated(_) => assert!(true),
         }
         
         // Test the other variant too
@@ -1138,6 +1150,7 @@ mod tests {
             AppEvent::SwitchToConversation(_) => assert!(true),
             AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
+            AppEvent::RepositoryListUpdated(_) => assert!(true),
         }
     }
 

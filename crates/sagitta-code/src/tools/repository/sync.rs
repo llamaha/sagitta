@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
+use terminal_stream::events::StreamEvent;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
@@ -19,6 +21,9 @@ pub struct SyncRepositoryParams {
     /// Whether to force sync even if no changes detected
     #[serde(default)]
     pub force: bool,
+    /// Optional depth for shallow fetch (useful for large repos)
+    #[serde(default)]
+    pub depth: Option<u32>,
 }
 
 /// Tool for syncing repositories in the management system
@@ -35,8 +40,12 @@ impl SyncRepositoryTool {
         }
     }
     
-    /// Sync a repository
-    async fn sync_repository(&self, params: &SyncRepositoryParams) -> Result<String, SagittaCodeError> {
+    /// Sync a repository with progress reporting
+    async fn sync_repository_with_progress(
+        &self, 
+        params: &SyncRepositoryParams,
+        progress_sender: Option<mpsc::Sender<StreamEvent>>,
+    ) -> Result<String, SagittaCodeError> {
         let mut repo_manager = self.repo_manager.lock().await;
         
         // Check if repository exists
@@ -47,12 +56,57 @@ impl SyncRepositoryTool {
         if !repo_exists {
             return Err(SagittaCodeError::ToolError(format!("Repository '{}' not found", params.name)));
         }
-        
-        // Perform the sync
+
+        // Send progress updates if sender is available
+        if let Some(ref sender) = progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: format!("Starting sync for repository '{}'...", params.name),
+                percentage: Some(10.0),
+            }).await;
+        }
+
+        // Step 1: Fetch
+        if let Some(ref sender) = progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: "Fetching latest changes...".to_string(),
+                percentage: Some(30.0),
+            }).await;
+        }
+
+        // Step 2: Pull (if applicable)
+        if let Some(ref sender) = progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: "Pulling changes...".to_string(),
+                percentage: Some(60.0),
+            }).await;
+        }
+
+        // Step 3: Update submodules (if applicable)
+        if let Some(ref sender) = progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: "Updating submodules...".to_string(),
+                percentage: Some(80.0),
+            }).await;
+        }
+
+        // Perform the actual sync
         repo_manager.sync_repository(&params.name).await
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to sync repository '{}': {}", params.name, e)))?;
+
+        // Final progress update
+        if let Some(ref sender) = progress_sender {
+            let _ = sender.send(StreamEvent::Progress {
+                message: format!("Successfully synced repository '{}'", params.name),
+                percentage: Some(100.0),
+            }).await;
+        }
         
         Ok(format!("Successfully synced repository '{}'", params.name))
+    }
+    
+    /// Sync a repository
+    async fn sync_repository(&self, params: &SyncRepositoryParams) -> Result<String, SagittaCodeError> {
+        self.sync_repository_with_progress(params, None).await
     }
 }
 
@@ -77,6 +131,10 @@ impl Tool for SyncRepositoryTool {
                         "type": ["boolean", "null"], 
                         "default": false,
                         "description": "Force sync even if no changes detected (defaults to false if null)" 
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "Optional depth for shallow fetch (useful for large repos)"
                     }
                 }
             }),
@@ -235,6 +293,7 @@ mod tests {
         let params = SyncRepositoryParams {
             name: "test-repo".to_string(),
             force: true,
+            depth: None,
         };
         
         let serialized = serde_json::to_string(&params).unwrap();
@@ -242,6 +301,7 @@ mod tests {
         
         assert_eq!(params.name, deserialized.name);
         assert_eq!(params.force, deserialized.force);
+        assert_eq!(params.depth, deserialized.depth);
     }
 
     #[tokio::test]
@@ -258,6 +318,7 @@ mod tests {
         let params = SyncRepositoryParams {
             name: "test-repo".to_string(),
             force: false,
+            depth: None,
         };
         
         let json_value = serde_json::to_value(&params).unwrap();

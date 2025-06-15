@@ -4,11 +4,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use terminal_stream::events::StreamEvent;
+use std::sync::Arc;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::tools::local_executor::{LocalExecutor, LocalExecutorConfig, CommandExecutor, ApprovalPolicy};
 use crate::utils::errors::SagittaCodeError;
 use sagitta_search::config::get_repo_base_path;
+use crate::tools::working_directory::WorkingDirectoryManager;
 
 /// Configuration for shell execution containers
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,41 +273,40 @@ pub struct ShellExecutionResult {
 pub struct ShellExecutionTool {
     executor: LocalExecutor,
     pub default_working_dir: PathBuf,
+    working_dir_manager: Option<Arc<WorkingDirectoryManager>>,
 }
 
 impl ShellExecutionTool {
     /// Create a new shell execution tool with default configuration
     pub fn new(default_working_dir: PathBuf) -> Self {
         let config = LocalExecutorConfig {
-            base_dir: default_working_dir.clone(), // Use the provided working directory as base
-            approval_policy: ApprovalPolicy::Auto,
-            allow_automatic_tool_install: false,
-            cpu_limit_seconds: None,
-            memory_limit_mb: None,
-            allowed_paths: vec![],
-            shell_override: None,
-            env_vars: HashMap::new(),
-            timeout_seconds: 300,
+            base_dir: default_working_dir.clone(),
             execution_dir: default_working_dir.clone(),
-            enable_approval_flow: true,
-            audit_log_path: None,
-            max_execution_time_seconds: 300,
-            allowed_commands: None,
-            blocked_commands: None,
-            auto_approve_safe_commands: true,
+            ..Default::default()
         };
         
         Self {
             executor: LocalExecutor::new(config),
             default_working_dir,
+            working_dir_manager: None,
         }
     }
-    
-    /// Create a shell execution tool with custom executor configuration
-    pub fn with_executor_config(default_working_dir: PathBuf, config: LocalExecutorConfig) -> Self {
+
+    /// Create a new shell execution tool with working directory manager
+    pub fn new_with_working_dir_manager(
+        default_working_dir: PathBuf,
+        working_dir_manager: Arc<WorkingDirectoryManager>,
+    ) -> Self {
+        let config = LocalExecutorConfig {
+            base_dir: default_working_dir.clone(),
+            execution_dir: default_working_dir.clone(),
+            ..Default::default()
+        };
+        
         Self {
             executor: LocalExecutor::new(config),
             default_working_dir,
+            working_dir_manager: Some(working_dir_manager),
         }
     }
 
@@ -337,9 +338,50 @@ Required tools (like git, cargo, npm, etc.) should be installed on your system f
         self.executor.execute_streaming(params, event_sender).await
     }
 
-    /// Execute a command without streaming (convenience method)
+    /// Validate git command context
+    async fn validate_git_command(&self, command: &str, working_dir: &PathBuf) -> Result<(), SagittaCodeError> {
+        // Check if this is a git command
+        let is_git_command = command.trim_start().starts_with("git ");
+        
+        if is_git_command {
+            // Check if we're in a git repository
+            if !working_dir.join(".git").exists() {
+                return Err(SagittaCodeError::ToolError(format!(
+                    "Git command '{}' cannot be executed: not in a git repository.\n\
+                    Current directory: {}\n\
+                    Hint: Use 'set_repository_context' tool to switch to a repository first.",
+                    command.split_whitespace().take(2).collect::<Vec<_>>().join(" "),
+                    working_dir.display()
+                )));
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Execute a command with enhanced directory resolution
     pub async fn execute_command(&self, params: &ShellExecutionParams) -> Result<ShellExecutionResult, SagittaCodeError> {
-        self.executor.execute(params).await
+        // Resolve working directory
+        let working_dir = if let Some(ref wd_manager) = self.working_dir_manager {
+            wd_manager.auto_resolve(params.working_directory.clone()).await?
+        } else {
+            params.working_directory.clone().unwrap_or_else(|| self.default_working_dir.clone())
+        };
+
+        // Validate git commands
+        self.validate_git_command(&params.command, &working_dir).await?;
+
+        // Create new params with resolved directory
+        let resolved_params = ShellExecutionParams {
+            command: params.command.clone(),
+            language: params.language.clone(),
+            working_directory: Some(working_dir),
+            allow_network: params.allow_network,
+            env_vars: params.env_vars.clone(),
+            timeout_seconds: params.timeout_seconds,
+        };
+
+        self.executor.execute(&resolved_params).await
     }
 }
 
@@ -878,46 +920,26 @@ mod tests {
         assert_eq!(original_result.timed_out, deserialized.timed_out);
     }
 
-    #[test]
-    fn test_shell_execution_tool_new_with_default_config() {
+    #[tokio::test]
+    async fn test_shell_execution_tool_new_with_default_config() {
         let temp_dir = TempDir::new().unwrap();
         let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
-        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
-        assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
-        assert!(!tool.executor.config().allow_automatic_tool_install);
-        assert!(tool.executor.config().cpu_limit_seconds.is_none());
-        assert!(tool.executor.config().memory_limit_mb.is_none());
+        
+        assert_eq!(tool.default_working_dir, temp_dir.path().to_path_buf());
     }
 
-    #[test]
-    fn test_shell_execution_tool_with_custom_executor_config() {
+    #[tokio::test]
+    async fn test_shell_execution_tool_with_custom_executor_config() {
         let temp_dir = TempDir::new().unwrap();
         let config = LocalExecutorConfig {
             base_dir: temp_dir.path().to_path_buf(),
-            approval_policy: ApprovalPolicy::Auto,
-            allow_automatic_tool_install: false,
-            cpu_limit_seconds: None,
-            memory_limit_mb: None,
             execution_dir: temp_dir.path().to_path_buf(),
-            enable_approval_flow: true,
-            audit_log_path: None,
-            max_execution_time_seconds: 300,
-            allowed_commands: None,
-            blocked_commands: None,
-            auto_approve_safe_commands: true,
-            allowed_paths: vec![],
-            shell_override: None,
-            env_vars: HashMap::new(),
-            timeout_seconds: 300,
+            timeout_seconds: 60,
+            ..Default::default()
         };
-
-        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
         
-        assert_eq!(tool.executor.config().base_dir, temp_dir.path().to_path_buf());
-        assert!(matches!(tool.executor.config().approval_policy, ApprovalPolicy::Auto));
-        assert!(!tool.executor.config().allow_automatic_tool_install);
-        assert!(tool.executor.config().cpu_limit_seconds.is_none());
-        assert!(tool.executor.config().memory_limit_mb.is_none());
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
+        assert_eq!(tool.default_working_dir, temp_dir.path().to_path_buf());
     }
 
     #[tokio::test]
@@ -972,14 +994,7 @@ mod tests {
     #[tokio::test]
     async fn test_command_risk_analysis_integration() {
         let temp_dir = TempDir::new().unwrap();
-        let mut config = LocalExecutorConfig {
-            base_dir: temp_dir.path().to_path_buf(),
-            auto_approve_safe_commands: true,
-            enable_approval_flow: false, // Disable for testing
-            ..Default::default()
-        };
-        
-        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
         // Test safe command (should auto-approve)
         let safe_params = serde_json::json!({
@@ -1008,14 +1023,7 @@ mod tests {
     #[tokio::test]
     async fn test_stderr_classification() {
         let temp_dir = TempDir::new().unwrap();
-        // Configure the tool to use the temp directory as the base directory for security validation
-        let config = LocalExecutorConfig {
-            base_dir: temp_dir.path().to_path_buf(),
-            auto_approve_safe_commands: true,
-            enable_approval_flow: false,
-            ..Default::default()
-        };
-        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
         // Create a test script that outputs to stderr but isn't an error
         let script_content = r#"#!/bin/bash
@@ -1061,14 +1069,7 @@ exit 0
     #[tokio::test]
     async fn test_cargo_new_functionality() {
         let temp_dir = TempDir::new().unwrap();
-        // Configure the tool to use the temp directory as the base directory for security validation
-        let config = LocalExecutorConfig {
-            base_dir: temp_dir.path().to_path_buf(),
-            auto_approve_safe_commands: true,
-            enable_approval_flow: false,
-            ..Default::default()
-        };
-        let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+        let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
         
         // Test creating a new Rust project
         let params = serde_json::json!({

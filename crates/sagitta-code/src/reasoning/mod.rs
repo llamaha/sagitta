@@ -65,7 +65,7 @@ pub struct AgentToolExecutor {
     /// Maximum failures per tool before suggesting to skip
     max_tool_failures: usize,
     /// Default timeout for tool execution in seconds
-    default_timeout_seconds: u64,
+    pub default_timeout_seconds: u64,
 }
 
 impl AgentToolExecutor {
@@ -79,7 +79,7 @@ impl AgentToolExecutor {
             skipped_tools: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             max_identical_calls: 2, // Reduced from 3 to be more responsive
             max_tool_failures: 3,
-            default_timeout_seconds: 60, // Default timeout in seconds
+            default_timeout_seconds: 1800, // 30 minutes for long operations like sync
         }
     }
     
@@ -91,6 +91,17 @@ impl AgentToolExecutor {
     /// Set the event sender for LLM feedback
     pub fn set_event_sender(&mut self, sender: broadcast::Sender<AgentEvent>) {
         self.event_sender = Some(sender);
+    }
+    
+    /// Get timeout duration for specific tools
+    pub fn get_timeout_for_tool(&self, tool_name: &str) -> u64 {
+        match tool_name {
+            "sync_repository" | "add_existing_repository" => {
+                // No timeout for sync operations - they use progress reporting instead
+                u64::MAX // Effectively no timeout
+            }
+            _ => self.default_timeout_seconds
+        }
     }
     
     /// Enhanced loop detection with recovery strategy determination
@@ -632,8 +643,14 @@ impl ToolExecutor for AgentToolExecutor {
             tool_clone.execute(args_clone).await
         });
 
-        // Execute with timeout
-        let timeout_duration = std::time::Duration::from_secs(self.default_timeout_seconds);
+        // Execute with tool-specific timeout
+        let timeout_seconds = self.get_timeout_for_tool(name);
+        let timeout_duration = if timeout_seconds == u64::MAX {
+            // For operations without timeout, use a very large duration
+            std::time::Duration::from_secs(86400) // 24 hours
+        } else {
+            std::time::Duration::from_secs(timeout_seconds)
+        };
         let result = match tokio::time::timeout(timeout_duration, execution_task).await {
             Ok(task_result) => {
                 match task_result {
@@ -672,7 +689,7 @@ impl ToolExecutor for AgentToolExecutor {
             }
             Err(_timeout) => {
                 // Tool execution timed out
-                let error_msg = format!("Tool '{}' timed out after {} seconds", name, self.default_timeout_seconds);
+                let error_msg = format!("Tool '{}' timed out after {} seconds", name, timeout_seconds);
                 self.track_tool_failure(name).await;
                 self.surface_error_to_llm_with_recovery(name, &error_msg, "execution_timeout", None).await;
                 Ok(reasoning_engine::ToolResult::failure(error_msg, 0))

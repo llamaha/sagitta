@@ -30,6 +30,11 @@ pub struct AppState {
     pub toasts: Toasts,
     pub copy_button_state: CopyButtonState,
     
+    // Repository context state
+    pub current_repository_context: Option<String>,
+    pub available_repositories: Vec<String>,
+    pub pending_repository_context_change: Option<String>,
+    
     // Terminal state
     pub terminal_widget: TerminalWidget,
     pub terminal_event_sender: Option<mpsc::Sender<StreamEvent>>,
@@ -98,6 +103,11 @@ impl AppState {
             clicked_tool_info: None,
             toasts: Toasts::default(),
             copy_button_state: CopyButtonState::default(),
+            
+            // Repository context state
+            current_repository_context: None,
+            available_repositories: Vec::new(),
+            pending_repository_context_change: None,
             
             // Terminal state
             terminal_widget,
@@ -197,6 +207,32 @@ impl AppState {
             self.loop_inject_message = None;
             self.loop_inject_buffer.clear();
             self.show_loop_inject_input = false;
+        }
+    }
+
+    /// Set current repository context
+    pub fn set_repository_context(&mut self, repo_name: Option<String>) {
+        self.current_repository_context = repo_name;
+        self.pending_repository_context_change = None;
+    }
+
+    /// Update available repositories list
+    pub fn update_available_repositories(&mut self, repositories: Vec<String>) {
+        log::info!("Updating available repositories: {:?}", repositories);
+        self.available_repositories = repositories;
+        log::info!("Available repositories updated. Current list: {:?}", self.available_repositories);
+    }
+
+    /// Request repository context change
+    pub fn request_repository_context_change(&mut self, repo_name: String) {
+        self.pending_repository_context_change = Some(repo_name);
+    }
+
+    /// Get current repository context display name
+    pub fn get_repository_context_display(&self) -> String {
+        match &self.current_repository_context {
+            Some(repo) => format!("📁 {}", repo),
+            None => "📁 No Repository".to_string(),
         }
     }
 

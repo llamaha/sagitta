@@ -268,6 +268,76 @@ impl WorkingDirectoryManager {
 
         Ok(path)
     }
+
+    /// Set working directory to a specific repository
+    pub async fn set_repository_context(&self, repo_name: &str, repo_manager: &crate::gui::repository::manager::RepositoryManager) -> Result<DirectoryChangeResult, SagittaCodeError> {
+        // Get repository path from manager
+        let repositories = repo_manager.list_repositories().await
+            .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
+        
+        let repo = repositories.iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", repo_name)))?;
+        
+        let repo_path = PathBuf::from(&repo.local_path);
+        
+        // Verify it's a git repository
+        if !repo_path.join(".git").exists() {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Repository '{}' at '{}' is not a valid git repository",
+                repo_name, repo_path.display()
+            )));
+        }
+        
+        self.change_directory(repo_path).await
+    }
+
+    /// Auto-resolve working directory with fallback logic
+    pub async fn auto_resolve(&self, override_dir: Option<PathBuf>) -> Result<PathBuf, SagittaCodeError> {
+        let target_dir = match override_dir {
+            Some(dir) => dir,
+            None => self.get_current_directory().await,
+        };
+
+        // Ensure the directory exists and is within workspace
+        if !target_dir.exists() {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Directory does not exist: {}",
+                target_dir.display()
+            )));
+        }
+
+        if !self.is_within_workspace(&target_dir) {
+            return Err(SagittaCodeError::ToolError(format!(
+                "Directory '{}' is outside the workspace",
+                target_dir.display()
+            )));
+        }
+
+        Ok(target_dir)
+    }
+
+    /// Check if current directory is a git repository
+    pub async fn is_git_repository(&self) -> bool {
+        let current = self.get_current_directory().await;
+        current.join(".git").exists()
+    }
+
+    /// Find the git repository root from current directory
+    pub async fn find_git_root(&self) -> Option<PathBuf> {
+        let mut current = self.get_current_directory().await;
+        
+        loop {
+            if current.join(".git").exists() {
+                return Some(current);
+            }
+            
+            match current.parent() {
+                Some(parent) => current = parent.to_path_buf(),
+                None => return None,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -391,11 +461,86 @@ mod tests {
     async fn test_ensure_directory_exists() {
         let temp_dir = TempDir::new().unwrap();
         let manager = WorkingDirectoryManager::new(temp_dir.path().to_path_buf()).unwrap();
-
-        let new_dir = "deeply/nested/directory";
-        let result = manager.ensure_directory_exists(new_dir).await.unwrap();
         
+        let new_dir = temp_dir.path().join("new_directory");
+        let result = manager.ensure_directory_exists(&new_dir).await.unwrap();
+        
+        assert_eq!(result, new_dir);
+        assert!(new_dir.exists());
+        assert!(new_dir.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_set_repository_context() {
+        use crate::gui::repository::manager::RepositoryManager;
+        use sagitta_search::AppConfig;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let manager = WorkingDirectoryManager::new(temp_dir.path().to_path_buf()).unwrap();
+        
+        // Create a mock git repository
+        let repo_dir = temp_dir.path().join("test-repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        fs::create_dir_all(repo_dir.join(".git")).unwrap();
+        
+        // Create a mock repository manager
+        let config = Arc::new(Mutex::new(AppConfig::default()));
+        let mut repo_manager = RepositoryManager::new_for_test(config);
+        
+        // This test would need a proper mock implementation
+        // For now, we'll test the error case
+        let result = manager.set_repository_context("nonexistent-repo", &repo_manager).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_auto_resolve() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = WorkingDirectoryManager::new(temp_dir.path().to_path_buf()).unwrap();
+        
+        // Test with existing directory
+        let result = manager.auto_resolve(Some(temp_dir.path().to_path_buf())).await.unwrap();
+        assert_eq!(result, temp_dir.path().canonicalize().unwrap());
+        
+        // Test with None (should return current directory)
+        let result = manager.auto_resolve(None).await.unwrap();
         assert!(result.exists());
-        assert!(result.is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_is_git_repository() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = WorkingDirectoryManager::new(temp_dir.path().to_path_buf()).unwrap();
+        
+        // Initially not a git repository
+        assert!(!manager.is_git_repository().await);
+        
+        // Create .git directory
+        fs::create_dir_all(temp_dir.path().join(".git")).unwrap();
+        
+        // Now it should be detected as a git repository
+        assert!(manager.is_git_repository().await);
+    }
+
+    #[tokio::test]
+    async fn test_find_git_root() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = WorkingDirectoryManager::new(temp_dir.path().to_path_buf()).unwrap();
+        
+        // Create nested directory structure with .git at root
+        let git_root = temp_dir.path().join("repo");
+        let nested_dir = git_root.join("src").join("deep");
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::create_dir_all(git_root.join(".git")).unwrap();
+        
+        // Change to nested directory
+        manager.change_directory(nested_dir).await.unwrap();
+        
+        // Should find the git root
+        let found_root = manager.find_git_root().await;
+        assert!(found_root.is_some());
+        assert_eq!(found_root.unwrap(), git_root);
     }
 } 

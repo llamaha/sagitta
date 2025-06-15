@@ -37,7 +37,7 @@ pub struct ExitInfo {
 }
 
 /// Events that can occur during terminal streaming
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StreamEvent {
     /// A line of output was received
     Output {
@@ -81,6 +81,11 @@ pub enum StreamEvent {
     MissingTool {
         tool: String,
         advice: serde_json::Value,
+    },
+    /// Progress update for long-running operations
+    Progress {
+        message: String,
+        percentage: Option<f32>,
     },
 }
 
@@ -138,12 +143,13 @@ impl StreamEvent {
             StreamEvent::Exit { .. } => Utc::now(),
             StreamEvent::ApprovalRequest { .. } => Utc::now(),
             StreamEvent::MissingTool { .. } => Utc::now(),
+            StreamEvent::Progress { .. } => Utc::now(),
         }
     }
 
     /// Check if this is an output event
     pub fn is_output(&self) -> bool {
-        matches!(self, StreamEvent::Output { .. } | StreamEvent::Stdout { .. } | StreamEvent::Stderr { .. } | StreamEvent::Exit { .. } | StreamEvent::ApprovalRequest { .. } | StreamEvent::MissingTool { .. })
+        matches!(self, StreamEvent::Output { .. } | StreamEvent::Stdout { .. } | StreamEvent::Stderr { .. } | StreamEvent::Exit { .. } | StreamEvent::ApprovalRequest { .. } | StreamEvent::MissingTool { .. } | StreamEvent::Progress { .. })
     }
 
     /// Check if this is an error event (either stderr output or stream error)
