@@ -34,6 +34,7 @@ pub struct SettingsPanel {
     vocabulary_base_path: Option<String>,
     indexing_max_concurrent_upserts: u32,
     performance_batch_size: u32,
+    embedding_batch_size: u32,
     performance_collection_name_prefix: String,
     performance_max_file_size_bytes: u32,
     
@@ -63,6 +64,7 @@ impl SettingsPanel {
             vocabulary_base_path: initial_app_config.vocabulary_base_path.clone(),
             indexing_max_concurrent_upserts: initial_app_config.indexing.max_concurrent_upserts as u32,
             performance_batch_size: initial_app_config.performance.batch_size as u32,
+            embedding_batch_size: initial_app_config.embedding.embedding_batch_size as u32,
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             
@@ -292,6 +294,13 @@ impl SettingsPanel {
                                             .speed(1.0));
                                         ui.end_row();
                                         
+                                        ui.label("Embedding Batch Size:")
+                                            .on_hover_text("Higher batch sizes will use more VRAM but can improve throughput.");
+                                        ui.add(egui::DragValue::new(&mut self.embedding_batch_size)
+                                            .clamp_range(1..=1024)
+                                            .speed(1.0));
+                                        ui.end_row();
+                                        
                                         ui.label("Collection Name Prefix:");
                                         ui.text_edit_singleline(&mut self.performance_collection_name_prefix);
                                         ui.end_row();
@@ -392,6 +401,9 @@ impl SettingsPanel {
         config.performance.collection_name_prefix = self.performance_collection_name_prefix.clone();
         config.performance.max_file_size_bytes = self.performance_max_file_size_bytes as u64;
         
+        // Embedding engine settings
+        config.embedding.embedding_batch_size = self.embedding_batch_size as usize;
+        
         config
     }
     
@@ -462,7 +474,10 @@ mod tests {
                 max_file_size_bytes: 2 * 1024 * 1024, // 2MB
                 vector_dimension: 384,
             },
-            embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
+            embedding: sagitta_search::config::EmbeddingEngineConfig {
+                embedding_batch_size: 64,
+                ..sagitta_search::config::EmbeddingEngineConfig::default()
+            },
             server_api_key_path: None,
             oauth: None,
             tls_enable: false,
@@ -503,6 +518,7 @@ mod tests {
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
+        assert_eq!(panel.embedding_batch_size, 64);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
         assert_eq!(panel.performance_max_file_size_bytes, 2 * 1024 * 1024);
 
@@ -525,6 +541,7 @@ mod tests {
         assert_eq!(panel.vocabulary_base_path, Some("/test/vocab".to_string()));
         assert_eq!(panel.indexing_max_concurrent_upserts, 10);
         assert_eq!(panel.performance_batch_size, 150);
+        assert_eq!(panel.embedding_batch_size, 64);
         assert_eq!(panel.performance_collection_name_prefix, "test_sagitta");
         assert_eq!(panel.performance_max_file_size_bytes, 2 * 1024 * 1024);
     }
@@ -563,6 +580,7 @@ mod tests {
         panel.vocabulary_base_path = Some("/custom/vocab".to_string());
         panel.indexing_max_concurrent_upserts = 16;
         panel.performance_batch_size = 300;
+        panel.embedding_batch_size = 256;
         panel.performance_collection_name_prefix = "custom_sagitta".to_string();
         panel.performance_max_file_size_bytes = 4194304;
         
@@ -575,6 +593,7 @@ mod tests {
         assert_eq!(config.vocabulary_base_path, Some("/custom/vocab".to_string()));
         assert_eq!(config.indexing.max_concurrent_upserts, 16);
         assert_eq!(config.performance.batch_size, 300);
+        assert_eq!(config.embedding.embedding_batch_size, 256);
         assert_eq!(config.performance.collection_name_prefix, "custom_sagitta");
         assert_eq!(config.performance.max_file_size_bytes, 4194304);
     }
@@ -624,6 +643,7 @@ mod tests {
         assert_eq!(panel.vocabulary_base_path, default_app_config.vocabulary_base_path);
         assert_eq!(panel.indexing_max_concurrent_upserts as usize, default_app_config.indexing.max_concurrent_upserts);
         assert_eq!(panel.performance_batch_size as usize, default_app_config.performance.batch_size);
+        assert_eq!(panel.embedding_batch_size as usize, default_app_config.embedding.embedding_batch_size);
         assert_eq!(panel.performance_collection_name_prefix, default_app_config.performance.collection_name_prefix);
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
 

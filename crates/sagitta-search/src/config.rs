@@ -90,7 +90,7 @@ pub struct PerformanceConfig {
     #[serde(default = "default_max_file_size_bytes")]
     pub max_file_size_bytes: u64,
     /// Default vector dimension for embeddings
-    #[serde(default = "default_vector_dimension")]
+    #[serde(default = "default_vector_dimension", skip_serializing_if = "is_default_vector_dimension")]
     pub vector_dimension: u64,
 }
 
@@ -119,6 +119,11 @@ fn default_max_file_size_bytes() -> u64 {
 
 fn default_vector_dimension() -> u64 {
     384
+}
+
+// Helper for serde to skip serializing vector_dimension when it has the default value
+fn is_default_vector_dimension(dim: &u64) -> bool {
+    *dim == default_vector_dimension()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -1007,6 +1012,33 @@ mod tests {
         assert_eq!(default_perf.collection_name_prefix, default_collection_name_prefix());
         assert_eq!(default_perf.max_file_size_bytes, default_max_file_size_bytes());
         assert_eq!(default_perf.vector_dimension, default_vector_dimension());
+    }
+
+    #[test]
+    fn test_vector_dimension_not_serialized_when_default() {
+        let config = PerformanceConfig::default();
+        let serialized = toml::to_string(&config).expect("Failed to serialize config");
+        
+        // vector_dimension should not appear in the serialized output when it's the default value
+        assert!(!serialized.contains("vector_dimension"), 
+                "vector_dimension should not be serialized when it has the default value. Serialized: {}", serialized);
+        
+        // But other fields should still be present
+        assert!(serialized.contains("batch_size"));
+        assert!(serialized.contains("collection_name_prefix"));
+        assert!(serialized.contains("max_file_size_bytes"));
+    }
+
+    #[test]
+    fn test_vector_dimension_serialized_when_non_default() {
+        let mut config = PerformanceConfig::default();
+        config.vector_dimension = 512; // Non-default value
+        
+        let serialized = toml::to_string(&config).expect("Failed to serialize config");
+        
+        // vector_dimension should appear when it's not the default value
+        assert!(serialized.contains("vector_dimension = 512"), 
+                "vector_dimension should be serialized when it has a non-default value. Serialized: {}", serialized);
     }
 
     #[test]
