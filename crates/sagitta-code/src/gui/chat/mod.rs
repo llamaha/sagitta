@@ -5,11 +5,48 @@ pub mod view;
 use view::{StreamingMessage, MessageAuthor, MessageStatus, ToolCall, MessageType};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+use terminal_stream::events::StreamEvent;
+use crate::agent::events::ToolRunId;
+
+/// Represents an item in the chat timeline
+#[derive(Debug, Clone)]
+pub enum ChatItem {
+    /// A regular chat message
+    Message(StreamingMessage),
+    /// A tool execution card
+    ToolCard(ToolCard),
+}
+
+/// Represents a tool execution card in the chat
+#[derive(Debug, Clone)]
+pub struct ToolCard {
+    pub run_id: ToolRunId,
+    pub tool_name: String,
+    pub status: ToolCardStatus,
+    pub progress: Option<f32>,
+    pub logs: Vec<StreamEvent>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub input_params: serde_json::Value,
+    pub result: Option<serde_json::Value>,
+}
+
+/// Status of a tool card
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCardStatus {
+    Running,
+    Completed { success: bool },
+    Cancelled,
+    Failed { error: String },
+}
 
 /// Example chat manager that demonstrates proper streaming usage
 pub struct StreamingChatManager {
-    messages: Arc<Mutex<Vec<StreamingMessage>>>,
+    messages: Arc<Mutex<Vec<ChatItem>>>,
     active_streams: Arc<Mutex<HashMap<String, StreamingMessage>>>,
+    tool_cards: Arc<Mutex<HashMap<ToolRunId, ToolCard>>>,
 }
 
 impl StreamingChatManager {
@@ -17,6 +54,7 @@ impl StreamingChatManager {
         Self {
             messages: Arc::new(Mutex::new(Vec::new())),
             active_streams: Arc::new(Mutex::new(HashMap::new())),
+            tool_cards: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
@@ -26,7 +64,7 @@ impl StreamingChatManager {
             message.message_type = MessageType::Normal;
         }
         let mut messages = self.messages.lock().unwrap();
-        messages.push(message);
+        messages.push(ChatItem::Message(message));
     }
     
     /// Add a user message
@@ -37,7 +75,7 @@ impl StreamingChatManager {
         
         {
             let mut messages = self.messages.lock().unwrap();
-            messages.push(message);
+            messages.push(ChatItem::Message(message));
         }
         
         id
@@ -140,13 +178,15 @@ impl StreamingChatManager {
                 
                 // Fallback: Check if the message is in completed messages and add tool call there
                 let mut messages = self.messages.lock().unwrap();
-                for message in messages.iter_mut().rev() {
-                    if message.id == message_id && message.author == MessageAuthor::Agent {
-                        message.add_tool_call(tool_call);
-                        if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-                            log::debug!("StreamingChatManager::add_tool_call - Added tool call to completed agent message");
+                for item in messages.iter_mut().rev() {
+                    if let ChatItem::Message(message) = item {
+                        if message.id == message_id && message.author == MessageAuthor::Agent {
+                            message.add_tool_call(tool_call);
+                            if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
+                                log::debug!("StreamingChatManager::add_tool_call - Added tool call to completed agent message");
+                            }
+                            return;
                         }
-                        return;
                     }
                 }
                 
@@ -162,7 +202,7 @@ impl StreamingChatManager {
             message.finish_streaming();
             
             let mut messages = self.messages.lock().unwrap();
-            messages.push(message);
+            messages.push(ChatItem::Message(message));
         }
     }
     
@@ -175,16 +215,23 @@ impl StreamingChatManager {
             // Move to main messages even if error
             let message = active_streams.remove(message_id).unwrap();
             let mut messages = self.messages.lock().unwrap();
-            messages.push(message);
+            messages.push(ChatItem::Message(message));
         }
     }
     
-    /// Get all messages for display (includes active streams)
+    /// Get all messages for display (includes active streams) - kept for compatibility
     pub fn get_all_messages(&self) -> Vec<StreamingMessage> {
         let messages = self.messages.lock().unwrap();
         let active_streams = self.active_streams.lock().unwrap();
         
-        let mut all_messages = messages.clone();
+        let mut all_messages = Vec::new();
+        
+        // Extract StreamingMessages from ChatItems
+        for item in messages.iter() {
+            if let ChatItem::Message(msg) = item {
+                all_messages.push(msg.clone());
+            }
+        }
         
         // Add active streaming messages
         for message in active_streams.values() {
@@ -206,8 +253,12 @@ impl StreamingChatManager {
             let mut active_streams = self.active_streams.lock().unwrap();
             active_streams.clear();
         }
+        {
+            let mut tool_cards = self.tool_cards.lock().unwrap();
+            tool_cards.clear();
+        }
         if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-            log::debug!("StreamingChatManager: Cleared all messages and active streams");
+            log::debug!("StreamingChatManager: Cleared all messages, active streams, and tool cards");
         } else {
             log::trace!("StreamingChatManager: Cleared messages for conversation switch");
         }
@@ -237,17 +288,19 @@ impl StreamingChatManager {
         // Check completed messages
         {
             let mut messages = self.messages.lock().unwrap();
-            for message in messages.iter_mut() {
-                for tool_call in &mut message.tool_calls {
-                    // Try to match by tool call ID in the arguments
-                    if tool_call.arguments.contains(tool_call_id) {
-                        tool_call.result = Some(result.clone());
-                        tool_call.status = if is_success {
-                            MessageStatus::Complete
-                        } else {
-                            MessageStatus::Error("Tool execution failed".to_string())
-                        };
-                        return true;
+            for item in messages.iter_mut() {
+                if let ChatItem::Message(message) = item {
+                    for tool_call in &mut message.tool_calls {
+                        // Try to match by tool call ID in the arguments
+                        if tool_call.arguments.contains(tool_call_id) {
+                            tool_call.result = Some(result.clone());
+                            tool_call.status = if is_success {
+                                MessageStatus::Complete
+                            } else {
+                                MessageStatus::Error("Tool execution failed".to_string())
+                            };
+                            return true;
+                        }
                     }
                 }
             }
@@ -279,16 +332,18 @@ impl StreamingChatManager {
         // Check completed messages
         {
             let mut messages = self.messages.lock().unwrap();
-            for message in messages.iter_mut() {
-                for tool_call in &mut message.tool_calls {
-                    if tool_call.name == tool_name && tool_call.result.is_none() {
-                        tool_call.result = Some(result.clone());
-                        tool_call.status = if is_success {
-                            MessageStatus::Complete
-                        } else {
-                            MessageStatus::Error("Tool execution failed".to_string())
-                        };
-                        return true;
+            for item in messages.iter_mut() {
+                if let ChatItem::Message(message) = item {
+                    for tool_call in &mut message.tool_calls {
+                        if tool_call.name == tool_name && tool_call.result.is_none() {
+                            tool_call.result = Some(result.clone());
+                            tool_call.status = if is_success {
+                                MessageStatus::Complete
+                            } else {
+                                MessageStatus::Error("Tool execution failed".to_string())
+                            };
+                            return true;
+                        }
                     }
                 }
             }
@@ -308,13 +363,142 @@ impl StreamingChatManager {
         }
         {
             let mut messages = self.messages.lock().unwrap();
-            for message in messages.iter_mut() {
-                if message.id == message_id {
-                    message.message_type = message_type.clone();
-                    return;
+            for item in messages.iter_mut() {
+                if let ChatItem::Message(message) = item {
+                    if message.id == message_id {
+                        message.message_type = message_type.clone();
+                        return;
+                    }
                 }
             }
         }
+    }
+    
+    /// Insert a tool card after the last user message
+    pub fn insert_tool_card_after_last_user_msg(&self, run_id: ToolRunId, tool: String, params: serde_json::Value) {
+        let tool_card = ToolCard {
+            run_id,
+            tool_name: tool,
+            status: ToolCardStatus::Running,
+            progress: None,
+            logs: Vec::new(),
+            started_at: Utc::now(),
+            completed_at: None,
+            input_params: params,
+            result: None,
+        };
+        
+        // Store in tool_cards map
+        {
+            let mut tool_cards = self.tool_cards.lock().unwrap();
+            tool_cards.insert(run_id, tool_card.clone());
+        }
+        
+        // Find position after last user message
+        let mut messages = self.messages.lock().unwrap();
+        let mut insert_pos = messages.len();
+        
+        // Find the last user message
+        for (i, item) in messages.iter().enumerate().rev() {
+            if let ChatItem::Message(msg) = item {
+                if msg.author == MessageAuthor::User {
+                    insert_pos = i + 1;
+                    break;
+                }
+            }
+        }
+        
+        // Insert the tool card at the determined position
+        messages.insert(insert_pos, ChatItem::ToolCard(tool_card));
+    }
+    
+    /// Update tool card progress
+    pub fn update_tool_card_progress(&self, run_id: ToolRunId, progress: f32, _message: String) {
+        let mut tool_cards = self.tool_cards.lock().unwrap();
+        if let Some(card) = tool_cards.get_mut(&run_id) {
+            card.progress = Some(progress.clamp(0.0, 1.0));
+        }
+        
+        // Also update in messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut() {
+            if let ChatItem::ToolCard(card) = item {
+                if card.run_id == run_id {
+                    card.progress = Some(progress.clamp(0.0, 1.0));
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Append a log event to a tool card
+    pub fn append_tool_card_log(&self, run_id: ToolRunId, event: StreamEvent) {
+        let mut tool_cards = self.tool_cards.lock().unwrap();
+        if let Some(card) = tool_cards.get_mut(&run_id) {
+            card.logs.push(event.clone());
+        }
+        
+        // Also update in messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut() {
+            if let ChatItem::ToolCard(card) = item {
+                if card.run_id == run_id {
+                    card.logs.push(event);
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Complete a tool card
+    pub fn complete_tool_card(&self, run_id: ToolRunId, success: bool, result: Option<serde_json::Value>) {
+        let mut tool_cards = self.tool_cards.lock().unwrap();
+        if let Some(card) = tool_cards.get_mut(&run_id) {
+            card.status = ToolCardStatus::Completed { success };
+            card.completed_at = Some(Utc::now());
+            card.result = result.clone();
+        }
+        
+        // Also update in messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut() {
+            if let ChatItem::ToolCard(card) = item {
+                if card.run_id == run_id {
+                    card.status = ToolCardStatus::Completed { success };
+                    card.completed_at = Some(Utc::now());
+                    card.result = result;
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Get all items for display (includes active streams and tool cards)
+    pub fn get_all_items(&self) -> Vec<ChatItem> {
+        let messages = self.messages.lock().unwrap();
+        let active_streams = self.active_streams.lock().unwrap();
+        
+        let mut all_items = messages.clone();
+        
+        // Add active streaming messages
+        for message in active_streams.values() {
+            all_items.push(ChatItem::Message(message.clone()));
+        }
+        
+        // Sort by timestamp (messages have timestamps, tool cards have started_at)
+        all_items.sort_by(|a, b| {
+            let time_a = match a {
+                ChatItem::Message(msg) => msg.timestamp,
+                ChatItem::ToolCard(card) => card.started_at,
+            };
+            let time_b = match b {
+                ChatItem::Message(msg) => msg.timestamp,
+                ChatItem::ToolCard(card) => card.started_at,
+            };
+            time_a.cmp(&time_b)
+        });
+        
+        all_items
     }
 }
 

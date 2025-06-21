@@ -63,7 +63,17 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Handle clicked tool info
     if let Some((tool_name, tool_args)) = &app.state.clicked_tool_info.clone() {
-        render_tool_info_modal(app, ctx, tool_name, tool_args);
+        if tool_name == "__CANCEL_TOOL__" {
+            // Handle tool cancellation
+            if let Ok(run_id) = uuid::Uuid::parse_str(tool_args) {
+                if let Err(e) = app.app_event_sender.send(AppEvent::CancelTool(run_id)) {
+                    log::error!("Failed to send CancelTool event: {}", e);
+                }
+            }
+            app.state.clicked_tool_info = None;
+        } else {
+            render_tool_info_modal(app, ctx, tool_name, tool_args);
+        }
     }
 
     // Render main UI
@@ -969,7 +979,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 let messages = app.chat_manager.get_all_messages();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

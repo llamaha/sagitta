@@ -31,6 +31,7 @@ pub enum AppEvent {
         suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>,
     },
     RepositoryListUpdated(Vec<String>),
+    CancelTool(ToolRunId),
     // Add other app-level UI events here if needed
 }
 
@@ -275,6 +276,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::RepositoryListUpdated(repo_list) => {
                 log::info!("Received RepositoryListUpdated event with {} repositories: {:?}", repo_list.len(), repo_list);
                 app.handle_repository_list_update(repo_list);
+            },
+            AppEvent::CancelTool(run_id) => {
+                log::info!("Received CancelTool event for run_id: {}", run_id);
+                handle_tool_cancellation(app, run_id);
             },
         }
     }
@@ -1084,54 +1089,81 @@ impl SagittaCodeApp {
 
 /// Handle tool run started event
 pub fn handle_tool_run_started(app: &mut SagittaCodeApp, run_id: ToolRunId, tool: String) {
-    // For now, just add a system message to indicate tool started
-    // In Phase 2, this will create a proper tool card
-    let message = StreamingMessage::from_text(
-        MessageAuthor::System,
-        format!("🔧 {} started", tool)
-    );
-    app.chat_manager.add_complete_message(message);
+    use super::state::RunningToolInfo;
     
-    // Store the run_id for future reference
+    // Find the message ID that contains this tool (use current response ID as fallback)
+    let message_id = app.state.current_response_id.clone()
+        .or_else(|| app.state.active_tool_call_message_id.map(|id| id.to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+    
+    // Add to running tools tracking
+    let tool_info = RunningToolInfo {
+        tool_name: tool.clone(),
+        progress: None,
+        message_id,
+        start_time: std::time::Instant::now(),
+    };
+    
+    app.state.running_tools.insert(run_id, tool_info);
+    
+    // Store in tool results for backward compatibility
     app.state.tool_results.insert(run_id.to_string(), format!("Tool {} started", tool));
+    
+    log::debug!("Started tracking tool run: {} ({})", tool, run_id);
 }
 
 /// Handle tool run completed event
 pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, tool: String, success: bool) {
-    let status = if success { "✅ completed" } else { "❌ failed" };
-    let message = StreamingMessage::from_text(
-        MessageAuthor::System,
-        format!("{} {}", tool, status)
-    );
-    app.chat_manager.add_complete_message(message);
+    // Remove from running tools tracking
+    if let Some(tool_info) = app.state.running_tools.remove(&run_id) {
+        let duration = tool_info.start_time.elapsed();
+        log::debug!("Tool run completed: {} ({}) - success: {}, duration: {:?}", 
+            tool, run_id, success, duration);
+    }
     
     // Update stored result
+    let status = if success { "completed" } else { "failed" };
     app.state.tool_results.insert(run_id.to_string(), format!("Tool {} {}", tool, status));
+    
+    // UI will update on next frame automatically
 }
 
 /// Handle tool stream event (progress updates)
 pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: terminal_stream::events::StreamEvent) {
-    match event {
+    match &event {
         terminal_stream::events::StreamEvent::Progress { message, percentage } => {
-            // For now, add progress as system messages
-            // In Phase 2, this will update the tool card
-            let progress_text = if let Some(pct) = percentage {
-                format!("🔄 {} ({:.0}%)", message, pct)
-            } else {
-                format!("🔄 {}", message)
-            };
-            
-            let progress_message = StreamingMessage::from_text(
-                MessageAuthor::System,
-                progress_text
-            );
-            app.chat_manager.add_complete_message(progress_message);
+            // Update progress in running tools tracking
+            if let Some(tool_info) = app.state.running_tools.get_mut(&run_id) {
+                tool_info.progress = percentage.map(|p| p as f32 / 100.0);
+                log::debug!("Tool {} progress: {} ({}%)", run_id, message, percentage.unwrap_or(0.0));
+            }
         },
         _ => {
             // Handle other stream events if needed
-            log::debug!("Unhandled tool stream event: {:?}", event);
+            log::debug!("Tool stream event for run {}: {:?}", run_id, event);
         }
     }
+}
+
+/// Handle tool cancellation request
+pub fn handle_tool_cancellation(app: &mut SagittaCodeApp, run_id: ToolRunId) {
+    // Remove from running tools tracking
+    if let Some(tool_info) = app.state.running_tools.remove(&run_id) {
+        log::info!("Cancelling tool: {} ({})", tool_info.tool_name, run_id);
+    }
+    
+    // Update stored result
+    app.state.tool_results.insert(run_id.to_string(), "Tool cancelled".to_string());
+    
+    // TODO: In a complete implementation, we would need to:
+    // 1. Send a cancellation signal to the reasoning engine
+    // 2. The reasoning engine would need to track running tools and their cancel handles
+    // 3. Drop the future or send a cancel signal to the tool execution
+    
+    // For now, we just log the cancellation request
+    log::warn!("Tool cancellation requested for run_id: {} - actual cancellation not yet implemented", run_id);
+    
+    // UI will update on next frame automatically
 }
 
 #[cfg(test)]
@@ -1204,6 +1236,7 @@ mod tests {
             AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
+            AppEvent::CancelTool(_) => assert!(true),
         }
         
         // Test the other variant too
@@ -1215,6 +1248,7 @@ mod tests {
             AppEvent::CheckpointSuggestionsReady { .. } => assert!(true),
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
+            AppEvent::CancelTool(_) => assert!(true),
         }
     }
 
