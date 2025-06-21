@@ -11,6 +11,9 @@ use crate::tools::executor::ToolExecutionEvent;
 use crate::tools::types::ToolResult;
 use crate::llm::client::{LlmClient, Role};
 
+/// Type alias for tool run identification
+pub type ToolRunId = Uuid;
+
 /// Events that can be emitted by the agent
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -197,6 +200,26 @@ pub enum AgentEvent {
         title: String,
         parent_message_id: Option<Uuid>,
         timestamp: chrono::DateTime<chrono::Utc>,
+    },
+
+    // Tool lifecycle and streaming events for chat UI cards
+    /// A tool run has started
+    ToolRunStarted {
+        run_id: ToolRunId,
+        tool: String,
+    },
+
+    /// A tool run has completed
+    ToolRunCompleted {
+        run_id: ToolRunId,
+        tool: String,
+        success: bool,
+    },
+
+    /// Streaming event from a tool run
+    ToolStream {
+        run_id: ToolRunId,
+        event: terminal_stream::events::StreamEvent,
     },
 }
 

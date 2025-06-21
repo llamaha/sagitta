@@ -62,8 +62,19 @@ where
     let repo_path = PathBuf::from(&repo_config.local_path);
     
     // Get tenant ID
-    let tenant_id = cli_args.tenant_id.as_deref()
-        .ok_or_else(|| anyhow!("--tenant-id is required for sync operations"))?;
+    let tenant_id = match cli_args.tenant_id.as_deref() {
+        Some(id) => id,
+        None => {
+            #[cfg(feature = "multi_tenant")]
+            {
+                return Err(anyhow!("--tenant-id is required for sync operations"));
+            }
+            #[cfg(not(feature = "multi_tenant"))]
+            {
+                "default"
+            }
+        }
+    };
 
     // Initialize git manager to get available branches
     let mut git_manager = GitManager::new();

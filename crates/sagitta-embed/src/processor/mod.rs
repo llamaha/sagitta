@@ -80,7 +80,7 @@ impl Default for ProcessingConfig {
             max_embedding_sessions: 4,
             cpu_worker_threads: 0, // Auto-calculate
             processing_queue_size: 1000,
-            embedding_batch_size: 128,
+            embedding_batch_size: crate::DEFAULT_EMBEDDING_BATCH_SIZE,
             max_file_size_bytes: 5 * 1024 * 1024, // 5MB
             file_batch_size: std::cmp::max(1, cpu_cores / 4), // Reduce coordination overhead
         }
@@ -88,17 +88,17 @@ impl Default for ProcessingConfig {
 }
 
 impl ProcessingConfig {
-    /// Create a ProcessingConfig that properly uses the max_sessions from an EmbeddingConfig.
-    /// This ensures that the GPU memory control (max_embedding_sessions) respects the user's
-    /// configuration in config.toml rather than using a hardcoded default.
+    /// Create a ProcessingConfig from an EmbeddingConfig.
+    /// Uses default values for session management since max_sessions has been removed.
     pub fn from_embedding_config(embedding_config: &crate::config::EmbeddingConfig) -> Self {
         let cpu_cores = num_cpus::get();
-        let max_sessions = embedding_config.max_sessions;
+        // Use a reasonable default for GPU memory control
+        let default_sessions = 4;
         
         Self {
             file_processing_concurrency: cpu_cores,
-            max_embedding_sessions: max_sessions, // Use configured value, not default
-            cpu_worker_threads: Self::calculate_optimal_cpu_workers(max_sessions, cpu_cores),
+            max_embedding_sessions: default_sessions,
+            cpu_worker_threads: Self::calculate_optimal_cpu_workers(default_sessions, cpu_cores),
             processing_queue_size: 1000,
             embedding_batch_size: embedding_config.get_embedding_batch_size(), // Use configured or default batch size
             max_file_size_bytes: 5 * 1024 * 1024, // 5MB
@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(config.file_processing_concurrency, num_cpus::get());
         assert_eq!(config.max_embedding_sessions, 4); // Default value
         assert_eq!(config.processing_queue_size, 1000);
-        assert_eq!(config.embedding_batch_size, 128);
+        assert_eq!(config.embedding_batch_size, 256);  // Default batch size is 256
         assert_eq!(config.max_file_size_bytes, 5 * 1024 * 1024);
     }
 
@@ -313,32 +313,28 @@ mod tests {
     fn test_processing_config_from_embedding_config() {
         let embedding_config = EmbeddingConfig {
             model_type: EmbeddingModelType::Onnx,
-            max_sessions: 8, // Custom value that should be respected
             ..Default::default()
         };
 
         let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
         
-        // Verify that max_embedding_sessions uses the configured value, not the default
-        assert_eq!(processing_config.max_embedding_sessions, 8);
+        // Verify that automatic session management is used
+        assert_eq!(processing_config.max_embedding_sessions, 4); // Default for automatic management
         assert_eq!(processing_config.file_processing_concurrency, num_cpus::get());
         assert_eq!(processing_config.processing_queue_size, 1000);
-        assert_eq!(processing_config.embedding_batch_size, 128);
+        assert_eq!(processing_config.embedding_batch_size, 256);  // Default batch size is 256
         assert_eq!(processing_config.max_file_size_bytes, 5 * 1024 * 1024);
     }
 
     #[test]
     fn test_processing_config_respects_config_toml_values() {
-        // Test various max_sessions values that could come from config.toml
-        for max_sessions in [1, 2, 4, 8, 16] {
-            let embedding_config = EmbeddingConfig {
-                max_sessions,
-                ..Default::default()
-            };
+        // Test automatic session management with default config
+        let embedding_config = EmbeddingConfig::default();
 
-            let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
-            assert_eq!(processing_config.max_embedding_sessions, max_sessions,
-                "ProcessingConfig should respect max_sessions value {} from config.toml", max_sessions);
-        }
+        let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
+        
+        // Automatic session management uses 4 sessions by default
+        assert_eq!(processing_config.max_embedding_sessions, 4,
+            "ProcessingConfig should use automatic session management");
     }
 } 

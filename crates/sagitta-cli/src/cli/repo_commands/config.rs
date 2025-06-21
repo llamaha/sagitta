@@ -88,6 +88,7 @@ fn get_default_config() -> AppConfig {
         qdrant_url: "http://localhost:6334".to_string(),
         onnx_model_path: None,
         onnx_tokenizer_path: None,
+        embed_model: None,
         server_api_key_path: None,
         repositories_base_path: Some(temp_dir.path().join("repos").to_string_lossy().into_owned()),
         vocabulary_base_path: Some(temp_dir.path().join("vocab").to_string_lossy().into_owned()),

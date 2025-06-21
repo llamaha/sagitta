@@ -64,7 +64,14 @@ where
     let cli_tenant_id = match cli_args.tenant_id.as_deref() {
         Some(id) => id,
         None => {
-            anyhow::bail!("--tenant-id is required to get repository stats.");
+            #[cfg(feature = "multi_tenant")]
+            {
+                anyhow::bail!("--tenant-id is required to get repository stats.");
+            }
+            #[cfg(not(feature = "multi_tenant"))]
+            {
+                "default"
+            }
         }
     };
 

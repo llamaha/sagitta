@@ -55,20 +55,15 @@ pub use processor::{
 /// Current version of the sagitta-embed crate
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Default embedding dimension for ONNX models
+/// Default constants for configuration values
+/// Default embedding dimension for validation
 pub const DEFAULT_EMBEDDING_DIMENSION: usize = 384;
 
-/// Default maximum number of concurrent sessions
-pub const DEFAULT_MAX_SESSIONS: usize = 4;
-
-/// Default maximum sequence length for tokenization
-pub const DEFAULT_MAX_SEQUENCE_LENGTH: usize = 128;
-
-/// Default session timeout in seconds
+/// Default session timeout in seconds (5 minutes)
 pub const DEFAULT_SESSION_TIMEOUT_SECONDS: u64 = 300;
 
-/// Default enable session cleanup setting
+/// Default value for enabling session cleanup
 pub const DEFAULT_ENABLE_SESSION_CLEANUP: bool = true;
 
-/// Default embedding batch size
-pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 128; 
+/// Default embedding batch size for processing multiple texts
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 256;  // Match FastEmbed's default 

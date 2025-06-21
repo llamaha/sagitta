@@ -36,7 +36,7 @@ where
 {
     debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
 
-    // 1. Get Query Embedding using EmbeddingPool (respects max_sessions)
+    // 1. Get Query Embedding using EmbeddingPool
     let embedding_config = app_config_to_embedding_config(&**config);
     let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;

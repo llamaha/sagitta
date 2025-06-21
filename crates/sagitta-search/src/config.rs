@@ -129,12 +129,6 @@ fn is_default_vector_dimension(dim: &u64) -> bool {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 /// Configuration for the embedding engine
 pub struct EmbeddingEngineConfig {
-    /// Maximum number of concurrent sessions for session pooling
-    #[serde(default = "default_max_sessions")]
-    pub max_sessions: usize,
-    /// Maximum sequence length for tokenization
-    #[serde(default = "default_max_sequence_length")]
-    pub max_sequence_length: usize,
     /// Session timeout in seconds (0 = no timeout)
     #[serde(default = "default_session_timeout_seconds")]
     pub session_timeout_seconds: u64,
@@ -149,8 +143,6 @@ pub struct EmbeddingEngineConfig {
 impl Default for EmbeddingEngineConfig {
     fn default() -> Self {
         Self {
-            max_sessions: default_max_sessions(),
-            max_sequence_length: default_max_sequence_length(),
             session_timeout_seconds: default_session_timeout_seconds(),
             enable_session_cleanup: default_enable_session_cleanup(),
             embedding_batch_size: default_embedding_batch_size(),
@@ -158,13 +150,6 @@ impl Default for EmbeddingEngineConfig {
     }
 }
 
-fn default_max_sessions() -> usize {
-    4 // Match sagitta-embed default
-}
-
-fn default_max_sequence_length() -> usize {
-    128 // Match sagitta-embed default
-}
 
 fn default_session_timeout_seconds() -> u64 {
     300 // 5 minutes, match sagitta-embed default
@@ -225,6 +210,10 @@ pub struct AppConfig {
     pub onnx_model_path: Option<String>,
     /// Path to the ONNX tokenizer configuration directory or file.
     pub onnx_tokenizer_path: Option<String>,
+    /// Embedding model to download and use (alternative to onnx_model_path/onnx_tokenizer_path).
+    /// Options: "bge-small-fast" (INT8), "bge-small-fp32" (standard precision), or any HuggingFace model ID.
+    /// Cannot be used together with onnx_model_path/onnx_tokenizer_path.
+    pub embed_model: Option<String>,
     /// Optional path to a file containing the server API key.
     pub server_api_key_path: Option<String>,
     /// Base path where repositories are cloned/managed by default.
@@ -279,6 +268,7 @@ impl Default for AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             server_api_key_path: None,
             repositories_base_path: None,
             vocabulary_base_path: None,
@@ -377,6 +367,33 @@ pub fn get_repo_base_path(config: Option<&AppConfig>) -> Result<PathBuf> {
     Ok(app_data_dir)
 }
 
+impl AppConfig {
+    /// Validates that the configuration is valid.
+    /// Returns an error if mutually exclusive options are set.
+    pub fn validate(&self) -> Result<()> {
+        // Check that embed_model and onnx paths are not both set
+        let has_onnx_paths = self.onnx_model_path.is_some() || self.onnx_tokenizer_path.is_some();
+        let has_embed_model = self.embed_model.is_some();
+        
+        if has_onnx_paths && has_embed_model {
+            return Err(anyhow!(
+                "Configuration error: 'embed_model' cannot be used together with 'onnx_model_path' or 'onnx_tokenizer_path'. \
+                Please use either 'embed_model' for automatic model downloading, or 'onnx_model_path' and 'onnx_tokenizer_path' \
+                for manually specifying model files."
+            ));
+        }
+        
+        // If onnx paths are set, both must be set
+        if self.onnx_model_path.is_some() != self.onnx_tokenizer_path.is_some() {
+            return Err(anyhow!(
+                "Configuration error: Both 'onnx_model_path' and 'onnx_tokenizer_path' must be set together."
+            ));
+        }
+        
+        Ok(())
+    }
+}
+
 /// Gets the configuration path by checking ENV, override, or default XDG.
 pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     // Check for test environment variable first
@@ -425,9 +442,11 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
         
         log::debug!("Read config file content successfully.");
 
-        match toml::from_str(&config_content) {
+        match toml::from_str::<AppConfig>(&config_content) {
             Ok(config) => {
                 log::debug!("Parsed config successfully: {:?}", config);
+                // Validate the configuration
+                config.validate()?;
                 Ok(config)
             },
             Err(e) => {
@@ -468,20 +487,43 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
     let mut config_content = toml::to_string_pretty(config)
         .with_context(|| "Failed to serialize configuration to TOML")?;
 
-    // Prepare the commented-out ONNX examples as a separate string
+    // Prepare the commented-out ONNX/embedding examples as a separate string
     let mut onnx_comments = String::new();
-    if config.onnx_model_path.is_none() {
-        onnx_comments.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
+    
+    // Add embed_model comments if not set
+    if config.embed_model.is_none() && config.onnx_model_path.is_none() && config.onnx_tokenizer_path.is_none() {
+        onnx_comments.push_str("\n# Embedding model configuration - choose ONE of the following options:");
+        onnx_comments.push_str("\n");
+        onnx_comments.push_str("\n# Option 1: Automatic model downloading (recommended)");
+        onnx_comments.push_str("\n# The model will be downloaded to ~/.cache/huggingface/hub/");
+        onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # BGE Small v1.5 with INT8 quantization (fast)");
+        onnx_comments.push_str("\n#embed_model = \"bge-small-fp32\"  # BGE Small v1.5 with FP32 (standard precision)");
+        onnx_comments.push_str("\n# Or use any HuggingFace model ID:");
+        onnx_comments.push_str("\n#embed_model = \"BAAI/bge-base-en-v1.5\"");
+        onnx_comments.push_str("\n");
+        onnx_comments.push_str("\n# Option 2: Manual model paths (for custom models)");
         onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
-        onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/all-minilm-l6-v2.onnx");
-    }
-    if config.onnx_tokenizer_path.is_none() {
-        if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
-            onnx_comments.push_str("\n");
-        }
-        onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
         onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
-        onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/");
+    } else if config.embed_model.is_none() {
+        // If only manual paths are set, still show embed_model as an alternative
+        if config.onnx_model_path.is_none() {
+            onnx_comments.push_str("\n# Path to the ONNX model file (required for indexing/querying)");
+            onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
+            onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/all-minilm-l6-v2.onnx");
+        }
+        if config.onnx_tokenizer_path.is_none() {
+            if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
+                onnx_comments.push_str("\n");
+            }
+            onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
+            onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
+            onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/");
+        }
+        if !onnx_comments.is_empty() {
+            onnx_comments.push_str("\n");
+            onnx_comments.push_str("\n# Alternative: Use automatic model downloading instead");
+            onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # or \"bge-small-fp32\"");
+        }
     }
 
     // Prepend ONNX comments if any, ensuring they are at the top level
@@ -589,7 +631,8 @@ mod tests {
         let config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: Some("model".to_string()),
-            onnx_tokenizer_path: None,
+            onnx_tokenizer_path: Some("tokenizer".to_string()),
+            embed_model: None,
             server_api_key_path: None,
             repositories: vec![repo1.clone(), repo2.clone()],
             active_repository: Some("repo1".to_string()),
@@ -652,6 +695,7 @@ mod tests {
             qdrant_url: "test".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             server_api_key_path: None,
             repositories: Vec::new(),
             active_repository: None,
@@ -1052,5 +1096,52 @@ mod tests {
         assert!(default_oauth.redirect_uri.is_empty());
         assert_eq!(default_oauth.introspection_url, None);
         assert_eq!(default_oauth.scopes, vec!["openid".to_string(), "profile".to_string(), "email".to_string()]);
+    }
+
+    #[test]
+    fn test_config_validation_mutually_exclusive() {
+        let mut config = AppConfig::default();
+        
+        // Valid: no model configuration
+        assert!(config.validate().is_ok());
+        
+        // Valid: only embed_model
+        config.embed_model = Some("bge-small-fast".to_string());
+        assert!(config.validate().is_ok());
+        
+        // Valid: only onnx paths
+        config.embed_model = None;
+        config.onnx_model_path = Some("/path/to/model.onnx".to_string());
+        config.onnx_tokenizer_path = Some("/path/to/tokenizer".to_string());
+        assert!(config.validate().is_ok());
+        
+        // Invalid: both embed_model and onnx paths
+        config.embed_model = Some("bge-small-fast".to_string());
+        assert!(config.validate().is_err());
+        
+        // Invalid: only model path without tokenizer path
+        config.embed_model = None;
+        config.onnx_model_path = Some("/path/to/model.onnx".to_string());
+        config.onnx_tokenizer_path = None;
+        assert!(config.validate().is_err());
+        
+        // Invalid: only tokenizer path without model path
+        config.onnx_model_path = None;
+        config.onnx_tokenizer_path = Some("/path/to/tokenizer".to_string());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_embed_model_field() {
+        let toml_with_embed_model = r#"
+            qdrant_url = "http://localhost:6334"
+            embed_model = "bge-small-fast"
+        "#;
+        
+        let config: AppConfig = toml::from_str(toml_with_embed_model).unwrap();
+        assert_eq!(config.embed_model, Some("bge-small-fast".to_string()));
+        assert!(config.onnx_model_path.is_none());
+        assert!(config.onnx_tokenizer_path.is_none());
+        assert!(config.validate().is_ok());
     }
 } 

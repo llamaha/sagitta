@@ -24,7 +24,7 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 
-use crate::{agent::events::AgentEvent, tools::{registry::ToolRegistry, types::Tool}, llm::client::{MessagePart, StreamChunk as SagittaCodeStreamChunk}, utils::errors::SagittaCodeError};
+use crate::{agent::events::{AgentEvent, ToolRunId}, tools::{registry::ToolRegistry, types::Tool}, llm::client::{MessagePart, StreamChunk as SagittaCodeStreamChunk}, utils::errors::SagittaCodeError};
 
 /// Error recovery strategy for failed tools
 #[derive(Debug, Clone)]
@@ -607,6 +607,29 @@ impl ToolExecutor for AgentToolExecutor {
 
         log::debug!("Found tool '{}', executing with args: {:?}", name, args);
 
+        // Generate unique run ID for this tool execution
+        let run_id = Uuid::new_v4();
+        
+        // Create progress channel for this tool run
+        let (progress_tx, mut progress_rx) = mpsc::channel::<StreamEvent>(200);
+        
+        // Emit tool run started event
+        if let Some(ref event_sender) = self.event_sender {
+            let _ = event_sender.send(AgentEvent::ToolRunStarted {
+                run_id,
+                tool: name.to_string(),
+            });
+        }
+        
+        // Spawn task to forward progress events
+        if let Some(event_sender) = self.event_sender.clone() {
+            tokio::spawn(async move {
+                while let Some(event) = progress_rx.recv().await {
+                    let _ = event_sender.send(AgentEvent::ToolStream { run_id, event });
+                }
+            });
+        }
+
         // Clone necessary data for the spawned task
         let tool_clone = tool.clone();
         let args_clone = args.clone();
@@ -615,6 +638,25 @@ impl ToolExecutor for AgentToolExecutor {
         
         // Spawn the tool execution on a separate task to prevent deadlocks
         let execution_task = tokio::spawn(async move {
+            // Special handling for progress-aware repository tools
+            if name_clone == "add_existing_repository" {
+                if let Some(add_tool) = tool_clone.as_any().downcast_ref::<crate::tools::repository::add::AddExistingRepositoryTool>() {
+                    // Create a new instance with progress sender
+                    let repo_manager = add_tool.repo_manager.clone();
+                    let progress_tool = crate::tools::repository::add::AddExistingRepositoryTool::new_with_progress_sender(
+                        repo_manager,
+                        Some(progress_tx.clone())
+                    );
+                    return progress_tool.execute(args_clone).await;
+                }
+            } else if name_clone == "sync_repository" {
+                if let Some(sync_tool) = tool_clone.as_any().downcast_ref::<crate::tools::repository::sync::SyncRepositoryTool>() {
+                    // For sync tool, we need to pass the progress sender to the sync operation
+                    // This requires modifying the sync tool to accept a progress sender
+                    // For now, fall through to standard execution
+                }
+            }
+            
             // Special handling for streaming shell execution
             if name_clone == "streaming_shell_execution" || name_clone == "shell_execution" {
                 if let Some(sender) = terminal_sender {
@@ -660,6 +702,16 @@ impl ToolExecutor for AgentToolExecutor {
                         
                         log::debug!("Tool '{}' completed successfully", name);
                         
+                        // Emit tool run completed event
+                        if let Some(ref event_sender) = self.event_sender {
+                            let success = matches!(tool_result, Ok(crate::tools::types::ToolResult::Success(_)));
+                            let _ = event_sender.send(AgentEvent::ToolRunCompleted {
+                                run_id,
+                                tool: name.to_string(),
+                                success,
+                            });
+                        }
+                        
                         match tool_result {
                             Ok(crate::tools::types::ToolResult::Success(data)) => {
                                 Ok(reasoning_engine::ToolResult::success(data, 0))
@@ -683,6 +735,16 @@ impl ToolExecutor for AgentToolExecutor {
                         let error_msg = sagitta_error.to_string();
                         self.track_tool_failure(name).await;
                         self.surface_error_to_llm_with_recovery(name, &error_msg, "execution_error", None).await;
+                        
+                        // Emit tool run completed event with failure
+                        if let Some(ref event_sender) = self.event_sender {
+                            let _ = event_sender.send(AgentEvent::ToolRunCompleted {
+                                run_id,
+                                tool: name.to_string(),
+                                success: false,
+                            });
+                        }
+                        
                         Ok(reasoning_engine::ToolResult::failure(error_msg, 0))
                     }
                 }
@@ -692,6 +754,16 @@ impl ToolExecutor for AgentToolExecutor {
                 let error_msg = format!("Tool '{}' timed out after {} seconds", name, timeout_seconds);
                 self.track_tool_failure(name).await;
                 self.surface_error_to_llm_with_recovery(name, &error_msg, "execution_timeout", None).await;
+                
+                // Emit tool run completed event with failure
+                if let Some(ref event_sender) = self.event_sender {
+                    let _ = event_sender.send(AgentEvent::ToolRunCompleted {
+                        run_id,
+                        tool: name.to_string(),
+                        success: false,
+                    });
+                }
+                
                 Ok(reasoning_engine::ToolResult::failure(error_msg, 0))
             }
         };

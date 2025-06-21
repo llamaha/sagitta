@@ -79,14 +79,12 @@ fn test_embedding_config_builder_pattern() {
     let config = EmbeddingConfigBuilder::new()
         .model_type(EmbeddingModelType::Onnx)
         .max_sessions(8)
-        .max_sequence_length(256)
         .expected_dimension(512)
         .tenant_id("test-tenant")
         .build_unchecked();
 
     assert_eq!(config.model_type, EmbeddingModelType::Onnx);
     assert_eq!(config.max_sessions, 8);
-    assert_eq!(config.max_sequence_length, 256);
     assert_eq!(config.expected_dimension, Some(512));
     assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
 }
@@ -95,11 +93,9 @@ fn test_embedding_config_builder_pattern() {
 fn test_embedding_config_fluent_interface() {
     let config = EmbeddingConfig::new()
         .with_max_sessions(16)
-        .with_max_sequence_length(512)
         .with_expected_dimension(768);
 
     assert_eq!(config.max_sessions, 16);
-    assert_eq!(config.max_sequence_length, 512);
     assert_eq!(config.expected_dimension, Some(768));
 }
 
@@ -144,7 +140,7 @@ fn test_embedding_config_validation_edge_cases() {
 }
 
 #[test]
-fn test_embedding_config_validation_sequence_length() {
+fn test_embedding_config_validation_basic() {
     let temp_dir = tempdir().unwrap();
     let model_path = temp_dir.path().join("model.onnx");
     let tokenizer_path = temp_dir.path().join("tokenizer.json");
@@ -153,27 +149,14 @@ fn test_embedding_config_validation_sequence_length() {
     fs::write(&model_path, "dummy model").unwrap();
     fs::write(&tokenizer_path, "dummy tokenizer").unwrap();
 
-    // Test valid sequence lengths
-    for seq_len in [1, 128, 512, 1024, 8192, 16384] {
-        let config = EmbeddingConfig {
-            model_type: EmbeddingModelType::Onnx,
-            onnx_model_path: Some(model_path.clone()),
-            onnx_tokenizer_path: Some(tokenizer_path.clone()),
-            max_sequence_length: seq_len,
-            ..Default::default()
-        };
-        assert!(config.validate().is_ok(), "Sequence length {} should be valid", seq_len);
-    }
-
-    // Test invalid sequence lengths
-    let config_zero = EmbeddingConfig {
+    // Test valid config
+    let config = EmbeddingConfig {
         model_type: EmbeddingModelType::Onnx,
         onnx_model_path: Some(model_path.clone()),
         onnx_tokenizer_path: Some(tokenizer_path.clone()),
-        max_sequence_length: 0,
         ..Default::default()
     };
-    assert!(config_zero.validate().is_err());
+    assert!(config.validate().is_ok(), "Valid config should pass validation");
 }
 
 #[test]

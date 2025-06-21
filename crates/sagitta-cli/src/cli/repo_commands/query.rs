@@ -69,7 +69,14 @@ where
     let cli_tenant_id = match cli_args.tenant_id.as_deref() {
         Some(id) => id,
         None => {
-            bail!("--tenant-id is required to query a repository.");
+            #[cfg(feature = "multi_tenant")]
+            {
+                bail!("--tenant-id is required to query a repository.");
+            }
+            #[cfg(not(feature = "multi_tenant"))]
+            {
+                "default"
+            }
         }
     };
 

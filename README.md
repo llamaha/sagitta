@@ -165,7 +165,7 @@ You can also override these via CLI arguments:
     cargo build --release --workspace --features cuda
     ```
 *   **Manage GPU Memory**: By default this tool may be bottlenecked by your available GPU memory. You can control GPU memory usage through the configuration file settings in the `[embedding]` section:
-    - `max_sessions`: Controls how many model instances run in parallel (directly affects GPU memory usage)
+    - Automatic session management optimizes GPU memory usage
     - `embedding_batch_size`: Controls batch size per model instance (affects VRAM per model)
 
 ### 5a. Using CPU-Only Mode
@@ -187,7 +187,7 @@ For CPU-only usage, especially on systems without dedicated GPUs:
 *   **Adjust Configuration**: In your `config.toml`, consider lower values for CPU usage:
     ```toml
     [embedding]
-    max_sessions = 2              # Fewer parallel sessions for CPU
+    # Session management is now automatic
     embedding_batch_size = 32     # Smaller batches for CPU
     ```
 

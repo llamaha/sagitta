@@ -26,7 +26,7 @@ vocabulary_base_path = "/absolute/path/to/vocab"
 
 # Embedding engine configuration
 [embedding]
-max_sessions = 4                    # Maximum number of concurrent ONNX sessions
+# Session management is now automatic
 max_sequence_length = 128           # Maximum sequence length for tokenization
 session_timeout_seconds = 300       # Session timeout in seconds (0 = no timeout)
 enable_session_cleanup = true       # Enable session cleanup on idle
@@ -102,22 +102,22 @@ vector_dimension = 384
 Embedding engine configuration. Example:
 ```toml
 [embedding]
-max_sessions = 4
+# Session management is now automatic
 max_sequence_length = 128
 session_timeout_seconds = 300
 enable_session_cleanup = true
 embedding_batch_size = 128
 ```
-- `max_sessions` (integer, default: 4): Maximum number of concurrent ONNX model instances for parallel embedding generation. Higher values allow more parallel processing but use more GPU memory. This directly controls GPU memory usage and the number of models that can run simultaneously.
+- Session management is now automatic, optimizing GPU memory usage based on available resources.
 - `max_sequence_length` (integer, default: 128): Maximum sequence length for tokenization. Longer sequences use more memory and processing time.
 - `session_timeout_seconds` (integer, default: 300): Session timeout in seconds. Set to 0 for no timeout.
 - `enable_session_cleanup` (bool, default: true): Enable automatic cleanup of idle sessions to free memory.
-- `embedding_batch_size` (integer, default: 128): Number of texts processed together by a single model instance. Higher values improve throughput per model but use more VRAM per model. This setting controls the batch size for individual model instances, while `max_sessions` controls how many models run in parallel.
+- `embedding_batch_size` (integer, default: 128): Number of texts processed together by a single model instance. Higher values improve throughput per model but use more VRAM per model.
 
 **Performance Tuning:**
-- **`max_sessions`**: Controls parallelism and GPU memory usage. Increase for more parallel processing (uses more GPU memory). Decrease to reduce memory usage.
+- **Session Management**: Automatic optimization of parallelism and GPU memory usage based on available resources.
 - **`embedding_batch_size`**: Controls throughput per model instance and VRAM per model. Increase for better throughput (uses more VRAM per model). Decrease to reduce memory usage per model.
-- **Interaction**: A single large operation (like `repo add`) will use up to `max_sessions` model instances in parallel, each processing `embedding_batch_size` texts at once.
+- **Interaction**: A single large operation (like `repo add`) will automatically manage model instances in parallel, each processing `embedding_batch_size` texts at once.
 
 **CUDA Support**: CUDA acceleration is automatically enabled if the application was compiled with CUDA support and compatible hardware is available. No configuration needed.
 
@@ -176,7 +176,7 @@ The embedding generation is now handled by the `sagitta-embed` crate which has i
 
 ### Embedding Engine Settings
 The embedding engine configuration in the `[embedding]` section is handled by the `sagitta-embed` crate:
-- `max_sessions`: Controls session pooling for parallel embedding generation
+- Automatic session pooling for parallel embedding generation
 - `max_sequence_length`: Controls tokenization limits
 - `session_timeout_seconds` and `enable_session_cleanup`: Control session lifecycle
 - `embedding_batch_size`: Controls batch size for individual model instances

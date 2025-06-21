@@ -110,7 +110,6 @@ let config = EmbeddingConfig {
     onnx_model_path: Some("model.onnx".into()),
     onnx_tokenizer_path: Some("tokenizer.json".into()),
     max_sessions: 4,
-    max_sequence_length: 512,
     expected_dimension: Some(384),
     session_timeout_seconds: 300,
     enable_session_cleanup: true,
@@ -136,7 +135,6 @@ The Sagitta embedding engine provides comprehensive performance optimization fea
 # Minimal config - everything else uses intelligent defaults
 [embedding]
 max_sessions = 4
-max_sequence_length = 512
 session_timeout_seconds = 300
 enable_session_cleanup = true
 embedding_batch_size = 192
@@ -148,6 +146,7 @@ embedding_batch_size = 192
 - 🎯 **Hardware Detection**: Automatically selects CUDA vs CPU based on availability
 - 💾 **Memory Management**: CPU arena allocator, memory pooling (512MB), pressure detection
 - 📊 **Dynamic Batching**: Adaptive batch sizes (1-32) targeting 100ms latency
+- 🔍 **Sequence Length Auto-Detection**: Automatically detects optimal sequence length from model and tokenizer (typically 512 for BGE models)
 - 🔄 **Safe Defaults**: Conservative but optimized settings that work everywhere
 
 **Default Performance Features (Enabled Automatically):**
@@ -222,7 +221,6 @@ Add these sections to your `config.toml` to enable advanced performance features
 # Basic embedding configuration (existing)
 [embedding]
 max_sessions = 4
-max_sequence_length = 512
 session_timeout_seconds = 300
 enable_session_cleanup = true
 embedding_batch_size = 192

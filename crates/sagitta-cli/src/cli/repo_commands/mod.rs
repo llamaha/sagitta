@@ -83,7 +83,14 @@ where
             let tenant_id = match cli_args.tenant_id.as_deref() {
                 Some(id) => id.to_string(),
                 None => {
-                    return Err(anyhow!("--tenant-id is required to add a repository."));
+                    #[cfg(feature = "multi_tenant")]
+                    {
+                        return Err(anyhow!("--tenant-id is required to add a repository."));
+                    }
+                    #[cfg(not(feature = "multi_tenant"))]
+                    {
+                        "default".to_string()
+                    }
                 }
             };
 
@@ -214,6 +221,7 @@ mod tests {
             qdrant_url: "http://localhost:6333".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             server_api_key_path: None,
             repositories_base_path: Some(base_path.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),
@@ -251,6 +259,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             server_api_key_path: None,
             repositories_base_path: Some(repo_base.to_string_lossy().into_owned()),
             vocabulary_base_path: Some(vocab_base.to_string_lossy().into_owned()),

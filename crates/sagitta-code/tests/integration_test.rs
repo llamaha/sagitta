@@ -398,7 +398,7 @@ async fn test_embedding_adapter_no_runtime_nesting() {
     // Create a basic embedding config for testing
     let embedding_config = EmbeddingConfig {
         model_type: EmbeddingModelType::Default,
-        max_sessions: 1,
+        // max_sessions removed - using automatic session management
         ..Default::default()
     };
     

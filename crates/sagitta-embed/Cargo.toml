@@ -34,6 +34,10 @@ futures = "0.3"
 num_cpus = "1.16"
 uuid = { version = "1.8", features = ["v4"] }
 
+# Model downloading
+hf-hub = "0.3.2"
+dirs = "5.0.1"
+
 [dev-dependencies]
 mockall = "0.12.1"
 tempfile = "3.10.1"

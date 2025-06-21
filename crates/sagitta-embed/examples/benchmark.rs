@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, config) in configs {
         println!("Benchmarking: {}", name);
         println!("Configuration:");
-        println!("  - Max sessions: {}", config.max_sessions);
+        println!("  - Session management: automatic");
         println!("  - Batch size: {}", config.get_embedding_batch_size());
         
         match run_benchmark(&config, &text_refs).await {
@@ -94,12 +94,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn create_config(model_path: &str, tokenizer_path: &str, max_sessions: usize, batch_size: usize) -> EmbeddingConfig {
-    EmbeddingConfig::new_onnx(PathBuf::from(model_path), PathBuf::from(tokenizer_path))
-        .with_max_sessions(max_sessions)
-        .with_max_sequence_length(512)
-        .with_session_timeout(300)
-        .with_embedding_batch_size(batch_size)
+fn create_config(model_path: &str, tokenizer_path: &str, sessions: usize, batch_size: usize) -> EmbeddingConfig {
+    EmbeddingConfig::new_onnx(
+        PathBuf::from(model_path),
+        PathBuf::from(tokenizer_path)
+    )
+    // max_sessions removed - using automatic session management
+    .with_embedding_batch_size(batch_size)
 }
 
 async fn run_benchmark(config: &EmbeddingConfig, texts: &[&str]) -> Result<(std::time::Duration, f64), Box<dyn std::error::Error>> {

@@ -1,6 +1,7 @@
 //! Model types and definitions for the Sagitta embedding engine.
 
 pub mod types;
+pub mod download;
 
 use crate::error::Result;
 use crate::provider::EmbeddingProvider;
@@ -87,6 +88,18 @@ impl EmbeddingModel {
             onnx_tokenizer_path: Some(tokenizer_path.as_ref().to_path_buf()),
             tenant_id: None,
         })
+    }
+
+    /// Creates a new ONNX-based EmbeddingModel from a downloaded model.
+    #[cfg(feature = "onnx")]
+    pub fn from_downloaded_model(model: &download::EmbeddingModel) -> Result<Self> {
+        use crate::model::download::ModelDownloader;
+        
+        let downloader = ModelDownloader::new()?;
+        let paths = downloader.download_model(model)?;
+        let tokenizer_dir = paths.tokenizer_dir()?;
+        
+        Self::new_onnx(paths.model_path, tokenizer_dir)
     }
 
     /// Get the type of the embedding model.

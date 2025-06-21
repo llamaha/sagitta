@@ -31,7 +31,7 @@ pub struct AddExistingRepositoryParams {
 /// Tool for adding existing repositories to the management system
 #[derive(Debug)]
 pub struct AddExistingRepositoryTool {
-    repo_manager: Arc<Mutex<RepositoryManager>>,
+    pub repo_manager: Arc<Mutex<RepositoryManager>>,
     progress_sender: Option<mpsc::Sender<StreamEvent>>,
 }
 

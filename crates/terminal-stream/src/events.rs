@@ -130,6 +130,17 @@ impl StreamEvent {
         }
     }
 
+    /// Create a tool started event (convenience method)
+    pub fn tool_started(tool: &str, run_id: Uuid) -> Self {
+        Self::system(format!("🔧 {} started ({})", tool, run_id))
+    }
+
+    /// Create a tool completed event (convenience method)
+    pub fn tool_completed(tool: &str, run_id: Uuid, success: bool) -> Self {
+        let status = if success { "✅ completed" } else { "❌ failed" };
+        Self::system(format!("{} {} ({})", tool, status, run_id))
+    }
+
     /// Get the timestamp of this event
     pub fn timestamp(&self) -> DateTime<Utc> {
         match self {

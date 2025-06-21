@@ -69,6 +69,43 @@ def quantize_onnx_model(model_path, quantized_model_path):
         print(f"Error during quantization: {e}", file=sys.stderr)
         return None
 
+def get_model_max_sequence_length(model_name):
+    """
+    Try to detect the model's maximum sequence length from its configuration.
+    
+    Args:
+        model_name (str): Name of the model
+        
+    Returns:
+        int: Maximum sequence length, defaults to 512 if not found
+    """
+    try:
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(model_name)
+        
+        # Try different possible attribute names for max sequence length
+        max_seq_attrs = ['max_position_embeddings', 'n_positions', 'max_sequence_length', 'model_max_length']
+        
+        for attr in max_seq_attrs:
+            if hasattr(config, attr):
+                max_len = getattr(config, attr)
+                if max_len and max_len > 0:
+                    print(f"✓ Detected max sequence length from model config.{attr}: {max_len}")
+                    return max_len
+        
+        # Fallback: check tokenizer config
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if hasattr(tokenizer, 'model_max_length') and tokenizer.model_max_length < 1000000:  # Reasonable upper bound
+            print(f"✓ Detected max sequence length from tokenizer: {tokenizer.model_max_length}")
+            return tokenizer.model_max_length
+            
+    except Exception as e:
+        print(f"⚠ Could not auto-detect sequence length: {e}")
+    
+    # Default fallback
+    print("ℹ Using default sequence length: 512")
+    return 512
+
 def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_name=DEFAULT_MODEL_NAME, quantized=False):
     """
     Downloads a Sentence Transformer model and converts it to ONNX format
@@ -102,7 +139,8 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
     onnx_export_model.eval()
 
     # Prepare dummy inputs for tracing (adjust sequence length if needed)
-    seq_len = 128 # Common sequence length for ST models, check model config if unsure
+    # BGE models typically support up to 512 tokens
+    seq_len = get_model_max_sequence_length(model_name)
     dummy_input_ids = torch.ones(1, seq_len, dtype=torch.long)
     dummy_attention_mask = torch.ones(1, seq_len, dtype=torch.long)
 
@@ -111,7 +149,7 @@ def download_and_convert_st_model_to_onnx(output_dir=DEFAULT_OUTPUT_DIR, model_n
     # Output name corresponds to the pooled sentence embeddings
     output_names = ["sentence_embedding"]
 
-    # Define dynamic axes
+    # Define dynamic axes - but use 512 as the typical max for BGE
     dynamic_axes = {
         "input_ids": {0: "batch_size", 1: "sequence_length"},
         "attention_mask": {0: "batch_size", 1: "sequence_length"},
@@ -221,7 +259,9 @@ def verify_onnx_model(onnx_path, tokenizer_dir, model_name, quantized=False):
 
         # Prepare sample input text for verification (using a general text sample)
         text = "The quick brown fox jumps over the lazy dog."
-        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=128) # Use same max_length as dummy
+        # Use the same max_length as was used during export
+        max_length = get_model_max_sequence_length(model_name)
+        inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=max_length)
 
         # ONNX inference
         onnx_inputs = {

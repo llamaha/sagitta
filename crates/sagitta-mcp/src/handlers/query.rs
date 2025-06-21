@@ -60,37 +60,47 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     };
 
     // Perform tenant check and get the tenant_id to use for the collection
-    let tenant_id_for_collection_str: String = match (&acting_tenant_id, &repo_config.tenant_id) {
-        (Some(act_tid), Some(repo_tid)) => {
-            if act_tid == repo_tid {
-                info!(repo_name = %params.repository_name, acting_tenant_id = %act_tid, "Tenant ID match successful for query.");
-                repo_tid.clone() // Use this tenant ID for the collection
-            } else {
-                warn!(
-                    acting_tenant_id = %act_tid,
-                    repo_tenant_id = %repo_tid,
-                    repo_name = %params.repository_name,
-                    "Access denied: Acting tenant ID does not match repository's tenant ID for query."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: Tenant ID mismatch for query operation.".to_string(),
-                    data: None,
-                });
+    let tenant_id_for_collection_str: String = {
+        #[cfg(feature = "multi_tenant")]
+        {
+            match (&acting_tenant_id, &repo_config.tenant_id) {
+                (Some(act_tid), Some(repo_tid)) => {
+                    if act_tid == repo_tid {
+                        info!(repo_name = %params.repository_name, acting_tenant_id = %act_tid, "Tenant ID match successful for query.");
+                        repo_tid.clone() // Use this tenant ID for the collection
+                    } else {
+                        warn!(
+                            acting_tenant_id = %act_tid,
+                            repo_tenant_id = %repo_tid,
+                            repo_name = %params.repository_name,
+                            "Access denied: Acting tenant ID does not match repository's tenant ID for query."
+                        );
+                        return Err(ErrorObject {
+                            code: error_codes::ACCESS_DENIED,
+                            message: "Access denied: Tenant ID mismatch for query operation.".to_string(),
+                            data: None,
+                        });
+                    }
+                }
+                _ => { // All other cases: (None, Some), (Some, None), (None, None) -> Deny
+                    warn!(
+                        acting_tenant_id = ?acting_tenant_id,
+                        repo_tenant_id = ?repo_config.tenant_id,
+                        repo_name = %params.repository_name,
+                        "Access denied: Tenant ID mismatch or missing for query. Both acting context and repository must have a matching, defined tenant ID."
+                    );
+                    return Err(ErrorObject {
+                        code: error_codes::ACCESS_DENIED,
+                        message: "Access denied: Query requires matching and defined tenant IDs for both context and repository.".to_string(),
+                        data: None,
+                    });
+                }
             }
         }
-        _ => { // All other cases: (None, Some), (Some, None), (None, None) -> Deny
-            warn!(
-                acting_tenant_id = ?acting_tenant_id,
-                repo_tenant_id = ?repo_config.tenant_id,
-                repo_name = %params.repository_name,
-                "Access denied: Tenant ID mismatch or missing for query. Both acting context and repository must have a matching, defined tenant ID."
-            );
-            return Err(ErrorObject {
-                code: error_codes::ACCESS_DENIED,
-                message: "Access denied: Query requires matching and defined tenant IDs for both context and repository.".to_string(),
-                data: None,
-            });
+        #[cfg(not(feature = "multi_tenant"))]
+        {
+            info!(repo_name = %params.repository_name, "Multi-tenancy disabled, using default tenant ID for query");
+            repo_config.tenant_id.as_ref().unwrap_or(&"default".to_string()).clone()
         }
     };
 
