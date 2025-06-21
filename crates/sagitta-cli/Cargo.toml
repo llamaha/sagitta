@@ -39,6 +39,7 @@ cli_feature = [] # Renamed to avoid conflict with potential 'cli' dependency fea
 onetime_rayon_feature = ["dep:rayon"] # Renamed 
 onnx_feature = ["dep:ort"]          # Renamed
 cuda = ["ort/cuda"]
+multi_tenant = []
 
 [dependencies]
 git-manager = { path = "../git-manager" }

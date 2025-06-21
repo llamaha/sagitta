@@ -302,6 +302,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             server_api_key_path: None,
             repositories_base_path: None,
             vocabulary_base_path: None,
@@ -333,6 +334,7 @@ mod tests {
         let repo_name_str = "test_repo";
 
         let config = AppConfig {
+            embed_model: None,
             qdrant_url: "http://localhost:6334".to_string(),
             repositories: vec![],
             active_repository: None,
@@ -427,6 +429,7 @@ mod tests {
         let repo_name_str = "existing_repo";
 
         let config = AppConfig {
+            embed_model: None,
             qdrant_url: "http://localhost:6334".to_string(),
             repositories: vec![],
             active_repository: None,
@@ -526,6 +529,7 @@ mod tests {
         let client_arc = Arc::new(manual_mock_client.clone());
 
         let config = AppConfig {
+            embed_model: None,
             qdrant_url: "http://localhost:6334".to_string(),
             repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
             onnx_model_path: None,
@@ -624,6 +628,7 @@ mod tests {
         let client_arc = Arc::new(manual_mock_client.clone());
 
         let config = AppConfig {
+            embed_model: None,
             qdrant_url: "http://localhost:6334".to_string(),
             repositories_base_path: Some(temp_dir.path().to_string_lossy().into_owned()),
             onnx_model_path: None,
@@ -727,6 +732,7 @@ mod tests {
         let client_arc = Arc::new(manual_mock_client.clone());
 
         let config = AppConfig {
+            embed_model: None,
             qdrant_url: "http://localhost:6334".to_string(),
             repositories: vec![],
             active_repository: None,

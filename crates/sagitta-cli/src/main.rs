@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
 
     // If still no tenant_id (and not Init cmd), error out for tenant-aware commands
     let needs_tenant = matches!(args.command, sagitta_cli::cli::Commands::Repo(_) | sagitta_cli::cli::Commands::Edit(_));
+    #[cfg(feature = "multi_tenant")]
     if needs_tenant && args.tenant_id.is_none() {
         // For non-Init commands, if tenant_id is still None after checking args and config (from init),
         // then it means the init step didn't set one or it was removed. This is an error for tenant-aware commands.
@@ -62,17 +63,23 @@ async fn main() -> Result<()> {
         config.onnx_tokenizer_path = Some(PathBuf::from(tokenizer_path_str).to_string_lossy().into_owned());
     }
 
-    // Ensure required ONNX files exist if not provided by default config
-    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
+    // Ensure required model configuration exists
+    if config.embed_model.is_none() && (config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none()) {
         return Err(anyhow!(
-            "ONNX model path or tokenizer path not specified.\n\
-Please provide them via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir), \
-or ensure they are set in the configuration file.\n\
-\nExample config.toml entries:\n\
+            "No embedding model configuration found.\n\
+Please provide one of the following:\n\
+1. Set 'embed_model' in config.toml (e.g., embed_model = \"bge-small-fast\" or \"bge-small-fp32\")\n\
+2. Provide ONNX paths via CLI arguments (--onnx-model-path, --onnx-tokenizer-dir)\n\
+3. Set ONNX paths in config.toml:\n\
     onnx_model_path = \"/absolute/path/to/model.onnx\"\n\
     onnx_tokenizer_path = \"/absolute/path/to/tokenizer.json\"\n\
-\nSee the README section 'Setting ONNX Model and Tokenizer Paths in config.toml' for more details."
+\nNote: 'embed_model' and ONNX paths cannot be used together."
         ));
+    }
+    
+    // Validate configuration
+    if let Err(e) = config.validate() {
+        return Err(anyhow!("Configuration validation error: {}", e));
     }
 
     // Initialize Qdrant client

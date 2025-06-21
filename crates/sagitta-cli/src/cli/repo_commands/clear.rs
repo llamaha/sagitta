@@ -36,7 +36,14 @@ where
     let cli_tenant_id = match cli_args.tenant_id.as_deref() {
         Some(id) => id,
         None => {
-            config.tenant_id.as_deref().ok_or_else(|| anyhow!("--tenant-id is required (or set tenant_id in config) to clear a repository."))?
+            #[cfg(feature = "multi_tenant")]
+            {
+                config.tenant_id.as_deref().ok_or_else(|| anyhow!("--tenant-id is required (or set tenant_id in config) to clear a repository."))?
+            }
+            #[cfg(not(feature = "multi_tenant"))]
+            {
+                "default"
+            }
         }
     };
 

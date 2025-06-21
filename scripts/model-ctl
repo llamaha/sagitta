@@ -1,0 +1,657 @@
+#!/usr/bin/env python3
+"""
+model-ctl - Unified model optimization tool for Sagitta
+Optimizes embedding models for GPU (FP16) or CPU (optimized quantization).
+"""
+
+import os
+import sys
+import torch
+import argparse
+import numpy as np
+from pathlib import Path
+from transformers import AutoModel, AutoTokenizer
+import logging
+import shutil
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+# Default model and settings
+DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+DEFAULT_MAX_SEQUENCE_LENGTH = 384  # Optimized for performance
+
+def mean_pooling(model_output, attention_mask):
+    """Mean pooling for sentence embeddings"""
+    token_embeddings = model_output[0]
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+    sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+    return sum_embeddings / sum_mask
+
+class SentenceTransformerONNX(torch.nn.Module):
+    """Wrapper model for ONNX export with proper pooling and normalization"""
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, input_ids, attention_mask):
+        model_output = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        sentence_embeddings = mean_pooling(model_output, attention_mask)
+        sentence_embeddings = torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
+        return sentence_embeddings
+
+def export_base_model(model, tokenizer, output_dir, max_seq_length=DEFAULT_MAX_SEQUENCE_LENGTH):
+    """Export base ONNX model before optimization"""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    
+    # Wrap model
+    export_model = SentenceTransformerONNX(model)
+    export_model.eval()
+    
+    # Create dummy inputs
+    dummy_input_ids = torch.ones(1, max_seq_length, dtype=torch.long, device=device)
+    dummy_attention_mask = torch.ones(1, max_seq_length, dtype=torch.long, device=device)
+    
+    # Export settings
+    input_names = ["input_ids", "attention_mask"]
+    output_names = ["sentence_embedding"]
+    dynamic_axes = {
+        "input_ids": {0: "batch_size"},
+        "attention_mask": {0: "batch_size"},
+        "sentence_embedding": {0: "batch_size"}
+    }
+    
+    # Export path
+    base_model_path = os.path.join(output_dir, "model_base.onnx")
+    
+    logger.info("Exporting base ONNX model...")
+    torch.onnx.export(
+        export_model,
+        (dummy_input_ids, dummy_attention_mask),
+        base_model_path,
+        export_params=True,
+        opset_version=17,  # Use opset 17 for LayerNormalization support
+        do_constant_folding=True,
+        input_names=input_names,
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+        verbose=False
+    )
+    
+    return base_model_path
+
+def optimize_for_gpu(model_path, output_path, model_name=None):
+    """Optimize model for GPU with FP16"""
+    # First, try to use Qdrant's pre-optimized GPU model if available
+    if model_name:
+        output_dir = os.path.dirname(output_path)
+        qdrant_model = download_qdrant_optimized_model(model_name, output_dir, target='gpu')
+        if qdrant_model:
+            # Apply FP16 conversion to the Qdrant model
+            try:
+                import onnx
+                from onnxconverter_common import float16
+                
+                logger.info("Converting Qdrant model to FP16 for GPU...")
+                model = onnx.load(qdrant_model)
+                model_fp16 = float16.convert_float_to_float16(
+                    model,
+                    keep_io_types=True,
+                    disable_shape_infer=False,
+                    op_block_list=['DynamicQuantizeLinear', 'QuantizeLinear']
+                )
+                
+                # Save to output path
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                onnx.save(model_fp16, output_path)
+                
+                # Clean up temp file
+                os.remove(qdrant_model)
+                
+                logger.info(f"✓ GPU model saved: {output_path}")
+                logger.info("Using Qdrant pre-optimized model converted to FP16")
+                return output_path
+            except Exception as e:
+                logger.warning(f"Failed to convert Qdrant model to FP16: {e}")
+                # Fall through to manual optimization
+    
+    # Manual optimization
+    try:
+        import onnx
+        import onnxsim
+        
+        logger.info("Optimizing for GPU (FP16)...")
+        
+        # Load model
+        model = onnx.load(model_path)
+        
+        # Note: onnx.optimizer was deprecated, we'll rely on onnxsim for optimization
+        
+        # Simplify
+        logger.info("Simplifying model...")
+        model_simp, check = onnxsim.simplify(
+            model,
+            check_n=3,
+            perform_optimization=True,
+            skip_fuse_bn=False,
+            skip_shape_inference=False
+        )
+        
+        if not check:
+            logger.warning("Simplification check failed, using optimized model")
+            model_simp = model
+        
+        # Convert to FP16
+        logger.info("Converting to FP16...")
+        from onnxconverter_common import float16
+        model_fp16 = float16.convert_float_to_float16(
+            model_simp,
+            keep_io_types=True,
+            disable_shape_infer=False,
+            op_block_list=['DynamicQuantizeLinear', 'QuantizeLinear']
+        )
+        
+        onnx.save(model_fp16, output_path)
+        logger.info(f"✓ GPU model saved: {output_path}")
+        
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"GPU optimization failed: {e}")
+        return None
+
+def download_qdrant_optimized_model(model_name, output_dir, target='cpu'):
+    """Download pre-optimized model from Qdrant"""
+    try:
+        from huggingface_hub import snapshot_download
+        
+        # Map model names to Qdrant optimized versions
+        if target == 'cpu':
+            qdrant_models = {
+                "BAAI/bge-small-en-v1.5": "Qdrant/bge-small-en-v1.5-onnx-Q",
+                "BAAI/bge-base-en-v1.5": "Qdrant/bge-base-en-v1.5-onnx-Q",
+                "BAAI/bge-large-en-v1.5": "Qdrant/bge-large-en-v1.5-onnx-Q"
+            }
+        else:  # GPU
+            # Use Xenova models as they're well-maintained ONNX conversions
+            qdrant_models = {
+                "BAAI/bge-small-en-v1.5": "Xenova/bge-small-en-v1.5",
+                "BAAI/bge-base-en-v1.5": "Xenova/bge-base-en-v1.5", 
+                "BAAI/bge-large-en-v1.5": "Qdrant/bge-large-en-v1.5-onnx"
+            }
+        
+        if model_name not in qdrant_models:
+            logger.info(f"No Qdrant optimized {target.upper()} version available for {model_name}")
+            return None
+            
+        qdrant_model = qdrant_models[model_name]
+        logger.info(f"Downloading pre-optimized {target.upper()} model from {qdrant_model}...")
+        
+        # Download the model
+        cache_dir = snapshot_download(qdrant_model)
+        
+        # Look for model files (Xenova stores in onnx/ subdirectory)
+        possible_paths = [
+            ("model_optimized.onnx", cache_dir),
+            ("model.onnx", cache_dir),
+            ("model.onnx", os.path.join(cache_dir, "onnx")),
+            ("model_quantized.onnx", os.path.join(cache_dir, "onnx"))
+        ]
+        
+        for filename, directory in possible_paths:
+            model_file = os.path.join(directory, filename)
+            if os.path.exists(model_file):
+                # Check opset version and fix if needed
+                import onnx
+                model = onnx.load(model_file)
+                
+                # Check if we need to upgrade opset version
+                if model.opset_import[0].version < 17:
+                    logger.info(f"Upgrading model from opset {model.opset_import[0].version} to opset 17...")
+                    from onnx import version_converter
+                    model = version_converter.convert_version(model, 17)
+                    
+                    # Save the upgraded model
+                    temp_file = os.path.join(output_dir, "temp_model.onnx")
+                    onnx.save(model, temp_file)
+                    shutil.move(temp_file, os.path.join(output_dir, "model_optimized.onnx"))
+                    return os.path.join(output_dir, "model_optimized.onnx")
+                else:
+                    shutil.copy2(model_file, output_dir)
+                    return os.path.join(output_dir, "model_optimized.onnx")
+        
+        logger.error(f"No model file found in {cache_dir}")
+        return None
+            
+    except Exception as e:
+        logger.error(f"Failed to download Qdrant model: {e}")
+        return None
+
+def optimize_for_cpu(model_path, output_path, model_name=None):
+    """Optimize model for CPU using pre-optimized models when available"""
+    # First, try to use Qdrant's pre-optimized model
+    if model_name:
+        output_dir = os.path.dirname(output_path)
+        qdrant_model = download_qdrant_optimized_model(model_name, output_dir, target='cpu')
+        if qdrant_model:
+            # Rename to desired output path
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            os.rename(qdrant_model, output_path)
+            logger.info(f"✓ Using Qdrant pre-optimized model: {output_path}")
+            logger.info("This uses static INT8 quantization optimized for CPU performance")
+            return output_path
+    
+    # Fallback to manual optimization
+    try:
+        import onnx
+        import onnxsim
+        from onnxruntime.quantization import quantize_static, QuantType, CalibrationDataReader
+        import numpy as np
+        
+        logger.info("Creating custom CPU-optimized model...")
+        
+        # Load model
+        model = onnx.load(model_path)
+        
+        # First simplify the model
+        logger.info("Applying graph optimizations...")
+        model_simp, check = onnxsim.simplify(
+            model,
+            check_n=3,
+            perform_optimization=True,
+            skip_fuse_bn=False,
+            skip_shape_inference=False
+        )
+        
+        if not check:
+            logger.warning("Simplification check failed, using original model")
+            model_simp = model
+        
+        # Save simplified model temporarily
+        temp_path = output_path + ".temp"
+        onnx.save(model_simp, temp_path)
+        
+        # Apply ONNX Runtime optimizations
+        logger.info("Applying ONNX Runtime optimizations...")
+        import onnxruntime as ort
+        
+        # Create optimized model using ONNX Runtime with Level 3 optimization
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.optimized_model_filepath = temp_path + ".opt"
+        
+        # Use all CPU threads for optimization
+        cpu_count = configure_cpu_threads()
+        sess_options.intra_op_num_threads = cpu_count
+        sess_options.inter_op_num_threads = 1  # FastEmbed uses 1
+        
+        # Load with optimization
+        _ = ort.InferenceSession(temp_path, sess_options, providers=['CPUExecutionProvider'])
+        
+        # Use the optimized model if it exists
+        if os.path.exists(temp_path + ".opt"):
+            temp_path = temp_path + ".opt"
+        
+        # For static quantization, we need calibration data
+        logger.info("Applying static INT8 quantization...")
+        
+        # Create simple calibration data reader
+        class SimpleCalibrationDataReader(CalibrationDataReader):
+            def __init__(self, model_path, batch_size=1, num_samples=100):
+                self.model_path = model_path
+                self.batch_size = batch_size
+                self.num_samples = num_samples
+                self.current = 0
+                
+                # Get input shape from model
+                sess = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+                self.input_name = sess.get_inputs()[0].name
+                self.input_shape = sess.get_inputs()[0].shape
+                # Handle dynamic batch size
+                if self.input_shape[0] == 'batch_size' or self.input_shape[0] == -1:
+                    self.input_shape = [batch_size] + list(self.input_shape[1:])
+                
+            def get_next(self):
+                if self.current >= self.num_samples:
+                    return None
+                    
+                # Generate random input data for calibration
+                input_data = np.random.randint(0, 1000, size=self.input_shape, dtype=np.int64)
+                self.current += 1
+                return {self.input_name: input_data}
+        
+        # Try static quantization first
+        try:
+            from onnxruntime.quantization import quantize_static
+            
+            calibration_reader = SimpleCalibrationDataReader(temp_path)
+            quantize_static(
+                temp_path,
+                output_path,
+                calibration_data_reader=calibration_reader,
+                weight_type=QuantType.QInt8,
+                per_channel=True,
+                reduce_range=False,
+                extra_options={
+                    'ActivationSymmetric': True,
+                    'WeightSymmetric': True,
+                }
+            )
+            logger.info(f"✓ CPU model saved with static quantization: {output_path}")
+            
+        except Exception as e:
+            logger.warning(f"Static quantization failed: {e}, falling back to dynamic quantization")
+            
+            # Fallback to dynamic quantization
+            from onnxruntime.quantization import quantize_dynamic
+            quantize_dynamic(
+                temp_path,
+                output_path,
+                weight_type=QuantType.QInt8,
+                per_channel=True,
+                reduce_range=False,
+                extra_options={
+                    'ActivationSymmetric': True,
+                    'WeightSymmetric': True,
+                }
+            )
+            logger.info(f"✓ CPU model saved with dynamic quantization: {output_path}")
+        
+        # Clean up temp files
+        for temp_file in [output_path + ".temp", output_path + ".temp.opt"]:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"CPU optimization failed: {e}")
+        logger.info("Falling back to FP32 optimized model")
+        
+        # Fallback to optimized FP32
+        try:
+            import onnx
+            import onnxsim
+            
+            model = onnx.load(model_path)
+            model_simp, check = onnxsim.simplify(
+                model,
+                check_n=3,
+                perform_optimization=True,
+                skip_fuse_bn=False,
+                skip_shape_inference=False
+            )
+            
+            if check:
+                onnx.save(model_simp, output_path)
+                logger.info(f"✓ CPU model saved (FP32 optimized): {output_path}")
+                return output_path
+        except:
+            pass
+            
+        return None
+
+def configure_cpu_threads():
+    """Configure CPU to use all available cores"""
+    import multiprocessing
+    cpu_count = multiprocessing.cpu_count()
+    
+    # Set environment variables for maximum CPU utilization
+    os.environ['OMP_NUM_THREADS'] = str(cpu_count)
+    os.environ['MKL_NUM_THREADS'] = str(cpu_count)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_count)
+    os.environ['BLIS_NUM_THREADS'] = str(cpu_count)
+    
+    # Set torch threads
+    if hasattr(torch, 'set_num_threads'):
+        torch.set_num_threads(cpu_count)
+    
+    logger.info(f"Configured to use all {cpu_count} CPU cores")
+    return cpu_count
+
+def verify_model(model_path, tokenizer_path, target='gpu'):
+    """Verify the optimized model"""
+    try:
+        import onnx
+        import onnxruntime as ort
+        
+        logger.info(f"Verifying {target.upper()} model...")
+        
+        # Check model
+        onnx_model = onnx.load(model_path)
+        onnx.checker.check_model(onnx_model)
+        
+        # Configure session
+        providers = []
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        
+        if target == 'gpu':
+            available = ort.get_available_providers()
+            if 'TensorrtExecutionProvider' in available:
+                providers.append(('TensorrtExecutionProvider', {
+                    'trt_fp16_enable': True,
+                    'trt_engine_cache_enable': True,
+                }))
+            if 'CUDAExecutionProvider' in available:
+                providers.append(('CUDAExecutionProvider', {
+                    'arena_extend_strategy': 'kNextPowerOfTwo',
+                    'cudnn_conv_algo_search': 'EXHAUSTIVE',
+                }))
+        else:  # CPU
+            cpu_count = configure_cpu_threads()
+            sess_options.intra_op_num_threads = cpu_count
+            sess_options.inter_op_num_threads = 1  # FastEmbed uses 1 for inter-op
+            sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            
+        providers.append('CPUExecutionProvider')
+        
+        # Create session
+        session = ort.InferenceSession(model_path, sess_options, providers=providers)
+        logger.info(f"Provider: {session.get_providers()[0]}")
+        
+        # Test inference
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        test_texts = ["Test sentence for model verification."]
+        
+        # Get the model's expected sequence length from its inputs
+        model_inputs = session.get_inputs()
+        expected_seq_length = model_inputs[0].shape[1] if len(model_inputs[0].shape) > 1 else DEFAULT_MAX_SEQUENCE_LENGTH
+        
+        inputs = tokenizer(test_texts, return_tensors="np", padding='max_length', 
+                          truncation=True, max_length=expected_seq_length)
+        
+        outputs = session.run(None, {
+            "input_ids": inputs['input_ids'],
+            "attention_mask": inputs['attention_mask']
+        })
+        
+        logger.info(f"✓ Output shape: {outputs[0].shape}")
+        logger.info(f"✓ Model verified successfully")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Verification failed: {e}")
+        return False
+
+def clean_old_scripts(scripts_dir):
+    """Remove old conversion scripts"""
+    old_scripts = [
+        'convert_bge_dynamic_batching.py',
+        'convert_bge_small_gpu_fp16.py',
+        'convert_bge_small_model.py',
+        'optimize_bge_for_gpu.py',
+        'simplify_onnx_model.py',
+        'optimize_bge_model.py'
+    ]
+    
+    for script in old_scripts:
+        script_path = os.path.join(scripts_dir, script)
+        if os.path.exists(script_path):
+            os.remove(script_path)
+            logger.info(f"Removed old script: {script}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="model-ctl - Unified model optimization tool for Sagitta",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Optimize for GPU (uses Qdrant pre-optimized models when available, converts to FP16)
+  ./model-ctl gpu
+
+  # Optimize for CPU (uses Qdrant pre-quantized INT8 models when available) 
+  ./model-ctl cpu
+
+  # Create both GPU and CPU optimized models
+  ./model-ctl all
+
+  # Use a different model
+  ./model-ctl gpu --model BAAI/bge-base-en-v1.5
+
+  # Clean up old scripts
+  ./model-ctl clean
+
+Note: The script will try to use pre-optimized models when available:
+  - CPU: Uses Qdrant's pre-quantized INT8 models (e.g., Qdrant/bge-small-en-v1.5-onnx-Q)
+  - GPU: Uses Xenova/Qdrant ONNX models and converts to FP16 for optimal GPU performance
+
+Hardware Compatibility:
+  - Works on any hardware with ONNX Runtime support
+  - GPU optimization produces FP16 models compatible with NVIDIA, AMD, Intel GPUs
+  - CPU optimization produces INT8 models optimized for x86_64 and ARM processors
+  - Automatically falls back to manual optimization if pre-optimized models unavailable
+"""
+    )
+    
+    parser.add_argument(
+        'command',
+        choices=['gpu', 'cpu', 'all', 'clean'],
+        help='Command to run: gpu (FP16), cpu (S8S8 quantized), all (both), clean (remove old scripts)'
+    )
+    
+    parser.add_argument(
+        '--model',
+        type=str,
+        default=DEFAULT_MODEL_NAME,
+        help=f'Model to optimize (default: {DEFAULT_MODEL_NAME})'
+    )
+    
+    parser.add_argument(
+        '--output-dir',
+        type=str,
+        default='models',
+        help='Output directory (default: models)'
+    )
+    
+    parser.add_argument(
+        '--max-sequence-length',
+        type=int,
+        default=DEFAULT_MAX_SEQUENCE_LENGTH,
+        help=f'Maximum sequence length (default: {DEFAULT_MAX_SEQUENCE_LENGTH})'
+    )
+    
+    parser.add_argument(
+        '--skip-verify',
+        action='store_true',
+        help='Skip model verification'
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle clean command
+    if args.command == 'clean':
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        clean_old_scripts(scripts_dir)
+        logger.info("Cleanup complete")
+        return
+    
+    # Ensure we have required packages
+    package_checks = [
+        ('onnx', 'onnx'),
+        ('onnxruntime', 'onnxruntime'),
+        ('onnxsim', 'onnx-simplifier'),  # imports as onnxsim, installs as onnx-simplifier
+        ('onnxconverter_common', 'onnxconverter-common'),
+        ('huggingface_hub', 'huggingface-hub')
+    ]
+    missing = []
+    for import_name, install_name in package_checks:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(install_name)
+    
+    if missing:
+        logger.error(f"Missing required packages: {', '.join(missing)}")
+        logger.error(f"Install with: pip install {' '.join(missing)}")
+        sys.exit(1)
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Configure CPU threads for maximum performance
+    if args.command in ['cpu', 'all']:
+        configure_cpu_threads()
+    
+    # Load model and tokenizer
+    logger.info(f"Loading {args.model}...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        model = AutoModel.from_pretrained(args.model)
+        
+        # Save tokenizer files directly to output directory
+        tokenizer_path = args.output_dir
+        tokenizer.save_pretrained(tokenizer_path)
+        
+    except Exception as e:
+        logger.error(f"Failed to load model: {e}")
+        sys.exit(1)
+    
+    # Export base model
+    base_model = export_base_model(model, tokenizer, args.output_dir, args.max_sequence_length)
+    
+    # Process based on command
+    success = True
+    
+    if args.command in ['gpu', 'all']:
+        if args.command == 'all':
+            # When doing both, use different names
+            gpu_path = os.path.join(args.output_dir, "model_gpu.onnx")
+        else:
+            gpu_path = os.path.join(args.output_dir, "model.onnx")
+            
+        if optimize_for_gpu(base_model, gpu_path, args.model):
+            if not args.skip_verify:
+                verify_model(gpu_path, tokenizer_path, 'gpu')
+        else:
+            success = False
+    
+    if args.command in ['cpu', 'all']:
+        if args.command == 'all':
+            # When doing both, use different names
+            cpu_path = os.path.join(args.output_dir, "model_cpu.onnx")
+        else:
+            cpu_path = os.path.join(args.output_dir, "model.onnx")
+            
+        if optimize_for_cpu(base_model, cpu_path, args.model):
+            if not args.skip_verify:
+                verify_model(cpu_path, tokenizer_path, 'cpu')
+        else:
+            success = False
+    
+    # Clean up base model
+    if os.path.exists(base_model):
+        os.remove(base_model)
+    
+    if success:
+        logger.info("\n✅ Optimization complete!")
+        logger.info(f"📁 Models saved to: {os.path.abspath(args.output_dir)}")
+
+if __name__ == "__main__":
+    main()

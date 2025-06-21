@@ -29,12 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Configure the embedding pipeline
-    let embedding_config = EmbeddingConfig::new()
+    let config = EmbeddingConfig::default()
         .with_model_type(EmbeddingModelType::Onnx)
-        .with_max_sessions(2)                  // ⭐ This controls GPU memory usage (configurable in config.toml)
-        .with_max_sequence_length(512)
-        .with_expected_dimension(384)
-        .with_session_timeout(300)
+        // max_sessions removed - using automatic session management
         .with_embedding_batch_size(128); // Add the new field
 
     // Set the ONNX paths
@@ -43,15 +40,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         onnx_tokenizer_path: Some(tokenizer_path.into()),
         enable_session_cleanup: true,
         tenant_id: None,
-        ..embedding_config
+        ..config
     };
 
-    // Create processing config that respects the embedding config's max_sessions
+    // Create processing config from embedding config
     let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
     
     println!("Configuration:");
     println!("  File processing concurrency: {} CPU cores", processing_config.file_processing_concurrency);
-    println!("  Embedding model instances: {} (configured max_sessions)", processing_config.max_embedding_sessions);
+    println!("  Embedding model instances: {} (automatic)", processing_config.max_embedding_sessions);
     println!("  Embedding batch size: {}", processing_config.embedding_batch_size);
     println!();
 

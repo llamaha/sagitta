@@ -27,7 +27,7 @@ qdrant_storage/
 # Test repos
 repo-collection/
 
-onnx/
+/onnx/
 
 # File that is created when tests run
 test_file.rs

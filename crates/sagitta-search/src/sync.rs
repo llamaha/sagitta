@@ -701,6 +701,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: None,
             onnx_tokenizer_path: None,
+            embed_model: None,
             repositories_base_path: None,
             vocabulary_base_path: None,
             tenant_id: Some("test-tenant".to_string()),

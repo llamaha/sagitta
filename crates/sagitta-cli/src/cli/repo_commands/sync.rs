@@ -42,7 +42,14 @@ where
     let cli_tenant_id = match cli_args.tenant_id.as_deref() {
         Some(id) => id,
         None => {
-            return Err(anyhow!("--tenant-id is required to sync a repository."));
+            #[cfg(feature = "multi_tenant")]
+            {
+                return Err(anyhow!("--tenant-id is required to sync a repository."));
+            }
+            #[cfg(not(feature = "multi_tenant"))]
+            {
+                "default"
+            }
         }
     };
 

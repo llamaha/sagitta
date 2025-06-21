@@ -7,7 +7,7 @@ use uuid::{self, Uuid};
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
-use crate::agent::events::AgentEvent;
+use crate::agent::events::{AgentEvent, ToolRunId};
 use crate::llm::client::Role;
 use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall, MessageType};
 use super::panels::{SystemEventType};
@@ -206,6 +206,18 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     app.panels.analytics_panel.add_usage_entry(entry);
                 },
                 // Add catch-all for new/unhandled events to avoid non-exhaustive match error
+                AgentEvent::ToolRunStarted { run_id, tool } => {
+                    log::info!("SagittaCodeApp: Tool run started: {} ({})", tool, run_id);
+                    handle_tool_run_started(app, run_id, tool);
+                },
+                AgentEvent::ToolRunCompleted { run_id, tool, success } => {
+                    log::info!("SagittaCodeApp: Tool run completed: {} ({}) - success: {}", tool, run_id, success);
+                    handle_tool_run_completed(app, run_id, tool, success);
+                },
+                AgentEvent::ToolStream { run_id, event } => {
+                    log::debug!("SagittaCodeApp: Tool stream event for run {}: {:?}", run_id, event);
+                    handle_tool_stream(app, run_id, event);
+                },
                 _ => {
                     // Optionally log unhandled events: log::debug!("Unhandled AgentEvent: {:?}", event);
                 }
@@ -1067,6 +1079,58 @@ impl SagittaCodeApp {
     pub fn handle_repository_list_update(&mut self, repo_list: Vec<String>) {
         log::info!("Received repository list update with {} repositories: {:?}", repo_list.len(), repo_list);
         self.state.update_available_repositories(repo_list);
+    }
+}
+
+/// Handle tool run started event
+pub fn handle_tool_run_started(app: &mut SagittaCodeApp, run_id: ToolRunId, tool: String) {
+    // For now, just add a system message to indicate tool started
+    // In Phase 2, this will create a proper tool card
+    let message = StreamingMessage::from_text(
+        MessageAuthor::System,
+        format!("🔧 {} started", tool)
+    );
+    app.chat_manager.add_complete_message(message);
+    
+    // Store the run_id for future reference
+    app.state.tool_results.insert(run_id.to_string(), format!("Tool {} started", tool));
+}
+
+/// Handle tool run completed event
+pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, tool: String, success: bool) {
+    let status = if success { "✅ completed" } else { "❌ failed" };
+    let message = StreamingMessage::from_text(
+        MessageAuthor::System,
+        format!("{} {}", tool, status)
+    );
+    app.chat_manager.add_complete_message(message);
+    
+    // Update stored result
+    app.state.tool_results.insert(run_id.to_string(), format!("Tool {} {}", tool, status));
+}
+
+/// Handle tool stream event (progress updates)
+pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: terminal_stream::events::StreamEvent) {
+    match event {
+        terminal_stream::events::StreamEvent::Progress { message, percentage } => {
+            // For now, add progress as system messages
+            // In Phase 2, this will update the tool card
+            let progress_text = if let Some(pct) = percentage {
+                format!("🔄 {} ({:.0}%)", message, pct)
+            } else {
+                format!("🔄 {}", message)
+            };
+            
+            let progress_message = StreamingMessage::from_text(
+                MessageAuthor::System,
+                progress_text
+            );
+            app.chat_manager.add_complete_message(progress_message);
+        },
+        _ => {
+            // Handle other stream events if needed
+            log::debug!("Unhandled tool stream event: {:?}", event);
+        }
     }
 }
 

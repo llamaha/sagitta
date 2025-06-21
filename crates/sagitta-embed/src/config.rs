@@ -2,7 +2,7 @@
 
 use crate::error::{Result, SagittaEmbedError};
 use crate::model::EmbeddingModelType;
-use crate::{DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MAX_SESSIONS, DEFAULT_MAX_SEQUENCE_LENGTH, DEFAULT_SESSION_TIMEOUT_SECONDS, DEFAULT_ENABLE_SESSION_CLEANUP, DEFAULT_EMBEDDING_BATCH_SIZE};
+use crate::{DEFAULT_EMBEDDING_DIMENSION, DEFAULT_SESSION_TIMEOUT_SECONDS, DEFAULT_ENABLE_SESSION_CLEANUP, DEFAULT_EMBEDDING_BATCH_SIZE};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -73,11 +73,17 @@ pub struct IOBindingConfig {
 
 impl Default for IOBindingConfig {
     fn default() -> Self {
+        // Enable I/O binding by default only for CUDA builds
+        #[cfg(feature = "cuda")]
+        let enable_io_binding = true;
+        #[cfg(not(feature = "cuda"))]
+        let enable_io_binding = false;
+
         Self {
-            enable_io_binding: false, // Disabled by default for safety
-            enable_pre_allocated_buffers: false,
-            enable_zero_copy: false,
-            enable_batch_optimization: false,
+            enable_io_binding,
+            enable_pre_allocated_buffers: enable_io_binding, // Only useful with I/O binding
+            enable_zero_copy: enable_io_binding,             // Only useful with I/O binding
+            enable_batch_optimization: enable_io_binding,    // Only useful with I/O binding
             pre_allocated_input_buffers: 4,
             pre_allocated_output_buffers: 4,
         }
@@ -89,6 +95,8 @@ impl Default for IOBindingConfig {
 pub struct DynamicBatchConfig {
     /// Enable dynamic batch size optimization
     pub enable_dynamic_batching: bool,
+    /// Enable dynamic padding (pad to longest sequence in batch, not max)
+    pub enable_dynamic_padding: bool,
     /// Minimum batch size
     pub min_batch_size: usize,
     /// Maximum batch size
@@ -105,6 +113,7 @@ impl Default for DynamicBatchConfig {
     fn default() -> Self {
         Self {
             enable_dynamic_batching: true,
+            enable_dynamic_padding: false,  // Disabled - ONNX models require fixed sequence length
             min_batch_size: 1,
             max_batch_size: 32,
             target_latency_ms: 100, // 100ms target latency
@@ -123,10 +132,6 @@ pub struct EmbeddingConfig {
     pub onnx_model_path: Option<PathBuf>,
     /// Path to tokenizer file or directory (required for ONNX models)
     pub onnx_tokenizer_path: Option<PathBuf>,
-    /// Maximum number of concurrent sessions for session pooling
-    pub max_sessions: usize,
-    /// Maximum sequence length for tokenization
-    pub max_sequence_length: usize,
     /// Expected embedding dimension (for validation)
     pub expected_dimension: Option<usize>,
     /// Session timeout in seconds (0 = no timeout)
@@ -193,8 +198,6 @@ impl Default for EmbeddingConfig {
             model_type: EmbeddingModelType::Default,
             onnx_model_path: None,
             onnx_tokenizer_path: None,
-            max_sessions: DEFAULT_MAX_SESSIONS,
-            max_sequence_length: DEFAULT_MAX_SEQUENCE_LENGTH,
             expected_dimension: Some(DEFAULT_EMBEDDING_DIMENSION),
             session_timeout_seconds: DEFAULT_SESSION_TIMEOUT_SECONDS,
             enable_session_cleanup: DEFAULT_ENABLE_SESSION_CLEANUP,
@@ -202,8 +205,8 @@ impl Default for EmbeddingConfig {
             embedding_batch_size: Some(DEFAULT_EMBEDDING_BATCH_SIZE),
             
             // Phase 1: Performance defaults - optimized for typical embedding workloads
-            intra_op_num_threads: Some(num_cpus::get().min(4)), // Limit to 4 threads for intra-op
-            inter_op_num_threads: Some(1), // Sequential execution by default
+            intra_op_num_threads: Some(num_cpus::get()), // Use all available CPU cores
+            inter_op_num_threads: Some(1), // Single inter-op thread (FastEmbed style)
             enable_parallel_execution: false, // Most embedding models are sequential
             graph_optimization_level: 3, // Maximum optimization by default
             enable_memory_pattern: true, // Enable for fixed-size inputs (typical for embeddings)
@@ -248,17 +251,6 @@ impl EmbeddingConfig {
         }
     }
 
-    /// Set the maximum number of concurrent sessions.
-    pub fn with_max_sessions(mut self, max_sessions: usize) -> Self {
-        self.max_sessions = max_sessions;
-        self
-    }
-
-    /// Set the maximum sequence length.
-    pub fn with_max_sequence_length(mut self, max_sequence_length: usize) -> Self {
-        self.max_sequence_length = max_sequence_length;
-        self
-    }
 
     /// Set the expected embedding dimension.
     pub fn with_expected_dimension(mut self, dimension: usize) -> Self {
@@ -374,14 +366,6 @@ impl EmbeddingConfig {
             EmbeddingModelType::Default => {
                 // Default model doesn't require additional validation
             }
-        }
-
-        if self.max_sessions == 0 {
-            return Err(SagittaEmbedError::configuration("max_sessions must be greater than 0"));
-        }
-
-        if self.max_sequence_length == 0 {
-            return Err(SagittaEmbedError::configuration("max_sequence_length must be greater than 0"));
         }
 
         Ok(())
@@ -652,6 +636,56 @@ impl EmbeddingConfig {
     pub fn build_unchecked(self) -> EmbeddingConfig {
         self
     }
+
+    /// Creates a GPU-optimized configuration with I/O binding enabled
+    /// Only available when compiled with CUDA support
+    #[cfg(feature = "cuda")]
+    pub fn with_gpu_optimization(mut self) -> Self {
+        self.io_binding_config.enable_io_binding = true;
+        self.io_binding_config.enable_pre_allocated_buffers = true;
+        self.io_binding_config.enable_zero_copy = true;
+        self.io_binding_config.enable_batch_optimization = true;
+        self.enable_cuda_memory_streams = true;
+        self.cuda_config.enable_memory_optimization = true;
+        self.cuda_config.enable_memory_pool = true;
+        self
+    }
+
+    /// GPU optimization is not available in CPU-only builds
+    /// Use `with_auto_optimization()` for automatic feature detection
+    #[cfg(not(feature = "cuda"))]
+    pub fn with_gpu_optimization(self) -> Self {
+        log::warn!("GPU optimization requested but CUDA feature not enabled. Using CPU optimization instead.");
+        self.with_cpu_optimization()
+    }
+
+    /// Creates a CPU-optimized configuration with I/O binding disabled
+    pub fn with_cpu_optimization(mut self) -> Self {
+        self.io_binding_config.enable_io_binding = false;
+        self.io_binding_config.enable_pre_allocated_buffers = false;
+        self.io_binding_config.enable_zero_copy = false;
+        self.io_binding_config.enable_batch_optimization = false;
+        self.enable_cuda_memory_streams = false;
+        self.cpu_config.enable_arena = true;
+        self.cpu_config.enable_numa = true;
+        self.cpu_config.enable_cache_optimization = true;
+        self.cpu_config.enable_simd = true;
+        self.cpu_config.optimization_level = CpuOptimizationLevel::Aggressive;
+        self
+    }
+
+    /// Creates an auto-optimized configuration based on compile-time features
+    /// This is the recommended method for out-of-the-box usage
+    pub fn with_auto_optimization(self) -> Self {
+        #[cfg(feature = "cuda")]
+        {
+            self.with_gpu_optimization()
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            self.with_cpu_optimization()
+        }
+    }
 }
 
 /// Phase 3: Advanced CUDA provider configuration
@@ -895,21 +929,16 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the maximum number of sessions.
-    pub fn max_sessions(mut self, max_sessions: usize) -> Self {
-        self.config.max_sessions = max_sessions;
-        self
-    }
-
-    /// Set the maximum sequence length.
-    pub fn max_sequence_length(mut self, max_sequence_length: usize) -> Self {
-        self.config.max_sequence_length = max_sequence_length;
-        self
-    }
 
     /// Set the expected embedding dimension.
     pub fn expected_dimension(mut self, dimension: usize) -> Self {
         self.config.expected_dimension = Some(dimension);
+        self
+    }
+
+    /// Set the session timeout.
+    pub fn session_timeout(mut self, timeout_seconds: u64) -> Self {
+        self.config.session_timeout_seconds = timeout_seconds;
         self
     }
 
@@ -1257,23 +1286,19 @@ mod tests {
     fn test_default_config() {
         let config = EmbeddingConfig::default();
         assert_eq!(config.model_type, EmbeddingModelType::Default);
-        assert_eq!(config.max_sessions, DEFAULT_MAX_SESSIONS);
-        assert_eq!(config.max_sequence_length, DEFAULT_MAX_SEQUENCE_LENGTH);
+        // max_sessions has been removed
     }
 
     #[test]
     fn test_config_builder() {
         let config = EmbeddingConfigBuilder::new()
             .model_type(EmbeddingModelType::Onnx)
-            .max_sessions(8)
-            .max_sequence_length(256)
             .expected_dimension(512)
             .tenant_id("test-tenant")
             .build_unchecked();
 
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
-        assert_eq!(config.max_sessions, 8);
-        assert_eq!(config.max_sequence_length, 256);
+        // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(512));
         assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
     }
@@ -1292,29 +1317,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("model path is required"));
     }
 
-    #[test]
-    fn test_config_validation_invalid_sessions() {
-        let temp_dir = tempdir().unwrap();
-        let model_path = temp_dir.path().join("model.onnx");
-        let tokenizer_path = temp_dir.path().join("tokenizer.json");
-
-        // Create dummy files
-        fs::write(&model_path, "dummy model").unwrap();
-        fs::write(&tokenizer_path, "dummy tokenizer").unwrap();
-
-        let config = EmbeddingConfig {
-            model_type: EmbeddingModelType::Onnx,
-            onnx_model_path: Some(model_path),
-            onnx_tokenizer_path: Some(tokenizer_path),
-            max_sessions: 0, // This should cause the validation error
-            ..Default::default()
-        };
-
-        let result = config.validate();
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("max_sessions must be greater than 0"));
-    }
+    // Removed test_config_validation_invalid_sessions as max_sessions no longer exists
 
     #[test]
     fn test_config_validation_with_valid_files() {
@@ -1348,12 +1351,11 @@ mod tests {
     fn test_fluent_interface() {
         let config = EmbeddingConfig::new()
             .with_model_type(EmbeddingModelType::Onnx)
-            .with_max_sessions(16)
             .with_expected_dimension(512)
             .with_tenant_id("test-tenant".to_string());
 
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
-        assert_eq!(config.max_sessions, 16);
+        // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(512));
         assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
     }
@@ -1423,7 +1425,13 @@ mod tests {
         assert_eq!(config.graph_optimization_level, 3);
         assert_eq!(config.enable_memory_pattern, true);
         assert_eq!(config.enable_deterministic_compute, false);
+        
+        // I/O binding should be enabled for CUDA builds, disabled for CPU-only builds
+        #[cfg(feature = "cuda")]
+        assert_eq!(config.io_binding_config.enable_io_binding, true);
+        #[cfg(not(feature = "cuda"))]
         assert_eq!(config.io_binding_config.enable_io_binding, false);
+        
         assert_eq!(config.enable_cpu_arena, true);
     }
 
@@ -1552,11 +1560,22 @@ mod tests {
     fn test_phase2_default_values() {
         let config = EmbeddingConfig::default();
         
-        // I/O binding defaults
-        assert_eq!(config.io_binding_config.enable_io_binding, false);
-        assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, false);
-        assert_eq!(config.io_binding_config.enable_zero_copy, false);
-        assert_eq!(config.io_binding_config.enable_batch_optimization, false);
+        // I/O binding defaults - feature-gated for optimal out-of-the-box experience
+        #[cfg(feature = "cuda")]
+        {
+            assert_eq!(config.io_binding_config.enable_io_binding, true);
+            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
+            assert_eq!(config.io_binding_config.enable_zero_copy, true);
+            assert_eq!(config.io_binding_config.enable_batch_optimization, true);
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            assert_eq!(config.io_binding_config.enable_io_binding, false);
+            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, false);
+            assert_eq!(config.io_binding_config.enable_zero_copy, false);
+            assert_eq!(config.io_binding_config.enable_batch_optimization, false);
+        }
+        
         assert_eq!(config.io_binding_config.pre_allocated_input_buffers, 4);
         assert_eq!(config.io_binding_config.pre_allocated_output_buffers, 4);
 
@@ -1758,8 +1777,6 @@ mod tests {
         let config = EmbeddingConfigBuilder::new()
             .onnx_model_path("/tmp/model.onnx")
             .onnx_tokenizer_path("/tmp/tokenizer.json")
-            .max_sessions(10)
-            .max_sequence_length(512)
             .with_cuda_optimized(0, Some(2.0))
             .with_cpu_optimized()
             .with_cpu_thread_affinity("0-3".to_string())
@@ -1769,8 +1786,7 @@ mod tests {
             .build_unchecked();
         
         // Test basic config
-        assert_eq!(config.max_sessions, 10);
-        assert_eq!(config.max_sequence_length, 512);
+        // max_sessions has been removed
         
         // Test Phase 3 CUDA config
         assert!(config.cuda_config.enable);
@@ -1809,15 +1825,11 @@ mod tests {
 
     #[test]
     fn test_config_validation_edge_cases() {
-        // Test zero max_sessions
-        let mut config = EmbeddingConfig::default();
-        config.max_sessions = 0;
-        assert!(config.validate().is_err());
+        // max_sessions validation removed
 
-        // Test zero max_sequence_length
-        config = EmbeddingConfig::default();
-        config.max_sequence_length = 0;
-        assert!(config.validate().is_err());
+        // Test valid config passes validation
+        let config = EmbeddingConfig::default();
+        assert!(config.validate().is_ok());
 
         // Note: graph_optimization_level is automatically clamped to valid range [0-3]
         // so validation won't fail for invalid levels - they're just corrected
@@ -1828,7 +1840,7 @@ mod tests {
         let config = EmbeddingConfig::default();
         
         // Test getter methods
-        assert_eq!(config.get_embedding_batch_size(), 128); // Default batch size is 128
+        assert_eq!(config.get_embedding_batch_size(), 256); // Default batch size is 256
         assert_eq!(config.get_embedding_dimension(), 384); // Default dimension
         
         // Test should_use_cuda - this checks compile-time feature, not runtime config
@@ -1978,8 +1990,7 @@ mod tests {
         let _ = config.model_type;
         let _ = config.onnx_model_path;
         let _ = config.onnx_tokenizer_path;
-        let _ = config.max_sessions;
-        let _ = config.max_sequence_length;
+        // max_sessions has been removed
         let _ = config.expected_dimension;
         let _ = config.session_timeout_seconds;
         let _ = config.enable_session_cleanup;
@@ -2051,8 +2062,6 @@ mod tests {
             .model_type(EmbeddingModelType::Onnx)
             .onnx_model_path("/path/to/model.onnx")
             .onnx_tokenizer_path("/path/to/tokenizer.json")
-            .max_sessions(16)
-            .max_sequence_length(1024)
             .expected_dimension(768)
             .tenant_id("test-tenant")
             .embedding_batch_size(64)
@@ -2070,8 +2079,7 @@ mod tests {
         
         // Verify all settings were applied
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
-        assert_eq!(config.max_sessions, 16);
-        assert_eq!(config.max_sequence_length, 1024);
+        // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(768));
         assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(config.embedding_batch_size, Some(64));
@@ -2100,5 +2108,36 @@ mod tests {
         let _monitoring_config = MonitoringConfig::default();
         let _performance_thresholds = PerformanceThresholds::default();
         let _execution_provider = ExecutionProvider::default();
+    }
+
+    #[test]
+    fn test_auto_optimization_config() {
+        let config = EmbeddingConfig::default().with_auto_optimization();
+        
+        // Auto-optimization should enable appropriate settings based on features
+        #[cfg(feature = "cuda")]
+        {
+            // Should enable GPU optimizations
+            assert_eq!(config.io_binding_config.enable_io_binding, true);
+            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, true);
+            assert_eq!(config.io_binding_config.enable_zero_copy, true);
+            assert_eq!(config.io_binding_config.enable_batch_optimization, true);
+            assert_eq!(config.enable_cuda_memory_streams, true);
+            assert_eq!(config.cuda_config.enable_memory_optimization, true);
+            assert_eq!(config.cuda_config.enable_memory_pool, true);
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            // Should enable CPU optimizations
+            assert_eq!(config.io_binding_config.enable_io_binding, false);
+            assert_eq!(config.io_binding_config.enable_pre_allocated_buffers, false);
+            assert_eq!(config.io_binding_config.enable_zero_copy, false);
+            assert_eq!(config.io_binding_config.enable_batch_optimization, false);
+            assert_eq!(config.enable_cuda_memory_streams, false);
+            assert_eq!(config.cpu_config.enable_arena, true);
+            assert_eq!(config.cpu_config.enable_numa, true);
+            assert_eq!(config.cpu_config.enable_cache_optimization, true);
+            assert_eq!(config.cpu_config.enable_simd, true);
+        }
     }
 } 

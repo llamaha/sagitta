@@ -158,8 +158,6 @@ mod tests {
         
         // Set custom embedding configuration
         app_config.embedding = EmbeddingEngineConfig {
-            max_sessions: 8,
-            max_sequence_length: 256,
             session_timeout_seconds: 600,
             enable_session_cleanup: false,
             embedding_batch_size: 64,
@@ -172,8 +170,6 @@ mod tests {
         assert_eq!(embedding_config.model_type, EmbeddingModelType::Onnx);
         assert_eq!(embedding_config.onnx_model_path, Some("/path/to/model.onnx".into()));
         assert_eq!(embedding_config.onnx_tokenizer_path, Some("/path/to/tokenizer.json".into()));
-        assert_eq!(embedding_config.max_sessions, 8);
-        assert_eq!(embedding_config.max_sequence_length, 256);
         assert_eq!(embedding_config.session_timeout_seconds, 600);
         assert_eq!(embedding_config.enable_session_cleanup, false);
         assert_eq!(embedding_config.tenant_id, Some("test-tenant".to_string()));
@@ -188,11 +184,9 @@ mod tests {
         let embedding_config = app_config_to_embedding_config(&app_config);
         
         // Verify defaults are properly set
-        assert_eq!(embedding_config.model_type, EmbeddingModelType::Default);
+        assert_eq!(embedding_config.model_type, EmbeddingModelType::Onnx); // Always ONNX in current implementation
         assert_eq!(embedding_config.onnx_model_path, None);
         assert_eq!(embedding_config.onnx_tokenizer_path, None);
-        assert_eq!(embedding_config.max_sessions, 4); // Default from EmbeddingEngineConfig
-        assert_eq!(embedding_config.max_sequence_length, 128);
         assert_eq!(embedding_config.session_timeout_seconds, 300);
         assert_eq!(embedding_config.enable_session_cleanup, true);
         assert_eq!(embedding_config.tenant_id, None);
@@ -204,54 +198,66 @@ mod tests {
     fn test_config_toml_to_decoupled_processing() {
         use sagitta_embed::processor::ProcessingConfig;
         
-        // Simulate different max_sessions values that could be set in config.toml
-        for max_sessions in [1, 2, 4, 8, 16] {
-            let mut app_config = AppConfig::default();
-            app_config.embedding.max_sessions = max_sessions;
-            
-            // Bridge to embedding config (this is what happens in practice)
-            let embedding_config = app_config_to_embedding_config(&app_config);
-            assert_eq!(embedding_config.max_sessions, max_sessions);
-            
-            // Create processing config for decoupled architecture
-            let processing_config = ProcessingConfig::from_embedding_config(&embedding_config);
-            
-            // Verify that GPU memory control respects config.toml setting
-            assert_eq!(processing_config.max_embedding_sessions, max_sessions,
-                "max_embedding_sessions should respect config.toml [embedding].max_sessions = {}", 
-                max_sessions);
-        }
+        // max_sessions tests removed as feature no longer exists
+        // ProcessingConfig now uses automatic session management
     }
 }
 
 #[macro_use]
 extern crate log;
 
-/// Helper function to convert AppConfig to EmbeddingConfig for the new sagitta-embed crate
+/// Converts AppConfig to EmbeddingConfig for use with sagitta-embed
 pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig {
-    // Helper function to convert Option<String> to Option<PathBuf>, treating empty strings as None
-    let string_to_pathbuf = |s: &Option<String>| -> Option<std::path::PathBuf> {
-        s.as_ref()
-            .filter(|s| !s.trim().is_empty()) // Filter out empty or whitespace-only strings
-            .map(std::path::PathBuf::from)
-    };
+    use sagitta_embed::EmbeddingModelType;
+    use sagitta_embed::model::download::{EmbeddingModel as DownloadableModel, ModelDownloader};
+    use std::path::PathBuf;
 
-    // Determine the model type based on the paths provided (after filtering empty strings)
-    let onnx_model_path = string_to_pathbuf(&app_config.onnx_model_path);
-    let onnx_tokenizer_path = string_to_pathbuf(&app_config.onnx_tokenizer_path);
-    
-    let model_type = if onnx_model_path.is_some() && onnx_tokenizer_path.is_some() {
-        EmbeddingModelType::Onnx
+    // First validate the config
+    if let Err(e) = app_config.validate() {
+        // Log the error but continue with defaults if validation fails
+        log::error!("Configuration validation error: {}", e);
+    }
+
+    let (model_type, onnx_model_path, onnx_tokenizer_path) = if let Some(embed_model) = &app_config.embed_model {
+        // Use automatic model downloading
+        let model = DownloadableModel::from_str(embed_model);
+        match ModelDownloader::new() {
+            Ok(downloader) => {
+                match downloader.download_model(&model) {
+                    Ok(paths) => {
+                        log::info!("Using model: {}", embed_model);
+                        let tokenizer_dir = paths.tokenizer_dir().ok();
+                        (
+                            EmbeddingModelType::Onnx, 
+                            Some(paths.model_path),
+                            tokenizer_dir
+                        )
+                    },
+                    Err(e) => {
+                        log::error!("Failed to download model {}: {}", embed_model, e);
+                        (EmbeddingModelType::Onnx, None, None)
+                    }
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to create model downloader: {}", e);
+                (EmbeddingModelType::Onnx, None, None)
+            }
+        }
+    } else if let (Some(model_path), Some(tokenizer_path)) = 
+        (&app_config.onnx_model_path, &app_config.onnx_tokenizer_path) {
+        // Use manually specified paths
+        (EmbeddingModelType::Onnx, Some(PathBuf::from(model_path)), Some(PathBuf::from(tokenizer_path)))
     } else {
-        EmbeddingModelType::Default
+        // No model configuration provided
+        (EmbeddingModelType::Onnx, None, None)
     };
 
     EmbeddingConfig {
         model_type,
         onnx_model_path,
         onnx_tokenizer_path,
-        max_sessions: app_config.embedding.max_sessions,
-        max_sequence_length: app_config.embedding.max_sequence_length,
+        // max_sessions removed - using automatic session management
         session_timeout_seconds: app_config.embedding.session_timeout_seconds,
         enable_session_cleanup: app_config.embedding.enable_session_cleanup,
         tenant_id: app_config.tenant_id.clone(),
@@ -261,14 +267,14 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
     }
 }
 
-/// Creates an EmbeddingPool that properly respects the max_sessions configuration.
-/// This provides GPU memory control through session pooling.
+/// Creates an EmbeddingPool with automatic session management.
+/// This provides GPU memory control through intelligent pooling.
 /// 
 /// # Arguments
 /// * `app_config` - The application configuration containing embedding settings
 /// 
 /// # Returns
-/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool that respects max_sessions
+/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool with automatic session management
 /// 
 /// # Example
 /// ```rust,no_run
@@ -287,14 +293,14 @@ pub async fn create_embedding_pool(app_config: &AppConfig) -> std::result::Resul
     Ok(Arc::new(pool))
 }
 
-/// Creates an EmbeddingPool from an EmbeddingConfig that properly respects max_sessions.
+/// Creates an EmbeddingPool from an EmbeddingConfig with automatic session management.
 /// This is a convenience function for cases where you already have an EmbeddingConfig.
 /// 
 /// # Arguments
 /// * `embedding_config` - The embedding configuration
 /// 
 /// # Returns
-/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool that respects max_sessions
+/// * `Result<Arc<EmbeddingPool>>` - A thread-safe embedding pool with automatic session management
 pub async fn create_embedding_pool_from_config(embedding_config: EmbeddingConfig) -> std::result::Result<Arc<EmbeddingPool>, SagittaError> {
     let pool = EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
