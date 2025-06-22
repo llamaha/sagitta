@@ -567,14 +567,21 @@ impl CommandExecutor for LocalExecutor {
         let mut stderr_output = String::new();
         let mut line_count = 0;
         let mut error_detected = false;
+        let mut stdout_closed = false;
+        let mut stderr_closed = false;
 
         // Use timeout for the entire operation
         let timeout_duration = std::time::Duration::from_secs(self.config.timeout_seconds);
         
         let execution_result = tokio::time::timeout(timeout_duration, async {
             loop {
+                // Exit only when both streams are closed
+                if stdout_closed && stderr_closed {
+                    break;
+                }
+                
                 tokio::select! {
-                    stdout_line = stdout_lines.next_line() => {
+                    stdout_line = stdout_lines.next_line(), if !stdout_closed => {
                         match stdout_line {
                             Ok(Some(line)) => {
                                 stdout_output.push_str(&line);
@@ -592,11 +599,13 @@ impl CommandExecutor for LocalExecutor {
                                 // Send stdout line
                                 let _ = event_sender.send(StreamEvent::Stdout { content: line }).await;
                             }
-                            Ok(None) => break,
+                            Ok(None) => {
+                                stdout_closed = true;
+                            }
                             Err(e) => return Err(SagittaCodeError::ToolError(format!("Error reading stdout: {}", e))),
                         }
                     }
-                    stderr_line = stderr_lines.next_line() => {
+                    stderr_line = stderr_lines.next_line(), if !stderr_closed => {
                         match stderr_line {
                             Ok(Some(line)) => {
                                 stderr_output.push_str(&line);
@@ -622,7 +631,9 @@ impl CommandExecutor for LocalExecutor {
                                 // Send stderr line
                                 let _ = event_sender.send(StreamEvent::Stderr { content: line }).await;
                             }
-                            Ok(None) => break,
+                            Ok(None) => {
+                                stderr_closed = true;
+                            }
                             Err(e) => return Err(SagittaCodeError::ToolError(format!("Error reading stderr: {}", e))),
                         }
                     }

@@ -95,18 +95,15 @@ where
 
     let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name, &branch_name, config);
 
-    let model_env_var = std::env::var("SAGITTA_ONNX_MODEL").ok();
-    let tokenizer_env_var = std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").ok();
-
-    let _onnx_model_path_str = cli_args.onnx_model_path_arg.as_deref()
-        .or(model_env_var.as_deref())
-        .or(config.onnx_model_path.as_deref())
-        .ok_or_else(|| anyhow!("ONNX model path not found. Provide via --onnx-model, env var, or config."))?;
+    // Check if embedding is configured (either via embed_model or ONNX paths)
+    let has_embed_model = config.embed_model.is_some();
+    let has_onnx_paths = config.onnx_model_path.is_some() && config.onnx_tokenizer_path.is_some();
+    let has_cli_onnx = cli_args.onnx_model_path_arg.is_some() && cli_args.onnx_tokenizer_dir_arg.is_some();
+    let has_env_onnx = std::env::var("SAGITTA_ONNX_MODEL").is_ok() && std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").is_ok();
     
-    let _onnx_tokenizer_dir_str = cli_args.onnx_tokenizer_dir_arg.as_deref()
-        .or(tokenizer_env_var.as_deref())
-        .or(config.onnx_tokenizer_path.as_deref())
-        .ok_or_else(|| anyhow!("ONNX tokenizer dir not found. Provide via --onnx-tokenizer-dir, env var, or config."))?;
+    if !has_embed_model && !has_onnx_paths && !has_cli_onnx && !has_env_onnx {
+        return Err(anyhow!("Embedding model not configured. Provide 'embed_model' in config, or ONNX paths via config/CLI/env vars."));
+    }
 
     let embedding_config = app_config_to_embedding_config(config);
     let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)?;

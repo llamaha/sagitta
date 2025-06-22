@@ -208,10 +208,14 @@ async fn handle_simple_index(
     if cli_args.onnx_tokenizer_dir_arg.is_some() || std::env::var("SAGITTA_ONNX_TOKENIZER_DIR").is_ok() {
          return Err(anyhow!("For 'simple index', ONNX tokenizer path must be provided solely via the configuration file, not CLI arguments or environment variables."));
     }
-    if config.onnx_model_path.is_none() || config.onnx_tokenizer_path.is_none() {
-         return Err(anyhow!("ONNX model and tokenizer paths must be set in the configuration file when using 'simple index'"));
+    // Check if either embed_model or ONNX paths are configured
+    let has_embed_model = config.embed_model.is_some();
+    let has_onnx_paths = config.onnx_model_path.is_some() && config.onnx_tokenizer_path.is_some();
+    
+    if !has_embed_model && !has_onnx_paths {
+         return Err(anyhow!("Either 'embed_model' or both 'onnx_model_path' and 'onnx_tokenizer_path' must be set in the configuration file when using 'simple index'"));
     }
-    log::info!("Using ONNX paths from configuration file for simple index.");
+    log::info!("Using embedding configuration from configuration file for simple index.");
 
     // --- Ensure Collection Exists with Correct Dimension --- 
     let vector_dim = config.performance.vector_dimension as u64;

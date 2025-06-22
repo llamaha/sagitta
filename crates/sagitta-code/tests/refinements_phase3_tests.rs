@@ -5,17 +5,25 @@ use serde_json;
 
 use sagitta_code::gui::theme::{AppTheme, CustomThemeColors, set_custom_theme_colors, get_custom_theme_colors};
 use sagitta_code::config::types::{SagittaCodeConfig, UiConfig};
-use sagitta_code::config::{save_config, load_config_from_path};
+use sagitta_code::config::{save_config, load_config_from_path, load_config};
 
 mod common;
+
+// Mutex to serialize tests that modify SAGITTA_TEST_CONFIG_PATH
+static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test theme persistence across app restarts
 #[tokio::test]
 async fn test_theme_persistence_across_restarts() {
-    common::init_test_isolation();
+    let _guard = ENV_MUTEX.lock().unwrap();
     
+    // Don't call init_test_isolation() since we need to control the path ourselves
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("sagitta_code_config.toml");
+    
+    // Set up test environment - set to a dummy path so paths.rs can extract the parent
+    let dummy_path = temp_dir.path().join("dummy.toml");
+    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", dummy_path.to_string_lossy().to_string());
     
     // Create custom theme colors
     let custom_colors = CustomThemeColors {
@@ -33,15 +41,14 @@ async fn test_theme_persistence_across_restarts() {
     config.ui.custom_theme_path = Some(temp_dir.path().join("my_theme.sagitta-theme.json"));
     
     // Save the config
-    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", config_path.to_string_lossy().to_string());
     save_config(&config).expect("Should save config");
     
     // Save the custom theme colors to the theme file
     let theme_json = serde_json::to_string_pretty(&custom_colors).expect("Should serialize theme");
     fs::write(&config.ui.custom_theme_path.as_ref().unwrap(), theme_json).await.expect("Should write theme file");
     
-    // Simulate app restart - load config from file
-    let loaded_config = load_config_from_path(&config_path).expect("Should load config");
+    // Simulate app restart - load config from file using same path resolution
+    let loaded_config = load_config().expect("Should load config");
     
     // Verify theme settings persisted
     assert_eq!(loaded_config.ui.theme, "custom");
@@ -223,13 +230,16 @@ async fn test_theme_export_import_roundtrip() {
 /// Test automatic theme saving when user changes theme
 #[tokio::test]
 async fn test_automatic_theme_saving() {
-    common::init_test_isolation();
+    let _guard = ENV_MUTEX.lock().unwrap();
     
+    // Don't call init_test_isolation() since we need to control the path ourselves
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("sagitta_code_config.toml");
     
-    // Set up test environment
-    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", config_path.to_string_lossy().to_string());
+    // Set up test environment - set to a dummy path so paths.rs can extract the parent
+    // paths.rs will use the parent directory and append "sagitta_code_config.toml"
+    let dummy_path = temp_dir.path().join("dummy.toml");
+    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", dummy_path.to_string_lossy().to_string());
     
     // Create initial config
     let mut config = SagittaCodeConfig::default();
@@ -243,8 +253,8 @@ async fn test_automatic_theme_saving() {
     // Save config (simulating automatic save)
     save_config(&config).expect("Should save updated config");
     
-    // Verify config was saved
-    let loaded_config = load_config_from_path(&config_path).expect("Should load saved config");
+    // Verify config was saved - use load_config() to ensure same path resolution
+    let loaded_config = load_config().expect("Should load saved config");
     assert_eq!(loaded_config.ui.theme, "custom");
     assert!(loaded_config.ui.custom_theme_path.is_some());
 }
@@ -252,9 +262,15 @@ async fn test_automatic_theme_saving() {
 /// Test loading custom theme on startup
 #[tokio::test]
 async fn test_custom_theme_loading_on_startup() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+    
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("sagitta_code_config.toml");
     let theme_path = temp_dir.path().join("startup_theme.sagitta-theme.json");
+    
+    // Set up test environment - set to a dummy path so paths.rs can extract the parent
+    let dummy_path = temp_dir.path().join("dummy.toml");
+    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", dummy_path.to_string_lossy().to_string());
     
     // Create custom theme colors
     let custom_colors = CustomThemeColors {
@@ -273,11 +289,10 @@ async fn test_custom_theme_loading_on_startup() {
     config.ui.theme = "custom".to_string();
     config.ui.custom_theme_path = Some(theme_path.clone());
     
-    std::env::set_var("SAGITTA_TEST_CONFIG_PATH", config_path.to_string_lossy().to_string());
     save_config(&config).expect("Should save config");
     
     // Simulate app startup - load config and theme
-    let loaded_config = load_config_from_path(&config_path).expect("Should load config");
+    let loaded_config = load_config().expect("Should load config");
     assert_eq!(loaded_config.ui.theme, "custom");
     
     if let Some(theme_file_path) = &loaded_config.ui.custom_theme_path {
