@@ -1,11 +1,9 @@
 use sagitta_code::tools::shell_execution::{ShellExecutionTool, ShellExecutionParams, ShellExecutionResult};
-use sagitta_code::tools::local_executor::{LocalExecutorConfig, ApprovalPolicy};
 use sagitta_code::tools::types::{Tool, ToolResult};
 use serde_json::json;
 use std::time::Instant;
 use tempfile::TempDir;
 use tokio;
-use std::collections::HashMap;
 
 /// Integration test for shell execution functionality
 /// Run with: cargo test --test shell_execution_integration -- --nocapture
@@ -16,25 +14,7 @@ async fn test_shell_execution_integration() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     
     // Create the tool with custom config that uses our temp directory as the base
-    let config = LocalExecutorConfig {
-        base_dir: temp_dir.path().to_path_buf(),
-        approval_policy: ApprovalPolicy::Auto,
-        allow_automatic_tool_install: false,
-        cpu_limit_seconds: None,
-        memory_limit_mb: None,
-        execution_dir: temp_dir.path().to_path_buf(),
-        enable_approval_flow: false,
-        audit_log_path: None,
-        max_execution_time_seconds: 300,
-        allowed_commands: None,
-        blocked_commands: None,
-        auto_approve_safe_commands: true,
-        allowed_paths: vec![],
-        shell_override: None,
-        env_vars: HashMap::new(),
-        timeout_seconds: 300,
-    };
-    let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+    let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
     
     // Test 1: Check execution environment availability
     println!("\n1. Checking execution environment availability...");
@@ -190,26 +170,7 @@ async fn test_shell_execution_integration() {
     
     // Test 6: Test with custom executor configuration
     println!("\n6. Testing custom executor configuration...");
-    let custom_config = LocalExecutorConfig {
-        base_dir: temp_dir.path().to_path_buf(),
-        approval_policy: ApprovalPolicy::Auto,
-        allow_automatic_tool_install: false,
-        cpu_limit_seconds: None,
-        memory_limit_mb: None,
-        execution_dir: temp_dir.path().to_path_buf(),
-        enable_approval_flow: false,
-        audit_log_path: None,
-        max_execution_time_seconds: 300,
-        allowed_commands: None,
-        blocked_commands: None,
-        auto_approve_safe_commands: true,
-        allowed_paths: vec![],
-        shell_override: None,
-        env_vars: HashMap::new(),
-        timeout_seconds: 300,
-    };
-    
-    let custom_tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), custom_config);
+    let custom_tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
     
     let start_time = Instant::now();
     let params = json!({
@@ -249,25 +210,7 @@ async fn test_timeout_scenarios() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     
     // Create the tool with custom config that uses our temp directory as the base
-    let config = LocalExecutorConfig {
-        base_dir: temp_dir.path().to_path_buf(),
-        approval_policy: ApprovalPolicy::Auto,
-        allow_automatic_tool_install: false,
-        cpu_limit_seconds: None,
-        memory_limit_mb: None,
-        execution_dir: temp_dir.path().to_path_buf(),
-        enable_approval_flow: false,
-        audit_log_path: None,
-        max_execution_time_seconds: 300,
-        allowed_commands: None,
-        blocked_commands: None,
-        auto_approve_safe_commands: true,
-        allowed_paths: vec![],
-        shell_override: None,
-        env_vars: HashMap::new(),
-        timeout_seconds: 300,
-    };
-    let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+    let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
     
     // Check environment availability
     if !tool.check_environment_available().await.expect("Failed to check environment") {
@@ -345,25 +288,7 @@ async fn test_performance() {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     
     // Create the tool with custom config that uses our temp directory as the base
-    let config = LocalExecutorConfig {
-        base_dir: temp_dir.path().to_path_buf(),
-        approval_policy: ApprovalPolicy::Auto,
-        allow_automatic_tool_install: false,
-        cpu_limit_seconds: None,
-        memory_limit_mb: None,
-        execution_dir: temp_dir.path().to_path_buf(),
-        enable_approval_flow: false,
-        audit_log_path: None,
-        max_execution_time_seconds: 300,
-        allowed_commands: None,
-        blocked_commands: None,
-        auto_approve_safe_commands: true,
-        allowed_paths: vec![],
-        shell_override: None,
-        env_vars: HashMap::new(),
-        timeout_seconds: 300,
-    };
-    let tool = ShellExecutionTool::with_executor_config(temp_dir.path().to_path_buf(), config);
+    let tool = ShellExecutionTool::new(temp_dir.path().to_path_buf());
     
     // Check environment availability
     if !tool.check_environment_available().await.expect("Failed to check environment") {

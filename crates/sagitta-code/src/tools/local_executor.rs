@@ -517,8 +517,9 @@ impl CommandExecutor for LocalExecutor {
             )));
         }
 
-        let program = &command_parts[0];
-        let args = &command_parts[1..];
+        // Note: We're running through shell now, so we don't use the parsed parts
+        // let program = &command_parts[0];
+        // let args = &command_parts[1..];
 
         // Send initial progress
         let _ = event_sender.send(StreamEvent::Progress {
@@ -526,10 +527,17 @@ impl CommandExecutor for LocalExecutor {
             percentage: Some(0.0),
         }).await;
 
-        // Create command
-        let mut cmd = Command::new(program);
-        cmd.args(args)
-            .current_dir(&working_dir)
+        // Create command - run through shell for proper handling of quotes, pipes, etc.
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = Command::new("cmd");
+            c.args(&["/C", &params.command]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(&["-c", &params.command]);
+            c
+        };
+        cmd.current_dir(&working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());

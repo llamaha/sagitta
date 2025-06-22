@@ -1185,6 +1185,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
             EnhancedRepoInfo {
                 name: "enhanced-repo-2".to_string(),
@@ -1207,6 +1208,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
         ];
         
@@ -1321,6 +1323,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
         ];
         

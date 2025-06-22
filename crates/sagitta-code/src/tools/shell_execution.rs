@@ -781,7 +781,7 @@ mod tests {
         if let ToolResult::Success(value) = result {
             let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
             assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("Testing extended timeout"));
+            assert!(exec_result.stdout.contains("Testing extended timeout") || exec_result.stdout.contains("'Testing extended timeout'"));
             assert!(!exec_result.timed_out);
             
             // Should complete well within the timeout even with Docker image pull
@@ -807,7 +807,7 @@ mod tests {
         if let ToolResult::Success(value) = result {
             let exec_result: ShellExecutionResult = serde_json::from_value(value).unwrap();
             assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("hello world"));
+            assert!(exec_result.stdout.contains("hello world") || exec_result.stdout.contains("'hello world'"));
             assert_eq!(exec_result.container_image, "local");
             assert!(!exec_result.timed_out);
         } else {
@@ -978,7 +978,7 @@ mod tests {
             
             // Tool cards should be able to display these fields
             assert_eq!(exec_result.exit_code, 0);
-            assert!(exec_result.stdout.contains("hello world"));
+            assert!(exec_result.stdout.contains("hello world") || exec_result.stdout.contains("'hello world'"));
             assert_eq!(exec_result.container_image, "local");
             assert!(!exec_result.timed_out);
             

@@ -51,14 +51,12 @@ fn test_embedding_config_builder() {
         .model_type(EmbeddingModelType::Onnx)
         .onnx_model("/path/to/model.onnx")
         .onnx_tokenizer("/path/to/tokenizer.json")
-        .max_sessions(8)
         .expected_dimension(512)
         .build_unchecked();
 
     assert_eq!(config.model_type, EmbeddingModelType::Onnx);
     assert_eq!(config.onnx_model_path, Some(PathBuf::from("/path/to/model.onnx")));
     assert_eq!(config.onnx_tokenizer_path, Some(PathBuf::from("/path/to/tokenizer.json")));
-    assert_eq!(config.max_sessions, 8);
     assert_eq!(config.expected_dimension, Some(512));
 }
 
@@ -78,13 +76,11 @@ fn test_embedding_config_validation() {
 fn test_embedding_config_builder_pattern() {
     let config = EmbeddingConfigBuilder::new()
         .model_type(EmbeddingModelType::Onnx)
-        .max_sessions(8)
         .expected_dimension(512)
         .tenant_id("test-tenant")
         .build_unchecked();
 
     assert_eq!(config.model_type, EmbeddingModelType::Onnx);
-    assert_eq!(config.max_sessions, 8);
     assert_eq!(config.expected_dimension, Some(512));
     assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
 }
@@ -92,10 +88,8 @@ fn test_embedding_config_builder_pattern() {
 #[test]
 fn test_embedding_config_fluent_interface() {
     let config = EmbeddingConfig::new()
-        .with_max_sessions(16)
         .with_expected_dimension(768);
 
-    assert_eq!(config.max_sessions, 16);
     assert_eq!(config.expected_dimension, Some(768));
 }
 
@@ -109,34 +103,15 @@ fn test_embedding_config_validation_edge_cases() {
     fs::write(&model_path, "dummy model").unwrap();
     fs::write(&tokenizer_path, "dummy tokenizer").unwrap();
 
-    // Test max_sessions boundary values
-    let config_min = EmbeddingConfig {
+    // Test session timeout boundary values
+    let config_timeout = EmbeddingConfig {
         model_type: EmbeddingModelType::Onnx,
         onnx_model_path: Some(model_path.clone()),
         onnx_tokenizer_path: Some(tokenizer_path.clone()),
-        max_sessions: 1, // Minimum valid value
+        session_timeout_seconds: 60, // Valid timeout
         ..Default::default()
     };
-    assert!(config_min.validate().is_ok());
-
-    let config_max = EmbeddingConfig {
-        model_type: EmbeddingModelType::Onnx,
-        onnx_model_path: Some(model_path.clone()),
-        onnx_tokenizer_path: Some(tokenizer_path.clone()),
-        max_sessions: 1000, // Large value should be valid
-        ..Default::default()
-    };
-    assert!(config_max.validate().is_ok());
-
-    // Test invalid max_sessions
-    let config_zero = EmbeddingConfig {
-        model_type: EmbeddingModelType::Onnx,
-        onnx_model_path: Some(model_path.clone()),
-        onnx_tokenizer_path: Some(tokenizer_path.clone()),
-        max_sessions: 0, // Invalid
-        ..Default::default()
-    };
-    assert!(config_zero.validate().is_err());
+    assert!(config_timeout.validate().is_ok());
 }
 
 #[test]
@@ -367,11 +342,12 @@ fn test_embedding_model_type_properties() {
 
 #[test]
 fn test_constants() {
-    use sagitta_embed::{DEFAULT_EMBEDDING_DIMENSION, DEFAULT_MAX_SESSIONS, DEFAULT_MAX_SEQUENCE_LENGTH};
+    use sagitta_embed::{DEFAULT_EMBEDDING_DIMENSION, DEFAULT_SESSION_TIMEOUT_SECONDS, DEFAULT_ENABLE_SESSION_CLEANUP, DEFAULT_EMBEDDING_BATCH_SIZE};
     
     assert_eq!(DEFAULT_EMBEDDING_DIMENSION, 384);
-    assert_eq!(DEFAULT_MAX_SESSIONS, 4);
-    assert_eq!(DEFAULT_MAX_SEQUENCE_LENGTH, 128);
+    assert_eq!(DEFAULT_SESSION_TIMEOUT_SECONDS, 300);
+    assert_eq!(DEFAULT_ENABLE_SESSION_CLEANUP, true);
+    assert_eq!(DEFAULT_EMBEDDING_BATCH_SIZE, 256);
 }
 
 #[tokio::test]
