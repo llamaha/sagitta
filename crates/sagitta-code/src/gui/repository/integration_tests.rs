@@ -697,6 +697,7 @@ mod tests {
                     file_extensions: vec![],
                     total_files: Some(250),
                     size_bytes: Some(125000),
+                    added_as_local_path: false,
                 },
             ],
             use_enhanced_repos: true,

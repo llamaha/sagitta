@@ -31,6 +31,8 @@ use similar::{ChangeTag, TextDiff};
 use std::sync::OnceLock;
 use crate::gui::theme::AppTheme;
 use crate::gui::symbols;
+use crate::gui::app::RunningToolInfo;
+use crate::agent::events::ToolRunId;
 use catppuccin_egui::Theme as CatppuccinTheme;
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::cell::RefCell;
@@ -38,6 +40,7 @@ use std::thread::LocalKey;
 use serde_json;
 use uuid;
 use std::time::Instant;
+use std::collections::HashMap;
 
 #[cfg(feature = "gui")]
 use egui_notify::Toasts;
@@ -90,6 +93,7 @@ pub struct ToolCall {
     pub arguments: String,
     pub result: Option<String>,
     pub status: MessageStatus,
+    pub content_position: Option<usize>, // Position in content where tool was initiated
 }
 
 #[derive(Debug, Clone)]
@@ -330,10 +334,12 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
         .map(|msg| msg.clone().into())
         .collect();
     
-    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state);
+    // Create empty HashMap for backward compatibility
+    let empty_running_tools = HashMap::new();
+    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -399,7 +405,7 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                         }
                         
                         // Render the message group with adjusted width for margins
-                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state) {
+                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools) {
                             clicked_tool = Some(tool_info);
                         }
                     }
@@ -447,6 +453,7 @@ fn render_message_group(
     total_width: f32,
     app_theme: AppTheme,
     copy_state: &mut CopyButtonState,
+    running_tools: &HashMap<ToolRunId, RunningToolInfo>,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -559,14 +566,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme) {
+            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -603,6 +610,8 @@ fn render_single_message_content(
     bg_color: &Color32,
     max_width: f32,
     app_theme: AppTheme,
+    running_tools: &HashMap<ToolRunId, RunningToolInfo>,
+    copy_state: &mut CopyButtonState,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
@@ -612,21 +621,57 @@ fn render_single_message_content(
         ui.add_space(2.0); // Reduced spacing
     }
     
-    // Main message content first (this contains the conversation flow)
-    if !message.content.is_empty() {
-        render_message_content_compact(ui, message, &bg_color, max_width, app_theme);
-    }
+    // Render content and tool calls in chronological order
+    let mut sorted_tools: Vec<(usize, &ToolCall)> = message.tool_calls.iter()
+        .filter_map(|tc| tc.content_position.map(|pos| (pos, tc)))
+        .collect();
+    sorted_tools.sort_by_key(|&(pos, _)| pos);
     
-    // Tool calls (if any) - render inline after the main content
-    // REMOVED: Tool cards removed per user request
-    /*
-    if !message.tool_calls.is_empty() {
-        ui.add_space(1.0); // Small spacing before tool calls
-        if let Some(tool_info) = render_tool_calls_compact(ui, &message.tool_calls, &bg_color, max_width, app_theme) {
+    let mut last_pos = 0;
+    let content = &message.content;
+    
+    // Render content and tool calls interleaved
+    for (pos, tool_call) in &sorted_tools {
+        // Render content before this tool call
+        if *pos > last_pos && last_pos < content.len() {
+            let content_chunk = &content[last_pos..*pos.min(&content.len())];
+            if !content_chunk.is_empty() {
+                render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme);
+            }
+        }
+        
+        // Render the tool call
+        ui.add_space(1.0);
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
             clicked_tool = Some(tool_info);
         }
+        ui.add_space(1.0);
+        
+        last_pos = *pos;
     }
-    */
+    
+    // Render any remaining content after the last tool
+    if last_pos < content.len() {
+        let remaining_content = &content[last_pos..];
+        if !remaining_content.is_empty() {
+            render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme);
+        }
+    }
+    
+    // Render tool calls without position info at the end
+    let unpositioned_tools: Vec<&ToolCall> = message.tool_calls.iter()
+        .filter(|tc| tc.content_position.is_none())
+        .collect();
+    
+    if !unpositioned_tools.is_empty() {
+        ui.add_space(1.0);
+        for tool_call in unpositioned_tools {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
+                clicked_tool = Some(tool_info);
+            }
+            ui.add_space(4.0);
+        }
+    }
     
     clicked_tool
 }
@@ -712,65 +757,142 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
     }
 }
 
-/// Render tool calls as compact, clickable cards
-fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+/// Render a single tool call as a compact, clickable card
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
-    
-    for tool_call in tool_calls {
-        // Only show the tool result as an inline preview link if there's a result
-        if let Some(result) = &tool_call.result {
-            if !result.trim().is_empty() {
+        // Create a frame for the tool card
+        Frame::none()
+            .fill(app_theme.code_background())
+            .rounding(Rounding::same(4))
+            .stroke(Stroke::new(1.0, app_theme.border_color()))
+            .inner_margin(8.0)
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Tool completion status and name
+                    // Tool status icon
                     let (status_icon, status_color) = match tool_call.status {
                         MessageStatus::Complete => ("✅", app_theme.success_color()),
                         MessageStatus::Error(_) => ("❌", app_theme.error_color()),
-                        _ => (symbols::get_tool_symbol(), app_theme.hint_text_color()),
+                        MessageStatus::Streaming => ("🔄", app_theme.accent_color()),
+                        MessageStatus::Sending => ("⏳", app_theme.hint_text_color()),
+                        _ => ("🔧", app_theme.hint_text_color()),
                     };
                     
-                    // Show wrench icon and status
-                    ui.label(RichText::new(symbols::get_tool_symbol()).size(12.0));
-                    ui.label(RichText::new(status_icon).color(status_color).size(10.0));
+                    ui.label(RichText::new(status_icon).color(status_color).size(14.0));
                     ui.add_space(4.0);
                     
                     // Tool name
-                    ui.label(RichText::new(&tool_call.name).color(app_theme.tool_color()).size(11.0));
-                    ui.add_space(8.0);
+                    ui.label(RichText::new("Tool").color(app_theme.hint_text_color()).size(11.0));
+                    ui.label(RichText::new(&tool_call.name).color(app_theme.text_color()).strong().size(12.0));
                     
-                    // Extract execution time from result if available
-                    let execution_time = if let Some(result) = &tool_call.result {
-                        extract_execution_time(result).unwrap_or(0)
-                    } else {
-                        0
+                    // Status text
+                    let status_text = match &tool_call.status {
+                        MessageStatus::Complete => {
+                            // Extract execution time from result if available
+                            let execution_time = if let Some(result) = &tool_call.result {
+                                extract_execution_time(result).unwrap_or(0)
+                            } else {
+                                0
+                            };
+                            
+                            if execution_time > 0 {
+                                format!("completed in {}ms", execution_time)
+                            } else {
+                                "completed".to_string()
+                            }
+                        },
+                        MessageStatus::Error(e) => format!("failed: {}", e),
+                        MessageStatus::Streaming => "running...".to_string(),
+                        MessageStatus::Sending => "starting...".to_string(),
+                        _ => "".to_string(),
                     };
                     
-                    // Simple preview link with timing
-                    let preview_text = if execution_time > 0 {
-                        format!("preview ({}ms)", execution_time)
-                    } else {
-                        "preview".to_string()
-                    };
-                    let preview_link = ui.link(RichText::new(preview_text).color(app_theme.accent_color()).size(11.0));
-                    
-                    if preview_link.clicked() {
-                        // Determine display title based on tool type
-                        let is_shell_result = tool_call.name.contains("shell") || tool_call.name.contains("execution") ||
-                                             result.contains("stdout") || result.contains("stderr") ||
-                                             result.contains("exit_code");
-                        
-                        let display_title = if is_shell_result {
-                            format!("{} - Terminal Output", tool_call.name)
-                        } else {
-                            format!("{} - Result", tool_call.name)
-                        };
-                        
-                        clicked_tool_result = Some((display_title, result.clone()));
+                    if !status_text.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(status_text).color(app_theme.hint_text_color()).size(11.0));
                     }
+                    
+                    // Add progress bar for running tools
+                    if tool_call.status == MessageStatus::Streaming {
+                        // Try to find running tool info to get actual progress
+                        let progress = running_tools.values()
+                            .find(|info| info.tool_name == tool_call.name)
+                            .and_then(|info| info.progress)
+                            .unwrap_or(0.0);
+                        
+                        ui.add_space(8.0);
+                        ui.add(egui::ProgressBar::new(progress)
+                            .desired_width(100.0)
+                            .desired_height(4.0)
+                            .fill(app_theme.accent_color())
+                            .animate(progress == 0.0)); // Only animate if we don't have actual progress
+                    }
+                    
+                    // Right-aligned action buttons
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if tool_call.result.is_some() {
+                            // View details button for completed tools
+                            log::trace!("Rendering view details button for tool: {}", tool_call.name);
+                            let view_details_btn = ui.small_button("View details");
+                            if view_details_btn.clicked() {
+                                // Determine display title based on tool type
+                                let result = tool_call.result.as_ref().unwrap();
+                                let is_shell_result = tool_call.name.contains("shell") || tool_call.name.contains("execution") ||
+                                                     result.contains("stdout") || result.contains("stderr") ||
+                                                     result.contains("exit_code");
+                                
+                                let display_title = if is_shell_result {
+                                    format!("{} - Terminal Output", tool_call.name)
+                                } else {
+                                    format!("{} - Result", tool_call.name)
+                                };
+                                
+                                log::debug!("View details clicked for tool: {}, display_title: {}", tool_call.name, display_title);
+                                clicked_tool_result = Some((display_title, result.clone()));
+                            }
+                            
+                            // Copy button for tool results
+                            let copy_text = copy_state.get_button_text("Copy");
+                            let copy_color = copy_state.get_button_color(app_theme);
+                            
+                            if ui.add(egui::Button::new(copy_text)
+                                .small()
+                                .fill(copy_color.gamma_multiply(0.1)))
+                                .clicked() {
+                                let result = tool_call.result.as_ref().unwrap();
+                                ui.output_mut(|o| o.copied_text = result.clone());
+                                copy_state.start_copy_feedback(result.clone());
+                                log::debug!("Copied tool result to clipboard");
+                            }
+                        } else if tool_call.status == MessageStatus::Streaming {
+                            // Cancel button for running tools
+                            if ui.small_button("Cancel").clicked() {
+                                // Find the running tool by name to get its run_id
+                                if let Some((run_id, _)) = running_tools.iter()
+                                    .find(|(_, info)| info.tool_name == tool_call.name) {
+                                    // Store the run_id for cancellation (will be handled by the main app)
+                                    clicked_tool_result = Some(("__CANCEL_TOOL__".to_string(), run_id.to_string()));
+                                    log::info!("Requested cancellation for tool: {} ({})", tool_call.name, run_id);
+                                } else {
+                                    log::warn!("Could not find running tool to cancel: {}", tool_call.name);
+                                }
+                            }
+                        }
+                    });
                 });
-                
-                ui.add_space(2.0); // Small spacing between tool results
-            }
+            });
+    
+    clicked_tool_result
+}
+
+/// Render tool calls as compact, clickable cards (for backward compatibility)
+fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+    let mut clicked_tool_result = None;
+    
+    for tool_call in tool_calls {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+            clicked_tool_result = Some(tool_info);
         }
+        ui.add_space(4.0); // Spacing between tool cards
     }
     
     clicked_tool_result
@@ -1827,6 +1949,7 @@ index 1234567..abcdefg 100644
                 "timed_out": false
             }"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         };
         
         assert_eq!(tool_call.name, "shell_execution");
@@ -1941,6 +2064,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"name": "test_repo"}"#.to_string(),
             result: Some(r#"{"status": "added", "message": "Repository added successfully"}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg_1);
         
@@ -1990,6 +2114,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"target_file": "test.rs", "content": "test content"}"#.to_string(),
             result: Some(r#"{"status": "success", "file_path": "test.rs", "lines_added": 25}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg);
         
@@ -2056,6 +2181,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"path": "./src"}"#.to_string(),
             result: Some(r#"{"files": ["main.rs", "lib.rs"], "language": "rust"}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg);
         

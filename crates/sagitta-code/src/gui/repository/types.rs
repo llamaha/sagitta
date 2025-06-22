@@ -214,6 +214,7 @@ pub struct EnhancedRepoInfo {
     pub file_extensions: Vec<FileExtensionInfo>,
     pub total_files: Option<usize>,
     pub size_bytes: Option<u64>,
+    pub added_as_local_path: bool,
 }
 
 /// Filesystem status of the repository
@@ -248,6 +249,25 @@ pub enum SyncState {
     UpToDate,
     NeedsSync,
     Unknown,
+}
+
+/// Orphaned repository information
+#[derive(Debug, Clone)]
+pub struct OrphanedRepoInfo {
+    pub name: String,
+    pub local_path: PathBuf,
+    pub is_git_repository: bool,
+    pub remote_url: Option<String>,
+    pub file_count: Option<usize>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Sync options for repository sync
+#[derive(Debug, Clone, Default)]
+pub struct SyncOptions {
+    pub repository_name: String,
+    pub branch: Option<String>,
+    pub force: bool,
 }
 
 /// File extension information
@@ -302,6 +322,7 @@ impl From<sagitta_search::EnhancedRepositoryInfo> for EnhancedRepoInfo {
             }).collect(),
             total_files: enhanced.filesystem_status.total_files,
             size_bytes: enhanced.filesystem_status.size_bytes,
+            added_as_local_path: enhanced.added_as_local_path,
         }
     }
 }
@@ -325,6 +346,7 @@ pub struct RepoPanelState {
     pub active_tab: RepoPanelTab,
     pub repositories: Vec<RepoInfo>,
     pub enhanced_repositories: Vec<EnhancedRepoInfo>,
+    pub orphaned_repositories: Vec<OrphanedRepoInfo>,
     pub use_enhanced_repos: bool,
     pub initial_load_attempted: bool,
     pub repository_filter: RepoFilterOptions,
@@ -341,6 +363,7 @@ pub struct RepoPanelState {
     pub file_search_result: FileSearchResult,
     pub file_view_result: FileViewResult,
     pub branch_management: BranchManagementState,
+    pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
 }
 
@@ -1162,6 +1185,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
             EnhancedRepoInfo {
                 name: "enhanced-repo-2".to_string(),
@@ -1184,6 +1208,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
         ];
         
@@ -1298,6 +1323,7 @@ mod tests {
                 file_extensions: vec![],
                 total_files: None,
                 size_bytes: None,
+                added_as_local_path: false,
             },
         ];
         

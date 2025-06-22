@@ -459,18 +459,13 @@ mod tests {
     fn test_log_collector_with_special_characters() {
         let collector = SagittaCodeLogCollector;
         
-        // Clear any existing logs
-        if let Ok(mut logs) = LOG_COLLECTOR.lock() {
-            logs.clear();
-        }
-        
         let metadata = Metadata::builder()
             .level(Level::Info)
             .target("sagitta_code::test")
             .build();
         
-        // Use a simpler special character string that doesn't conflict with format parsing
-        let special_message = "Special chars: !@#$%^&*()[]|:;'<>,.?/~`";
+        // Use a unique identifier to avoid race conditions with other tests
+        let special_message = "UNIQUE_SPECIAL_CHARS_TEST: !@#$%^&*()[]|:;'<>,.?/~`";
         collector.log(&Record::builder()
             .metadata(metadata)
             .args(format_args!("{}", special_message))
@@ -478,15 +473,12 @@ mod tests {
         
         // Check that special characters are preserved
         if let Ok(logs) = LOG_COLLECTOR.lock() {
-            assert!(!logs.is_empty(), "Log collector should not be empty after logging special chars.");
-            let last_log = &logs[logs.len() - 1];
+            // Search for our specific message among all logs
+            let found = logs.iter().any(|(_, msg)| msg.contains("UNIQUE_SPECIAL_CHARS_TEST: !@#$%^&*()[]|:;'<>,.?/~`"));
             
-            eprintln!("Collected log for test_log_collector_with_special_characters: '{}'", last_log.1);
-
-            // Expected substring, matching the literal characters we logged.
-            assert!(last_log.1.contains(special_message), 
-                    "Log message does not contain the expected special characters. Expected to contain: '{}', Actual: '{}'", 
-                    special_message, last_log.1);
+            assert!(found, 
+                    "Log message with special characters not found. Available logs: {:?}", 
+                    logs.iter().map(|(_, msg)| msg.as_str()).collect::<Vec<_>>());
         }
     }
 

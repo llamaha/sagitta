@@ -125,7 +125,7 @@ pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-expor
 pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, Match, Range, PointsSelector, Value, Vectors, Vector, NamedVectors, ScoredPoint, SearchPoints, QueryPoints, QueryResponse, CollectionInfo as QdrantCollectionInfo, CountPoints, CountResponse, PointsOperationResponse, UpsertPoints, DeletePoints, CreateCollection, DeleteCollection, HealthCheckReply, Distance, VectorParams, VectorsConfig, SparseVectorParams, SparseVectorConfig, vectors_config, point_id::PointIdOptions, PointId, VectorParamsMap, HnswConfigDiff, OptimizersConfigDiff, WalConfigDiff, QuantizationConfig, ScalarQuantization, ProductQuantization, BinaryQuantization, /*quantization_config::Quantizer,*/ CompressionRatio, ListCollectionsResponse, CollectionDescription, AliasDescription, /*CollectionAliases,*/ ListAliasesRequest, /*UpdateCollectionAliases,*/ AliasOperations, CreateAlias, RenameAlias, DeleteAlias};
 
 // Additional re-exports for enhanced repository functionality
-pub use config::{get_config_path, ManagedRepositories};
+pub use config::{get_config_path, ManagedRepositories, get_repo_base_path};
 
 use std::sync::Arc;
 use async_trait::async_trait;
@@ -138,6 +138,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn it_works() {
@@ -192,6 +193,423 @@ mod tests {
         assert_eq!(embedding_config.tenant_id, None);
         assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
         assert_eq!(embedding_config.embedding_batch_size, Some(128)); // Default batch size
+    }
+
+    #[tokio::test]
+    async fn test_scan_for_orphaned_repositories() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        // Create a temporary directory structure
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path().join("repositories");
+        fs::create_dir_all(&base_path).unwrap();
+        
+        // Create some directories
+        fs::create_dir(&base_path.join("configured-repo")).unwrap();
+        fs::create_dir(&base_path.join("orphaned-repo1")).unwrap();
+        fs::create_dir(&base_path.join("orphaned-repo2")).unwrap();
+        
+        // Make orphaned-repo2 a git repository
+        fs::create_dir(&base_path.join("orphaned-repo2/.git")).unwrap();
+        
+        // Create a config with only one configured repo
+        let config = AppConfig {
+            repositories_base_path: Some(base_path.to_string_lossy().to_string()),
+            repositories: vec![
+                RepositoryConfig {
+                    name: "configured-repo".to_string(),
+                    url: "https://example.com/repo.git".to_string(),
+                    local_path: base_path.join("configured-repo"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: std::collections::HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                    tenant_id: None,
+                }
+            ],
+            ..Default::default()
+        };
+        
+        // Scan for orphaned repositories
+        let orphaned = scan_for_orphaned_repositories(&config).await.unwrap();
+        
+        // Verify results
+        assert_eq!(orphaned.len(), 2);
+        
+        let names: Vec<String> = orphaned.iter().map(|o| o.name.clone()).collect();
+        assert!(names.contains(&"orphaned-repo1".to_string()));
+        assert!(names.contains(&"orphaned-repo2".to_string()));
+        
+        // Check git repository detection
+        let git_repo = orphaned.iter().find(|o| o.name == "orphaned-repo2").unwrap();
+        assert!(git_repo.is_git_repository);
+        
+        let non_git_repo = orphaned.iter().find(|o| o.name == "orphaned-repo1").unwrap();
+        assert!(!non_git_repo.is_git_repository);
+    }
+
+    #[tokio::test]
+    async fn test_scan_for_orphaned_repositories_no_base_path() {
+        use tempfile::TempDir;
+        
+        // Test when base path doesn't exist
+        let temp_dir = TempDir::new().unwrap();
+        let non_existent_path = temp_dir.path().join("non_existent");
+        
+        let config = AppConfig {
+            repositories_base_path: Some(non_existent_path.to_string_lossy().to_string()),
+            ..Default::default()
+        };
+        
+        let orphaned = scan_for_orphaned_repositories(&config).await.unwrap();
+        assert_eq!(orphaned.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_orphaned_repository() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("orphaned-repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        let mut config = AppConfig::default();
+        
+        let orphaned_repo = OrphanedRepository {
+            name: "orphaned-repo".to_string(),
+            local_path: repo_path.clone(),
+            is_git_repository: false,
+            remote_url: Some("https://example.com/repo.git".to_string()),
+            file_count: Some(10),
+            size_bytes: Some(1024),
+        };
+        
+        // Add the orphaned repository
+        add_orphaned_repository(&mut config, &orphaned_repo).await.unwrap();
+        
+        // Verify it was added
+        assert_eq!(config.repositories.len(), 1);
+        let added_repo = &config.repositories[0];
+        assert_eq!(added_repo.name, "orphaned-repo");
+        assert_eq!(added_repo.url, "https://example.com/repo.git");
+        assert_eq!(added_repo.local_path, repo_path);
+        assert!(added_repo.added_as_local_path);
+    }
+
+    #[tokio::test]
+    async fn test_add_orphaned_repository_no_remote() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("local-repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        let mut config = AppConfig::default();
+        
+        let orphaned_repo = OrphanedRepository {
+            name: "local-repo".to_string(),
+            local_path: repo_path.clone(),
+            is_git_repository: false,
+            remote_url: None,
+            file_count: None,
+            size_bytes: None,
+        };
+        
+        // Add the orphaned repository
+        add_orphaned_repository(&mut config, &orphaned_repo).await.unwrap();
+        
+        // Verify it was added with local URL
+        assert_eq!(config.repositories.len(), 1);
+        let added_repo = &config.repositories[0];
+        assert_eq!(added_repo.name, "local-repo");
+        assert!(added_repo.url.starts_with("local://"));
+        assert!(added_repo.added_as_local_path);
+    }
+
+    #[tokio::test]
+    async fn test_add_orphaned_repository_duplicate_name() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("existing-repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        let mut config = AppConfig {
+            repositories: vec![
+                RepositoryConfig {
+                    name: "existing-repo".to_string(),
+                    url: "https://example.com/existing.git".to_string(),
+                    local_path: PathBuf::from("/some/other/path"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: std::collections::HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                    tenant_id: None,
+                }
+            ],
+            ..Default::default()
+        };
+        
+        let orphaned_repo = OrphanedRepository {
+            name: "existing-repo".to_string(),
+            local_path: repo_path,
+            is_git_repository: false,
+            remote_url: None,
+            file_count: None,
+            size_bytes: None,
+        };
+        
+        // Try to add duplicate
+        let result = add_orphaned_repository(&mut config, &orphaned_repo).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_remove_orphaned_repository() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("to-remove");
+        fs::create_dir_all(&repo_path).unwrap();
+        fs::write(repo_path.join("test.txt"), "test content").unwrap();
+        
+        let orphaned_repo = OrphanedRepository {
+            name: "to-remove".to_string(),
+            local_path: repo_path.clone(),
+            is_git_repository: false,
+            remote_url: None,
+            file_count: Some(1),
+            size_bytes: Some(12),
+        };
+        
+        // Remove the directory
+        remove_orphaned_repository(&orphaned_repo).await.unwrap();
+        
+        // Verify it's gone
+        assert!(!repo_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_remove_orphaned_repository_not_exists() {
+        let orphaned_repo = OrphanedRepository {
+            name: "non-existent".to_string(),
+            local_path: PathBuf::from("/non/existent/path"),
+            is_git_repository: false,
+            remote_url: None,
+            file_count: None,
+            size_bytes: None,
+        };
+        
+        // Try to remove non-existent directory
+        let result = remove_orphaned_repository(&orphaned_repo).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_repository_list_with_orphaned() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path().join("repositories");
+        fs::create_dir_all(&base_path).unwrap();
+        
+        // Create configured repo directory
+        fs::create_dir(&base_path.join("configured-repo")).unwrap();
+        // Create orphaned repo directory
+        fs::create_dir(&base_path.join("orphaned-repo")).unwrap();
+        
+        let config = AppConfig {
+            repositories_base_path: Some(base_path.to_string_lossy().to_string()),
+            repositories: vec![
+                RepositoryConfig {
+                    name: "configured-repo".to_string(),
+                    url: "https://example.com/repo.git".to_string(),
+                    local_path: base_path.join("configured-repo"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: std::collections::HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                    tenant_id: None,
+                },
+                RepositoryConfig {
+                    name: "missing-repo".to_string(),
+                    url: "https://example.com/missing.git".to_string(),
+                    local_path: base_path.join("missing-repo"),
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: std::collections::HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: false,
+                    target_ref: None,
+                    tenant_id: None,
+                }
+            ],
+            ..Default::default()
+        };
+        
+        // Get enhanced repository list
+        let enhanced_list = get_enhanced_repository_list(&config).await.unwrap();
+        
+        // Verify results
+        assert_eq!(enhanced_list.repositories.len(), 2);
+        assert_eq!(enhanced_list.orphaned_repositories.len(), 1);
+        assert_eq!(enhanced_list.summary.existing_count, 1);
+        assert_eq!(enhanced_list.summary.missing_count, 1);
+        assert_eq!(enhanced_list.summary.orphaned_count, 1);
+        
+        // Check orphaned repo
+        assert_eq!(enhanced_list.orphaned_repositories[0].name, "orphaned-repo");
+    }
+
+    #[tokio::test]
+    async fn test_reclone_missing_repository_not_found() {
+        let config = AppConfig::default();
+        
+        // Try to reclone non-existent repository
+        let result = reclone_missing_repository(&config, "non-existent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found in config"));
+    }
+
+    #[tokio::test]
+    async fn test_reclone_missing_repository_local_path() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("local-repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        
+        let config = AppConfig {
+            repositories: vec![
+                RepositoryConfig {
+                    name: "local-repo".to_string(),
+                    url: "local://path".to_string(),
+                    local_path: repo_path,
+                    default_branch: "main".to_string(),
+                    tracked_branches: vec!["main".to_string()],
+                    remote_name: Some("origin".to_string()),
+                    active_branch: Some("main".to_string()),
+                    ssh_key_path: None,
+                    ssh_key_passphrase: None,
+                    last_synced_commits: std::collections::HashMap::new(),
+                    indexed_languages: None,
+                    added_as_local_path: true, // This makes it non-reclonable
+                    target_ref: None,
+                    tenant_id: None,
+                }
+            ],
+            ..Default::default()
+        };
+        
+        // Try to reclone local path repository
+        let result = reclone_missing_repository(&config, "local-repo").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be recloned"));
+    }
+
+    #[tokio::test]
+    async fn test_scan_orphaned_with_git_timeout() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        // This test verifies that slow git operations don't block orphaned repo scanning
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path().join("repositories");
+        fs::create_dir_all(&base_path).unwrap();
+        
+        // Create a git repository
+        let git_repo_path = base_path.join("slow-git-repo");
+        fs::create_dir(&git_repo_path).unwrap();
+        fs::create_dir(&git_repo_path.join(".git")).unwrap();
+        
+        let config = AppConfig {
+            repositories_base_path: Some(base_path.to_string_lossy().to_string()),
+            repositories: vec![], // No configured repos
+            ..Default::default()
+        };
+        
+        // Scan should complete quickly even if git operations would be slow
+        let start = std::time::Instant::now();
+        let orphaned = scan_for_orphaned_repositories(&config).await.unwrap();
+        let duration = start.elapsed();
+        
+        // Should complete within reasonable time (well under 5 seconds)
+        assert!(duration.as_secs() < 5);
+        assert_eq!(orphaned.len(), 1);
+        assert_eq!(orphaned[0].name, "slow-git-repo");
+        assert!(orphaned[0].is_git_repository);
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_repository_info_filesystem_only() {
+        use tempfile::TempDir;
+        use std::fs;
+        
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().join("test-repo");
+        fs::create_dir_all(&repo_path).unwrap();
+        fs::write(repo_path.join("test.txt"), "content").unwrap();
+        
+        let repo_config = RepositoryConfig {
+            name: "test-repo".to_string(),
+            url: "https://example.com/test.git".to_string(),
+            local_path: repo_path,
+            default_branch: "main".to_string(),
+            tracked_branches: vec!["main".to_string()],
+            remote_name: Some("origin".to_string()),
+            active_branch: Some("main".to_string()),
+            ssh_key_path: None,
+            ssh_key_passphrase: None,
+            last_synced_commits: std::collections::HashMap::new(),
+            indexed_languages: None,
+            added_as_local_path: false,
+            target_ref: None,
+            tenant_id: None,
+        };
+        
+        let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
+        
+        // Verify filesystem status
+        assert!(enhanced_info.filesystem_status.exists);
+        assert!(enhanced_info.filesystem_status.accessible);
+        assert!(!enhanced_info.filesystem_status.is_git_repository);
+        assert_eq!(enhanced_info.filesystem_status.total_files, Some(1));
+        
+        // Should have no git status
+        assert!(enhanced_info.git_status.is_none());
+        
+        // Sync state should be never synced
+        assert_eq!(enhanced_info.sync_status.state, SyncState::NeverSynced);
     }
 
     #[test]
@@ -514,6 +932,8 @@ pub struct EnhancedRepositoryList {
     pub total_count: usize,
     /// Summary statistics
     pub summary: RepositoryListSummary,
+    /// Orphaned repositories found on filesystem but not in config
+    pub orphaned_repositories: Vec<OrphanedRepository>,
 }
 
 /// Summary statistics for repository list
@@ -531,6 +951,27 @@ pub struct RepositoryListSummary {
     pub total_size_bytes: u64,
     /// Most common file extensions across all repositories
     pub common_extensions: Vec<FileExtensionInfo>,
+    /// Number of orphaned repositories found on filesystem
+    pub orphaned_count: usize,
+    /// Number of missing repositories (in config but not on filesystem)
+    pub missing_count: usize,
+}
+
+/// Represents a repository found on filesystem but not in configuration
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct OrphanedRepository {
+    /// Directory name
+    pub name: String,
+    /// Full path to the directory
+    pub local_path: std::path::PathBuf,
+    /// Whether it contains a .git directory
+    pub is_git_repository: bool,
+    /// Remote URL if it can be determined from git config
+    pub remote_url: Option<String>,
+    /// File count
+    pub file_count: Option<usize>,
+    /// Size in bytes
+    pub size_bytes: Option<u64>,
 }
 
 /// Get enhanced repository listing with comprehensive information
@@ -543,10 +984,14 @@ pub async fn get_enhanced_repository_list(config: &AppConfig) -> Result<Enhanced
         total_files: 0,
         total_size_bytes: 0,
         common_extensions: Vec::new(),
+        orphaned_count: 0,
+        missing_count: 0,
     };
     
     // Collect extension statistics across all repositories
     let mut all_extensions: std::collections::HashMap<String, FileExtensionInfo> = std::collections::HashMap::new();
+    
+    let mut missing_count = 0;
     
     for repo_config in &config.repositories {
         let enhanced_info = get_enhanced_repository_info(repo_config).await?;
@@ -554,6 +999,8 @@ pub async fn get_enhanced_repository_list(config: &AppConfig) -> Result<Enhanced
         // Update summary statistics
         if enhanced_info.filesystem_status.exists {
             summary.existing_count += 1;
+        } else {
+            missing_count += 1;
         }
         
         if enhanced_info.sync_status.state == SyncState::NeedsSync {
@@ -587,6 +1034,14 @@ pub async fn get_enhanced_repository_list(config: &AppConfig) -> Result<Enhanced
         enhanced_repos.push(enhanced_info);
     }
     
+    // Scan for orphaned repositories
+    let orphaned_repos = scan_for_orphaned_repositories(config).await?;
+    let orphaned_count = orphaned_repos.len();
+    
+    // Update summary with missing and orphaned counts
+    summary.missing_count = missing_count;
+    summary.orphaned_count = orphaned_count;
+    
     // Sort extensions by count and take top 10
     let mut sorted_extensions: Vec<_> = all_extensions.into_values().collect();
     sorted_extensions.sort_by(|a, b| b.count.cmp(&a.count));
@@ -597,6 +1052,7 @@ pub async fn get_enhanced_repository_list(config: &AppConfig) -> Result<Enhanced
         active_repository: config.active_repository.clone(),
         total_count: config.repositories.len(),
         summary,
+        orphaned_repositories: orphaned_repos,
     })
 }
 
@@ -815,4 +1271,291 @@ async fn get_file_extension_stats(path: &Path) -> Result<Vec<FileExtensionInfo>>
     result.sort_by(|a, b| b.count.cmp(&a.count));
     
     Ok(result)
+}
+
+/// Scan the repository base path for directories that are not in the configuration
+pub async fn scan_for_orphaned_repositories(config: &AppConfig) -> Result<Vec<OrphanedRepository>> {
+    use config::get_repo_base_path;
+    
+    let base_path = get_repo_base_path(Some(config))?;
+    log::debug!("Scanning for orphaned repositories in: {}", base_path.display());
+    
+    // If base path doesn't exist, return empty list
+    if !base_path.exists() {
+        log::debug!("Repository base path does not exist, no orphaned repos");
+        return Ok(Vec::new());
+    }
+    
+    // Get list of configured repository names
+    let configured_names: std::collections::HashSet<String> = config.repositories
+        .iter()
+        .map(|r| r.name.clone())
+        .collect();
+    
+    let mut orphaned_repos = Vec::new();
+    
+    // Read directories in base path
+    if let Ok(entries) = std::fs::read_dir(&base_path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_dir() {
+                    let dir_name = entry.file_name().to_string_lossy().to_string();
+                    
+                    // Skip if this directory is configured
+                    if configured_names.contains(&dir_name) {
+                        continue;
+                    }
+                    
+                    log::debug!("Found potential orphaned directory: {}", dir_name);
+                    let dir_path = entry.path();
+                    
+                    // Check if it's a git repository
+                    let is_git_repository = dir_path.join(".git").exists();
+                    
+                    // Try to get remote URL if it's a git repo (but don't wait too long)
+                    let remote_url = if is_git_repository {
+                        // Use a timeout to prevent hanging on slow git operations
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            get_git_remote_url(&dir_path)
+                        ).await.ok().and_then(|r| r.ok())
+                    } else {
+                        None
+                    };
+                    
+                    // For orphaned repos, we don't need exact file count/size - just check if it's empty
+                    let is_empty = dir_path.read_dir()
+                        .map(|mut entries| entries.next().is_none())
+                        .unwrap_or(true);
+                    
+                    let (file_count, size_bytes) = if is_empty {
+                        (Some(0), Some(0))
+                    } else {
+                        // Skip detailed stats for now to avoid slow scanning
+                        (None, None)
+                    };
+                    
+                    orphaned_repos.push(OrphanedRepository {
+                        name: dir_name,
+                        local_path: dir_path,
+                        is_git_repository,
+                        remote_url,
+                        file_count,
+                        size_bytes,
+                    });
+                }
+            }
+        }
+    }
+    
+    log::debug!("Found {} orphaned repositories", orphaned_repos.len());
+    Ok(orphaned_repos)
+}
+
+/// Get git remote URL from a repository path
+async fn get_git_remote_url(path: &Path) -> Result<String> {
+    use git_manager::GitManager;
+    
+    let git_manager = GitManager::new();
+    let repo_info = git_manager.get_repository_info(path)
+        .map_err(|e| SagittaError::RepositoryError(format!("Failed to get git repository info: {}", e)))?;
+    
+    repo_info.remote_url.ok_or_else(|| SagittaError::RepositoryError("No remote URL found".to_string()))
+}
+
+/// Get basic statistics for a directory
+async fn get_directory_stats(path: &Path) -> Result<(Option<usize>, Option<u64>)> {
+    use walkdir::WalkDir;
+    
+    let mut file_count = 0;
+    let mut total_size = 0u64;
+    
+    for entry in WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !name.starts_with('.') && 
+            name != "target" && 
+            name != "node_modules" &&
+            name != "__pycache__"
+        })
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file() {
+            file_count += 1;
+            if let Ok(metadata) = entry.metadata() {
+                total_size += metadata.len();
+            }
+        }
+    }
+    
+    Ok((Some(file_count), Some(total_size)))
+}
+
+/// Reclone a missing repository
+pub async fn reclone_missing_repository(
+    config: &AppConfig,
+    repository_name: &str,
+) -> Result<()> {
+    use config::get_repo_base_path;
+    
+    // Find the repository config
+    let repo_config = config.repositories
+        .iter()
+        .find(|r| r.name == repository_name)
+        .ok_or_else(|| SagittaError::RepositoryError(format!("Repository '{}' not found in config", repository_name)))?;
+    
+    // Determine the local path
+    let local_path = if repo_config.added_as_local_path {
+        // For repos added as local path, we can't reclone
+        return Err(SagittaError::RepositoryError(
+            format!("Repository '{}' was added as a local path and cannot be recloned. Use 'add' to re-add it.", repository_name)
+        ));
+    } else {
+        // For cloned repos, use the standard path
+        let base_path = get_repo_base_path(Some(config))?;
+        base_path.join(&repo_config.name)
+    };
+    
+    // Remove existing directory if it exists
+    if local_path.exists() {
+        std::fs::remove_dir_all(&local_path)
+            .map_err(|e| SagittaError::RepositoryError(format!("Failed to remove existing directory: {}", e)))?;
+    }
+    
+    // Clone the repository using git2
+    log::info!("Cloning repository {} from {}", repo_config.name, repo_config.url);
+    
+    // Create callbacks for authentication
+    let mut callbacks = git2::RemoteCallbacks::new();
+    
+    // Setup SSH authentication if configured
+    if let (Some(ssh_key_path), ssh_passphrase) = (&repo_config.ssh_key_path, &repo_config.ssh_key_passphrase) {
+        callbacks.credentials(move |_url, username_from_url, _allowed_types| {
+            git2::Cred::ssh_key(
+                username_from_url.unwrap_or("git"),
+                None,
+                ssh_key_path,
+                ssh_passphrase.as_deref(),
+            )
+        });
+    } else {
+        // Try default SSH keys
+        callbacks.credentials(|_url, username_from_url, _allowed_types| {
+            git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
+        });
+    }
+    
+    // Setup fetch options
+    let mut fetch_options = git2::FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+    
+    // Clone the repository
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fetch_options);
+    
+    if let Some(target_ref) = &repo_config.target_ref {
+        // If target_ref is specified, clone with that reference
+        builder.branch(target_ref);
+    } else if repo_config.default_branch != "main" && repo_config.default_branch != "master" {
+        // Clone with specific branch
+        builder.branch(&repo_config.default_branch);
+    }
+    
+    builder.clone(&repo_config.url, &local_path)
+        .map_err(|e| SagittaError::RepositoryError(format!("Failed to clone repository: {}", e)))?;
+    
+    log::info!("Successfully recloned repository '{}'", repository_name);
+    
+    Ok(())
+}
+
+/// Add an orphaned repository to configuration
+pub async fn add_orphaned_repository(
+    config: &mut AppConfig,
+    orphaned_repo: &OrphanedRepository,
+) -> Result<()> {
+    // Use the directory name as the repository name
+    let name = orphaned_repo.name.clone();
+    
+    // Use the remote URL if available, otherwise use a placeholder
+    let url = orphaned_repo.remote_url
+        .clone()
+        .unwrap_or_else(|| format!("local://{}", orphaned_repo.local_path.display()));
+    
+    // Determine the default branch if it's a git repository
+    let default_branch = if orphaned_repo.is_git_repository {
+        match git2::Repository::open(&orphaned_repo.local_path) {
+            Ok(repo) => {
+                // Try to get current branch
+                match repo.head() {
+                    Ok(head) => {
+                        if let Some(branch_name) = head.shorthand() {
+                            branch_name.to_string()
+                        } else {
+                            "main".to_string()
+                        }
+                    }
+                    Err(_) => "main".to_string(),
+                }
+            }
+            Err(_) => "main".to_string(),
+        }
+    } else {
+        "main".to_string()
+    };
+    
+    // Create repository configuration
+    let repo_config = RepositoryConfig {
+        name: name.clone(),
+        url: url.clone(),
+        local_path: orphaned_repo.local_path.clone(),
+        default_branch: default_branch.clone(),
+        tracked_branches: vec![default_branch.clone()],
+        remote_name: Some("origin".to_string()),
+        active_branch: Some(default_branch),
+        ssh_key_path: None,
+        ssh_key_passphrase: None,
+        last_synced_commits: std::collections::HashMap::new(),
+        indexed_languages: None,
+        added_as_local_path: true, // Mark as added from local path
+        target_ref: None,
+        tenant_id: config.tenant_id.clone(),
+    };
+    
+    // Check if repository with same name already exists
+    if config.repositories.iter().any(|r| r.name == name) {
+        return Err(SagittaError::RepositoryError(format!("Repository with name '{}' already exists", name)));
+    }
+    
+    // Add to configuration
+    config.repositories.push(repo_config);
+    
+    log::info!("Added orphaned repository '{}' to configuration", name);
+    
+    Ok(())
+}
+
+/// Remove an orphaned repository from filesystem
+pub async fn remove_orphaned_repository(
+    orphaned_repo: &OrphanedRepository,
+) -> Result<()> {
+    use std::fs;
+    
+    // Safety check: ensure the path exists and is a directory
+    if !orphaned_repo.local_path.exists() || !orphaned_repo.local_path.is_dir() {
+        return Err(SagittaError::RepositoryError(
+            format!("Directory '{}' does not exist or is not a directory", orphaned_repo.local_path.display())
+        ));
+    }
+    
+    // Remove the directory
+    fs::remove_dir_all(&orphaned_repo.local_path)
+        .map_err(|e| SagittaError::RepositoryError(
+            format!("Failed to remove directory '{}': {}", orphaned_repo.local_path.display(), e)
+        ))?;
+    
+    log::info!("Removed orphaned repository directory: {}", orphaned_repo.local_path.display());
+    
+    Ok(())
 }

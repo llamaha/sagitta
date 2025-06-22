@@ -467,6 +467,7 @@ mod tests {
             qdrant_url: "http://localhost:6334".to_string(),
             onnx_model_path: Some("/test/model.onnx".to_string()),
             onnx_tokenizer_path: Some("/test/tokenizer".to_string()),
+            embed_model: None, // Not using automatic model downloading
             repositories_base_path: Some("/test/repos".to_string()),
             vocabulary_base_path: None, // Use default path
             tenant_id: None, // not used in sagitta-code (hardcoded to "local")

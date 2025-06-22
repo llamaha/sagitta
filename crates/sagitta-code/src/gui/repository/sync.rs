@@ -582,6 +582,7 @@ mod tests {
                     file_extensions: vec![],
                     total_files: Some(100),
                     size_bytes: Some(50000),
+                    added_as_local_path: false,
                 },
             ],
             use_enhanced_repos: true,
@@ -631,6 +632,7 @@ mod tests {
                     file_extensions: vec![],
                     total_files: Some(500),
                     size_bytes: Some(2500000),
+                    added_as_local_path: false,
                 },
                 EnhancedRepoInfo {
                     name: "user-repo-2".to_string(),
@@ -653,6 +655,7 @@ mod tests {
                     file_extensions: vec![],
                     total_files: Some(200),
                     size_bytes: Some(750000),
+                    added_as_local_path: false,
                 },
             ],
             use_enhanced_repos: true,

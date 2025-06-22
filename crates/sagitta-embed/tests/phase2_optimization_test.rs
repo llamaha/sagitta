@@ -124,6 +124,7 @@ fn test_phase2_dynamic_batch_optimization() {
     // Test with dynamic batch optimization
     let batch_config = DynamicBatchConfig {
         enable_dynamic_batching: true,
+        enable_dynamic_padding: false,
         min_batch_size: 1,
         max_batch_size: 16,
         target_latency_ms: 50,

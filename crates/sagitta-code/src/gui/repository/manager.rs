@@ -256,6 +256,40 @@ impl RepositoryManager {
             .map_err(|e| anyhow::anyhow!("Failed to get enhanced repository list: {}", e))
     }
 
+    /// Get orphaned repositories (on filesystem but not in config)
+    pub async fn get_orphaned_repositories(&self) -> Result<Vec<sagitta_search::OrphanedRepository>> {
+        let config_guard = self.config.lock().await;
+        sagitta_search::scan_for_orphaned_repositories(&*config_guard).await
+            .map_err(|e| anyhow::anyhow!("Failed to scan for orphaned repositories: {}", e))
+    }
+
+    /// Add an orphaned repository to configuration
+    pub async fn add_orphaned_repository(&self, orphaned_repo: &sagitta_search::OrphanedRepository) -> Result<()> {
+        log::info!("[GUI RepoManager] Add orphaned repo: {}", orphaned_repo.name);
+        
+        let mut config_guard = self.config.lock().await;
+        
+        // Add the orphaned repository
+        sagitta_search::add_orphaned_repository(&mut *config_guard, orphaned_repo).await
+            .map_err(|e| anyhow::anyhow!("Failed to add orphaned repository: {}", e))?;
+        
+        // Save config
+        self.save_core_config_with_guard(&*config_guard).await?;
+        
+        Ok(())
+    }
+
+    /// Remove an orphaned repository from filesystem
+    pub async fn remove_orphaned_repository(&self, orphaned_repo: &sagitta_search::OrphanedRepository) -> Result<()> {
+        log::info!("[GUI RepoManager] Remove orphaned repo: {}", orphaned_repo.name);
+        
+        // Remove the orphaned repository
+        sagitta_search::remove_orphaned_repository(orphaned_repo).await
+            .map_err(|e| anyhow::anyhow!("Failed to remove orphaned repository: {}", e))?;
+        
+        Ok(())
+    }
+
     /// Get enhanced information for a specific repository
     pub async fn get_enhanced_repository_info(&self, repo_name: &str) -> Result<sagitta_search::EnhancedRepositoryInfo> {
         let config_guard = self.config.lock().await;
@@ -519,6 +553,21 @@ impl RepositoryManager {
         
         // Save config
         self.save_core_config_with_guard(&*config_guard).await?;
+        
+        Ok(())
+    }
+
+    pub async fn reclone_repository(&mut self, name: &str) -> Result<()> {
+        log::info!("[GUI RepoManager] Reclone repo: {}", name);
+        
+        let config_guard = self.config.lock().await;
+        
+        // Use the sagitta_search reclone function
+        sagitta_search::reclone_missing_repository(&*config_guard, name).await
+            .map_err(|e| anyhow::anyhow!("Failed to reclone repository '{}': {}", name, e))?;
+        
+        // After successful reclone, trigger a refresh of repository list
+        log::info!("[GUI RepoManager] Successfully recloned repository '{}'", name);
         
         Ok(())
     }

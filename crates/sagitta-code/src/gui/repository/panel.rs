@@ -4,7 +4,7 @@ use egui::{Context, SidePanel, Vec2, Ui, RichText};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 
-use super::types::{RepoPanelState, RepoPanelTab};
+use super::types::{RepoPanelState, RepoPanelTab, OrphanedRepoInfo};
 use super::list::render_repo_list;
 use super::add::render_add_repo;
 use super::sync::render_sync_repo;
@@ -39,21 +39,60 @@ impl RepoPanel {
             log::debug!("RepoPanel: Starting background enhanced repository refresh...");
             
             // Try to get enhanced repository information first
-            match repo_manager_clone.lock().await.get_enhanced_repository_list().await {
+            let enhanced_result = {
+                let manager = repo_manager_clone.lock().await;
+                manager.get_enhanced_repository_list().await
+            };
+            
+            match enhanced_result {
                 Ok(enhanced_list) => {
+                    // Get orphaned repositories
+                    let orphaned_result = {
+                        let manager = repo_manager_clone.lock().await;
+                        manager.get_orphaned_repositories().await
+                    };
+                    
+                    // Update state with both results
                     let mut state_guard = state_clone.lock().await;
                     state_guard.enhanced_repositories = enhanced_list.repositories
                         .into_iter()
                         .map(|enhanced| enhanced.into())
                         .collect();
                     state_guard.use_enhanced_repos = true;
+                    state_guard.is_loading_repos = false; // Reset loading flag
                     log::info!("RepoPanel: Successfully refreshed {} enhanced repositories.", state_guard.enhanced_repositories.len());
+                    
+                    match orphaned_result {
+                        Ok(orphaned_list) => {
+                            state_guard.orphaned_repositories = orphaned_list
+                                .into_iter()
+                                .map(|orphaned| OrphanedRepoInfo {
+                                    name: orphaned.name,
+                                    local_path: orphaned.local_path,
+                                    is_git_repository: orphaned.is_git_repository,
+                                    remote_url: orphaned.remote_url,
+                                    file_count: orphaned.file_count,
+                                    size_bytes: orphaned.size_bytes,
+                                })
+                                .collect();
+                            log::info!("RepoPanel: Found {} orphaned repositories.", state_guard.orphaned_repositories.len());
+                        }
+                        Err(e) => {
+                            log::warn!("RepoPanel: Failed to get orphaned repositories: {}", e);
+                            state_guard.orphaned_repositories.clear();
+                        }
+                    }
                 }
                 Err(e) => {
                     log::warn!("RepoPanel: Failed to get enhanced repository list: {}, falling back to basic list", e);
                     
                     // Fallback to basic repository listing
-                    match repo_manager_clone.lock().await.list_repositories().await {
+                    let basic_result = {
+                        let manager = repo_manager_clone.lock().await;
+                        manager.list_repositories().await
+                    };
+                    
+                    match basic_result {
                         Ok(repositories) => {
                             let mut state_guard = state_clone.lock().await;
                             state_guard.repositories = repositories
@@ -61,10 +100,15 @@ impl RepoPanel {
                                 .map(|config| config.into())
                                 .collect();
                             state_guard.use_enhanced_repos = false;
+                            state_guard.orphaned_repositories.clear(); // Clear orphaned repos in fallback mode
+                            state_guard.is_loading_repos = false; // Reset loading flag
                             log::info!("RepoPanel: Successfully refreshed {} basic repositories.", state_guard.repositories.len());
                         }
                         Err(e) => {
                             log::error!("RepoPanel: Failed to refresh repositories: {}", e);
+                            // Reset loading flag on error
+                            let mut state_guard = state_clone.lock().await;
+                            state_guard.is_loading_repos = false;
                         }
                     }
                 }
@@ -129,19 +173,20 @@ impl RepoPanel {
                 if !state_guard.use_enhanced_repos && state_guard.enhanced_repositories.is_empty() && !state_guard.is_loading_repos && !state_guard.initial_load_attempted {
                     // Mark that we've attempted initial load to prevent infinite loops
                     state_guard.initial_load_attempted = true;
+                    state_guard.is_loading_repos = true; // Set loading flag
                     
                     // Start initial enhanced repository load
                     drop(state_guard); // Drop lock before spawning refresh task
                     let _ = self.refresh_repositories();
                     
-                    // Re-acquire lock after starting refresh
-                    state_guard = match state_clone.try_lock() {
-                        Ok(guard) => guard,
-                        Err(_) => {
-                            ui.label("State lock contention during initial load...");
-                            return;
-                        }
-                    };
+                    // Show loading message and return early
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(20.0);
+                        ui.spinner();
+                        ui.add_space(8.0);
+                        ui.label("Loading repositories...");
+                    });
+                    return;
                 }
 
                 self.render_header(ui);

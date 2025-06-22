@@ -141,7 +141,7 @@ pub fn render_repo_list(
                     };
                     
                     // Convert basic repos to enhanced format for display
-                    return render_basic_repos(ui, basic_repos, state, repo_manager);
+                    return render_basic_repos(ui, basic_repos, state, Arc::clone(&repo_manager));
                 };
                 
                 if repos_to_display.is_empty() {
@@ -156,7 +156,14 @@ pub fn render_repo_list(
                     // Name column
                     let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &enhanced_repo.name);
                     
-                    if ui.selectable_label(is_selected, &enhanced_repo.name).clicked() {
+                    // Style the name differently if the repository is missing
+                    let name_text = if !enhanced_repo.filesystem_status.exists {
+                        RichText::new(&enhanced_repo.name).color(Color32::from_rgb(220, 53, 69))
+                    } else {
+                        RichText::new(&enhanced_repo.name)
+                    };
+                    
+                    if ui.selectable_label(is_selected, name_text).clicked() {
                         if is_selected {
                             state.selected_repo = None;
                             // Also remove from selected_repos
@@ -223,18 +230,45 @@ pub fn render_repo_list(
                     
                     // Actions column
                     ui.horizontal(|ui| {
-                        if ui.button("Query").clicked() {
-                            state.active_tab = super::types::RepoPanelTab::Query;
-                            state.selected_repo = Some(enhanced_repo.name.clone());
-                            state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
+                        if !enhanced_repo.filesystem_status.exists {
+                            // Repository is missing - show reclone button
+                            if !enhanced_repo.added_as_local_path {
+                                if ui.button("Reclone").clicked() {
+                                    let repo_name = enhanced_repo.name.clone();
+                                    let repo_manager_clone = Arc::clone(&repo_manager);
+                                    let handle = tokio::runtime::Handle::current();
+                                    
+                                    handle.spawn(async move {
+                                        let mut manager = repo_manager_clone.lock().await;
+                                        let _ = manager.reclone_repository(&repo_name).await;
+                                    });
+                                }
+                            } else {
+                                // Repository was added as local path - can't reclone
+                                ui.label("Local path");
+                            }
+                        } else {
+                            // Repository exists - show normal actions
+                            if ui.button("Query").clicked() {
+                                state.active_tab = super::types::RepoPanelTab::Query;
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
+                            }
+                            
+                            if ui.button("Files").clicked() {
+                                state.active_tab = super::types::RepoPanelTab::SearchFile;
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
+                            }
+                            
+                            if ui.button("Sync").clicked() {
+                                state.active_tab = super::types::RepoPanelTab::Sync;
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                state.sync_options.repository_name = enhanced_repo.name.clone();
+                            }
                         }
                         
-                        if ui.button("Files").clicked() {
-                            state.active_tab = super::types::RepoPanelTab::SearchFile;
-                            state.selected_repo = Some(enhanced_repo.name.clone());
-                            state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
-                        }
-                        
+                        // Remove button is always available
                         if ui.button("Remove").clicked() {
                             // Set up the remove
                             let repo_name = enhanced_repo.name.clone();
@@ -263,6 +297,106 @@ pub fn render_repo_list(
                 }
             });
     });
+    
+    // Display orphaned repositories if any
+    if !state.orphaned_repositories.is_empty() {
+        ui.separator();
+        ui.heading("Orphaned Repositories");
+        ui.label("These directories exist on the filesystem but are not in your configuration:");
+        
+        ScrollArea::vertical().show(ui, |ui| {
+            Grid::new("orphaned_repositories_grid")
+                .num_columns(4)
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    // Header
+                    ui.label(RichText::new("Name").strong());
+                    ui.label(RichText::new("Path").strong());
+                    ui.label(RichText::new("Info").strong());
+                    ui.label(RichText::new("Actions").strong());
+                    ui.end_row();
+                    
+                    let orphaned_repos = state.orphaned_repositories.clone();
+                    let mut to_remove = Vec::new();
+                    
+                    for orphan in &orphaned_repos {
+                        // Name column
+                        ui.label(RichText::new(&orphan.name).color(Color32::from_rgb(255, 193, 7)));
+                        
+                        // Path column
+                        ui.label(orphan.local_path.to_string_lossy().to_string());
+                        
+                        // Info column
+                        ui.horizontal(|ui| {
+                            if orphan.is_git_repository {
+                                ui.colored_label(Color32::from_rgb(46, 160, 67), "Git");
+                            }
+                            if let Some(file_count) = orphan.file_count {
+                                ui.label(format!("{} files", file_count));
+                            }
+                            if let Some(size) = orphan.size_bytes {
+                                ui.label(format_bytes(size));
+                            }
+                        });
+                        
+                        // Actions column
+                        ui.horizontal(|ui| {
+                            if ui.button("Add").clicked() {
+                                let orphan_clone = orphan.clone();
+                                let repo_manager_clone = Arc::clone(&repo_manager);
+                                let handle = tokio::runtime::Handle::current();
+                                
+                                handle.spawn(async move {
+                                    let manager = repo_manager_clone.lock().await;
+                                    let orphaned_repo = sagitta_search::OrphanedRepository {
+                                        name: orphan_clone.name,
+                                        local_path: orphan_clone.local_path,
+                                        is_git_repository: orphan_clone.is_git_repository,
+                                        remote_url: orphan_clone.remote_url,
+                                        file_count: orphan_clone.file_count,
+                                        size_bytes: orphan_clone.size_bytes,
+                                    };
+                                    let _ = manager.add_orphaned_repository(&orphaned_repo).await;
+                                });
+                                
+                                // Mark for removal
+                                to_remove.push(orphan.name.clone());
+                            }
+                            
+                            if ui.button("Remove").clicked() {
+                                let orphan_clone = orphan.clone();
+                                let repo_manager_clone = Arc::clone(&repo_manager);
+                                let handle = tokio::runtime::Handle::current();
+                                
+                                handle.spawn(async move {
+                                    let manager = repo_manager_clone.lock().await;
+                                    let orphaned_repo = sagitta_search::OrphanedRepository {
+                                        name: orphan_clone.name,
+                                        local_path: orphan_clone.local_path,
+                                        is_git_repository: orphan_clone.is_git_repository,
+                                        remote_url: orphan_clone.remote_url,
+                                        file_count: orphan_clone.file_count,
+                                        size_bytes: orphan_clone.size_bytes,
+                                    };
+                                    let _ = manager.remove_orphaned_repository(&orphaned_repo).await;
+                                });
+                                
+                                // Mark for removal
+                                to_remove.push(orphan.name.clone());
+                            }
+                        });
+                        
+                        ui.end_row();
+                    }
+                    
+                    // Remove clicked items from the state
+                    for name in to_remove {
+                        state.orphaned_repositories.retain(|o| o.name != name);
+                    }
+                });
+        });
+    }
 }
 
 /// Fallback function to render basic repositories when enhanced data is not available

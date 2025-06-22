@@ -560,6 +560,39 @@ impl AppTheme {
             AppTheme::Custom => get_custom_theme_colors().button_background, // Reuse button background for custom
         }
     }
+
+    /// Get separator color
+    pub fn separator_color(&self) -> Color32 {
+        self.border_color()
+    }
+
+    /// Get muted text color
+    pub fn muted_text_color(&self) -> Color32 {
+        self.hint_text_color()
+    }
+
+    /// Get user message background color
+    pub fn user_message_background(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(35, 35, 40),
+            AppTheme::Light => Color32::from_rgb(240, 240, 245),
+            AppTheme::Custom => get_custom_theme_colors().code_background,
+        }
+    }
+
+    /// Get agent message background color
+    pub fn agent_message_background(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(30, 40, 30),
+            AppTheme::Light => Color32::from_rgb(235, 245, 235),
+            AppTheme::Custom => Color32::from_rgba_unmultiplied(
+                get_custom_theme_colors().agent_color.r(),
+                get_custom_theme_colors().agent_color.g(),
+                get_custom_theme_colors().agent_color.b(),
+                20
+            ),
+        }
+    }
 }
 
 /// Apply theme to the entire application

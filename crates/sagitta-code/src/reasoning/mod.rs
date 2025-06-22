@@ -900,12 +900,7 @@ impl EventEmitter for AgentEventEmitter {
                 AgentEvent::Log(format!("Tool execution started: {}", tool_name))
             }
             ReasoningEvent::ToolExecutionCompleted { session_id: _, tool_name, success, duration_ms } => {
-                // Emit streaming text for tool execution completion
-                let status_icon = if success { "✅" } else { "❌" };
-                self.emit_streaming_text(
-                    format!("\n{} Tool **{}** completed in {}ms\n\n", status_icon, tool_name, duration_ms),
-                    false
-                ).await;
+                // Don't emit redundant text - the tool card already shows completion status
                 
                 AgentEvent::ToolCompleted {
                     tool_name,
@@ -914,12 +909,7 @@ impl EventEmitter for AgentEventEmitter {
                 }
             }
             ReasoningEvent::Summary { session_id, content, timestamp } => {
-                // Emit streaming text for summary event
-                self.emit_streaming_text(
-                    format!("\n📋 Summary: {}\n\n", content.chars().take(100).collect::<String>()),
-                    false
-                ).await;
-                
+                // Don't emit streaming text for summary - it's redundant with tool cards
                 AgentEvent::Log(format!("Summary generated: {}", content.chars().take(100).collect::<String>()))
             }
             ReasoningEvent::DecisionMade { session_id, decision_id: _, options_considered: _, chosen_option, confidence } => {

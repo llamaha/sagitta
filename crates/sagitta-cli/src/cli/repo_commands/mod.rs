@@ -15,6 +15,7 @@ pub mod status;
 pub mod sync_branches;
 pub mod compare_branches;
 pub mod cleanup_branches;
+pub mod orphaned;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Subcommand};
@@ -66,6 +67,8 @@ pub enum RepoCommand {
     CompareBranches(compare_branches::CompareBranchesArgs),
     /// Clean up unused branch collections
     CleanupBranches(cleanup_branches::CleanupBranchesArgs),
+    /// Manage orphaned repositories
+    Orphaned(orphaned::OrphanedArgs),
 }
 
 pub async fn handle_repo_command<C>(
@@ -187,6 +190,10 @@ where
         },
         RepoCommand::CleanupBranches(cleanup_branches_args) => {
             cleanup_branches::handle_cleanup_branches(cleanup_branches_args, config, client.clone(), cli_args, override_path).await?;
+            Ok(())
+        },
+        RepoCommand::Orphaned(orphaned_args) => {
+            orphaned::handle_orphaned_command(orphaned_args, config, override_path).await?;
             Ok(())
         },
     };

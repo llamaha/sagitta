@@ -2,18 +2,27 @@
 
 use crate::agent::state::types::{AgentMode, AgentState, ConversationStatus};
 use crate::agent::message::types::{ToolCall, AgentMessage};
+use crate::agent::events::ToolRunId;
 use crate::gui::conversation::sidebar::SidebarAction;
 use crate::gui::chat::view::CopyButtonState;
 use super::super::theme::AppTheme;
 use egui_notify::Toasts;
 use uuid::Uuid;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
 use terminal_stream::{
     events::StreamEvent,
     TerminalWidget, TerminalConfig,
 };
 
+/// Information about a currently running tool
+#[derive(Debug, Clone)]
+pub struct RunningToolInfo {
+    pub tool_name: String,
+    pub progress: Option<f32>,
+    pub message_id: String,
+    pub start_time: std::time::Instant,
+}
 
 /// Application state management
 pub struct AppState {
@@ -66,6 +75,9 @@ pub struct AppState {
     pub messages: Vec<AgentMessage>,
     pub pending_tool_calls: VecDeque<ToolCall>,
     pub active_tool_call_message_id: Option<Uuid>,
+    
+    // Running tool tracking
+    pub running_tools: HashMap<ToolRunId, RunningToolInfo>,
     
     // Sidebar state
     pub sidebar_action: Option<SidebarAction>,
@@ -140,6 +152,9 @@ impl AppState {
             messages: Vec::new(),
             pending_tool_calls: VecDeque::new(),
             active_tool_call_message_id: None,
+            
+            // Running tool tracking
+            running_tools: HashMap::new(),
             
             // Sidebar state
             sidebar_action: None,
@@ -347,6 +362,9 @@ mod tests {
         assert!(state.messages.is_empty());
         assert!(state.pending_tool_calls.is_empty());
         assert!(state.active_tool_call_message_id.is_none());
+        
+        // Test initial running tools state
+        assert!(state.running_tools.is_empty());
         
         // Test initial sidebar state
         assert!(state.sidebar_action.is_none());

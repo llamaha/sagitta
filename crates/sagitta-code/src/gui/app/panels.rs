@@ -545,10 +545,12 @@ impl PanelManager {
     }
 
     pub fn show_preview(&mut self, title: &str, content: &str) {
+        log::debug!("show_preview called with title: {}", title);
         self.preview_panel.set_content(title, content);
         
         // Automatically open the preview panel if it's not already open
         if !self.preview_panel.visible {
+            log::debug!("Opening preview panel");
             self.toggle_panel(ActivePanel::Preview);
         }
     }
