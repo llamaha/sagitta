@@ -93,6 +93,7 @@ pub struct ToolCall {
     pub arguments: String,
     pub result: Option<String>,
     pub status: MessageStatus,
+    pub content_position: Option<usize>, // Position in content where tool was initiated
 }
 
 #[derive(Debug, Clone)]
@@ -620,16 +621,55 @@ fn render_single_message_content(
         ui.add_space(2.0); // Reduced spacing
     }
     
-    // Main message content first (this contains the conversation flow)
-    if !message.content.is_empty() {
-        render_message_content_compact(ui, message, &bg_color, max_width, app_theme);
+    // Render content and tool calls in chronological order
+    let mut sorted_tools: Vec<(usize, &ToolCall)> = message.tool_calls.iter()
+        .filter_map(|tc| tc.content_position.map(|pos| (pos, tc)))
+        .collect();
+    sorted_tools.sort_by_key(|&(pos, _)| pos);
+    
+    let mut last_pos = 0;
+    let content = &message.content;
+    
+    // Render content and tool calls interleaved
+    for (pos, tool_call) in &sorted_tools {
+        // Render content before this tool call
+        if *pos > last_pos && last_pos < content.len() {
+            let content_chunk = &content[last_pos..*pos.min(&content.len())];
+            if !content_chunk.is_empty() {
+                render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme);
+            }
+        }
+        
+        // Render the tool call
+        ui.add_space(1.0);
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
+            clicked_tool = Some(tool_info);
+        }
+        ui.add_space(1.0);
+        
+        last_pos = *pos;
     }
     
-    // Tool calls (if any) - render inline after the main content
-    if !message.tool_calls.is_empty() {
-        ui.add_space(1.0); // Small spacing before tool calls
-        if let Some(tool_info) = render_tool_calls_compact(ui, &message.tool_calls, &bg_color, max_width, app_theme, running_tools, copy_state) {
-            clicked_tool = Some(tool_info);
+    // Render any remaining content after the last tool
+    if last_pos < content.len() {
+        let remaining_content = &content[last_pos..];
+        if !remaining_content.is_empty() {
+            render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme);
+        }
+    }
+    
+    // Render tool calls without position info at the end
+    let unpositioned_tools: Vec<&ToolCall> = message.tool_calls.iter()
+        .filter(|tc| tc.content_position.is_none())
+        .collect();
+    
+    if !unpositioned_tools.is_empty() {
+        ui.add_space(1.0);
+        for tool_call in unpositioned_tools {
+            if let Some(tool_info) = render_single_tool_call(ui, tool_call, &bg_color, max_width, app_theme, running_tools, copy_state) {
+                clicked_tool = Some(tool_info);
+            }
+            ui.add_space(4.0);
         }
     }
     
@@ -717,11 +757,9 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
     }
 }
 
-/// Render tool calls as compact, clickable cards
-fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+/// Render a single tool call as a compact, clickable card
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
-    
-    for tool_call in tool_calls {
         // Create a frame for the tool card
         Frame::none()
             .fill(app_theme.code_background())
@@ -793,7 +831,9 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if tool_call.result.is_some() {
                             // View details button for completed tools
-                            if ui.small_button("View details").clicked() {
+                            log::trace!("Rendering view details button for tool: {}", tool_call.name);
+                            let view_details_btn = ui.small_button("View details");
+                            if view_details_btn.clicked() {
                                 // Determine display title based on tool type
                                 let result = tool_call.result.as_ref().unwrap();
                                 let is_shell_result = tool_call.name.contains("shell") || tool_call.name.contains("execution") ||
@@ -806,6 +846,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
                                     format!("{} - Result", tool_call.name)
                                 };
                                 
+                                log::debug!("View details clicked for tool: {}, display_title: {}", tool_call.name, display_title);
                                 clicked_tool_result = Some((display_title, result.clone()));
                             }
                             
@@ -839,7 +880,18 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
                     });
                 });
             });
-        
+    
+    clicked_tool_result
+}
+
+/// Render tool calls as compact, clickable cards (for backward compatibility)
+fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+    let mut clicked_tool_result = None;
+    
+    for tool_call in tool_calls {
+        if let Some(tool_info) = render_single_tool_call(ui, tool_call, bg_color, max_width, app_theme, running_tools, copy_state) {
+            clicked_tool_result = Some(tool_info);
+        }
         ui.add_space(4.0); // Spacing between tool cards
     }
     
@@ -1897,6 +1949,7 @@ index 1234567..abcdefg 100644
                 "timed_out": false
             }"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         };
         
         assert_eq!(tool_call.name, "shell_execution");
@@ -2011,6 +2064,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"name": "test_repo"}"#.to_string(),
             result: Some(r#"{"status": "added", "message": "Repository added successfully"}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg_1);
         
@@ -2060,6 +2114,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"target_file": "test.rs", "content": "test content"}"#.to_string(),
             result: Some(r#"{"status": "success", "file_path": "test.rs", "lines_added": 25}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg);
         
@@ -2126,6 +2181,7 @@ index 1234567..abcdefg 100644
             arguments: r#"{"path": "./src"}"#.to_string(),
             result: Some(r#"{"files": ["main.rs", "lib.rs"], "language": "rust"}"#.to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         });
         messages.push(agent_msg);
         

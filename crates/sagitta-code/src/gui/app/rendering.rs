@@ -994,58 +994,71 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
 /// Render tool info modal
 fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &str, tool_args: &str) {
+    log::debug!("render_tool_info_modal called with tool_name: {}", tool_name);
+    
     // Check if this is a tool result (indicated by " Result" suffix or " - Terminal Output" suffix)
     if tool_name.ends_with(" Result") || tool_name.contains(" - ") {
+        log::debug!("Detected tool result, determining display method");
         // This is a tool result - determine how to display it
         if tool_name.contains("Terminal Output") || tool_name.contains("shell") || tool_name.contains("execution") ||
            tool_args.contains("stdout") || tool_args.contains("stderr") || tool_args.contains("exit_code") {
-            // This is shell execution output - show in terminal
-            app.state.show_terminal = true;
+            log::debug!("Handling terminal output for: {}", tool_name);
             
-            // Parse and add the shell output to terminal
-            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(tool_args) {
-                if let Some(obj) = json_value.as_object() {
-                    let mut terminal_output = String::new();
-                    
-                    // Add command info if available
-                    if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
-                        terminal_output.push_str(&format!("$ {}\n", command));
-                    }
-                    
-                    // Add stdout
-                    if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
-                        if !stdout.trim().is_empty() {
-                            terminal_output.push_str(stdout);
-                            if !stdout.ends_with('\n') {
-                                terminal_output.push('\n');
+            // If terminal is already showing this tool's output, close it
+            // Otherwise, show the terminal and add the output
+            if app.state.show_terminal {
+                // Terminal is already open - just close it
+                app.state.show_terminal = false;
+            } else {
+                // Terminal is closed - open it and show the output
+                app.state.show_terminal = true;
+                
+                // Parse and add the shell output to terminal
+                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(tool_args) {
+                    if let Some(obj) = json_value.as_object() {
+                        let mut terminal_output = String::new();
+                        
+                        // Add command info if available
+                        if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
+                            terminal_output.push_str(&format!("$ {}\n", command));
+                        }
+                        
+                        // Add stdout
+                        if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
+                            if !stdout.trim().is_empty() {
+                                terminal_output.push_str(stdout);
+                                if !stdout.ends_with('\n') {
+                                    terminal_output.push('\n');
+                                }
                             }
                         }
-                    }
-                    
-                    // Add stderr
-                    if let Some(stderr) = obj.get("stderr").and_then(|v| v.as_str()) {
-                        if !stderr.trim().is_empty() {
-                            terminal_output.push_str(&format!("stderr: {}\n", stderr));
+                        
+                        // Add stderr
+                        if let Some(stderr) = obj.get("stderr").and_then(|v| v.as_str()) {
+                            if !stderr.trim().is_empty() {
+                                terminal_output.push_str(&format!("stderr: {}\n", stderr));
+                            }
                         }
+                        
+                        // Add exit code
+                        if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
+                            terminal_output.push_str(&format!("Exit code: {}\n", exit_code));
+                        }
+                        
+                        // Add the output to terminal widget
+                        app.state.terminal_widget.add_output(&terminal_output);
+                    } else {
+                        // Fallback: add raw JSON to terminal
+                        app.state.terminal_widget.add_output(tool_args);
                     }
-                    
-                    // Add exit code
-                    if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
-                        terminal_output.push_str(&format!("Exit code: {}\n", exit_code));
-                    }
-                    
-                    // Add the output to terminal widget
-                    app.state.terminal_widget.add_output(&terminal_output);
                 } else {
-                    // Fallback: add raw JSON to terminal
+                    // Not JSON, add as plain text
                     app.state.terminal_widget.add_output(tool_args);
                 }
-            } else {
-                // Not JSON, add as plain text
-                app.state.terminal_widget.add_output(tool_args);
             }
         } else {
             // This is a non-shell tool result - show in preview
+            log::debug!("Showing preview for non-shell tool result: {}", tool_name);
             app.show_preview(tool_name, tool_args);
         }
     } else {

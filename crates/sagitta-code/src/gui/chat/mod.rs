@@ -537,6 +537,7 @@ mod tests {
             arguments: r#"{"query": "help assistance"}"#.to_string(),
             result: Some("Found relevant help resources".to_string()),
             status: MessageStatus::Complete,
+            content_position: None,
         };
         manager.add_tool_call(&agent_id, tool_call);
         

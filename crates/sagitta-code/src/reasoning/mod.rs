@@ -914,12 +914,7 @@ impl EventEmitter for AgentEventEmitter {
                 }
             }
             ReasoningEvent::Summary { session_id, content, timestamp } => {
-                // Emit streaming text for summary event
-                self.emit_streaming_text(
-                    format!("\n📋 Summary: {}\n\n", content.chars().take(100).collect::<String>()),
-                    false
-                ).await;
-                
+                // Don't emit streaming text for summary - it's redundant with tool cards
                 AgentEvent::Log(format!("Summary generated: {}", content.chars().take(100).collect::<String>()))
             }
             ReasoningEvent::DecisionMade { session_id, decision_id: _, options_considered: _, chosen_option, confidence } => {
