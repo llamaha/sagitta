@@ -29,6 +29,7 @@ use crate::agent::conversation::search::text::TextConversationSearchEngine;
 
 use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
 use crate::llm::title::TitleGenerator;
+use crate::tools::WorkingDirectoryManager;
 
 // Import the modularized components
 mod panels;
@@ -104,6 +105,9 @@ pub struct SagittaCodeApp {
     
     // Tool result formatting
     tool_formatter: ToolResultFormatter,
+    
+    // Working directory management
+    working_dir_manager: Option<Arc<crate::tools::WorkingDirectoryManager>>,
 }
 
 impl SagittaCodeApp {
@@ -224,6 +228,7 @@ impl SagittaCodeApp {
             
             // Tool result formatting
             tool_formatter: ToolResultFormatter::new(),
+            working_dir_manager: None, // Will be set during initialization
             
             // Conversation service for cluster management
             conversation_service: None,

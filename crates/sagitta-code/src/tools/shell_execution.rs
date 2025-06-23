@@ -469,6 +469,15 @@ impl StreamingShellExecutionTool {
         }
     }
     
+    pub fn new_with_working_dir_manager(
+        default_working_dir: PathBuf,
+        working_dir_manager: Arc<WorkingDirectoryManager>,
+    ) -> Self {
+        Self {
+            base_tool: ShellExecutionTool::new_with_working_dir_manager(default_working_dir, working_dir_manager),
+        }
+    }
+    
     /// Execute a command with streaming output to a terminal widget
     pub async fn execute_streaming(
         &self,

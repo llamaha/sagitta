@@ -929,10 +929,72 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
                 let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
-                app.state.set_repository_context(repo_context);
+                app.state.set_repository_context(repo_context.clone());
                 
-                // TODO: Trigger set_repository_context tool call to update working directory
-                // This will be handled by the agent when it processes the context change
+                // Update working directory if we have a working directory manager
+                if let Some(working_dir_manager) = &app.working_dir_manager {
+                    if let Some(repo_name) = &repo_context {
+                        // Get repository manager
+                        let repo_manager = app.repo_panel.get_repo_manager();
+                        let working_dir_manager_clone = working_dir_manager.clone();
+                        let repo_name_clone = repo_name.clone();
+                        
+                        // Change working directory in background
+                        tokio::spawn(async move {
+                            let repo_manager_lock = repo_manager.lock().await;
+                            match working_dir_manager_clone.set_repository_context(&repo_name_clone, &*repo_manager_lock).await {
+                                Ok(result) => {
+                                    log::info!("Changed working directory to repository '{}': {} -> {}", 
+                                        repo_name_clone, 
+                                        result.previous_directory.display(), 
+                                        result.new_directory.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to change working directory to repository '{}': {}", repo_name_clone, e);
+                                }
+                            }
+                        });
+                    } else {
+                        // No repository selected, reset to base directory
+                        let working_dir_manager_clone = working_dir_manager.clone();
+                        let base_dir = working_dir_manager.get_base_directory().clone();
+                        
+                        tokio::spawn(async move {
+                            match working_dir_manager_clone.change_directory(base_dir.clone()).await {
+                                Ok(result) => {
+                                    log::info!("Reset working directory to base: {} -> {}", 
+                                        result.previous_directory.display(), 
+                                        result.new_directory.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to reset working directory to base: {}", e);
+                                }
+                            }
+                        });
+                    }
+                }
+                
+                // Save the repository context to config
+                let config = app.config.clone();
+                let repo_context_for_save = repo_context.clone();
+                tokio::spawn(async move {
+                    match config.try_lock() {
+                        Ok(mut config_guard) => {
+                            config_guard.ui.current_repository_context = repo_context_for_save;
+                            
+                            // Save the config
+                            if let Err(e) = crate::config::save_config(&*config_guard) {
+                                log::error!("Failed to save repository context to config: {}", e);
+                            } else {
+                                log::info!("Repository context saved to config");
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to lock config for saving repository context: {}", e);
+                        }
+                    }
+                });
+                
                 log::info!("Repository context changed to: {:?}", new_repo);
             }
             

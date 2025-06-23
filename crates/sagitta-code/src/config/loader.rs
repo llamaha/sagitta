@@ -433,4 +433,52 @@ unknown_field = "also ignored"
         assert_eq!(result.openrouter.api_key, Some("test-key".to_string()));
         assert_eq!(result.openrouter.model, "test-model");
     }
+
+    #[test]
+    fn test_save_and_load_repository_context() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let mut config = SagittaCodeConfig::default();
+        
+        // Set repository context
+        config.ui.current_repository_context = Some("my-test-repo".to_string());
+        
+        // Save the config
+        save_config_to_path(&config, temp_file.path()).unwrap();
+        
+        // Load it back
+        let loaded_config = load_config_from_path(temp_file.path()).unwrap();
+        
+        // Verify repository context was preserved
+        assert_eq!(loaded_config.ui.current_repository_context, Some("my-test-repo".to_string()));
+    }
+
+    #[test]
+    fn test_load_config_without_repository_context() {
+        // Create a config file without the repository context field
+        let temp_file = NamedTempFile::new().unwrap();
+        let config_content = r#"
+[openrouter]
+api_key = "test-key"
+model = "openai/gpt-4"
+
+[ui]
+theme = "dark"
+window_width = 1200
+window_height = 800
+# Note: no current_repository_context field
+
+[sagitta]
+
+[logging]
+
+[conversation]
+"#;
+        
+        fs::write(temp_file.path(), config_content).unwrap();
+        
+        let loaded_config = load_config_from_path(temp_file.path()).unwrap();
+        
+        // Should default to None
+        assert_eq!(loaded_config.ui.current_repository_context, None);
+    }
 }

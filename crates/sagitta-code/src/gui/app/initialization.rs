@@ -334,11 +334,47 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     let working_dir_manager = Arc::new(crate::tools::WorkingDirectoryManager::new(working_dir.clone())
         .map_err(|e| anyhow::anyhow!("Failed to create WorkingDirectoryManager: {}", e))?);
 
+    // Store the working directory manager in the app
+    app.working_dir_manager = Some(working_dir_manager.clone());
+    log::info!("Working directory manager initialized with base path: {}", working_dir.display());
+    
+    // Load saved repository context from config
+    let saved_repo_context = {
+        let config_guard = app.config.lock().await;
+        config_guard.ui.current_repository_context.clone()
+    };
+    
+    if let Some(saved_repo_context) = saved_repo_context {
+        app.state.set_repository_context(Some(saved_repo_context.clone()));
+        log::info!("Restored repository context from config: {}", saved_repo_context);
+        
+        // Also update the working directory to match
+        let repo_name = saved_repo_context.clone();
+        let working_dir_mgr = working_dir_manager.clone();
+        let repo_mgr = repo_manager.clone();
+        
+        tokio::spawn(async move {
+            let repo_manager_lock = repo_mgr.lock().await;
+            match working_dir_mgr.set_repository_context(&repo_name, &*repo_manager_lock).await {
+                Ok(result) => {
+                    log::info!("Restored working directory to repository '{}': {}", 
+                        repo_name, result.new_directory.display());
+                }
+                Err(e) => {
+                    log::warn!("Failed to restore working directory to repository '{}': {}", repo_name, e);
+                }
+            }
+        });
+    }
+
     // Register tools first - ALL TOOLS TO CAPTURE ALL SCHEMA ERRORS
     tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
     
-    // Register shell execution tools (same as CLI)
-    tool_registry.register(Arc::new(StreamingShellExecutionTool::new(working_dir.clone()))).await?;
+    // Register shell execution tools with working directory manager
+    tool_registry.register(Arc::new(StreamingShellExecutionTool::new_with_working_dir_manager(
+        working_dir.clone(),
+        working_dir_manager.clone()
+    ))).await?;
 
     // Repository tools
     tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone(), working_dir.clone()))).await?;
@@ -770,5 +806,32 @@ mod tests {
         
         let path_with_home = get_default_conversation_storage_path();
         assert!(!path_with_home.as_os_str().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_repository_context_restoration() {
+        use tempfile::TempDir;
+        
+        // Create a temporary directory for testing
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Create test config with repository context
+        let mut sagitta_config = SagittaCodeConfig::default();
+        sagitta_config.ui.current_repository_context = Some("saved-repo".to_string());
+        
+        let app_config = CoreAppConfig::default();
+        let repo_manager = Arc::new(tokio::sync::Mutex::new(
+            RepositoryManager::new(Arc::new(tokio::sync::Mutex::new(app_config.clone())))
+        ));
+        
+        // Create app
+        let mut app = SagittaCodeApp::new(repo_manager.clone(), sagitta_config.clone(), app_config);
+        
+        // Initially no repository context in state
+        assert_eq!(app.state.current_repository_context, None);
+        
+        // TODO: We can't easily test the full initialization here because it requires
+        // setting up the entire environment (Qdrant, embedding models, etc.)
+        // But we've verified the loading logic in the loader tests.
     }
 } 
