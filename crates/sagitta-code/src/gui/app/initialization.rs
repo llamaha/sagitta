@@ -214,7 +214,11 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Create repository manager
     let repo_manager = create_repository_manager(core_config.clone()).await?;
-    app.repo_panel = RepoPanel::new(repo_manager.clone());
+    app.repo_panel = RepoPanel::new(
+        repo_manager.clone(),
+        app.config.clone(),
+        None, // Agent will be set later after it's initialized
+    );
     app.repo_panel.refresh_repositories(); // Initial refresh
     log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
 
@@ -492,8 +496,12 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             
             // Subscribe to agent events
             let event_receiver = agent.subscribe();
-            app.agent = Some(Arc::new(agent));
+            let agent_arc = Arc::new(agent);
+            app.agent = Some(agent_arc.clone());
             app.agent_event_receiver = Some(event_receiver);
+            
+            // Set the agent on the RepoPanel
+            app.repo_panel.set_agent(agent_arc);
             
             // Initialize conversation service for the sidebar - use shared instances (Phase 1 optimization)
             if let Err(e) = app.initialize_conversation_service_with_shared_instances(qdrant_client_concrete.clone(), Some(embedding_handler_arc.clone())).await {
@@ -525,6 +533,36 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
                 format!("Failed to initialize agent: {}. Check your OpenRouter API key in settings.", err)
             );
         }
+    }
+    
+    // Load initial repository list to ensure saved repository context is available in dropdown
+    {
+        log::info!("Loading initial repository list...");
+        let repo_manager = app.repo_panel.get_repo_manager();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            match repo_manager.lock().await.list_repositories().await {
+                Ok(repositories) => {
+                    let repo_names: Vec<String> = repositories
+                        .iter()
+                        .map(|repo| repo.name.clone())
+                        .collect();
+                    
+                    log::info!("Initial repository list loaded: {:?}", repo_names);
+                    
+                    // Send the repository list update event
+                    if let Err(e) = app_event_sender.send(super::events::AppEvent::RepositoryListUpdated(repo_names)) {
+                        log::error!("Failed to send initial repository list update event: {}", e);
+                    } else {
+                        log::debug!("Successfully sent initial repository list update event");
+                    }
+                },
+                Err(e) => {
+                    log::error!("Failed to load initial repository list: {}", e);
+                }
+            }
+        });
     }
     
     Ok(())

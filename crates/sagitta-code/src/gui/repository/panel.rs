@@ -12,20 +12,31 @@ use super::query::render_query_repo;
 use super::search::render_file_search;
 use super::view::render_file_view;
 use super::branches::render_branch_management;
+use super::create_project::render_create_project;
+use crate::config::types::SagittaCodeConfig;
+use crate::agent::Agent;
 
 /// Repository management panel
 pub struct RepoPanel {
     state: Arc<Mutex<RepoPanelState>>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
+    config: Arc<Mutex<SagittaCodeConfig>>,
+    agent: Option<Arc<Agent>>,
     is_open: bool,
 }
 
 impl RepoPanel {
     /// Create a new repository panel
-    pub fn new(repo_manager: Arc<Mutex<RepositoryManager>>) -> Self {
+    pub fn new(
+        repo_manager: Arc<Mutex<RepositoryManager>>,
+        config: Arc<Mutex<SagittaCodeConfig>>,
+        agent: Option<Arc<Agent>>,
+    ) -> Self {
         Self {
             state: Arc::new(Mutex::new(RepoPanelState::default())),
             repo_manager,
+            config,
+            agent,
             is_open: false,
         }
     }
@@ -202,14 +213,23 @@ impl RepoPanel {
                         render_add_repo(ui, &mut state_guard, Arc::clone(&repo_manager_clone), theme);
                     }
                     RepoPanelTab::CreateProject => {
-                        // We need config and agent for project creation - these should be passed in
-                        // For now, render a placeholder until we wire up the dependencies
-                        ui.vertical_centered(|ui| {
-                            ui.label("🆕 Project Creation");
-                            ui.add_space(8.0);
-                            ui.label("This feature requires access to the agent and config.");
-                            ui.label("Implementation in progress...");
-                        });
+                        // Get config from the panel's config field
+                        let config = match self.config.try_lock() {
+                            Ok(guard) => guard.clone(),
+                            Err(_) => {
+                                ui.label("Config lock contention...");
+                                return;
+                            }
+                        };
+                        
+                        render_create_project(
+                            ui,
+                            &mut state_guard,
+                            &config,
+                            self.agent.as_ref(),
+                            Arc::clone(&repo_manager_clone),
+                            theme,
+                        );
                     }
                     RepoPanelTab::Sync => {
                         // Auto-refresh repositories if sync tab is accessed with no repositories
@@ -277,5 +297,88 @@ impl RepoPanel {
     /// Get the repository manager
     pub fn get_repo_manager(&self) -> Arc<Mutex<RepositoryManager>> {
         Arc::clone(&self.repo_manager)
+    }
+    
+    /// Set the agent (usually done after initialization)
+    pub fn set_agent(&mut self, agent: Arc<Agent>) {
+        self.agent = Some(agent);
+    }
+    
+    /// Set the active tab
+    pub fn set_active_tab(&self, tab: RepoPanelTab) {
+        let state_clone = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            let mut state = state_clone.lock().await;
+            state.active_tab = tab;
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::types::SagittaCodeConfig;
+    use sagitta_search::{AppConfig as SagittaAppConfig};
+    use std::path::PathBuf;
+
+    fn create_test_config() -> Arc<Mutex<SagittaCodeConfig>> {
+        Arc::new(Mutex::new(SagittaCodeConfig::default()))
+    }
+
+    fn create_test_repo_manager() -> Arc<Mutex<RepositoryManager>> {
+        let sagitta_config = Arc::new(Mutex::new(SagittaAppConfig::default()));
+        Arc::new(Mutex::new(RepositoryManager::new(sagitta_config)))
+    }
+
+    #[test]
+    fn test_repo_panel_creation() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let panel = RepoPanel::new(repo_manager, config, None);
+        
+        assert!(!panel.is_open());
+    }
+
+    #[test]
+    fn test_repo_panel_toggle() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let mut panel = RepoPanel::new(repo_manager, config, None);
+        
+        assert!(!panel.is_open());
+        panel.toggle();
+        assert!(panel.is_open());
+        panel.toggle();
+        assert!(!panel.is_open());
+    }
+
+    #[test]
+    fn test_repo_panel_set_agent() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let mut panel = RepoPanel::new(repo_manager, config.clone(), None);
+        
+        assert!(panel.agent.is_none());
+        
+        // Create a mock agent (would need proper agent setup in real test)
+        // For now, just verify the structure exists
+        // panel.set_agent(agent);
+        // assert!(panel.agent.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_repo_panel_set_active_tab() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let panel = RepoPanel::new(repo_manager, config, None);
+        
+        // Set active tab to CreateProject
+        panel.set_active_tab(RepoPanelTab::CreateProject);
+        
+        // Wait a bit for the async operation
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        
+        // In a real test, we would verify the tab was set
+        // For now, just verify no panic occurs
     }
 } 

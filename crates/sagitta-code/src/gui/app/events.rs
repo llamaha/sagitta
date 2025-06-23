@@ -414,11 +414,6 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             app.chat_manager.add_tool_call(&last_agent_msg.id, view_tool_call);
         }
     }
-    
-    // Optionally show detailed arguments in the preview pane if needed
-    if let Ok(json) = serde_json::to_string_pretty(&tool_call.arguments) {
-        app.show_preview(&format!("{} Arguments", tool_call.name), &json);
-    }
 }
 
 /// Handle tool call result events

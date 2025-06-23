@@ -206,7 +206,11 @@ impl SagittaCodeApp {
 
         Self {
             agent: None,
-            repo_panel: RepoPanel::new(repo_manager.clone()),
+            repo_panel: RepoPanel::new(
+                repo_manager.clone(),
+                Arc::new(Mutex::new(sagitta_code_config.clone())),
+                None, // Agent will be set later during initialization
+            ),
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),

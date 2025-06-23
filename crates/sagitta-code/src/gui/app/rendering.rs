@@ -189,10 +189,6 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         // Ctrl+`: Toggle terminal panel (like VS Code)
         app.state.toggle_terminal();
     }
-    if ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.ctrl) {
-        // Ctrl+P: Toggle create project panel
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-    }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
         // Ctrl+M: Toggle model selection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
@@ -612,42 +608,6 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
             }
         },
-        ActivePanel::CreateProject => {
-            // Handle project creation requests
-            if let Some(create_request) = app.panels.create_project_panel.render(ctx, app.state.current_theme) {
-                // TODO: Implement project creation logic
-                // For now, just log the request and show success
-                log::info!("Create project request: {:?}", create_request);
-                
-                // Create directory if it doesn't exist
-                if let Err(e) = std::fs::create_dir_all(&create_request.path) {
-                    app.panels.create_project_panel.set_error(format!("Failed to create directory: {}", e));
-                } else {
-                    // TODO: Initialize git repository if requested
-                    if create_request.initialize_git {
-                        // Git initialization would go here
-                    }
-                    
-                    // TODO: Add to workspace if requested
-                    if create_request.add_to_workspace {
-                        // Workspace integration would go here
-                    }
-                    
-                    // TODO: Apply template if selected
-                    if let Some(_template) = create_request.template {
-                        // Template application would go here
-                    }
-                    
-                    app.panels.create_project_panel.project_created();
-                    
-                    // Add event to events panel
-                    app.panels.events_panel.add_event(
-                        super::SystemEventType::Info,
-                        format!("Created project '{}' at {}", create_request.name, create_request.path.display())
-                    );
-                }
-            }
-        },
         ActivePanel::Settings => {
             // Ensure the settings panel is open
             if !app.settings_panel.is_open() {
@@ -775,16 +735,6 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.panels.logging_panel.toggle();
-                        }
-                    });
-                });
-                
-                // Create Project Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.panels.toggle_panel(ActivePanel::CreateProject);
                         }
                     });
                 });
@@ -1023,8 +973,18 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
-                let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
-                app.state.set_repository_context(repo_context.clone());
+                // Check for special flag to open repository panel with CreateProject tab
+                if new_repo == "__CREATE_NEW_REPOSITORY__" {
+                    // Open the repository panel
+                    if !app.repo_panel.is_open() {
+                        app.repo_panel.toggle();
+                    }
+                    // Set the active tab to CreateProject
+                    app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::CreateProject);
+                    // Don't process this as a normal repository change
+                } else {
+                    let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
+                    app.state.set_repository_context(repo_context.clone());
                 
                 // Update working directory if we have a working directory manager
                 if let Some(working_dir_manager) = &app.working_dir_manager {
@@ -1091,6 +1051,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
                 
                 log::info!("Repository context changed to: {:?}", new_repo);
+                }
             }
             
             // Store the input ID for potential future use
@@ -1568,7 +1529,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1583,7 +1543,6 @@ mod tests {
                 ActivePanel::Events => {},
                 ActivePanel::Analytics => {},
                 ActivePanel::ThemeCustomizer => {},
-                ActivePanel::CreateProject => {},
                 ActivePanel::ModelSelection => {},
             }
         }
@@ -1600,7 +1559,6 @@ mod tests {
         let _conversation = ActivePanel::Conversation;
         let _events = ActivePanel::Events;
         let _analytics = ActivePanel::Analytics;
-        let _create_project = ActivePanel::CreateProject;
         let _none = ActivePanel::None;
         
         // If this compiles, the imports are working correctly
@@ -1676,11 +1634,6 @@ mod tests {
     fn test_new_keyboard_shortcuts() {
         let mut app = create_test_app();
         
-        // Test Ctrl+P for CreateProject panel
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
-        assert!(app.panels.create_project_panel.visible);
-        
         // Test Ctrl+M for ModelSelection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
         assert_eq!(app.panels.active_panel, ActivePanel::ModelSelection);
@@ -1697,21 +1650,6 @@ mod tests {
         assert!(!app.state.show_hotkeys_modal);
     }
 
-    #[test]
-    fn test_create_project_panel_in_integration() {
-        let mut app = create_test_app();
-        
-        // Test that CreateProject panel is included in integration
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
-        assert!(app.panels.create_project_panel.visible);
-        
-        // Test that switching to another panel closes CreateProject
-        app.panels.toggle_panel(ActivePanel::Preview);
-        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
-        assert!(!app.panels.create_project_panel.visible);
-        assert!(app.panels.preview_panel.visible);
-    }
 
     /// Phase 5: Test sequential panel open/close events to ensure no races
     #[test]
@@ -1727,7 +1665,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1742,7 +1679,6 @@ mod tests {
                 ActivePanel::Events => assert!(app.panels.events_panel.visible),
                 ActivePanel::Analytics => assert!(app.panels.analytics_panel.visible),
                 ActivePanel::ThemeCustomizer => assert!(app.panels.theme_customizer.is_open()),
-                ActivePanel::CreateProject => assert!(app.panels.create_project_panel.visible),
                 ActivePanel::ModelSelection => assert!(app.panels.model_selection_panel.visible),
                 _ => {} // Repository, Settings, Conversation handled by main app
             }
@@ -1757,7 +1693,6 @@ mod tests {
         assert!(!app.panels.events_panel.visible);
         assert!(!app.panels.analytics_panel.visible);
         assert!(!app.panels.theme_customizer.is_open());
-        assert!(!app.panels.create_project_panel.visible);
         assert!(!app.panels.model_selection_panel.visible);
     }
 
@@ -1841,7 +1776,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1870,10 +1804,6 @@ mod tests {
                 ActivePanel::ThemeCustomizer => {
                     assert_eq!(app.panels.active_panel, panel);
                     assert!(app.panels.theme_customizer.is_open());
-                },
-                ActivePanel::CreateProject => {
-                    assert_eq!(app.panels.active_panel, panel);
-                    assert!(app.panels.create_project_panel.visible);
                 },
                 ActivePanel::ModelSelection => {
                     assert_eq!(app.panels.active_panel, panel);
