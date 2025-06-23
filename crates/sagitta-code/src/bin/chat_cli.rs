@@ -493,20 +493,27 @@ async fn initialize_agent(config: SagittaCodeConfig) -> Result<Agent> {
     let default_working_dir = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     
+    // Create working directory manager for CLI
+    let working_dir_manager = Arc::new(sagitta_code::tools::working_directory::WorkingDirectoryManager::new(
+        default_working_dir.clone()
+    ).context("Failed to create working directory manager")?);
+    
     tool_registry.register(Arc::new(sagitta_code::tools::shell_execution::ShellExecutionTool::new(
         default_working_dir.clone()
     ))).await.context("Failed to register shell execution tool")?;
 
-    // Register git tools for current directory operations
-    tool_registry.register(Arc::new(GitCreateBranchTool::new(default_working_dir.clone())))
+    // Register git tools with working directory manager
+    tool_registry.register(Arc::new(GitCreateBranchTool::new(working_dir_manager.clone())))
         .await.context("Failed to register git create branch tool")?;
     
-    tool_registry.register(Arc::new(GitListBranchesTool::new(default_working_dir.clone())))
+    tool_registry.register(Arc::new(GitListBranchesTool::new(working_dir_manager.clone())))
         .await.context("Failed to register git list branches tool")?;
 
-    // Register streaming shell execution tool for terminal integration
-    tool_registry.register(Arc::new(StreamingShellExecutionTool::new(default_working_dir.clone())))
-        .await.context("Failed to register streaming shell execution tool")?;
+    // Register streaming shell execution tool with working directory manager
+    tool_registry.register(Arc::new(StreamingShellExecutionTool::new_with_working_dir_manager(
+        default_working_dir.clone(),
+        working_dir_manager.clone()
+    ))).await.context("Failed to register streaming shell execution tool")?;
 
     // Note: Project creation and test execution functionality is now available through shell_execution tool
     // Examples:

@@ -7,6 +7,7 @@ use tokio::process::Command;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::utils::errors::SagittaCodeError;
+use crate::tools::working_directory::WorkingDirectoryManager;
 
 /// Parameters for creating a new git branch
 #[derive(Debug, Deserialize, Serialize)]
@@ -23,13 +24,13 @@ pub struct CreateBranchParams {
 /// Tool for creating git branches in the current directory
 #[derive(Debug)]
 pub struct GitCreateBranchTool {
-    working_dir: PathBuf,
+    working_dir_manager: Arc<WorkingDirectoryManager>,
 }
 
 impl GitCreateBranchTool {
     /// Create a new git create branch tool
-    pub fn new(working_dir: PathBuf) -> Self {
-        Self { working_dir }
+    pub fn new(working_dir_manager: Arc<WorkingDirectoryManager>) -> Self {
+        Self { working_dir_manager }
     }
 }
 
@@ -73,23 +74,27 @@ impl Tool for GitCreateBranchTool {
             return Ok(ToolResult::error("Branch name cannot be empty"));
         }
 
+        // Get current working directory from manager
+        let working_dir = self.working_dir_manager.get_current_directory().await;
+        log::debug!("GitCreateBranchTool: Using working directory: {}", working_dir.display());
+
         // Check if we're in a git repository
         let git_check = Command::new("git")
             .arg("rev-parse")
             .arg("--git-dir")
-            .current_dir(&self.working_dir)
+            .current_dir(&working_dir)
             .output()
             .await;
 
         if git_check.is_err() || !git_check.unwrap().status.success() {
-            return Ok(ToolResult::error("Not in a git repository"));
+            return Ok(ToolResult::error(format!("Not in a git repository. Current directory: {}", working_dir.display())));
         }
 
         // Create the branch
         let mut cmd = Command::new("git");
         cmd.arg("branch")
             .arg(&params.branch_name)
-            .current_dir(&self.working_dir);
+            .current_dir(&working_dir);
 
         if let Some(start_point) = &params.start_point {
             cmd.arg(start_point);
@@ -108,7 +113,7 @@ impl Tool for GitCreateBranchTool {
             let checkout_output = Command::new("git")
                 .arg("checkout")
                 .arg(&params.branch_name)
-                .current_dir(&self.working_dir)
+                .current_dir(&working_dir)
                 .output()
                 .await
                 .map_err(|e| SagittaCodeError::ToolError(format!("Failed to execute git checkout: {}", e)))?;
@@ -129,7 +134,7 @@ impl Tool for GitCreateBranchTool {
             "message": message,
             "branch_name": params.branch_name,
             "checked_out": params.checkout,
-            "working_directory": self.working_dir.display().to_string()
+            "working_directory": working_dir.display().to_string()
         })))
     }
 
@@ -141,13 +146,13 @@ impl Tool for GitCreateBranchTool {
 /// Tool for listing git branches in the current directory
 #[derive(Debug)]
 pub struct GitListBranchesTool {
-    working_dir: PathBuf,
+    working_dir_manager: Arc<WorkingDirectoryManager>,
 }
 
 impl GitListBranchesTool {
     /// Create a new git list branches tool
-    pub fn new(working_dir: PathBuf) -> Self {
-        Self { working_dir }
+    pub fn new(working_dir_manager: Arc<WorkingDirectoryManager>) -> Self {
+        Self { working_dir_manager }
     }
 }
 
@@ -184,16 +189,20 @@ impl Tool for GitListBranchesTool {
         let params: ListBranchesParams = serde_json::from_value(parameters)
             .map_err(|e| SagittaCodeError::ToolError(format!("Invalid parameters: {}", e)))?;
 
+        // Get current working directory from manager
+        let working_dir = self.working_dir_manager.get_current_directory().await;
+        log::debug!("GitListBranchesTool: Using working directory: {}", working_dir.display());
+
         // Check if we're in a git repository
         let git_check = Command::new("git")
             .arg("rev-parse")
             .arg("--git-dir")
-            .current_dir(&self.working_dir)
+            .current_dir(&working_dir)
             .output()
             .await;
 
         if git_check.is_err() || !git_check.unwrap().status.success() {
-            return Ok(ToolResult::error("Not in a git repository"));
+            return Ok(ToolResult::error(format!("Not in a git repository. Current directory: {}", working_dir.display())));
         }
 
         // List branches
@@ -204,7 +213,7 @@ impl Tool for GitListBranchesTool {
             cmd.arg("-a");
         }
 
-        cmd.current_dir(&self.working_dir);
+        cmd.current_dir(&working_dir);
 
         let output = cmd.output().await
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to execute git command: {}", e)))?;
@@ -228,7 +237,7 @@ impl Tool for GitListBranchesTool {
         Ok(ToolResult::success(serde_json::json!({
             "branches": branches,
             "current_branch": current_branch,
-            "working_directory": self.working_dir.display().to_string()
+            "working_directory": working_dir.display().to_string()
         })))
     }
 
