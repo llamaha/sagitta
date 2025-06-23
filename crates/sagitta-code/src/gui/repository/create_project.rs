@@ -2,10 +2,8 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke};
 use tokio::sync::Mutex;
-use rfd::FileDialog;
 
 use crate::gui::theme::AppTheme;
-use crate::agent::Agent;
 use crate::config::types::SagittaCodeConfig;
 use super::types::RepoPanelState;
 use super::manager::RepositoryManager;
@@ -74,28 +72,18 @@ pub fn render_create_project(
     ui: &mut Ui,
     state: &mut RepoPanelState,
     config: &SagittaCodeConfig,
-    agent: Option<&Arc<Agent>>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
     theme: AppTheme,
 ) {
-    // Initialize form state if needed
-    if state.project_form.path.is_empty() {
-        if let Some(base_path) = &config.sagitta.repositories_base_path {
-            state.project_form.path = base_path.to_string_lossy().to_string();
-        } else {
-            state.project_form.path = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("projects")
-                .to_string_lossy()
-                .to_string();
-        }
-    }
+    // Use repositories_base_path from config, with fallback
+    let base_path = config.repositories_base_path();
+    state.project_form.path = base_path.to_string_lossy().to_string();
 
     ui.heading("🆕 Create New Project");
     ui.add_space(8.0);
 
-    // Show intelligent suggestions if we have a project name
-    if !state.project_form.name.is_empty() && agent.is_some() {
+    // Show project info if we have a project name
+    if !state.project_form.name.is_empty() {
         Frame::none()
             .fill(theme.info_background())
             .stroke(Stroke::new(1.0, theme.info_color()))
@@ -165,21 +153,9 @@ pub fn render_create_project(
                     });
                     ui.end_row();
 
-                    // Project Location
-                    ui.label(RichText::new("Location:").strong());
-                    ui.horizontal(|ui| {
-                        ui.add_enabled(!state.project_form.creating, 
-                            TextEdit::singleline(&mut state.project_form.path)
-                                .hint_text("Path where project will be created"));
-                        
-                        if ui.add_enabled(!state.project_form.creating, Button::new("📁 Browse")).clicked() {
-                            if let Some(path) = FileDialog::new()
-                                .set_title("Select Project Directory")
-                                .pick_folder() {
-                                state.project_form.path = path.to_string_lossy().to_string();
-                            }
-                        }
-                    });
+                    // Project Location (read-only, always uses repositories_base_path)
+                    ui.label(RichText::new("Base Location:").strong());
+                    ui.label(RichText::new(&state.project_form.path).color(theme.hint_text_color()));
                     ui.end_row();
 
                     // Description
@@ -190,21 +166,6 @@ pub fn render_create_project(
                             .hint_text("Brief description of the project..."));
                     ui.end_row();
 
-                    // Framework (if using AI)
-                    if state.project_form.use_ai_scaffolding {
-                        ui.label(RichText::new("Framework:").strong());
-                        ui.add_enabled(!state.project_form.creating,
-                            TextEdit::singleline(&mut state.project_form.framework)
-                                .hint_text("e.g., Axum, FastAPI, Express..."));
-                        ui.end_row();
-
-                        ui.label(RichText::new("Requirements:").strong());
-                        ui.add_enabled(!state.project_form.creating,
-                            TextEdit::multiline(&mut state.project_form.additional_requirements)
-                                .desired_rows(2)
-                                .hint_text("Any specific libraries or features..."));
-                        ui.end_row();
-                    }
                 });
 
             ui.add_space(12.0);
@@ -215,25 +176,11 @@ pub fn render_create_project(
             ui.label(RichText::new("⚙️ Options:").strong());
             ui.add_space(4.0);
             
-            Grid::new("project_options")
-                .num_columns(2)
-                .spacing([12.0, 4.0])
-                .show(ui, |ui| {
-                    ui.add_enabled(!state.project_form.creating, 
-                        Checkbox::new(&mut state.project_form.initialize_git, ""));
-                    ui.label("Initialize Git repository");
-                    ui.end_row();
-
-                    ui.add_enabled(!state.project_form.creating && agent.is_some(), 
-                        Checkbox::new(&mut state.project_form.use_ai_scaffolding, ""));
-                    ui.horizontal(|ui| {
-                        ui.label("Use AI scaffolding");
-                        if agent.is_none() {
-                            ui.label(RichText::new("(requires agent)").small().color(theme.hint_text_color()));
-                        }
-                    });
-                    ui.end_row();
-                });
+            ui.horizontal(|ui| {
+                ui.add_enabled(!state.project_form.creating, 
+                    Checkbox::new(&mut state.project_form.initialize_git, ""));
+                ui.label("Initialize Git repository");
+            });
         });
 
     ui.add_space(12.0);
@@ -273,142 +220,130 @@ pub fn render_create_project(
                 state.project_form.creating = true;
 
                 // Create the project
-                create_project(state, config, agent, repo_manager.clone());
+                create_project(state, config, repo_manager.clone());
             }
             
             // Clear button
             if ui.add_enabled(!state.project_form.creating, Button::new("🗑️ Clear"))
                 .clicked() {
                 state.project_form = Default::default();
-                // Re-initialize path
-                if let Some(base_path) = &config.sagitta.repositories_base_path {
-                    state.project_form.path = base_path.to_string_lossy().to_string();
-                }
+                // Use repositories_base_path with fallback
+                let base_path = config.repositories_base_path();
+                state.project_form.path = base_path.to_string_lossy().to_string();
             }
         });
     });
 }
 
-/// Create the project
+/// Create the project directly without AI involvement
 fn create_project(
     state: &mut RepoPanelState,
     config: &SagittaCodeConfig,
-    agent: Option<&Arc<Agent>>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
     let project_name = state.project_form.name.clone();
     let project_path = state.project_form.path.clone();
     let language = state.project_form.language.clone();
-    let use_ai = state.project_form.use_ai_scaffolding && agent.is_some();
+    let initialize_git = state.project_form.initialize_git;
     
-    if use_ai {
-        // Use AI to create the project
-        if let Some(agent) = agent {
-            let mut message = format!(
-                "Create a new {} project named '{}' in the directory '{}/{}'. Description: {}.",
-                language,
-                project_name,
-                project_path,
-                project_name,
-                if state.project_form.description.is_empty() { 
-                    "A new project" 
-                } else { 
-                    &state.project_form.description 
-                }
-            );
-
-            if !state.project_form.framework.is_empty() {
-                message.push_str(&format!(" Use the {} framework.", state.project_form.framework));
-            }
-
-            if !state.project_form.additional_requirements.is_empty() {
-                message.push_str(&format!(" Additional requirements: {}", state.project_form.additional_requirements));
-            }
-
-            if !state.project_form.initialize_git {
-                message.push_str(" Do not initialize a git repository.");
-            }
-
-            // Send to agent
-            let agent_clone = agent.clone();
-            let message_clone = message.clone();
-            let repo_manager_clone = repo_manager.clone();
-            let project_full_path = format!("{}/{}", project_path, project_name);
-            
-            tokio::spawn(async move {
-                if let Err(e) = agent_clone.process_message_stream(message_clone).await {
-                    log::error!("Failed to process project creation message: {}", e);
-                } else {
-                    // After successful creation, add the repository
-                    let mut manager = repo_manager_clone.lock().await;
-                    if let Err(e) = manager.add_repository(&project_name, &project_full_path, None).await {
-                        log::error!("Failed to add repository after creation: {}", e);
-                    }
-                }
-            });
-
-            state.project_form.status_message = Some("Project creation request sent to agent. Check the chat for progress.".to_string());
-        }
-    } else {
-        // Use simple command-based creation
-        if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
-            // Check if the tool is available
+    if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
+        let repo_manager_clone = repo_manager.clone();
+        let full_path = format!("{}/{}", project_path, project_name);
+        
+        tokio::spawn(async move {
+            // First check if the tool is available
             let check_command = if cfg!(windows) {
                 format!("where {}", info.command_check)
             } else {
                 format!("which {}", info.command_check)
             };
 
-            // Run the check command
-            tokio::spawn(async move {
-                match tokio::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&check_command)
-                    .output()
-                    .await
-                {
-                    Ok(output) if output.status.success() => {
-                        // Tool is available, create the project
-                        let full_path = format!("{}/{}", project_path, project_name);
-                        let create_cmd = (info.create_command)(&project_name);
-                        
-                        // Change to the project directory and run the command
-                        let cd_and_create = format!("cd '{}' && {}", project_path, create_cmd);
-                        
-                        match tokio::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&cd_and_create)
+            match tokio::process::Command::new(if cfg!(windows) { "cmd" } else { "sh" })
+                .args(if cfg!(windows) { ["/C", &check_command] } else { ["-c", &check_command] })
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    // Tool is available, create the base directory if it doesn't exist
+                    if let Err(e) = tokio::fs::create_dir_all(&project_path).await {
+                        log::error!("Failed to create base directory {}: {}", project_path, e);
+                        return;
+                    }
+                    
+                    // Create the project
+                    let create_cmd = (info.create_command)(&project_name);
+                    
+                    let result = if cfg!(windows) {
+                        tokio::process::Command::new("cmd")
+                            .args(["/C", &format!("cd /d \"{}\" && {}", project_path, create_cmd)])
                             .output()
                             .await
-                        {
-                            Ok(output) if output.status.success() => {
-                                log::info!("Project created successfully at {}", full_path);
+                    } else {
+                        tokio::process::Command::new("sh")
+                            .args(["-c", &format!("cd '{}' && {}", project_path, create_cmd)])
+                            .output()
+                            .await
+                    };
+                    
+                    match result {
+                        Ok(output) if output.status.success() => {
+                            log::info!("Project created successfully at {}", full_path);
+                            
+                            // Initialize git if requested
+                            if initialize_git {
+                                let git_init_result = if cfg!(windows) {
+                                    tokio::process::Command::new("cmd")
+                                        .args(["/C", &format!("cd /d \"{}\" && git init", full_path)])
+                                        .output()
+                                        .await
+                                } else {
+                                    tokio::process::Command::new("sh")
+                                        .args(["-c", &format!("cd '{}' && git init", full_path)])
+                                        .output()
+                                        .await
+                                };
                                 
-                                // Add to repository manager
-                                let mut manager = repo_manager.lock().await;
-                                if let Err(e) = manager.add_repository(&project_name, &full_path, None).await {
-                                    log::error!("Failed to add repository after creation: {}", e);
+                                match git_init_result {
+                                    Ok(git_output) if git_output.status.success() => {
+                                        log::info!("Git repository initialized at {}", full_path);
+                                    }
+                                    Ok(git_output) => {
+                                        let error = String::from_utf8_lossy(&git_output.stderr);
+                                        log::warn!("Git init warning for {}: {}", full_path, error);
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to initialize git for {}: {}", full_path, e);
+                                    }
                                 }
                             }
-                            Ok(output) => {
-                                let error = String::from_utf8_lossy(&output.stderr);
-                                log::error!("Failed to create project: {}", error);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to execute create command: {}", e);
+                            
+                            // Add to repository manager
+                            let mut manager = repo_manager_clone.lock().await;
+                            if let Err(e) = manager.add_repository(&project_name, &full_path, None).await {
+                                log::error!("Failed to add repository after creation: {}", e);
+                            } else {
+                                log::info!("Successfully added repository '{}' to Sagitta", project_name);
+                                // Project created successfully - the repository list will refresh automatically
                             }
                         }
-                    }
-                    _ => {
-                        log::error!("{} is not installed. {}", info.tool_name, info.install_instructions);
+                        Ok(output) => {
+                            let error = String::from_utf8_lossy(&output.stderr);
+                            log::error!("Failed to create project: {}", error);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to execute create command: {}", e);
+                        }
                     }
                 }
-            });
+                _ => {
+                    log::error!("{} is not installed. {}", info.tool_name, info.install_instructions);
+                }
+            }
+        });
 
-            state.project_form.status_message = Some("Creating project...".to_string());
-        } else {
-            state.project_form.error_message = Some(format!("Project creation for {} is not yet supported", language));
-        }
+        state.project_form.status_message = Some("Creating project... Check the logs for progress.".to_string());
+    } else {
+        state.project_form.error_message = Some(format!("Project creation for {} is not yet supported", language));
     }
     
     state.project_form.creating = false;
@@ -461,12 +396,9 @@ mod tests {
         let form = ProjectCreationForm::default();
         assert_eq!(form.name, "");
         assert_eq!(form.language, "rust");
-        assert_eq!(form.framework, "");
         assert_eq!(form.path, "");
         assert_eq!(form.description, "");
-        assert_eq!(form.additional_requirements, "");
         assert!(form.initialize_git);
-        assert!(!form.use_ai_scaffolding);
         assert!(!form.creating);
         assert!(form.status_message.is_none());
         assert!(form.error_message.is_none());

@@ -345,12 +345,9 @@ pub struct SimpleSyncStatus {
 pub struct ProjectCreationForm {
     pub name: String,
     pub language: String,
-    pub framework: String,
     pub path: String,
     pub description: String,
-    pub additional_requirements: String,
     pub initialize_git: bool,
-    pub use_ai_scaffolding: bool,
     pub creating: bool,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
@@ -361,12 +358,9 @@ impl Default for ProjectCreationForm {
         Self {
             name: String::new(),
             language: "rust".to_string(),
-            framework: String::new(),
             path: String::new(),
             description: String::new(),
-            additional_requirements: String::new(),
             initialize_git: true,
-            use_ai_scaffolding: false,
             creating: false,
             status_message: None,
             error_message: None,
@@ -399,6 +393,7 @@ pub struct RepoPanelState {
     pub branch_management: BranchManagementState,
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
+    pub newly_created_repository: Option<String>, // Name of repository that was just created
 }
 
 impl RepoPanelState {

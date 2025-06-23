@@ -226,7 +226,6 @@ impl RepoPanel {
                             ui,
                             &mut state_guard,
                             &config,
-                            self.agent.as_ref(),
                             Arc::clone(&repo_manager_clone),
                             theme,
                         );
@@ -311,6 +310,14 @@ impl RepoPanel {
             let mut state = state_clone.lock().await;
             state.active_tab = tab;
         });
+    }
+    
+    /// Check if a repository was just created and return its name if so
+    pub fn take_newly_created_repository(&self) -> Option<String> {
+        match self.state.try_lock() {
+            Ok(mut state) => state.newly_created_repository.take(),
+            Err(_) => None,
+        }
     }
 }
 
