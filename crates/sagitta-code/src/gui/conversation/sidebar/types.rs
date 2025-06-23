@@ -515,10 +515,28 @@ impl ConversationSidebar {
 
     /// Toggle group expansion
     pub fn toggle_group(&mut self, group_id: &str) {
-        if self.expanded_groups.contains(group_id) {
-            self.expanded_groups.remove(group_id);
+        let collapsed_key = format!("collapsed_{}", group_id);
+        let expanded_key = format!("expanded_{}", group_id);
+        
+        // Determine current state
+        let is_currently_expanded = if self.expanded_groups.contains(&collapsed_key) {
+            false
+        } else if self.expanded_groups.contains(&expanded_key) {
+            true
         } else {
-            self.expanded_groups.insert(group_id.to_string());
+            // Default state
+            group_id == "today"
+        };
+        
+        // Clear both keys
+        self.expanded_groups.remove(&collapsed_key);
+        self.expanded_groups.remove(&expanded_key);
+        
+        // Set new state (opposite of current)
+        if is_currently_expanded {
+            self.expanded_groups.insert(collapsed_key);
+        } else {
+            self.expanded_groups.insert(expanded_key);
         }
     }
 

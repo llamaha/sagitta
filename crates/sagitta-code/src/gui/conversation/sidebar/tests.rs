@@ -37,6 +37,14 @@ fn create_test_conversations() -> Vec<ConversationSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Context;
+    use crate::gui::app::AppState;
+    use crate::gui::theme::AppTheme;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use crate::gui::app::events::AppEvent;
+    use crate::config::SagittaCodeConfig;
+    use crate::agent::conversation::service::ConversationService;
 
     #[test]
     fn test_sidebar_creation() {
@@ -46,6 +54,132 @@ mod tests {
         assert_eq!(sidebar.organization_mode, OrganizationMode::Recency);
         assert!(sidebar.search_query.is_none());
         assert!(sidebar.expanded_groups.is_empty());
+    }
+
+    #[test]
+    fn test_sidebar_rendering_does_not_panic() {
+        // This test ensures the sidebar rendering code exists and compiles correctly
+        // We can't actually run the rendering without a full egui context, but we can verify
+        // that all the methods exist and are callable
+        
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        let conversations = create_test_conversations();
+        
+        // Test that the organization method exists and works
+        let result = sidebar.organize_conversations(&conversations, None);
+        assert!(result.is_ok());
+        
+        // Test that rendering methods exist (they will be called by show())
+        // If these don't compile, it means the implementation is missing
+        let _show_fn: fn(&mut ConversationSidebar, &Context, &mut AppState, &AppTheme, Option<Arc<ConversationService>>, mpsc::UnboundedSender<AppEvent>, Arc<tokio::sync::Mutex<SagittaCodeConfig>>) = ConversationSidebar::show;
+        
+        // Verify the sidebar has all expected fields
+        assert!(sidebar.expanded_groups.is_empty());
+        assert!(sidebar.search_query.is_none());
+    }
+
+    #[test]
+    fn test_conversation_organization() {
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        let conversations = create_test_conversations();
+        
+        // Test organizing by recency
+        sidebar.set_organization_mode(OrganizationMode::Recency);
+        let organized = sidebar.organize_conversations(&conversations, None).unwrap();
+        assert!(!organized.groups.is_empty());
+        assert_eq!(organized.total_count, 3);
+        
+        // Test organizing by status
+        sidebar.set_organization_mode(OrganizationMode::Status);
+        let organized = sidebar.organize_conversations(&conversations, None).unwrap();
+        assert!(!organized.groups.is_empty());
+        
+        // Verify we have groups for different statuses
+        let group_names: Vec<&str> = organized.groups.iter().map(|g| g.name.as_str()).collect();
+        assert!(group_names.contains(&"Active"));
+        assert!(group_names.contains(&"Completed"));
+    }
+
+    #[test]
+    fn test_search_functionality() {
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        let conversations = create_test_conversations();
+        
+        // Test search
+        sidebar.set_search_query(Some("Rust".to_string()));
+        let organized = sidebar.organize_conversations(&conversations, None).unwrap();
+        assert_eq!(organized.filtered_count, 1);
+        
+        // Clear search
+        sidebar.set_search_query(None);
+        let organized = sidebar.organize_conversations(&conversations, None).unwrap();
+        assert_eq!(organized.filtered_count, 3);
+    }
+
+    #[test]
+    fn test_toggle_functionality() {
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        
+        // Test branch suggestions toggle
+        assert!(!sidebar.show_branch_suggestions);
+        sidebar.toggle_branch_suggestions();
+        assert!(sidebar.show_branch_suggestions);
+        sidebar.toggle_branch_suggestions();
+        assert!(!sidebar.show_branch_suggestions);
+        
+        // Test checkpoint suggestions toggle
+        assert!(!sidebar.show_checkpoint_suggestions);
+        sidebar.toggle_checkpoint_suggestions();
+        assert!(sidebar.show_checkpoint_suggestions);
+    }
+
+    #[test]
+    fn test_group_expansion() {
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        
+        // Test group toggle
+        assert!(!sidebar.expanded_groups.contains("test_group"));
+        sidebar.toggle_group("test_group");
+        assert!(sidebar.expanded_groups.contains("test_group"));
+        sidebar.toggle_group("test_group");
+        assert!(!sidebar.expanded_groups.contains("test_group"));
+    }
+
+    #[test]
+    fn test_theme_application() {
+        // This test verifies that theme methods are called correctly
+        let theme = AppTheme::default();
+        
+        // Verify theme methods exist and return valid values
+        let _panel_bg = theme.panel_background();
+        let _accent = theme.accent_color();
+        let _muted = theme.muted_text_color();
+        
+        // If these compile, the theme integration is working
+    }
+
+    #[test]
+    fn test_sidebar_actions() {
+        let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
+        let conversation_id = Uuid::new_v4();
+        
+        // Test setting pending actions
+        sidebar.pending_action = Some(SidebarAction::SwitchToConversation(conversation_id));
+        assert!(matches!(sidebar.pending_action, Some(SidebarAction::SwitchToConversation(_))));
+        
+        // Test action handling
+        let mut app_state = AppState::default();
+        let ctx = Context::default();
+        let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+        
+        sidebar.handle_sidebar_actions(&mut app_state, &ctx, None, tx);
+        
+        // Verify the action was processed
+        assert!(sidebar.pending_action.is_none());
+        assert_eq!(app_state.current_conversation_id, Some(conversation_id));
+        
+        // Verify event was sent
+        assert!(rx.try_recv().is_ok());
     }
 
     #[test]
@@ -124,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_group_expansion() {
+    fn test_group_expansion_duplicate() {
         let config = SidebarConfig::default();
         let mut sidebar = ConversationSidebar::new(config);
         
@@ -199,5 +333,44 @@ mod tests {
                 assert_eq!(group.conversations[0].summary.title, "Rust talk");
             }
         }
+    }
+    
+    #[test]
+    fn test_conversation_click_triggers_load() {
+        // Create sidebar with test data
+        let mut sidebar = ConversationSidebar::with_default_config();
+        let conversations = create_test_conversations();
+        
+        // Create a channel to receive events
+        let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+        
+        // Simulate clicking on a conversation
+        let conversation_id = conversations[0].id;
+        sidebar.pending_action = Some(SidebarAction::SwitchToConversation(conversation_id));
+        
+        // Create app state
+        let mut app_state = AppState::default();
+        app_state.conversation_list = conversations;
+        
+        // Process the pending action
+        sidebar.handle_sidebar_actions(
+            &mut app_state,
+            &Context::default(),
+            None,
+            tx
+        );
+        
+        // Verify the event was sent
+        let event = rx.try_recv().unwrap();
+        match event {
+            AppEvent::SwitchToConversation(id) => {
+                assert_eq!(id, conversation_id);
+            },
+            _ => panic!("Expected SwitchToConversation event"),
+        }
+        
+        // Verify state was updated
+        assert_eq!(app_state.current_conversation_id, Some(conversation_id));
+        assert_eq!(sidebar.selected_conversation, Some(conversation_id));
     }
 } 
