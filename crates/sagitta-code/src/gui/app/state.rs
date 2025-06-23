@@ -35,6 +35,7 @@ pub struct AppState {
     // UI state
     pub current_theme: AppTheme,
     pub show_hotkeys_modal: bool,
+    pub show_tools_modal: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
     pub copy_button_state: CopyButtonState,
@@ -112,6 +113,7 @@ impl AppState {
             // UI state
             current_theme: AppTheme::default(),
             show_hotkeys_modal: false,
+            show_tools_modal: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
             copy_button_state: CopyButtonState::default(),

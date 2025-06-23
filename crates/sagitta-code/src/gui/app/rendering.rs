@@ -81,6 +81,75 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Render hotkeys modal if needed
     render_hotkeys_modal(app, ctx);
+    render_tools_modal(app, ctx);
+}
+
+/// Render tools list modal
+fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    if app.state.show_tools_modal {
+        let theme = app.state.current_theme;
+        egui::Window::new("Available Tools")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(700.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new("These tools are available to the AI assistant:").color(theme.accent_color()).strong());
+                ui.separator();
+                
+                // Create a scrollable area for the tools list
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Tools list with descriptions
+                    let tools = vec![
+                        ("analyze_input", "Analyze user input to determine relevant tools and search strategies"),
+                        ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
+                        ("read_file", "Read file contents from repositories"),
+                        ("view_file", "View specific files in a repository with line range support"),
+                        ("list_repositories", "List all configured repositories"),
+                        ("add_existing_repository", "Add an existing local or remote repository"),
+                        ("sync_repository", "Sync a repository to get latest changes"),
+                        ("remove_repository", "Remove a repository from the system"),
+                        ("search_file_in_repository", "Search for files by name pattern in a repository"),
+                        ("repository_map", "Generate a high-level map of repository structure (supports optional name)"),
+                        ("targeted_view", "View specific code elements like functions or classes"),
+                        ("code_search", "Search code semantically across repositories"),
+                        ("web_search", "Search the web for information"),
+                        ("edit_file", "Edit files with precise text replacements"),
+                        ("validate", "Validate code changes for correctness"),
+                        ("semantic_edit", "Make semantic code edits with AI assistance"),
+                    ];
+                    
+                    for (tool_name, description) in tools {
+                        ui.group(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(egui::RichText::new(tool_name).color(theme.success_color()).strong());
+                                ui.label(egui::RichText::new("-").color(theme.text_color()));
+                                ui.label(egui::RichText::new(description).color(theme.text_color()));
+                            });
+                        });
+                    }
+                });
+                
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Note:").color(theme.warning_color()).strong());
+                    ui.label(egui::RichText::new("Tools marked with 'optional name' support using the current repository context").color(theme.text_color()));
+                });
+                
+                ui.separator();
+                
+                // Close button
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Press F2 or click Close to dismiss").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
+                            app.state.show_tools_modal = false;
+                        }
+                    });
+                });
+            });
+    }
 }
 
 /// Handle keyboard shortcuts
@@ -131,6 +200,10 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
         app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
+    }
+    if ctx.input(|i| i.key_pressed(Key::F2)) {
+        // F2: Toggle tools list modal
+        app.state.show_tools_modal = !app.state.show_tools_modal;
     }
     
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
@@ -827,6 +900,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.state.show_hotkeys_modal = false;
+                        }
+                    });
+                });
+                
+                // F2 Tools List
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("F2: Show/Hide Tools List").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.show_tools_modal = !app.state.show_tools_modal;
                         }
                     });
                 });
