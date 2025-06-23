@@ -380,8 +380,11 @@ impl SettingsPanel {
     
     /// Create an updated AppConfig from the current UI state
     fn create_updated_sagitta_config(&self) -> AppConfig {
-        let mut config = AppConfig::default();
+        // Clone the existing config to preserve all fields
+        let sagitta_config_guard = self.sagitta_config.blocking_lock();
+        let mut config = sagitta_config_guard.clone();
         
+        // Update only the fields that are exposed in the UI
         // Basic settings
         config.qdrant_url = self.qdrant_url.clone();
         config.onnx_model_path = self.onnx_model_path.clone();
@@ -400,42 +403,28 @@ impl SettingsPanel {
         // Embedding engine settings
         config.embedding.embedding_batch_size = self.embedding_batch_size as usize;
         
+        // All other fields (repositories, embed_model, etc.) are preserved from the original config
+        
         config
     }
     
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
-        let mut updated_config = SagittaCodeConfig {
-            openrouter: OpenRouterConfig {
-                api_key: if self.openrouter_api_key.is_empty() { 
-                    None 
-                } else { 
-                    Some(self.openrouter_api_key.clone()) 
-                },
-                model: self.openrouter_model.clone(),
-                provider_preferences: None,
-                max_history_size: 20,
-                max_reasoning_steps: self.openrouter_max_reasoning_steps,
-                request_timeout: 30,
-            },
-            sagitta: Default::default(),
-            ui: Default::default(),
-            logging: Default::default(),
-            conversation: Default::default(),
-
-        };
+        // Clone the existing config to preserve all fields
+        let current_config_guard = self.sagitta_code_config.blocking_lock();
+        let mut updated_config = current_config_guard.clone();
         
-        // Copy other fields from current config using try_lock to avoid blocking runtime
-        if let Ok(current_config) = self.sagitta_code_config.try_lock() {
-            updated_config.sagitta = current_config.sagitta.clone();
-            updated_config.ui = current_config.ui.clone();
-            updated_config.logging = current_config.logging.clone();
-            updated_config.conversation = current_config.conversation.clone();
-
-        } else {
-            // If we can't get the lock immediately, log a warning but use defaults
-            log::warn!("SettingsPanel: Could not acquire config lock immediately, using defaults for non-OpenRouter fields");
-        }
+        // Update only the OpenRouter fields that are exposed in the UI
+        updated_config.openrouter.api_key = if self.openrouter_api_key.is_empty() { 
+            None 
+        } else { 
+            Some(self.openrouter_api_key.clone()) 
+        };
+        updated_config.openrouter.model = self.openrouter_model.clone();
+        updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
+        
+        // Preserve all other OpenRouter fields (provider_preferences, max_history_size, request_timeout)
+        // and all other config sections (sagitta, ui, logging, conversation) from the original
         
         updated_config
     }
@@ -693,6 +682,74 @@ mod tests {
         // Test that it contains expected path components
         assert!(default_repo_path.contains("sagitta"), "Default repo path should contain 'sagitta'");
         assert!(default_repo_path.contains("repositories"), "Default repo path should contain 'repositories'");
+    }
+
+    #[test]
+    fn test_config_fields_preserved_on_update() {
+        // Create configs with additional fields that aren't in the UI
+        let mut initial_sagitta_config = create_test_sagitta_config();
+        initial_sagitta_config.repositories = vec![
+            sagitta_search::config::RepositoryConfig {
+                name: "test-repo-1".to_string(),
+                url: "https://github.com/test/repo1".to_string(),
+                local_path: PathBuf::from("/test/repos/repo1"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                last_synced_commits: std::collections::HashMap::new(),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                tenant_id: None,
+            },
+            sagitta_search::config::RepositoryConfig {
+                name: "test-repo-2".to_string(),
+                url: "https://github.com/test/repo2".to_string(),
+                local_path: PathBuf::from("/test/repos/repo2"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                last_synced_commits: std::collections::HashMap::new(),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                tenant_id: None,
+            },
+        ];
+        initial_sagitta_config.embed_model = Some("test-embed-model".to_string());
+        
+        let mut initial_sagitta_code_config = create_test_sagitta_code_config();
+        initial_sagitta_code_config.ui.current_repository_context = Some("test-repo-1".to_string());
+        initial_sagitta_code_config.sagitta.repositories = vec!["repo1".to_string(), "repo2".to_string()];
+        
+        let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_sagitta_config.clone());
+        
+        // Modify only UI-exposed fields
+        panel.openrouter_api_key = "updated-key".to_string();
+        panel.qdrant_url = "http://updated:6334".to_string();
+        
+        // Create updated configs
+        let updated_sagitta_config = panel.create_updated_sagitta_config();
+        let updated_sagitta_code_config = panel.create_updated_sagitta_code_config();
+        
+        // Verify UI-exposed fields were updated
+        assert_eq!(updated_sagitta_config.qdrant_url, "http://updated:6334");
+        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("updated-key".to_string()));
+        
+        // Verify non-UI fields were preserved
+        assert_eq!(updated_sagitta_config.repositories.len(), 2);
+        assert_eq!(updated_sagitta_config.repositories[0].name, "test-repo-1");
+        assert_eq!(updated_sagitta_config.repositories[1].name, "test-repo-2");
+        assert_eq!(updated_sagitta_config.embed_model, Some("test-embed-model".to_string()));
+        
+        assert_eq!(updated_sagitta_code_config.ui.current_repository_context, Some("test-repo-1".to_string()));
+        assert_eq!(updated_sagitta_code_config.sagitta.repositories, vec!["repo1".to_string(), "repo2".to_string()]);
     }
 }
 
