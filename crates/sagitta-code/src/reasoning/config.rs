@@ -75,5 +75,7 @@ pub fn create_reasoning_config(agent_config: &SagittaCodeConfig) -> ReasoningCon
             log_level: "info".to_string(),
             enable_debug_assertions: true,
         },
+        enable_analyze_input: agent_config.conversation.analyze_input,
+        enable_analyze_intent: agent_config.conversation.analyze_intent,
     }
 } 

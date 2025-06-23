@@ -242,6 +242,14 @@ pub struct ConversationConfig {
     /// Sidebar configuration for persistent state
     #[serde(default)]
     pub sidebar: SidebarPersistentConfig,
+    
+    /// Enable analyze_input tool for initial user input analysis
+    #[serde(default = "default_analyze_input")]
+    pub analyze_input: bool,
+    
+    /// Enable analyze_intent for LLM response intent detection
+    #[serde(default = "default_analyze_intent")]
+    pub analyze_intent: bool,
 }
 
 /// Configuration for persistent sidebar state
@@ -396,6 +404,8 @@ impl Default for ConversationConfig {
             auto_branching: false,
             default_tags: Vec::new(),
             sidebar: SidebarPersistentConfig::default(),
+            analyze_input: default_analyze_input(),
+            analyze_intent: default_analyze_intent(),
         }
     }
 }
@@ -444,6 +454,14 @@ fn default_auto_create() -> bool {
 }
 
 fn default_auto_checkpoints() -> bool {
+    true
+}
+
+fn default_analyze_input() -> bool {
+    true
+}
+
+fn default_analyze_intent() -> bool {
     true
 }
 

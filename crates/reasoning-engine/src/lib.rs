@@ -221,29 +221,29 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
         let mut pending_completion_data: Option<(String, std::collections::HashMap<String, crate::traits::ToolResult>)> = None;
 
         // Initial planning step (analyze_input) - operates on the *current* user input text
-        let initial_tool_request = ToolExecutionRequest::new(
-            "analyze_input".to_string(),
-            serde_json::json!({ 
-                "input": current_user_input_text.clone(),
-                "context": if state.session_metadata.is_continuation {
-                    Some(state.get_context_summary())
-                } else {
-                    None
-                }
-            })
-        );
-        tracing::debug!(%session_id, ?initial_tool_request, "Constructed initial_tool_request for analyze_input");
-
-        let initial_orchestration_result_maybe = self.orchestrator.orchestrate_tools(
-            vec![initial_tool_request.clone()], // Clone for logging if needed later
-            tool_executor.clone(),
-            event_emitter.clone(),
-        ).await;
-
-        // This variable will hold the successful result if Ok, or be None if Err
         let mut initial_analysis_succeeded_and_value: Option<(bool, Value)> = None;
+        
+        if self.config.enable_analyze_input {
+            let initial_tool_request = ToolExecutionRequest::new(
+                "analyze_input".to_string(),
+                serde_json::json!({ 
+                    "input": current_user_input_text.clone(),
+                    "context": if state.session_metadata.is_continuation {
+                        Some(state.get_context_summary())
+                    } else {
+                        None
+                    }
+                })
+            );
+            tracing::debug!(%session_id, ?initial_tool_request, "Constructed initial_tool_request for analyze_input");
 
-        match initial_orchestration_result_maybe {
+            let initial_orchestration_result_maybe = self.orchestrator.orchestrate_tools(
+                vec![initial_tool_request.clone()], // Clone for logging if needed later
+                tool_executor.clone(),
+                event_emitter.clone(),
+            ).await;
+
+            match initial_orchestration_result_maybe {
             Ok(orchestration_result) => {
                 tracing::info!(%session_id, initial_orchestration_result = ?orchestration_result, "Full Initial 'analyze_input' orchestration result OBTAINED SUCCESSFULLY.");
                 state.add_step(ReasoningStep::from_orchestration_result(&orchestration_result, Some("Initial analysis with context")));
@@ -293,6 +293,9 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                 return Ok(state); // Return Ok(state) here as per sagitta_code's expectation of Ok(ReasoningState)
                                   // but the state itself indicates failure.
             }
+        }
+        } else {
+            tracing::info!(%session_id, "analyze_input is disabled by configuration, skipping initial analysis");
         }
         
         // Add tool result to conversation history only if initial_analysis_succeeded_and_value is Some
@@ -771,11 +774,15 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                     true
                 };
                 
-                let intent_analysis_result = if should_analyze_intent {
+                let intent_analysis_result = if self.config.enable_analyze_intent && should_analyze_intent {
                     tracing::debug!(%session_id, iteration, "Analyzing intent for new content: '{}'", current_llm_text_response.chars().take(100).collect::<String>());
                     let result = self.intent_analyzer.analyze_intent(&current_llm_text_response, Some(&llm_conversation_history)).await;
                     last_analyzed_content = Some(current_llm_text_response.clone());
                     result
+                } else if !self.config.enable_analyze_intent {
+                    tracing::debug!(%session_id, iteration, "Intent analysis is disabled by configuration");
+                    // Default to general conversation when disabled
+                    Ok(DetectedIntent::GeneralConversation)
                 } else {
                     tracing::debug!(%session_id, iteration, "Skipping duplicate intent analysis for same content");
                     // Return the same intent as before to avoid re-processing

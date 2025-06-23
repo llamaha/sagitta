@@ -38,6 +38,12 @@ pub struct ReasoningConfig {
     
     /// Debug configuration
     pub debug: DebugConfig,
+    
+    /// Control whether to use analyze_input tool for initial planning
+    pub enable_analyze_input: bool,
+    
+    /// Control whether to use intent analyzer for response analysis
+    pub enable_analyze_intent: bool,
 }
 
 impl Default for ReasoningConfig {
@@ -54,6 +60,8 @@ impl Default for ReasoningConfig {
             backtracking: BacktrackingConfig::default(),
             reflection: ReflectionConfig::default(),
             debug: DebugConfig::default(),
+            enable_analyze_input: true,
+            enable_analyze_intent: true,
         }
     }
 }
@@ -361,6 +369,8 @@ impl ReasoningConfig {
         config.debug.log_level = "debug".to_string();
         config.streaming.enable_retry = false; // Fail fast in development
         config.max_iterations = 20; // Lower for faster feedback
+        config.enable_analyze_input = true;
+        config.enable_analyze_intent = true;
         config
     }
     
@@ -373,6 +383,8 @@ impl ReasoningConfig {
         config.streaming.enable_retry = true;
         config.streaming.max_retry_attempts = 5;
         config.max_iterations = 100; // Higher for complex tasks
+        config.enable_analyze_input = true;
+        config.enable_analyze_intent = true;
         config
     }
 }

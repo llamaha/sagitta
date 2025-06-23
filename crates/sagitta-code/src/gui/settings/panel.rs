@@ -43,6 +43,10 @@ pub struct SettingsPanel {
     pub openrouter_model: String,
     pub openrouter_max_reasoning_steps: u32,
     
+    // Conversation config fields
+    pub analyze_input: bool,
+    pub analyze_intent: bool,
+    
     // Model selector for dynamic model selection
     model_selector: Option<ModelSelector>,
 }
@@ -72,6 +76,10 @@ impl SettingsPanel {
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
             openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
             openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
+            
+            // Conversation config fields
+            analyze_input: initial_sagitta_code_config.conversation.analyze_input,
+            analyze_intent: initial_sagitta_code_config.conversation.analyze_intent,
             
             // Initialize model selector as None (will be lazy-loaded)
             model_selector: None,
@@ -151,6 +159,19 @@ impl SettingsPanel {
                                         .speed(1.0));
                                     ui.end_row();
                                 });
+                            
+                            ui.add_space(8.0);
+                            
+                            // Reasoning Features
+                            ui.heading("Reasoning Features");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.analyze_input, "Enable Analyze Input")
+                                    .on_hover_text("Analyzes initial user input to determine intent and suggest actions");
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.analyze_intent, "Enable Analyze Intent")
+                                    .on_hover_text("Detects LLM response intent for better conversation flow");
+                            });
                             
                             // Model selector (enhanced UI)
                             ui.add_space(8.0);
@@ -381,7 +402,7 @@ impl SettingsPanel {
     /// Create an updated AppConfig from the current UI state
     fn create_updated_sagitta_config(&self) -> AppConfig {
         // Clone the existing config to preserve all fields
-        let sagitta_config_guard = self.sagitta_config.blocking_lock();
+        let sagitta_config_guard = self.sagitta_config.try_lock().expect("Failed to acquire sagitta_config lock");
         let mut config = sagitta_config_guard.clone();
         
         // Update only the fields that are exposed in the UI
@@ -411,7 +432,7 @@ impl SettingsPanel {
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
         // Clone the existing config to preserve all fields
-        let current_config_guard = self.sagitta_code_config.blocking_lock();
+        let current_config_guard = self.sagitta_code_config.try_lock().expect("Failed to acquire sagitta_code_config lock");
         let mut updated_config = current_config_guard.clone();
         
         // Update only the OpenRouter fields that are exposed in the UI
@@ -422,6 +443,10 @@ impl SettingsPanel {
         };
         updated_config.openrouter.model = self.openrouter_model.clone();
         updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
+        
+        // Update conversation settings
+        updated_config.conversation.analyze_input = self.analyze_input;
+        updated_config.conversation.analyze_intent = self.analyze_intent;
         
         // Preserve all other OpenRouter fields (provider_preferences, max_history_size, request_timeout)
         // and all other config sections (sagitta, ui, logging, conversation) from the original
