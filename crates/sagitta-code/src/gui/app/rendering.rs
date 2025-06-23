@@ -110,7 +110,7 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                         ("sync_repository", "Sync a repository to get latest changes"),
                         ("remove_repository", "Remove a repository from the system"),
                         ("search_file_in_repository", "Search for files by name pattern in a repository"),
-                        ("repository_map", "Generate a high-level map of repository structure (supports optional name)"),
+                        ("repository_map", "Generate a high-level map of repository structure with functions, classes, and their relationships (supports optional name - uses current context if not provided)"),
                         ("targeted_view", "View specific code elements like functions or classes"),
                         ("code_search", "Search code semantically across repositories"),
                         ("web_search", "Search the web for information"),
@@ -329,7 +329,19 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             if let Some(agent) = &app.agent {
                 // Clone necessary values for async task
                 let agent_clone = agent.clone();
-                let user_msg_clone = user_message.clone();
+                
+                // Build context-aware message
+                let mut context_aware_message = String::new();
+                
+                // Add repository context as a system message if available
+                if let Some(repo_context) = &app.state.current_repository_context {
+                    context_aware_message.push_str(&format!("[System: Current repository context is '{}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{}']\n\n", repo_context, repo_context));
+                }
+                
+                // Append the actual user message
+                context_aware_message.push_str(&user_message);
+                
+                let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
                 app.state.is_waiting_for_response = true;

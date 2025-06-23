@@ -169,46 +169,11 @@ impl Tool for RepositoryMapTool {
             })
         };
         
-        let repo_manager = self.repo_manager.lock().await;
-        
-        // Get repository information using list_repositories
-        let result = repo_manager.list_repositories().await;
-        
-        match result {
-            Ok(repositories) => {
-                // This code path is no longer used since we're using generate_map
-                // but keeping it for backwards compatibility
-                if let Some(repo_name) = &params.name {
-                    if let Some(repo_config) = repositories.iter().find(|r| &r.name == repo_name) {
-                        // Create a simple repository map with basic information
-                        let map = serde_json::json!({
-                            "name": repo_config.name,
-                            "url": repo_config.url,
-                            "local_path": repo_config.local_path,
-                            "default_branch": repo_config.default_branch,
-                            "active_branch": repo_config.active_branch,
-                            "last_synced_commits": repo_config.last_synced_commits,
-                            "indexed_languages": repo_config.indexed_languages,
-                            "status": "Repository information retrieved"
-                        });
-                        
-                        Ok(ToolResult::Success(serde_json::json!({
-                            "repository_name": repo_name,
-                            "map": map
-                        })))
-                    } else {
-                        Ok(ToolResult::Error { 
-                            error: format!("Repository '{}' not found", repo_name)
-                        })
-                    }
-                } else {
-                    Ok(ToolResult::Error { 
-                        error: "No repository name provided. Please either: 1) Select a repository from the UI dropdown to set the context, or 2) Provide the 'name' parameter explicitly.".to_string()
-                    })
-                }
-            }
-            Err(e) => Ok(ToolResult::Error { 
-                error: format!("Failed to get repository information: {}", e)
+        // Use the generate_map method that includes repo-mapper functionality
+        match self.generate_map(&params).await {
+            Ok(map_result) => Ok(ToolResult::Success(map_result)),
+            Err(e) => Ok(ToolResult::Error {
+                error: e.to_string()
             })
         }
     }
