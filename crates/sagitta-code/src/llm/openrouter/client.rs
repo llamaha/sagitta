@@ -275,8 +275,44 @@ impl OpenRouterClient {
         result
     }
 
+    /// Check if the current model supports structured outputs
+    async fn supports_structured_outputs(&self) -> bool {
+        // Try to get model info from cache/API
+        match self.model_manager.get_model_by_id(&self.config.model).await {
+            Ok(Some(model_info)) => {
+                // Check if supported_parameters contains "structured_outputs"
+                let supports = model_info.supported_parameters
+                    .as_ref()
+                    .map(|params| params.iter().any(|p| p == "structured_outputs"))
+                    .unwrap_or(false);
+                
+                if let Some(params) = &model_info.supported_parameters {
+                    log::debug!("Model {} supported parameters: {:?}", self.config.model, params);
+                }
+                
+                supports
+            }
+            Ok(None) => {
+                log::warn!("Model {} not found in model list, assuming no structured outputs support", self.config.model);
+                false
+            }
+            Err(e) => {
+                log::warn!("Failed to get model info for {}: {}, assuming no structured outputs support", self.config.model, e);
+                false
+            }
+        }
+    }
+
     /// Convert Sagitta ToolDefinition to OpenRouter Tool format
-    fn convert_tools(&self, tools: &[ToolDefinition]) -> Vec<super::api::Tool> {
+    async fn convert_tools(&self, tools: &[ToolDefinition]) -> Vec<super::api::Tool> {
+        let supports_structured = self.supports_structured_outputs().await;
+        
+        log::debug!(
+            "Model {} supports structured outputs: {}", 
+            self.config.model, 
+            supports_structured
+        );
+        
         tools.iter().map(|tool| {
             super::api::Tool {
                 tool_type: "function".to_string(),
@@ -284,7 +320,7 @@ impl OpenRouterClient {
                     name: tool.name.clone(),
                     description: Some(tool.description.clone()),
                     parameters: Some(self.make_schema_strict_compliant(tool.parameters.clone())),
-                    strict: Some(true), // Enable strict mode for better function call reliability
+                    strict: if supports_structured { Some(true) } else { None },
                 },
             }
         }).collect()
@@ -437,7 +473,7 @@ impl LlmClient for OpenRouterClient {
         tools: &[ToolDefinition]
     ) -> Result<LlmResponse, SagittaCodeError> {
         let openrouter_tools = if !tools.is_empty() {
-            Some(self.convert_tools(tools))
+            Some(self.convert_tools(tools).await)
         } else {
             None
         };
@@ -472,6 +508,7 @@ impl LlmClient for OpenRouterClient {
                 sort: p.sort.clone(),
                 data_collection: p.data_collection.clone(),
             }),
+            plugins: None,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -509,11 +546,82 @@ impl LlmClient for OpenRouterClient {
     async fn generate_with_grounding(&self,
         messages: &[Message],
         tools: &[ToolDefinition],
-        _grounding_config: &GroundingConfig,
+        grounding_config: &GroundingConfig,
     ) -> Result<LlmResponse, SagittaCodeError> {
-        // For now, just call the basic generate method
-        // TODO: Implement grounding-specific logic (web search) when OpenRouter supports it
-        self.generate(messages, tools).await
+        // OpenRouter supports web search via plugins
+        if grounding_config.enable_web_search {
+            let openrouter_tools = if !tools.is_empty() {
+                Some(self.convert_tools(tools).await)
+            } else {
+                None
+            };
+
+            let tool_choice = if !tools.is_empty() {
+                Some(super::api::ToolChoice::String("auto".to_string()))
+            } else {
+                None
+            };
+
+            let converted_messages = self.convert_messages(messages);
+            
+            if converted_messages.is_empty() {
+                return Err(SagittaCodeError::LlmError(
+                    "No valid messages to send to OpenRouter. All messages were empty or invalid.".to_string()
+                ));
+            }
+
+            // Create web search plugin configuration
+            let plugins = vec![super::api::Plugin {
+                id: "web".to_string(),
+                max_results: Some(5),
+                search_prompt: Some(format!(
+                    "A web search was conducted on {}. Incorporate the following web search results into your response.",
+                    chrono::Utc::now().format("%Y-%m-%d")
+                )),
+            }];
+
+            let request = ChatCompletionRequest {
+                model: self.config.model.clone(),
+                messages: converted_messages,
+                stream: Some(false),
+                max_tokens: None,
+                temperature: None,
+                top_p: None,
+                tools: openrouter_tools,
+                tool_choice,
+                provider: self.config.provider_preferences.as_ref().map(|p| ProviderPreferences {
+                    order: p.order.clone(),
+                    allow_fallbacks: p.allow_fallbacks,
+                    sort: p.sort.clone(),
+                    data_collection: p.data_collection.clone(),
+                }),
+                plugins: Some(plugins),
+            };
+
+            let url = format!("{}/chat/completions", self.base_url);
+            let response = self.http_client
+                .post(&url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(format!("HTTP request failed: {}", e)))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                return Err(SagittaCodeError::LlmError(
+                    format!("HTTP {}: {}", status, error_text)
+                ));
+            }
+
+            let completion: ChatCompletionResponse = response.json().await
+                .map_err(|e| SagittaCodeError::LlmError(format!("Failed to parse response: {}", e)))?;
+
+            Ok(self.convert_response(completion))
+        } else {
+            // No web search requested, use regular generate
+            self.generate(messages, tools).await
+        }
     }
 
     async fn generate_with_thinking_and_grounding(&self,
@@ -532,7 +640,7 @@ impl LlmClient for OpenRouterClient {
         tools: &[ToolDefinition]
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         let openrouter_tools = if !tools.is_empty() {
-            Some(self.convert_tools(tools))
+            Some(self.convert_tools(tools).await)
         } else {
             None
         };
@@ -567,6 +675,7 @@ impl LlmClient for OpenRouterClient {
                 sort: p.sort.clone(),
                 data_collection: p.data_collection.clone(),
             }),
+            plugins: None,
         };
 
         // Debug logging to diagnose issues

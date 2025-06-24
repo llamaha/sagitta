@@ -567,8 +567,29 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
             if stream_attempt_failed && !llm_call_successful {
                 tracing::warn!(%session_id, iteration, "Attempting non-streaming fallback due to streaming failure");
                 
+                // CRITICAL: If we already streamed some text, we need to handle the conversation differently
+                let mut fallback_messages = llm_conversation_history.clone();
+                
+                if text_was_streamed && !current_llm_text_response.is_empty() {
+                    // Add the partially streamed response as an assistant message
+                    // This prevents the LLM from regenerating the same content
+                    tracing::info!(%session_id, "Adding partially streamed response to conversation before fallback");
+                    fallback_messages.push(LlmMessage {
+                        role: "assistant".to_string(),
+                        parts: vec![LlmMessagePart::Text(current_llm_text_response.clone())],
+                    });
+                    
+                    // Add a user message asking to continue
+                    fallback_messages.push(LlmMessage {
+                        role: "user".to_string(),
+                        parts: vec![LlmMessagePart::Text(
+                            "Please continue with your response.".to_string()
+                        )],
+                    });
+                }
+                
                 // Convert LlmMessage to the format expected by the LLM client
-                let llm_client_messages: Vec<crate::traits::LlmMessage> = llm_conversation_history.clone()
+                let llm_client_messages: Vec<crate::traits::LlmMessage> = fallback_messages
                     .into_iter()
                     .map(|msg| crate::traits::LlmMessage {
                         role: msg.role,
@@ -591,6 +612,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         for part in response.message.parts {
                             match part {
                                 crate::traits::LlmMessagePart::Text(text) => {
+                                    // Append the continuation text to what we already have
                                     current_llm_text_response.push_str(&text);
                                     
                                     // Send as a single chunk to maintain streaming interface

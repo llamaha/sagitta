@@ -20,6 +20,18 @@ pub struct ChatCompletionRequest {
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<ProviderPreferences>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<Vec<Plugin>>,
+}
+
+/// Plugin configuration for OpenRouter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Plugin {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_prompt: Option<String>,
 }
 
 /// Chat message in OpenRouter format (OpenAI-compatible)
