@@ -335,7 +335,38 @@ Required tools (like git, cargo, npm, etc.) should be installed on your system f
         params: &ShellExecutionParams,
         event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
-        self.executor.execute_streaming(params, event_sender).await
+        // Log the incoming parameters for debugging
+        log::debug!("ShellExecutionTool::execute_streaming - params.working_directory: {:?}", params.working_directory);
+        log::debug!("ShellExecutionTool::execute_streaming - has working_dir_manager: {}", self.working_dir_manager.is_some());
+        
+        // Resolve working directory using the same logic as execute_command
+        let working_dir = if let Some(ref wd_manager) = self.working_dir_manager {
+            let resolved = wd_manager.auto_resolve(params.working_directory.clone()).await?;
+            log::info!("ShellExecutionTool::execute_streaming - Resolved working directory to: {}", resolved.display());
+            resolved
+        } else {
+            let dir = params.working_directory.clone().unwrap_or_else(|| self.default_working_dir.clone());
+            log::info!("ShellExecutionTool::execute_streaming - No working_dir_manager, using directory: {}", dir.display());
+            dir
+        };
+
+        // Validate git commands
+        self.validate_git_command(&params.command, &working_dir).await?;
+
+        // Create new params with resolved directory
+        let resolved_params = ShellExecutionParams {
+            command: params.command.clone(),
+            language: params.language.clone(),
+            working_directory: Some(working_dir.clone()),
+            allow_network: params.allow_network,
+            env_vars: params.env_vars.clone(),
+            timeout_seconds: params.timeout_seconds,
+        };
+        
+        log::info!("ShellExecutionTool::execute_streaming - Executing command '{}' in directory: {}", 
+            params.command, working_dir.display());
+
+        self.executor.execute_streaming(&resolved_params, event_sender).await
     }
 
     /// Validate git command context
@@ -361,11 +392,19 @@ Required tools (like git, cargo, npm, etc.) should be installed on your system f
 
     /// Execute a command with enhanced directory resolution
     pub async fn execute_command(&self, params: &ShellExecutionParams) -> Result<ShellExecutionResult, SagittaCodeError> {
+        // Log the incoming parameters for debugging
+        log::debug!("ShellExecutionTool::execute_command - params.working_directory: {:?}", params.working_directory);
+        log::debug!("ShellExecutionTool::execute_command - has working_dir_manager: {}", self.working_dir_manager.is_some());
+        
         // Resolve working directory
         let working_dir = if let Some(ref wd_manager) = self.working_dir_manager {
-            wd_manager.auto_resolve(params.working_directory.clone()).await?
+            let resolved = wd_manager.auto_resolve(params.working_directory.clone()).await?;
+            log::info!("ShellExecutionTool: Resolved working directory to: {}", resolved.display());
+            resolved
         } else {
-            params.working_directory.clone().unwrap_or_else(|| self.default_working_dir.clone())
+            let dir = params.working_directory.clone().unwrap_or_else(|| self.default_working_dir.clone());
+            log::info!("ShellExecutionTool: No working_dir_manager, using directory: {}", dir.display());
+            dir
         };
 
         // Validate git commands
@@ -375,11 +414,14 @@ Required tools (like git, cargo, npm, etc.) should be installed on your system f
         let resolved_params = ShellExecutionParams {
             command: params.command.clone(),
             language: params.language.clone(),
-            working_directory: Some(working_dir),
+            working_directory: Some(working_dir.clone()),
             allow_network: params.allow_network,
             env_vars: params.env_vars.clone(),
             timeout_seconds: params.timeout_seconds,
         };
+        
+        log::info!("ShellExecutionTool: Executing command '{}' in directory: {}", 
+            params.command, working_dir.display());
 
         self.executor.execute(&resolved_params).await
     }
@@ -466,6 +508,15 @@ impl StreamingShellExecutionTool {
     pub fn new(default_working_dir: PathBuf) -> Self {
         Self {
             base_tool: ShellExecutionTool::new(default_working_dir),
+        }
+    }
+    
+    pub fn new_with_working_dir_manager(
+        default_working_dir: PathBuf,
+        working_dir_manager: Arc<WorkingDirectoryManager>,
+    ) -> Self {
+        Self {
+            base_tool: ShellExecutionTool::new_with_working_dir_manager(default_working_dir, working_dir_manager),
         }
     }
     

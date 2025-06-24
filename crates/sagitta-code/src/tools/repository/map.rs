@@ -14,8 +14,8 @@ use sagitta_search::config::AppConfig;
 /// Parameters for mapping a repository
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RepositoryMapParams {
-    /// Name of the repository to map
-    pub name: String,
+    /// Name of the repository to map (uses current repository context if not provided)
+    pub name: Option<String>,
     /// Verbosity level (0=minimal, 1=normal, 2=detailed)
     #[serde(default = "default_verbosity")]
     pub verbosity: u8,
@@ -53,9 +53,19 @@ impl RepositoryMapTool {
         let repositories = repo_manager.list_repositories().await
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
         
+        // Get the repository name
+        let repo_name = match &params.name {
+            Some(name) => name.clone(),
+            None => {
+                return Err(SagittaCodeError::ToolError(
+                    "No repository name provided. Please either: 1) Select a repository from the UI dropdown to set the context, or 2) Provide the 'name' parameter explicitly. You can use the 'list_repositories' tool to see available repositories.".to_string()
+                ));
+            }
+        };
+        
         let repo = repositories.iter()
-            .find(|r| r.name == params.name)
-            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", params.name)))?;
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", repo_name)))?;
 
         let repo_path = &repo.local_path;
 
@@ -86,7 +96,7 @@ impl RepositoryMapTool {
         // Convert to JSON response
         Ok(serde_json::json!({
             "success": true,
-            "repository_name": params.name,
+            "repository_name": repo_name,
             "repository_path": repo_path.to_string_lossy(),
             "verbosity": params.verbosity,
             "map_content": result.map_content,
@@ -116,7 +126,7 @@ impl Tool for RepositoryMapTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "repository_map".to_string(),
-            description: "Generate a high-level map of a repository's code structure using the repo-mapper crate for reliable name extraction. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.".to_string(),
+            description: "Generate a high-level map of a repository's code structure using the repo-mapper crate for reliable name extraction. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.\n\nIMPORTANT: If a repository is currently selected (shown in the UI dropdown), you can omit the 'name' parameter to map that repository. If no repository is selected or you want to map a different repository, provide the 'name' parameter.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
             parameters: serde_json::json!({
@@ -159,39 +169,11 @@ impl Tool for RepositoryMapTool {
             })
         };
         
-        let repo_manager = self.repo_manager.lock().await;
-        
-        // Get repository information using list_repositories
-        let result = repo_manager.list_repositories().await;
-        
-        match result {
-            Ok(repositories) => {
-                // Find the requested repository
-                if let Some(repo_config) = repositories.iter().find(|r| r.name == params.name) {
-                    // Create a simple repository map with basic information
-                    let map = serde_json::json!({
-                        "name": repo_config.name,
-                        "url": repo_config.url,
-                        "local_path": repo_config.local_path,
-                        "default_branch": repo_config.default_branch,
-                        "active_branch": repo_config.active_branch,
-                        "last_synced_commits": repo_config.last_synced_commits,
-                        "indexed_languages": repo_config.indexed_languages,
-                        "status": "Repository information retrieved"
-                    });
-                    
-                    Ok(ToolResult::Success(serde_json::json!({
-                        "repository_name": params.name,
-                        "map": map
-                    })))
-                } else {
-                    Ok(ToolResult::Error { 
-                        error: format!("Repository '{}' not found", params.name)
-                    })
-                }
-            }
-            Err(e) => Ok(ToolResult::Error { 
-                error: format!("Failed to get repository information: {}", e)
+        // Use the generate_map method that includes repo-mapper functionality
+        match self.generate_map(&params).await {
+            Ok(map_result) => Ok(ToolResult::Success(map_result)),
+            Err(e) => Ok(ToolResult::Error {
+                error: e.to_string()
             })
         }
     }
@@ -278,7 +260,7 @@ mod tests {
         
         match result {
             ToolResult::Error { error } => {
-                assert!(error.contains("Invalid parameters"));
+                assert!(error.contains("missing field `name`") || error.contains("No repository name provided"));
             }
             _ => panic!("Expected parameter validation error"),
         }
@@ -289,7 +271,7 @@ mod tests {
         let json_str = r#"{"name": "test_repo"}"#;
         let params: RepositoryMapParams = serde_json::from_str(json_str).unwrap();
         
-        assert_eq!(params.name, "test_repo");
+        assert_eq!(params.name, Some("test_repo".to_string()));
         assert_eq!(params.verbosity, 1); // Should use default
         assert!(params.paths.is_none());
         assert!(params.file_extension.is_none());
@@ -345,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_repository_map_params_serialization() {
         let params = RepositoryMapParams {
-            name: "test_repo".to_string(),
+            name: Some("test_repo".to_string()),
             verbosity: 2,
             paths: Some(vec!["src/".to_string(), "tests/".to_string()]),
             file_extension: Some("rs".to_string()),

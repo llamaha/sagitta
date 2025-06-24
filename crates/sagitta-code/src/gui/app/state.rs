@@ -35,6 +35,7 @@ pub struct AppState {
     // UI state
     pub current_theme: AppTheme,
     pub show_hotkeys_modal: bool,
+    pub show_tools_modal: bool,
     pub clicked_tool_info: Option<(String, String)>, // (tool_name, tool_args)
     pub toasts: Toasts,
     pub copy_button_state: CopyButtonState,
@@ -112,6 +113,7 @@ impl AppState {
             // UI state
             current_theme: AppTheme::default(),
             show_hotkeys_modal: false,
+            show_tools_modal: false,
             clicked_tool_info: None,
             toasts: Toasts::default(),
             copy_button_state: CopyButtonState::default(),
@@ -706,5 +708,59 @@ mod tests {
         assert!(state.messages.is_empty());
     }
 
-    
+    #[test]
+    fn test_repository_context_management() {
+        let mut state = AppState::new();
+        
+        // Initially no repository context
+        assert_eq!(state.current_repository_context, None);
+        assert_eq!(state.pending_repository_context_change, None);
+        
+        // Set repository context
+        state.set_repository_context(Some("test-repo".to_string()));
+        assert_eq!(state.current_repository_context, Some("test-repo".to_string()));
+        assert_eq!(state.pending_repository_context_change, None);
+        
+        // Clear repository context
+        state.set_repository_context(None);
+        assert_eq!(state.current_repository_context, None);
+    }
+
+    #[test]
+    fn test_request_repository_context_change() {
+        let mut state = AppState::new();
+        
+        // Request a repository change
+        state.request_repository_context_change("new-repo".to_string());
+        assert_eq!(state.pending_repository_context_change, Some("new-repo".to_string()));
+        
+        // Current context should not change yet
+        assert_eq!(state.current_repository_context, None);
+    }
+
+    #[test]
+    fn test_update_available_repositories() {
+        let mut state = AppState::new();
+        
+        // Initially empty
+        assert!(state.available_repositories.is_empty());
+        
+        // Update with repositories
+        let repos = vec!["repo1".to_string(), "repo2".to_string(), "repo3".to_string()];
+        state.update_available_repositories(repos.clone());
+        
+        assert_eq!(state.available_repositories, repos);
+    }
+
+    #[test]
+    fn test_get_repository_context_display() {
+        let mut state = AppState::new();
+        
+        // No repository
+        assert_eq!(state.get_repository_context_display(), "📁 No Repository");
+        
+        // With repository
+        state.set_repository_context(Some("my-project".to_string()));
+        assert_eq!(state.get_repository_context_display(), "📁 my-project");
+    }
 } 

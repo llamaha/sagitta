@@ -29,6 +29,7 @@ use crate::agent::conversation::search::text::TextConversationSearchEngine;
 
 use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
 use crate::llm::title::TitleGenerator;
+use crate::tools::WorkingDirectoryManager;
 
 // Import the modularized components
 mod panels;
@@ -38,6 +39,10 @@ mod tool_formatting;
 mod state;
 mod rendering;
 mod initialization;
+mod conversation_title_updater;
+
+#[cfg(test)]
+mod tests;
 
 // Re-export types and functions from modules
 pub use panels::*;
@@ -82,6 +87,9 @@ pub struct SagittaCodeApp {
     // Conversation service for cluster management
     conversation_service: Option<Arc<ConversationService>>,
     
+    // Title updater for auto-generating conversation titles
+    title_updater: Option<Arc<conversation_title_updater::ConversationTitleUpdater>>,
+    
     // State management - make public for direct access
     pub state: AppState,
     
@@ -97,6 +105,9 @@ pub struct SagittaCodeApp {
     
     // Tool result formatting
     tool_formatter: ToolResultFormatter,
+    
+    // Working directory management
+    working_dir_manager: Option<Arc<crate::tools::WorkingDirectoryManager>>,
 }
 
 impl SagittaCodeApp {
@@ -195,7 +206,11 @@ impl SagittaCodeApp {
 
         Self {
             agent: None,
-            repo_panel: RepoPanel::new(repo_manager.clone()),
+            repo_panel: RepoPanel::new(
+                repo_manager.clone(),
+                Arc::new(Mutex::new(sagitta_code_config.clone())),
+                None, // Agent will be set later during initialization
+            ),
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),
@@ -217,9 +232,13 @@ impl SagittaCodeApp {
             
             // Tool result formatting
             tool_formatter: ToolResultFormatter::new(),
+            working_dir_manager: None, // Will be set during initialization
             
             // Conversation service for cluster management
             conversation_service: None,
+            
+            // Title updater - will be initialized later with conversation service
+            title_updater: None,
         }
     }
 
@@ -313,7 +332,17 @@ impl SagittaCodeApp {
             analytics_manager,
         );
         
-        self.conversation_service = Some(Arc::new(service));
+        let service_arc = Arc::new(service);
+        self.conversation_service = Some(service_arc.clone());
+        
+        // Initialize title updater with the conversation service
+        // For now, use rule-based title generation (no LLM client)
+        self.title_updater = Some(Arc::new(
+            conversation_title_updater::ConversationTitleUpdater::new(
+                service_arc,
+                None, // No LLM client for now
+            )
+        ));
         
         // Initial refresh of conversation data
         self.refresh_conversation_clusters().await?;
@@ -369,7 +398,17 @@ impl SagittaCodeApp {
             analytics_manager,
         );
         
-        self.conversation_service = Some(Arc::new(service));
+        let service_arc = Arc::new(service);
+        self.conversation_service = Some(service_arc.clone());
+        
+        // Initialize title updater with the conversation service
+        // For now, use rule-based title generation (no LLM client)
+        self.title_updater = Some(Arc::new(
+            conversation_title_updater::ConversationTitleUpdater::new(
+                service_arc,
+                None, // No LLM client for now
+            )
+        ));
         
         // Initial refresh of conversation data
         self.refresh_conversation_clusters().await?;

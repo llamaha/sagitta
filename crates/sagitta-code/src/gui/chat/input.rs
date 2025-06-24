@@ -157,6 +157,19 @@ pub fn chat_input_ui(
                         *on_repository_context_change = Some("".to_string());
                     }
                     
+                    // If current repository is set but not in available list, show it first
+                    if let Some(current_repo) = current_repository_context {
+                        if !available_repositories.contains(current_repo) {
+                            if ui.selectable_value(
+                                &mut *on_repository_context_change,
+                                Some(current_repo.clone()),
+                                RichText::new(format!("📁 {} (loading...)", current_repo)).color(success_color)
+                            ).clicked() {
+                                *on_repository_context_change = Some(current_repo.clone());
+                            }
+                        }
+                    }
+                    
                     // Available repositories
                     for repo in available_repositories {
                         if ui.selectable_value(
@@ -168,6 +181,16 @@ pub fn chat_input_ui(
                         }
                     }
                 });
+            
+            // Show "Create new repository" button when "No repository" is selected
+            if current_repository_context.is_none() || current_repository_context.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+                ui.add_space(8.0);
+                if ui.button(RichText::new("🆕 Create new repository").color(accent_color).small()).clicked() {
+                    // Set a flag to open the repository panel with CreateProject tab
+                    // This will be handled by the main app
+                    *on_repository_context_change = Some("__CREATE_NEW_REPOSITORY__".to_string());
+                }
+            }
             
             // Removed help text for cleaner UI
             

@@ -382,7 +382,7 @@ impl ConversationSidebar {
     }
     
     /// Create a conversation item for display
-    fn create_conversation_item(&self, summary: ConversationSummary) -> ConversationItem {
+    pub(super) fn create_conversation_item(&self, summary: ConversationSummary) -> ConversationItem {
         let display = self.create_conversation_display(&summary);
         let preview = if self.config.show_previews {
             Some(format!("{} messages", summary.message_count))

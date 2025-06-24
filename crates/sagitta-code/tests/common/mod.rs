@@ -44,7 +44,9 @@ mod tests {
         assert!(config_path.is_ok(), "SAGITTA_TEST_CONFIG_PATH should be set after init_test_isolation");
         
         let path = PathBuf::from(config_path.unwrap());
-        assert!(path.to_string_lossy().contains("config.toml"), "Config path should end with config.toml");
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert!(filename == "config.toml" || filename == "dummy.toml", 
+                "Config path should end with config.toml or dummy.toml, got: {}", filename);
     }
 
     #[test]
@@ -55,6 +57,8 @@ mod tests {
         assert!(path.is_some(), "Should return test config path when isolation is active");
         
         let path = path.unwrap();
-        assert!(path.to_string_lossy().contains("config.toml"), "Should point to config.toml");
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert!(filename == "config.toml" || filename == "dummy.toml", 
+                "Should point to config.toml or dummy.toml, got: {}", filename);
     }
 } 

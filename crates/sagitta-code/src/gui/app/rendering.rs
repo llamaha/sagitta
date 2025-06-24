@@ -81,6 +81,75 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Render hotkeys modal if needed
     render_hotkeys_modal(app, ctx);
+    render_tools_modal(app, ctx);
+}
+
+/// Render tools list modal
+fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    if app.state.show_tools_modal {
+        let theme = app.state.current_theme;
+        egui::Window::new("Available Tools")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(700.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new("These tools are available to the AI assistant:").color(theme.accent_color()).strong());
+                ui.separator();
+                
+                // Create a scrollable area for the tools list
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Tools list with descriptions
+                    let tools = vec![
+                        ("analyze_input", "Analyze user input to determine relevant tools and search strategies"),
+                        ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
+                        ("read_file", "Read file contents from repositories"),
+                        ("view_file", "View specific files in a repository with line range support"),
+                        ("list_repositories", "List all configured repositories"),
+                        ("add_existing_repository", "Add an existing local or remote repository"),
+                        ("sync_repository", "Sync a repository to get latest changes"),
+                        ("remove_repository", "Remove a repository from the system"),
+                        ("search_file_in_repository", "Search for files by name pattern in a repository"),
+                        ("repository_map", "Generate a high-level map of repository structure with functions, classes, and their relationships (supports optional name - uses current context if not provided)"),
+                        ("targeted_view", "View specific code elements like functions or classes"),
+                        ("code_search", "Search code semantically across repositories"),
+                        ("web_search", "Search the web for information"),
+                        ("edit_file", "Edit files with precise text replacements"),
+                        ("validate", "Validate code changes for correctness"),
+                        ("semantic_edit", "Make semantic code edits with AI assistance"),
+                    ];
+                    
+                    for (tool_name, description) in tools {
+                        ui.group(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(egui::RichText::new(tool_name).color(theme.success_color()).strong());
+                                ui.label(egui::RichText::new("-").color(theme.text_color()));
+                                ui.label(egui::RichText::new(description).color(theme.text_color()));
+                            });
+                        });
+                    }
+                });
+                
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Note:").color(theme.warning_color()).strong());
+                    ui.label(egui::RichText::new("Tools marked with 'optional name' support using the current repository context").color(theme.text_color()));
+                });
+                
+                ui.separator();
+                
+                // Close button
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Press F2 or click Close to dismiss").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Close").color(theme.button_text_color())).clicked() {
+                            app.state.show_tools_modal = false;
+                        }
+                    });
+                });
+            });
+    }
 }
 
 /// Handle keyboard shortcuts
@@ -120,10 +189,6 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         // Ctrl+`: Toggle terminal panel (like VS Code)
         app.state.toggle_terminal();
     }
-    if ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.ctrl) {
-        // Ctrl+P: Toggle create project panel
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-    }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
         // Ctrl+M: Toggle model selection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
@@ -131,6 +196,10 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
         app.state.show_hotkeys_modal = !app.state.show_hotkeys_modal;
+    }
+    if ctx.input(|i| i.key_pressed(Key::F2)) {
+        // F2: Toggle tools list modal
+        app.state.show_tools_modal = !app.state.show_tools_modal;
     }
     
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
@@ -256,7 +325,19 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             if let Some(agent) = &app.agent {
                 // Clone necessary values for async task
                 let agent_clone = agent.clone();
-                let user_msg_clone = user_message.clone();
+                
+                // Build context-aware message
+                let mut context_aware_message = String::new();
+                
+                // Add repository context as a system message if available
+                if let Some(repo_context) = &app.state.current_repository_context {
+                    context_aware_message.push_str(&format!("[System: Current repository context is '{}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{}']\n\n", repo_context, repo_context));
+                }
+                
+                // Append the actual user message
+                context_aware_message.push_str(&user_message);
+                
+                let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
                 app.state.is_waiting_for_response = true;
@@ -527,42 +608,6 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
             }
         },
-        ActivePanel::CreateProject => {
-            // Handle project creation requests
-            if let Some(create_request) = app.panels.create_project_panel.render(ctx, app.state.current_theme) {
-                // TODO: Implement project creation logic
-                // For now, just log the request and show success
-                log::info!("Create project request: {:?}", create_request);
-                
-                // Create directory if it doesn't exist
-                if let Err(e) = std::fs::create_dir_all(&create_request.path) {
-                    app.panels.create_project_panel.set_error(format!("Failed to create directory: {}", e));
-                } else {
-                    // TODO: Initialize git repository if requested
-                    if create_request.initialize_git {
-                        // Git initialization would go here
-                    }
-                    
-                    // TODO: Add to workspace if requested
-                    if create_request.add_to_workspace {
-                        // Workspace integration would go here
-                    }
-                    
-                    // TODO: Apply template if selected
-                    if let Some(_template) = create_request.template {
-                        // Template application would go here
-                    }
-                    
-                    app.panels.create_project_panel.project_created();
-                    
-                    // Add event to events panel
-                    app.panels.events_panel.add_event(
-                        super::SystemEventType::Info,
-                        format!("Created project '{}' at {}", create_request.name, create_request.path.display())
-                    );
-                }
-            }
-        },
         ActivePanel::Settings => {
             // Ensure the settings panel is open
             if !app.settings_panel.is_open() {
@@ -694,16 +739,6 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Create Project Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + P: Toggle Create Project Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.panels.toggle_panel(ActivePanel::CreateProject);
-                        }
-                    });
-                });
-                
                 // Model Selection Panel
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
@@ -831,6 +866,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
+                // F2 Tools List
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("F2: Show/Hide Tools List").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.state.show_tools_modal = !app.state.show_tools_modal;
+                        }
+                    });
+                });
+                
                 ui.separator();
                 ui.label(egui::RichText::new("Loop Control:").color(theme.accent_color()).strong());
                 
@@ -928,12 +973,85 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
-                let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
-                app.state.set_repository_context(repo_context);
+                // Check for special flag to open repository panel with CreateProject tab
+                if new_repo == "__CREATE_NEW_REPOSITORY__" {
+                    // Open the repository panel
+                    if !app.repo_panel.is_open() {
+                        app.repo_panel.toggle();
+                    }
+                    // Set the active tab to CreateProject
+                    app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::CreateProject);
+                    // Don't process this as a normal repository change
+                } else {
+                    let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
+                    app.state.set_repository_context(repo_context.clone());
                 
-                // TODO: Trigger set_repository_context tool call to update working directory
-                // This will be handled by the agent when it processes the context change
+                // Update working directory if we have a working directory manager
+                if let Some(working_dir_manager) = &app.working_dir_manager {
+                    if let Some(repo_name) = &repo_context {
+                        // Get repository manager
+                        let repo_manager = app.repo_panel.get_repo_manager();
+                        let working_dir_manager_clone = working_dir_manager.clone();
+                        let repo_name_clone = repo_name.clone();
+                        
+                        // Change working directory in background
+                        tokio::spawn(async move {
+                            let repo_manager_lock = repo_manager.lock().await;
+                            match working_dir_manager_clone.set_repository_context(&repo_name_clone, &*repo_manager_lock).await {
+                                Ok(result) => {
+                                    log::info!("Changed working directory to repository '{}': {} -> {}", 
+                                        repo_name_clone, 
+                                        result.previous_directory.display(), 
+                                        result.new_directory.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to change working directory to repository '{}': {}", repo_name_clone, e);
+                                }
+                            }
+                        });
+                    } else {
+                        // No repository selected, reset to base directory
+                        let working_dir_manager_clone = working_dir_manager.clone();
+                        let base_dir = working_dir_manager.get_base_directory().clone();
+                        
+                        tokio::spawn(async move {
+                            match working_dir_manager_clone.change_directory(base_dir.clone()).await {
+                                Ok(result) => {
+                                    log::info!("Reset working directory to base: {} -> {}", 
+                                        result.previous_directory.display(), 
+                                        result.new_directory.display());
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to reset working directory to base: {}", e);
+                                }
+                            }
+                        });
+                    }
+                }
+                
+                // Save the repository context to config
+                let config = app.config.clone();
+                let repo_context_for_save = repo_context.clone();
+                tokio::spawn(async move {
+                    match config.try_lock() {
+                        Ok(mut config_guard) => {
+                            config_guard.ui.current_repository_context = repo_context_for_save;
+                            
+                            // Save the config
+                            if let Err(e) = crate::config::save_config(&*config_guard) {
+                                log::error!("Failed to save repository context to config: {}", e);
+                            } else {
+                                log::info!("Repository context saved to config");
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to lock config for saving repository context: {}", e);
+                        }
+                    }
+                });
+                
                 log::info!("Repository context changed to: {:?}", new_repo);
+                }
             }
             
             // Store the input ID for potential future use
@@ -1411,7 +1529,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1426,7 +1543,6 @@ mod tests {
                 ActivePanel::Events => {},
                 ActivePanel::Analytics => {},
                 ActivePanel::ThemeCustomizer => {},
-                ActivePanel::CreateProject => {},
                 ActivePanel::ModelSelection => {},
             }
         }
@@ -1443,7 +1559,6 @@ mod tests {
         let _conversation = ActivePanel::Conversation;
         let _events = ActivePanel::Events;
         let _analytics = ActivePanel::Analytics;
-        let _create_project = ActivePanel::CreateProject;
         let _none = ActivePanel::None;
         
         // If this compiles, the imports are working correctly
@@ -1519,11 +1634,6 @@ mod tests {
     fn test_new_keyboard_shortcuts() {
         let mut app = create_test_app();
         
-        // Test Ctrl+P for CreateProject panel
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
-        assert!(app.panels.create_project_panel.visible);
-        
         // Test Ctrl+M for ModelSelection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
         assert_eq!(app.panels.active_panel, ActivePanel::ModelSelection);
@@ -1540,21 +1650,6 @@ mod tests {
         assert!(!app.state.show_hotkeys_modal);
     }
 
-    #[test]
-    fn test_create_project_panel_in_integration() {
-        let mut app = create_test_app();
-        
-        // Test that CreateProject panel is included in integration
-        app.panels.toggle_panel(ActivePanel::CreateProject);
-        assert_eq!(app.panels.active_panel, ActivePanel::CreateProject);
-        assert!(app.panels.create_project_panel.visible);
-        
-        // Test that switching to another panel closes CreateProject
-        app.panels.toggle_panel(ActivePanel::Preview);
-        assert_eq!(app.panels.active_panel, ActivePanel::Preview);
-        assert!(!app.panels.create_project_panel.visible);
-        assert!(app.panels.preview_panel.visible);
-    }
 
     /// Phase 5: Test sequential panel open/close events to ensure no races
     #[test]
@@ -1570,7 +1665,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1585,7 +1679,6 @@ mod tests {
                 ActivePanel::Events => assert!(app.panels.events_panel.visible),
                 ActivePanel::Analytics => assert!(app.panels.analytics_panel.visible),
                 ActivePanel::ThemeCustomizer => assert!(app.panels.theme_customizer.is_open()),
-                ActivePanel::CreateProject => assert!(app.panels.create_project_panel.visible),
                 ActivePanel::ModelSelection => assert!(app.panels.model_selection_panel.visible),
                 _ => {} // Repository, Settings, Conversation handled by main app
             }
@@ -1600,7 +1693,6 @@ mod tests {
         assert!(!app.panels.events_panel.visible);
         assert!(!app.panels.analytics_panel.visible);
         assert!(!app.panels.theme_customizer.is_open());
-        assert!(!app.panels.create_project_panel.visible);
         assert!(!app.panels.model_selection_panel.visible);
     }
 
@@ -1684,7 +1776,6 @@ mod tests {
             ActivePanel::Events,
             ActivePanel::Analytics,
             ActivePanel::ThemeCustomizer,
-            ActivePanel::CreateProject,
             ActivePanel::ModelSelection,
         ];
         
@@ -1713,10 +1804,6 @@ mod tests {
                 ActivePanel::ThemeCustomizer => {
                     assert_eq!(app.panels.active_panel, panel);
                     assert!(app.panels.theme_customizer.is_open());
-                },
-                ActivePanel::CreateProject => {
-                    assert_eq!(app.panels.active_panel, panel);
-                    assert!(app.panels.create_project_panel.visible);
                 },
                 ActivePanel::ModelSelection => {
                     assert_eq!(app.panels.active_panel, panel);

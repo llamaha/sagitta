@@ -257,12 +257,24 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.chat_manager.finish_streaming(app.state.current_response_id.as_ref().unwrap());
                     app.state.current_response_id = None;
                 }
+                
+                // Update conversation title after response is complete
+                if let (Some(conversation_id), Some(title_updater)) = 
+                    (app.state.current_conversation_id, &app.title_updater) {
+                    let title_updater_clone = title_updater.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = title_updater_clone.maybe_update_title(conversation_id).await {
+                            log::error!("Failed to update conversation title: {}", e);
+                        }
+                    });
+                }
             }
             AppEvent::RefreshConversationList => {
                 log::info!("SagittaCodeApp: Received RefreshConversationList event. Forcing refresh.");
                 force_refresh_conversation_data(app);
             }
             AppEvent::SwitchToConversation(conversation_id) => {
+                log::info!("AppEvent: Received SwitchToConversation for {}", conversation_id);
                 switch_to_conversation(app, conversation_id);
             }
             AppEvent::CheckpointSuggestionsReady { conversation_id, suggestions } => {
@@ -401,11 +413,6 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             };
             app.chat_manager.add_tool_call(&last_agent_msg.id, view_tool_call);
         }
-    }
-    
-    // Optionally show detailed arguments in the preview pane if needed
-    if let Ok(json) = serde_json::to_string_pretty(&tool_call.arguments) {
-        app.show_preview(&format!("{} Arguments", tool_call.name), &json);
     }
 }
 
@@ -680,8 +687,20 @@ pub fn refresh_conversation_data(app: &mut SagittaCodeApp) {
                 }
             });
         } else {
-            // No service or agent available, but keep loading state for tests
+            // No service or agent available, send empty data to clear loading state
             log::warn!("No conversation service or agent available for refresh");
+            
+            // Send empty data to clear the loading state
+            if let Some(sender) = &app.conversation_event_sender {
+                if let Err(e) = sender.send(ConversationEvent::DataLoaded {
+                    current_title: None,
+                    conversations: Vec::new(),
+                }) {
+                    log::error!("Failed to send empty DataLoaded event: {}", e);
+                } else {
+                    log::debug!("Sent empty DataLoaded event to clear loading state");
+                }
+            }
         }
         
         app.state.last_conversation_refresh = Some(std::time::Instant::now());
@@ -769,14 +788,26 @@ pub fn force_refresh_conversation_data(app: &mut SagittaCodeApp) {
             }
         });
     } else {
-        // No service or agent available, but keep loading state for tests
+        // No service or agent available, send empty data to clear loading state
         log::warn!("No conversation service or agent available for forced refresh");
+        
+        // Send empty data to clear the loading state
+        if let Some(sender) = &app.conversation_event_sender {
+            if let Err(e) = sender.send(ConversationEvent::DataLoaded {
+                current_title: None,
+                conversations: Vec::new(),
+            }) {
+                log::error!("Failed to send empty DataLoaded event: {}", e);
+            } else {
+                log::debug!("Sent empty DataLoaded event to clear loading state");
+            }
+        }
     }
 }
 
 /// Switch to a conversation and update the chat view
 pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
-    log::info!("Switching to conversation: {}", conversation_id);
+    log::info!("switch_to_conversation: Starting switch to conversation {}", conversation_id);
     
     // Clear current chat state
     app.state.current_conversation_id = Some(conversation_id);
@@ -803,6 +834,7 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
     
     // Load conversation history
     if let Some(service) = &app.conversation_service {
+        log::info!("switch_to_conversation: Using conversation service to load messages");
         let service_clone = service.clone();
         let sender = app.conversation_event_sender.clone();
         
@@ -835,6 +867,8 @@ pub fn switch_to_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::U
                 }
             }
         });
+    } else {
+        log::warn!("switch_to_conversation: No conversation service available - cannot load messages!");
     }
     
     // Trigger analysis for suggestions
@@ -1810,5 +1844,107 @@ mod tests {
         
         // Verify that suggestions were stored in the sidebar
         assert!(app.conversation_sidebar.get_branch_suggestions(conversation_id).is_some());
+    }
+    
+    #[test]
+    fn test_refresh_conversation_data_without_service_or_agent() {
+        let mut app = create_test_app();
+        
+        // Ensure no service or agent is available
+        app.conversation_service = None;
+        app.agent = None;
+        
+        // Initially should not be loading
+        assert!(!app.state.conversation_data_loading);
+        
+        // Call refresh
+        refresh_conversation_data(&mut app);
+        
+        // Should set loading state initially
+        assert!(app.state.conversation_data_loading);
+        
+        // Process events to handle the DataLoaded event
+        process_conversation_events(&mut app);
+        
+        // Loading state should be cleared even without service/agent
+        assert!(!app.state.conversation_data_loading);
+        
+        // Conversation list should be empty
+        assert!(app.state.conversation_list.is_empty());
+        assert!(app.state.current_conversation_title.is_none());
+    }
+    
+    #[test]
+    fn test_force_refresh_conversation_data_without_service_or_agent() {
+        let mut app = create_test_app();
+        
+        // Ensure no service or agent is available
+        app.conversation_service = None;
+        app.agent = None;
+        
+        // Initially should not be loading
+        assert!(!app.state.conversation_data_loading);
+        
+        // Call force refresh
+        force_refresh_conversation_data(&mut app);
+        
+        // Should set loading state initially
+        assert!(app.state.conversation_data_loading);
+        
+        // Process events to handle the DataLoaded event
+        process_conversation_events(&mut app);
+        
+        // Loading state should be cleared even without service/agent
+        assert!(!app.state.conversation_data_loading);
+        
+        // Conversation list should be empty
+        assert!(app.state.conversation_list.is_empty());
+        assert!(app.state.current_conversation_title.is_none());
+    }
+    
+    #[test]
+    fn test_switch_to_conversation_loads_messages() {
+        let mut app = create_test_app();
+        let conversation_id = Uuid::new_v4();
+        
+        // Create some test messages
+        let test_messages = vec![
+            create_test_agent_message(crate::llm::client::Role::User, "Hello"),
+            create_test_agent_message(crate::llm::client::Role::Assistant, "Hi there!"),
+        ];
+        
+        // Add conversation to the list
+        app.state.conversation_list.push(crate::agent::conversation::types::ConversationSummary {
+            id: conversation_id,
+            title: "Test Conversation".to_string(),
+            created_at: chrono::Utc::now(),
+            last_active: chrono::Utc::now(),
+            message_count: 2,
+            status: ConversationStatus::Active,
+            tags: vec![],
+            workspace_id: None,
+            has_branches: false,
+            has_checkpoints: false,
+            project_name: None,
+        });
+        
+        // Clear chat manager messages
+        app.chat_manager.clear_all_messages();
+        assert_eq!(app.chat_manager.get_all_messages().len(), 0);
+        
+        // Switch to the conversation
+        switch_to_conversation(&mut app, conversation_id);
+        
+        // Verify state is updated
+        assert_eq!(app.state.current_conversation_id, Some(conversation_id));
+        assert_eq!(app.state.current_conversation_title, Some("Test Conversation".to_string()));
+        assert!(app.state.conversation_data_loading);
+        
+        // Simulate receiving the loaded messages event
+        app.handle_conversation_messages(conversation_id, test_messages);
+        
+        // Verify messages were loaded into chat manager
+        assert_eq!(app.chat_manager.get_all_messages().len(), 2);
+        assert!(!app.state.conversation_data_loading);
     }
 } 

@@ -42,6 +42,11 @@ pub struct SettingsPanel {
     pub openrouter_api_key: String,
     pub openrouter_model: String,
     pub openrouter_max_reasoning_steps: u32,
+    pub openrouter_max_history_size: usize,
+    
+    // Conversation config fields
+    pub analyze_input: bool,
+    pub analyze_intent: bool,
     
     // Model selector for dynamic model selection
     model_selector: Option<ModelSelector>,
@@ -72,6 +77,11 @@ impl SettingsPanel {
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
             openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
             openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
+            openrouter_max_history_size: initial_sagitta_code_config.openrouter.max_history_size,
+            
+            // Conversation config fields
+            analyze_input: initial_sagitta_code_config.conversation.analyze_input,
+            analyze_intent: initial_sagitta_code_config.conversation.analyze_intent,
             
             // Initialize model selector as None (will be lazy-loaded)
             model_selector: None,
@@ -150,7 +160,27 @@ impl SettingsPanel {
                                         .range(1..=100)
                                         .speed(1.0));
                                     ui.end_row();
+                                    
+                                    ui.label("Max History Size:");
+                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_history_size)
+                                        .range(1..=100)
+                                        .speed(1.0))
+                                        .on_hover_text("Maximum number of messages to include in conversation history");
+                                    ui.end_row();
                                 });
+                            
+                            ui.add_space(8.0);
+                            
+                            // Reasoning Features
+                            ui.heading("Reasoning Features");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.analyze_input, "Enable Analyze Input")
+                                    .on_hover_text("Analyzes initial user input to determine intent and suggest actions");
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.analyze_intent, "Enable Analyze Intent")
+                                    .on_hover_text("Detects LLM response intent for better conversation flow");
+                            });
                             
                             // Model selector (enhanced UI)
                             ui.add_space(8.0);
@@ -380,8 +410,11 @@ impl SettingsPanel {
     
     /// Create an updated AppConfig from the current UI state
     fn create_updated_sagitta_config(&self) -> AppConfig {
-        let mut config = AppConfig::default();
+        // Clone the existing config to preserve all fields
+        let sagitta_config_guard = self.sagitta_config.try_lock().expect("Failed to acquire sagitta_config lock");
+        let mut config = sagitta_config_guard.clone();
         
+        // Update only the fields that are exposed in the UI
         // Basic settings
         config.qdrant_url = self.qdrant_url.clone();
         config.onnx_model_path = self.onnx_model_path.clone();
@@ -400,42 +433,33 @@ impl SettingsPanel {
         // Embedding engine settings
         config.embedding.embedding_batch_size = self.embedding_batch_size as usize;
         
+        // All other fields (repositories, embed_model, etc.) are preserved from the original config
+        
         config
     }
     
     /// Create an updated SagittaCodeConfig from the current UI state
     fn create_updated_sagitta_code_config(&self) -> SagittaCodeConfig {
-        let mut updated_config = SagittaCodeConfig {
-            openrouter: OpenRouterConfig {
-                api_key: if self.openrouter_api_key.is_empty() { 
-                    None 
-                } else { 
-                    Some(self.openrouter_api_key.clone()) 
-                },
-                model: self.openrouter_model.clone(),
-                provider_preferences: None,
-                max_history_size: 20,
-                max_reasoning_steps: self.openrouter_max_reasoning_steps,
-                request_timeout: 30,
-            },
-            sagitta: Default::default(),
-            ui: Default::default(),
-            logging: Default::default(),
-            conversation: Default::default(),
-
-        };
+        // Clone the existing config to preserve all fields
+        let current_config_guard = self.sagitta_code_config.try_lock().expect("Failed to acquire sagitta_code_config lock");
+        let mut updated_config = current_config_guard.clone();
         
-        // Copy other fields from current config using try_lock to avoid blocking runtime
-        if let Ok(current_config) = self.sagitta_code_config.try_lock() {
-            updated_config.sagitta = current_config.sagitta.clone();
-            updated_config.ui = current_config.ui.clone();
-            updated_config.logging = current_config.logging.clone();
-            updated_config.conversation = current_config.conversation.clone();
-
-        } else {
-            // If we can't get the lock immediately, log a warning but use defaults
-            log::warn!("SettingsPanel: Could not acquire config lock immediately, using defaults for non-OpenRouter fields");
-        }
+        // Update only the OpenRouter fields that are exposed in the UI
+        updated_config.openrouter.api_key = if self.openrouter_api_key.is_empty() { 
+            None 
+        } else { 
+            Some(self.openrouter_api_key.clone()) 
+        };
+        updated_config.openrouter.model = self.openrouter_model.clone();
+        updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
+        updated_config.openrouter.max_history_size = self.openrouter_max_history_size;
+        
+        // Update conversation settings
+        updated_config.conversation.analyze_input = self.analyze_input;
+        updated_config.conversation.analyze_intent = self.analyze_intent;
+        
+        // Preserve all other OpenRouter fields (provider_preferences, request_timeout)
+        // and all other config sections (sagitta, ui, logging, conversation) from the original
         
         updated_config
     }
@@ -533,6 +557,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, "test-api-key");
         assert_eq!(panel.openrouter_model, "test-model");
         assert_eq!(panel.openrouter_max_reasoning_steps, 10);
+        assert_eq!(panel.openrouter_max_history_size, 20);
 
         assert!(!panel.is_open);
     }
@@ -559,6 +584,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, "test-api-key");
         assert_eq!(panel.openrouter_model, "test-model");
         assert_eq!(panel.openrouter_max_reasoning_steps, 10);
+        assert_eq!(panel.openrouter_max_history_size, 20);
     }
 
     #[test]
@@ -610,12 +636,14 @@ mod tests {
         panel.openrouter_api_key = "updated-api-key".to_string();
         panel.openrouter_model = "updated-model".to_string();
         panel.openrouter_max_reasoning_steps = 100;
+        panel.openrouter_max_history_size = 50;
         
         let config = panel.create_updated_sagitta_code_config();
         
         assert_eq!(config.openrouter.api_key, Some("updated-api-key".to_string()));
         assert_eq!(config.openrouter.model, "updated-model");
         assert_eq!(config.openrouter.max_reasoning_steps, 100);
+        assert_eq!(config.openrouter.max_history_size, 50);
     }
 
     #[test]
@@ -654,6 +682,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, default_sagitta_code_config.openrouter.api_key.unwrap_or_default());
         assert_eq!(panel.openrouter_model, default_sagitta_code_config.openrouter.model);
         assert_eq!(panel.openrouter_max_reasoning_steps, default_sagitta_code_config.openrouter.max_reasoning_steps);
+        assert_eq!(panel.openrouter_max_history_size, default_sagitta_code_config.openrouter.max_history_size);
     }
 
     #[test]
@@ -693,6 +722,74 @@ mod tests {
         // Test that it contains expected path components
         assert!(default_repo_path.contains("sagitta"), "Default repo path should contain 'sagitta'");
         assert!(default_repo_path.contains("repositories"), "Default repo path should contain 'repositories'");
+    }
+
+    #[test]
+    fn test_config_fields_preserved_on_update() {
+        // Create configs with additional fields that aren't in the UI
+        let mut initial_sagitta_config = create_test_sagitta_config();
+        initial_sagitta_config.repositories = vec![
+            sagitta_search::config::RepositoryConfig {
+                name: "test-repo-1".to_string(),
+                url: "https://github.com/test/repo1".to_string(),
+                local_path: PathBuf::from("/test/repos/repo1"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                last_synced_commits: std::collections::HashMap::new(),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                tenant_id: None,
+            },
+            sagitta_search::config::RepositoryConfig {
+                name: "test-repo-2".to_string(),
+                url: "https://github.com/test/repo2".to_string(),
+                local_path: PathBuf::from("/test/repos/repo2"),
+                default_branch: "main".to_string(),
+                tracked_branches: vec!["main".to_string()],
+                remote_name: Some("origin".to_string()),
+                last_synced_commits: std::collections::HashMap::new(),
+                active_branch: Some("main".to_string()),
+                ssh_key_path: None,
+                ssh_key_passphrase: None,
+                indexed_languages: None,
+                added_as_local_path: false,
+                target_ref: None,
+                tenant_id: None,
+            },
+        ];
+        initial_sagitta_config.embed_model = Some("test-embed-model".to_string());
+        
+        let mut initial_sagitta_code_config = create_test_sagitta_code_config();
+        initial_sagitta_code_config.ui.current_repository_context = Some("test-repo-1".to_string());
+        initial_sagitta_code_config.sagitta.repositories = vec!["repo1".to_string(), "repo2".to_string()];
+        
+        let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_sagitta_config.clone());
+        
+        // Modify only UI-exposed fields
+        panel.openrouter_api_key = "updated-key".to_string();
+        panel.qdrant_url = "http://updated:6334".to_string();
+        
+        // Create updated configs
+        let updated_sagitta_config = panel.create_updated_sagitta_config();
+        let updated_sagitta_code_config = panel.create_updated_sagitta_code_config();
+        
+        // Verify UI-exposed fields were updated
+        assert_eq!(updated_sagitta_config.qdrant_url, "http://updated:6334");
+        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("updated-key".to_string()));
+        
+        // Verify non-UI fields were preserved
+        assert_eq!(updated_sagitta_config.repositories.len(), 2);
+        assert_eq!(updated_sagitta_config.repositories[0].name, "test-repo-1");
+        assert_eq!(updated_sagitta_config.repositories[1].name, "test-repo-2");
+        assert_eq!(updated_sagitta_config.embed_model, Some("test-embed-model".to_string()));
+        
+        assert_eq!(updated_sagitta_code_config.ui.current_repository_context, Some("test-repo-1".to_string()));
+        assert_eq!(updated_sagitta_code_config.sagitta.repositories, vec!["repo1".to_string(), "repo2".to_string()]);
     }
 }
 

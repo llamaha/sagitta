@@ -163,6 +163,9 @@ pub struct UiConfig {
     /// Window height
     #[serde(default = "default_window_height")]
     pub window_height: u32,
+    
+    /// Currently selected repository context
+    pub current_repository_context: Option<String>,
 }
 
 impl Default for UiConfig {
@@ -173,6 +176,7 @@ impl Default for UiConfig {
             custom_theme_path: None,
             window_width: default_window_width(),
             window_height: default_window_height(),
+            current_repository_context: None,
         }
     }
 }
@@ -238,6 +242,14 @@ pub struct ConversationConfig {
     /// Sidebar configuration for persistent state
     #[serde(default)]
     pub sidebar: SidebarPersistentConfig,
+    
+    /// Enable analyze_input tool for initial user input analysis
+    #[serde(default = "default_analyze_input")]
+    pub analyze_input: bool,
+    
+    /// Enable analyze_intent for LLM response intent detection
+    #[serde(default = "default_analyze_intent")]
+    pub analyze_intent: bool,
 }
 
 /// Configuration for persistent sidebar state
@@ -392,6 +404,8 @@ impl Default for ConversationConfig {
             auto_branching: false,
             default_tags: Vec::new(),
             sidebar: SidebarPersistentConfig::default(),
+            analyze_input: default_analyze_input(),
+            analyze_intent: default_analyze_intent(),
         }
     }
 }
@@ -443,6 +457,14 @@ fn default_auto_checkpoints() -> bool {
     true
 }
 
+fn default_analyze_input() -> bool {
+    true
+}
+
+fn default_analyze_intent() -> bool {
+    true
+}
+
 
 
 fn default_organization_mode() -> String {
@@ -486,3 +508,55 @@ fn default_request_timeout() -> u64 {
 }
 
 // Configuration structures will go here
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_ui_config_default() {
+        let config = UiConfig::default();
+        assert_eq!(config.dark_mode, true); // default_dark_mode() returns true
+        assert_eq!(config.theme, "default"); // default_theme() returns "default"
+        assert_eq!(config.custom_theme_path, None);
+        assert_eq!(config.window_width, 900); // default_window_width() returns 900
+        assert_eq!(config.window_height, 700); // default_window_height() returns 700
+        assert_eq!(config.current_repository_context, None);
+    }
+
+    #[test]
+    fn test_ui_config_with_repository_context() {
+        let mut config = UiConfig::default();
+        config.current_repository_context = Some("test-repo".to_string());
+        
+        assert_eq!(config.current_repository_context, Some("test-repo".to_string()));
+    }
+
+    #[test]
+    fn test_sagitta_code_config_default() {
+        let config = SagittaCodeConfig::default();
+        
+        // Check that UI config has None for repository context by default
+        assert_eq!(config.ui.current_repository_context, None);
+    }
+
+    #[test]
+    fn test_repositories_base_path() {
+        let config = SagittaCodeConfig::default();
+        
+        // Default should use data dir
+        let base_path = config.repositories_base_path();
+        assert!(base_path.to_string_lossy().contains("sagitta"));
+        assert!(base_path.to_string_lossy().contains("repositories"));
+    }
+
+    #[test]
+    fn test_repositories_base_path_with_override() {
+        let mut config = SagittaCodeConfig::default();
+        let custom_path = PathBuf::from("/custom/repo/path");
+        config.sagitta.repositories_base_path = Some(custom_path.clone());
+        
+        assert_eq!(config.repositories_base_path(), custom_path);
+    }
+}

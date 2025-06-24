@@ -1,6 +1,5 @@
 pub mod app;
 pub mod chat;
-pub mod tools;
 pub mod settings;
 pub mod repository;
 pub mod theme;

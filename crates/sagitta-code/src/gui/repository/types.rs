@@ -340,6 +340,34 @@ pub struct SimpleSyncStatus {
     pub last_progress_time: Option<std::time::Instant>, // Last time progress was updated (for watchdog)
 }
 
+/// Project creation form state
+#[derive(Debug, Clone)]
+pub struct ProjectCreationForm {
+    pub name: String,
+    pub language: String,
+    pub path: String,
+    pub description: String,
+    pub initialize_git: bool,
+    pub creating: bool,
+    pub status_message: Option<String>,
+    pub error_message: Option<String>,
+}
+
+impl Default for ProjectCreationForm {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            language: "rust".to_string(),
+            path: String::new(),
+            description: String::new(),
+            initialize_git: true,
+            creating: false,
+            status_message: None,
+            error_message: None,
+        }
+    }
+}
+
 /// State for the repository panel
 #[derive(Debug, Default)]
 pub struct RepoPanelState {
@@ -351,7 +379,7 @@ pub struct RepoPanelState {
     pub initial_load_attempted: bool,
     pub repository_filter: RepoFilterOptions,
     pub add_repo_form: AddRepoForm,
-    pub project_creation_state: crate::gui::tools::panel::ProjectCreationPanelState,
+    pub project_form: ProjectCreationForm,
     pub selected_repo: Option<String>,
     pub selected_repos: Vec<String>,
     pub branch_overrides: std::collections::HashMap<String, String>,
@@ -365,6 +393,7 @@ pub struct RepoPanelState {
     pub branch_management: BranchManagementState,
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
+    pub newly_created_repository: Option<String>, // Name of repository that was just created
 }
 
 impl RepoPanelState {

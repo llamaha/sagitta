@@ -271,6 +271,8 @@ impl WorkingDirectoryManager {
 
     /// Set working directory to a specific repository
     pub async fn set_repository_context(&self, repo_name: &str, repo_manager: &crate::gui::repository::manager::RepositoryManager) -> Result<DirectoryChangeResult, SagittaCodeError> {
+        log::info!("WorkingDirectoryManager::set_repository_context - Setting context to repository: {}", repo_name);
+        
         // Get repository path from manager
         let repositories = repo_manager.list_repositories().await
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to list repositories: {}", e)))?;
@@ -280,6 +282,7 @@ impl WorkingDirectoryManager {
             .ok_or_else(|| SagittaCodeError::ToolError(format!("Repository '{}' not found", repo_name)))?;
         
         let repo_path = PathBuf::from(&repo.local_path);
+        log::info!("WorkingDirectoryManager::set_repository_context - Repository path: {}", repo_path.display());
         
         // Verify it's a git repository
         if !repo_path.join(".git").exists() {
@@ -289,14 +292,27 @@ impl WorkingDirectoryManager {
             )));
         }
         
-        self.change_directory(repo_path).await
+        let result = self.change_directory(repo_path).await?;
+        log::info!("WorkingDirectoryManager::set_repository_context - Successfully changed to repository directory");
+        Ok(result)
     }
 
     /// Auto-resolve working directory with fallback logic
     pub async fn auto_resolve(&self, override_dir: Option<PathBuf>) -> Result<PathBuf, SagittaCodeError> {
+        log::debug!("WorkingDirectoryManager::auto_resolve - override_dir: {:?}", override_dir);
+        
+        let current_dir = self.get_current_directory().await;
+        log::debug!("WorkingDirectoryManager::auto_resolve - current_directory: {}", current_dir.display());
+        
         let target_dir = match override_dir {
-            Some(dir) => dir,
-            None => self.get_current_directory().await,
+            Some(dir) => {
+                log::debug!("WorkingDirectoryManager::auto_resolve - using override directory: {}", dir.display());
+                dir
+            },
+            None => {
+                log::info!("WorkingDirectoryManager::auto_resolve - no override, using current directory: {}", current_dir.display());
+                current_dir
+            }
         };
 
         // Ensure the directory exists and is within workspace

@@ -10,5 +10,6 @@ pub mod types;
 pub mod view;
 pub mod branches;
 pub mod shared_sync_state;
+pub mod create_project;
 
 pub use panel::RepoPanel; 
