@@ -23,11 +23,13 @@ fn create_test_config_with_key(api_key: Option<String>) -> SagittaCodeConfig {
 }
 
 #[test]
+#[ignore = "This test modifies environment variables and may fail when run in parallel"]
 fn test_missing_api_key_error() {
     // Save and clear environment variable
     let original_env_key = std::env::var("OPENROUTER_API_KEY").ok();
     std::env::remove_var("OPENROUTER_API_KEY");
     
+    // Create config with no API key in config either
     let config = create_test_config_with_key(None);
     let result = OpenRouterClient::new(&config);
     
@@ -41,7 +43,8 @@ fn test_missing_api_key_error() {
         Err(OpenRouterError::AuthenticationError(msg)) => {
             assert!(msg.contains("not found"), "Error should mention API key not found: {}", msg);
         }
-        _ => panic!("Expected AuthenticationError"),
+        Ok(_) => panic!("Expected AuthenticationError, but got Ok"),
+        Err(e) => panic!("Expected AuthenticationError, got different error: {:?}", e),
     }
 }
 

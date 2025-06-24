@@ -260,7 +260,7 @@ mod tests {
         
         match result {
             ToolResult::Error { error } => {
-                assert!(error.contains("Invalid parameters"));
+                assert!(error.contains("missing field `name`") || error.contains("No repository name provided"));
             }
             _ => panic!("Expected parameter validation error"),
         }

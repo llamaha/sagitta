@@ -138,11 +138,11 @@ mod tests {
         let mut sidebar = ConversationSidebar::new(SidebarConfig::default());
         
         // Test group toggle
-        assert!(!sidebar.expanded_groups.contains("test_group"));
+        assert!(!sidebar.expanded_groups.contains("expanded_test_group"));
         sidebar.toggle_group("test_group");
-        assert!(sidebar.expanded_groups.contains("test_group"));
+        assert!(sidebar.expanded_groups.contains("expanded_test_group"));
         sidebar.toggle_group("test_group");
-        assert!(!sidebar.expanded_groups.contains("test_group"));
+        assert!(sidebar.expanded_groups.contains("collapsed_test_group"));
     }
 
     #[test]
@@ -265,15 +265,15 @@ mod tests {
         let group_id = "test_group";
         
         // Initially not expanded
-        assert!(!sidebar.expanded_groups.contains(group_id));
+        assert!(!sidebar.expanded_groups.contains(&format!("expanded_{}", group_id)));
         
         // Toggle to expand
         sidebar.toggle_group(group_id);
-        assert!(sidebar.expanded_groups.contains(group_id));
+        assert!(sidebar.expanded_groups.contains(&format!("expanded_{}", group_id)));
         
         // Toggle to collapse
         sidebar.toggle_group(group_id);
-        assert!(!sidebar.expanded_groups.contains(group_id));
+        assert!(sidebar.expanded_groups.contains(&format!("collapsed_{}", group_id)));
     }
 
     #[test]
