@@ -365,4 +365,53 @@ mod tests {
         assert!(model.supported_parameters.is_none());
         assert!(model.pricing.input_cache_read.is_none());
     }
+
+    #[test]
+    fn test_plugin_serialization() {
+        // Test that Plugin serializes correctly for web search
+        let plugin = Plugin {
+            id: "web".to_string(),
+            max_results: Some(5),
+            search_prompt: Some("Web search results:".to_string()),
+        };
+
+        let json = serde_json::to_value(&plugin).unwrap();
+        assert_eq!(json["id"], "web");
+        assert_eq!(json["max_results"], 5);
+        assert_eq!(json["search_prompt"], "Web search results:");
+    }
+
+    #[test]
+    fn test_chat_completion_request_with_plugins() {
+        // Test that ChatCompletionRequest serializes correctly with plugins
+        let request = ChatCompletionRequest {
+            model: "test/model".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: Some("test".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            stream: Some(false),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            tools: None,
+            tool_choice: None,
+            provider: None,
+            plugins: Some(vec![Plugin {
+                id: "web".to_string(),
+                max_results: Some(3),
+                search_prompt: None,
+            }]),
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["model"], "test/model");
+        assert!(json["plugins"].is_array());
+        assert_eq!(json["plugins"][0]["id"], "web");
+        assert_eq!(json["plugins"][0]["max_results"], 3);
+        assert!(!json["plugins"][0].as_object().unwrap().contains_key("search_prompt"));
+    }
 } 
