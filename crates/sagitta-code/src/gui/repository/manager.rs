@@ -185,6 +185,12 @@ impl RepositoryManager {
         Ok(())
     }
 
+    /// Set the embedding handler from the app's shared pool
+    pub fn set_embedding_handler(&mut self, embedding_handler: Arc<EmbeddingPool>) {
+        log::info!("[RepositoryManager] Setting embedding handler from app's shared pool");
+        self.embedding_handler = Some(embedding_handler);
+    }
+    
     /// Set the sync log sender for capturing log messages
     pub async fn set_sync_log_sender(&self, sender: mpsc::UnboundedSender<SyncLogMessage>) {
         let mut log_sender = self.sync_log_sender.lock().await;
@@ -679,6 +685,11 @@ impl RepositoryManager {
         log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
                   repo_name, query_text, limit, element_type, language, branch);
         
+        // Log warning if parameters are not specified
+        if element_type.is_none() && language.is_none() {
+            log::warn!("[GUI RepoManager] Query without element_type or language filters may return too many results and fill context window");
+        }
+        
         // Find the repository configuration to determine the effective branch
         let repo_config = config_guard.repositories.iter()
             .find(|r| r.name == repo_name)
@@ -693,11 +704,14 @@ impl RepositoryManager {
         // Get collection name based on tenant, repo, and branch using branch-aware naming
         let collection_name = repo_helpers::get_branch_aware_collection_name(&tenant_id, repo_name, &branch_name, &config_guard);
         
+        log::info!("[GUI RepoManager] Using collection '{}' for search (branch: {})", collection_name, branch_name);
+        
         // Create filter conditions
         let mut filter_conditions = Vec::new();
         
         // Always add branch filter to ensure we only get results from the correct branch
         filter_conditions.push(Condition::matches("branch", branch_name.clone()));
+        log::debug!("[GUI RepoManager] Added branch filter: {}", branch_name);
         
         // Add element_type filter if provided
         if let Some(element) = element_type {
@@ -716,8 +730,36 @@ impl RepositoryManager {
             None
         };
         
+        log::debug!("[GUI RepoManager] Search filter: {:?}", search_filter);
+        
         // Try to use the real search implementation if we have all the required components
         if let (Some(client), Some(embedding_handler)) = (&self.client, &self.embedding_handler) {
+            log::info!("[GUI RepoManager] Client and embedding handler are available, performing search");
+            
+            // Check if collection exists
+            match client.collection_exists(&collection_name).await {
+                Ok(exists) => {
+                    if !exists {
+                        log::error!("[GUI RepoManager] Collection '{}' does not exist! Repository may need to be indexed.", collection_name);
+                        return Err(anyhow!("Collection '{}' does not exist. Please sync/index the repository first.", collection_name));
+                    } else {
+                        // Check collection info
+                        match client.collection_info(&collection_name).await {
+                            Ok(info) => {
+                                log::info!("[GUI RepoManager] Collection '{}' info - points count: {:?}", 
+                                         collection_name, info.result.map(|r| r.points_count));
+                            },
+                            Err(e) => {
+                                log::warn!("[GUI RepoManager] Failed to get collection info: {}", e);
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    log::warn!("[GUI RepoManager] Failed to check if collection exists: {}", e);
+                }
+            }
+            
             match search_collection(
                 client.clone(),
                 &collection_name,
@@ -729,6 +771,11 @@ impl RepositoryManager {
                 None, // Use default search configuration
             ).await {
                 Ok(result) => {
+                    if result.result.is_empty() {
+                        log::warn!("[GUI RepoManager] Search returned 0 results for collection '{}' with query '{}'", collection_name, query_text);
+                    } else {
+                        log::info!("[GUI RepoManager] Search returned {} results", result.result.len());
+                    }
                     return Ok(result);
                 },
                 Err(e) => {
@@ -737,9 +784,16 @@ impl RepositoryManager {
                 }
             }
         } else {
-            // Return placeholder response if we don't have client or embedding handler
-            log::warn!("Using placeholder response - Qdrant client or embedding handler not initialized");
-            Ok(QueryResponse { result: vec![], time: 0.0, usage: None })
+            // Return error if we don't have client or embedding handler
+            let client_status = if self.client.is_some() { "initialized" } else { "NOT initialized" };
+            let embedding_status = if self.embedding_handler.is_some() { "initialized" } else { "NOT initialized" };
+            
+            log::error!("[GUI RepoManager] Cannot perform search - Qdrant client: {}, Embedding handler: {}", 
+                       client_status, embedding_status);
+            
+            Err(anyhow!("Search infrastructure not initialized. Qdrant client: {}, Embedding handler: {}. \
+                        Please ensure Qdrant is running and embedding models are configured.", 
+                        client_status, embedding_status))
         }
     }
 

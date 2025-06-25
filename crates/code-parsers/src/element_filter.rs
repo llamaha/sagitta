@@ -7,6 +7,10 @@ pub fn is_core_element_type(element_type: &str, language: Option<&str>) -> bool 
         // Universal core types
         "function" | "method" | "struct" | "class" | "enum" | "interface" | "trait" | "module" => true,
         
+        // Constants are often important and usually small
+        // Note: Currently only emitted by Rust and Go parsers
+        "const" | "constant" => true,
+        
         // Special case for Go where 'type' includes struct definitions
         "type" if language == Some("go") => true,
         
@@ -38,6 +42,7 @@ pub fn get_core_element_types(language: &str) -> HashSet<&'static str> {
             types.insert("struct");
             types.insert("enum");
             types.insert("trait");
+            types.insert("const");
             // Note: Rust methods are parsed as "function" type
         }
         "python" => {
@@ -46,6 +51,7 @@ pub fn get_core_element_types(language: &str) -> HashSet<&'static str> {
         "go" => {
             types.insert("method");
             types.insert("type"); // Includes struct definitions
+            types.insert("const");
         }
         "javascript" | "typescript" => {
             types.insert("method");
@@ -93,12 +99,13 @@ mod tests {
         assert!(is_core_element_type("trait", None));
         assert!(is_core_element_type("method", None));
         assert!(is_core_element_type("module", None));
+        assert!(is_core_element_type("const", None));
+        assert!(is_core_element_type("constant", None));
         
         // Should filter out non-core types
         assert!(!is_core_element_type("use", None));
         assert!(!is_core_element_type("type_alias", None));
         assert!(!is_core_element_type("static", None));
-        assert!(!is_core_element_type("const", None));
         assert!(!is_core_element_type("var", None));
         assert!(!is_core_element_type("import", None));
         assert!(!is_core_element_type("statement", None));

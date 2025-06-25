@@ -3104,6 +3104,9 @@ mod tests {
         let overall_metrics = OverallMetrics {
             total_conversations: 10,
             total_messages: 150,
+            total_tokens: 50000,
+            avg_tokens_per_conversation: 5000,
+            avg_tokens_per_message: 333,
             avg_messages_per_conversation: 15.0,
             total_branches: 25,
             total_checkpoints: 12,
@@ -3207,12 +3210,26 @@ mod tests {
             },
         ];
         
+        let mut tokens_by_role = HashMap::new();
+        tokens_by_role.insert("user".to_string(), 20000);
+        tokens_by_role.insert("assistant".to_string(), 30000);
+        
+        let token_usage_metrics = TokenUsageMetrics {
+            token_distribution: vec![(uuid::Uuid::new_v4(), 5000), (uuid::Uuid::new_v4(), 4500)],
+            peak_usage: 8000,
+            limit_reached_count: 2,
+            tokens_by_role,
+            usage_trend: vec![(now - Duration::days(7), 10000), (now, 15000)],
+            estimated_cost: Some(0.75),
+        };
+        
         AnalyticsReport {
             generated_at: now,
             period,
             overall_metrics,
             success_metrics,
             efficiency_metrics,
+            token_usage_metrics,
             patterns,
             project_insights,
             trending_topics,

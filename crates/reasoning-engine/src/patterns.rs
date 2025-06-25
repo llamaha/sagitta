@@ -1018,6 +1018,7 @@ mod tests {
             last_analyzed_content: None,
             content_analysis_cache: std::collections::HashMap::new(),
             task_completion_analyzer: TaskCompletionAnalyzer::default(),
+            active_todo_list: None,
         }
     }
     

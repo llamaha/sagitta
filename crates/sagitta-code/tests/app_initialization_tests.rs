@@ -14,7 +14,7 @@ fn create_minimal_config() -> (SagittaCodeConfig, AppConfig) {
             api_key: Some("test-key".to_string()),
             model: "openai/gpt-4o-mini".to_string(),
             provider_preferences: None,
-            max_history_size: 10,
+            max_context_tokens: 0,
             max_reasoning_steps: 5,
             request_timeout: 30,
         },

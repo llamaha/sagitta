@@ -214,6 +214,17 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     // Create repository manager
     let repo_manager = create_repository_manager(core_config.clone()).await?;
+    
+    // Initialize embedding pool
+    let embedding_handler_arc = create_embedding_pool(&core_config)?;
+    
+    // Set the embedding handler on the repository manager
+    {
+        let mut manager_guard = repo_manager.lock().await;
+        manager_guard.set_embedding_handler(embedding_handler_arc.clone());
+        log::info!("SagittaCodeApp: Set embedding handler on repository manager");
+    }
+    
     app.repo_panel = RepoPanel::new(
         repo_manager.clone(),
         app.config.clone(),
@@ -221,9 +232,6 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     );
     app.repo_panel.refresh_repositories(); // Initial refresh
     log::info!("SagittaCodeApp: RepoPanel initialized and refreshed.");
-
-    // Initialize embedding pool
-    let embedding_handler_arc = create_embedding_pool(&core_config)?;
 
     // Create adapter for EmbeddingProvider compatibility
     let embedding_provider_adapter = Arc::new(sagitta_search::EmbeddingPoolAdapter::new(embedding_handler_arc.clone()));
