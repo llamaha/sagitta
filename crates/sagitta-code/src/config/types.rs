@@ -87,6 +87,10 @@ pub struct OpenRouterConfig {
     #[serde(default = "default_max_history_size")]
     pub max_history_size: usize,
     
+    /// Maximum context tokens (0 = use model default)
+    #[serde(default = "default_max_context_tokens")]
+    pub max_context_tokens: usize,
+    
     /// Maximum reasoning steps to prevent infinite loops
     #[serde(default = "default_max_reasoning_steps")]
     pub max_reasoning_steps: u32,
@@ -103,6 +107,7 @@ impl Default for OpenRouterConfig {
             model: default_openrouter_model(),
             provider_preferences: None,
             max_history_size: default_max_history_size(),
+            max_context_tokens: default_max_context_tokens(),
             max_reasoning_steps: default_max_reasoning_steps(),
             request_timeout: default_request_timeout(),
         }
@@ -418,7 +423,11 @@ fn default_openrouter_model() -> String {
 }
 
 fn default_max_history_size() -> usize {
-    20
+    100
+}
+
+fn default_max_context_tokens() -> usize {
+    8000 // Conservative default
 }
 
 fn default_max_reasoning_steps() -> u32 {

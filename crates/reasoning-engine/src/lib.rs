@@ -546,8 +546,15 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
 
             // Attempt to call LLM with stream
             let mut stream_attempt_failed = false;
-            match self.llm_client.generate_stream(llm_conversation_history.clone()).await {
-                Ok(mut llm_stream) => {
+            
+            // Log before making LLM call
+            let history_len = llm_conversation_history.len();
+            tracing::info!(%session_id, history_len, iteration, max_iterations = self.config.max_iterations, "Making LLM call with history");
+            
+            // Add timeout wrapper around LLM call
+            let timeout_duration = Duration::from_secs(120);
+            match tokio::time::timeout(timeout_duration, self.llm_client.generate_stream(llm_conversation_history.clone())).await {
+                Ok(Ok(mut llm_stream)) => {
                     llm_call_successful = true;
                     let stream_interaction_id = Uuid::new_v4();
                     tracing::info!(%session_id, %stream_interaction_id, "LLM stream initiated.");
@@ -660,7 +667,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         last_stream_error
                     ));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::error!(%session_id, "Failed to initiate LLM stream: {:?}", e);
                     
                     // Check if this looks like a streaming-specific error
@@ -686,6 +693,19 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         state.set_completed(false, error_msg);
                         break; // Break main loop
                     }
+                }
+                Err(_) => {
+                    // Timeout error
+                    tracing::error!(%session_id, "LLM call timed out after 120 seconds");
+                    let error_msg = "LLM call timed out after 120 seconds".to_string();
+                    state.add_step(ReasoningStep::llm_interaction(
+                        llm_conversation_history.last().map(|m| m.parts.iter().filter_map(|p| if let LlmMessagePart::Text(t) = p { Some(t.clone()) } else {None}).collect::<Vec<String>>().join("\n") ).unwrap_or_default(),
+                        String::new(), 
+                        false, 
+                        Some(error_msg.clone())
+                    ));
+                    llm_call_successful = false;
+                    last_stream_error = Some(error_msg);
                 }
             }
 
@@ -1205,11 +1225,11 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   // Check if we're in TODO execution mode for different directive
                   let directive = if state.is_in_todo_execution_mode() {
                       if let Some(current_todo) = state.get_active_todo() {
-                          format!("Good! You've made progress on the current task: '{}'. \n\nPlease confirm if this task is now complete. If complete, say 'Task completed' and provide a brief summary. If not complete, continue working on it.", current_todo.description)
+                          format!("Task progress update: '{}'\n\nIf this specific task is now complete, mark it as done and move to the next task. If not complete, continue working on it without asking for permission.", current_todo.description)
                       } else if let Some(next_todo) = state.get_next_todo() {
-                          format!("Excellent progress! Now please proceed with the next task: '{}'", next_todo.description)
+                          format!("Task completed. Now proceeding with: '{}'\n\nContinue working without asking for permission.", next_todo.description)
                       } else {
-                          "Great work! Please summarize what you've accomplished so far.".to_string()
+                          "All tasks completed. Provide a brief summary of what was accomplished.".to_string()
                       }
                   } else {
                       "Analyze the tool output above and respond in one of two ways:\n\n1. If you believe the task is finished, write a concise summary of what you accomplished and your final answer.\n2. If you have concrete ideas for next steps, briefly summarize your progress and ask the user whether they would like you to continue with those specific steps.\n\nDo not ask open-ended 'how can I help' questions; propose specific next actions instead. Always provide a clear wrap-up of your work.".to_string()

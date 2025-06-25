@@ -13,6 +13,7 @@ use crate::utils::errors::SagittaCodeError;
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use crate::agent::conversation::types::{Conversation, ProjectContext, ProjectType};
 use crate::config::types::ConversationConfig;
+use crate::llm::token_counter::TokenCounter;
 
 /// The default maximum history size
 pub const DEFAULT_MAX_HISTORY_SIZE: usize = 20;
@@ -25,6 +26,14 @@ pub struct MessageHistory {
     
     /// The maximum number of messages to keep
     pub max_size: usize,
+    
+    /// Total tokens in the current history
+    #[serde(skip, default)]
+    pub total_tokens: usize,
+    
+    /// Token counter instance
+    #[serde(skip)]
+    token_counter: Option<TokenCounter>,
 }
 
 impl MessageHistory {
@@ -33,6 +42,8 @@ impl MessageHistory {
         Self {
             messages: Vec::new(),
             max_size,
+            total_tokens: 0,
+            token_counter: TokenCounter::new().ok(),
         }
     }
     
@@ -43,8 +54,36 @@ impl MessageHistory {
         history
     }
     
+    /// Get or initialize the token counter
+    fn get_token_counter(&mut self) -> Option<&TokenCounter> {
+        if self.token_counter.is_none() {
+            self.token_counter = TokenCounter::new().ok();
+        }
+        self.token_counter.as_ref()
+    }
+    
+    /// Calculate tokens for a message
+    fn calculate_message_tokens(&mut self, message: &AgentMessage) -> usize {
+        let Some(counter) = self.get_token_counter() else {
+            // Fallback: estimate 4 characters per token
+            return message.content.len() / 4;
+        };
+        
+        let role_str = match message.role {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::Function => "function",
+        };
+        
+        counter.count_message_tokens(role_str, &message.content)
+    }
+    
     /// Add a new message to the history
     pub fn add_message(&mut self, message: AgentMessage) {
+        // Calculate tokens for the new message
+        let new_message_tokens = self.calculate_message_tokens(&message);
+        
         // If we're at max capacity, remove the oldest non-system message
         if self.messages.len() >= self.max_size {
             // Find the index of the oldest non-system message
@@ -54,14 +93,23 @@ impl MessageHistory {
                 .map(|(i, _)| i)
                 .next()
             {
-                self.messages.remove(index);
+                let removed_msg = self.messages.remove(index);
+                let removed_tokens = self.calculate_message_tokens(&removed_msg);
+                self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
             } else {
                 // If all messages are system messages, remove the oldest one
-                self.messages.remove(0);
+                if !self.messages.is_empty() {
+                    let removed_msg = self.messages.remove(0);
+                    let removed_tokens = self.calculate_message_tokens(&removed_msg);
+                    self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
+                }
             }
         }
         
         self.messages.push(message);
+        self.total_tokens += new_message_tokens;
+        
+        debug!("Message history: {} messages, ~{} tokens", self.messages.len(), self.total_tokens);
     }
     
     /// Add a system message to the history
@@ -92,9 +140,52 @@ impl MessageHistory {
     /// Remove a message by its ID
     pub fn remove_message(&mut self, id: Uuid) -> Option<AgentMessage> {
         if let Some(index) = self.messages.iter().position(|m| m.id == id) {
-            Some(self.messages.remove(index))
+            let removed_msg = self.messages.remove(index);
+            let removed_tokens = self.calculate_message_tokens(&removed_msg);
+            self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
+            Some(removed_msg)
         } else {
             None
+        }
+    }
+    
+    /// Get the current total token count
+    pub fn get_total_tokens(&self) -> usize {
+        self.total_tokens
+    }
+    
+    /// Check if we're approaching a token limit
+    pub fn is_approaching_token_limit(&self, max_tokens: usize) -> bool {
+        if max_tokens == 0 {
+            false // No limit set
+        } else {
+            self.total_tokens > (max_tokens * 8 / 10) // 80% threshold
+        }
+    }
+    
+    /// Truncate history to fit within token limit
+    pub fn truncate_to_token_limit(&mut self, max_tokens: usize) {
+        if max_tokens == 0 || self.total_tokens <= max_tokens {
+            return;
+        }
+        
+        info!("Truncating message history from {} tokens to fit within {} limit", self.total_tokens, max_tokens);
+        
+        // Keep system messages and remove oldest non-system messages
+        while self.total_tokens > max_tokens && self.messages.len() > 1 {
+            if let Some(index) = self.messages.iter()
+                .enumerate()
+                .filter(|(_, msg)| msg.role != Role::System)
+                .map(|(i, _)| i)
+                .next()
+            {
+                let removed_msg = self.messages.remove(index);
+                let removed_tokens = self.calculate_message_tokens(&removed_msg);
+                self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
+                debug!("Removed message at index {} (~{} tokens)", index, removed_tokens);
+            } else {
+                break; // Only system messages left
+            }
         }
     }
     
@@ -573,6 +664,8 @@ impl ConversationAwareHistoryManager {
         let history = MessageHistory {
             messages,
             max_size: usize::MAX, // No limit for conversion
+            total_tokens: 0,
+            token_counter: None,
         };
         history.to_llm_messages()
     }
