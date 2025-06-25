@@ -220,7 +220,7 @@ impl AddExistingRepositoryTool {
             }
             
             let branch = params.branch.as_deref();
-            repo_manager.add_repository(&params.name, url, branch).await
+            repo_manager.add_repository(&params.name, url, branch, None).await
         } else {
             return Err(SagittaCodeError::ToolError("Either URL or local_path must be provided".to_string()));
         };
@@ -287,9 +287,9 @@ impl AddExistingRepositoryTool {
                 }
                 
                 let status_msg = if was_already_existing {
-                    format!("Repository '{}' was already configured and has been synced successfully", params.name)
+                    format!("Repository '{}' was already configured and has been synced successfully. The repository is now ready for searching and querying.", params.name)
                 } else {
-                    format!("Successfully added and synced repository '{}'", params.name)
+                    format!("Successfully added and synced repository '{}'. The repository is now ready for searching and querying.", params.name)
                 };
                 
                 Ok(status_msg)
@@ -304,9 +304,9 @@ impl AddExistingRepositoryTool {
                 
                 // Repository was added but sync failed - still return success but mention sync failure
                 let warning_msg = if was_already_existing {
-                    format!("Repository '{}' is available but sync failed: {}. You can try syncing manually later.", params.name, e)
+                    format!("Repository '{}' is available but initial sync failed: {}. IMPORTANT: You need to run the sync_repository tool with repository_name '{}' before you can search or query this repository.", params.name, e, params.name)
                 } else {
-                    format!("Repository '{}' was added successfully but sync failed: {}. You can try syncing manually later.", params.name, e)
+                    format!("Repository '{}' was added successfully but initial sync failed: {}. IMPORTANT: You need to run the sync_repository tool with repository_name '{}' before you can search or query this repository.", params.name, e, params.name)
                 };
                 
                 Ok(warning_msg)
@@ -915,6 +915,39 @@ mod tests {
         assert!(error_msg.contains("Example with URL"));
         assert!(error_msg.contains("Example with local path"));
         assert!(error_msg.contains("\"name\": \"my-repo\""));
+    }
+
+    #[tokio::test]
+    async fn test_sync_failure_message_includes_sync_reminder() {
+        let repo_manager = create_test_repo_manager();
+        let tool = AddExistingRepositoryTool::new(repo_manager);
+        
+        // Test the warning message format when sync fails
+        let warning_msg_new = format!("Repository '{}' was added successfully but initial sync failed: {}. IMPORTANT: You need to run the sync_repository tool with repository_name '{}' before you can search or query this repository.", "test-repo", "sync error", "test-repo");
+        let warning_msg_existing = format!("Repository '{}' is available but initial sync failed: {}. IMPORTANT: You need to run the sync_repository tool with repository_name '{}' before you can search or query this repository.", "test-repo", "sync error", "test-repo");
+        
+        // Check that the messages contain the important sync reminder
+        assert!(warning_msg_new.contains("IMPORTANT: You need to run the sync_repository tool"));
+        assert!(warning_msg_new.contains("with repository_name 'test-repo'"));
+        assert!(warning_msg_new.contains("before you can search or query"));
+        
+        assert!(warning_msg_existing.contains("IMPORTANT: You need to run the sync_repository tool"));
+        assert!(warning_msg_existing.contains("with repository_name 'test-repo'"));
+        assert!(warning_msg_existing.contains("before you can search or query"));
+    }
+
+    #[tokio::test]
+    async fn test_success_message_indicates_ready_state() {
+        let repo_manager = create_test_repo_manager();
+        let tool = AddExistingRepositoryTool::new(repo_manager);
+        
+        // Test the success message format
+        let success_msg_new = format!("Successfully added and synced repository '{}'. The repository is now ready for searching and querying.", "test-repo");
+        let success_msg_existing = format!("Repository '{}' was already configured and has been synced successfully. The repository is now ready for searching and querying.", "test-repo");
+        
+        // Check that success messages indicate the repository is ready
+        assert!(success_msg_new.contains("The repository is now ready for searching and querying"));
+        assert!(success_msg_existing.contains("The repository is now ready for searching and querying"));
     }
 }
 

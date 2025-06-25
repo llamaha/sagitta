@@ -20,4 +20,7 @@ pub enum RepoMapperError {
     
     #[error("Pattern search error: {message}")]
     PatternSearchError { message: String },
+    
+    #[error("Cache has expired for key: {0}")]
+    CacheExpired(String),
 } 

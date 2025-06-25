@@ -10,9 +10,9 @@ pub mod scanners;
 pub mod types;
 
 pub use error::RepoMapperError;
-pub use mapper::RepoMapper;
+pub use mapper::{RepoMapper, get_cached_page};
 pub use types::{
-    MethodInfo, MethodType, RepoMapOptions, RepoMapResult, RepoMapSummary,
+    MethodInfo, MethodType, PaginationInfo, RepoMapOptions, RepoMapResult, RepoMapSummary,
 };
 
 /// Main entry point for generating a repository map

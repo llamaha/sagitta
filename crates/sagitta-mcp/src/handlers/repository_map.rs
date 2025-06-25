@@ -43,6 +43,7 @@ pub async fn handle_repository_map(
         max_calls_per_method: 10, // Default, could be configurable
         include_context: true, // Always include context for proper decorator detection
         include_docstrings: params.verbosity >= 1,
+        ..Default::default()
     };
 
     // Use the new repo-mapper crate
