@@ -153,34 +153,49 @@ pub fn render_repo_list(
                 }
                 
                 for enhanced_repo in repos_to_display {
-                    // Name column
-                    let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &enhanced_repo.name);
-                    
-                    // Style the name differently if the repository is missing
-                    let name_text = if !enhanced_repo.filesystem_status.exists {
-                        RichText::new(&enhanced_repo.name).color(Color32::from_rgb(220, 53, 69))
-                    } else {
-                        RichText::new(&enhanced_repo.name)
-                    };
-                    
-                    if ui.selectable_label(is_selected, name_text).clicked() {
-                        if is_selected {
-                            state.selected_repo = None;
-                            // Also remove from selected_repos
-                            state.selected_repos.retain(|name| name != &enhanced_repo.name);
-                        } else {
-                            state.selected_repo = Some(enhanced_repo.name.clone());
-                            // Also add to selected_repos if not already there
-                            if !state.selected_repos.contains(&enhanced_repo.name) {
-                                state.selected_repos.push(enhanced_repo.name.clone());
+                    // Name column with enable/disable toggle
+                    ui.horizontal(|ui| {
+                        // Enable/disable checkbox for LLM context
+                        let is_enabled = state.enabled_as_dependencies.contains(&enhanced_repo.name);
+                        let mut checkbox_enabled = is_enabled;
+                        if ui.checkbox(&mut checkbox_enabled, "")
+                            .on_hover_text("Enable this repository as a dependency context for the LLM")
+                            .changed() {
+                            if checkbox_enabled {
+                                state.enabled_as_dependencies.insert(enhanced_repo.name.clone());
+                            } else {
+                                state.enabled_as_dependencies.remove(&enhanced_repo.name);
                             }
-                            
-                            // Initialize options for other tabs
-                            state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
-                            state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
-                            state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
                         }
-                    }
+                        
+                        let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &enhanced_repo.name);
+                        
+                        // Style the name differently if the repository is missing
+                        let name_text = if !enhanced_repo.filesystem_status.exists {
+                            RichText::new(&enhanced_repo.name).color(Color32::from_rgb(220, 53, 69))
+                        } else {
+                            RichText::new(&enhanced_repo.name)
+                        };
+                        
+                        if ui.selectable_label(is_selected, name_text).clicked() {
+                            if is_selected {
+                                state.selected_repo = None;
+                                // Also remove from selected_repos
+                                state.selected_repos.retain(|name| name != &enhanced_repo.name);
+                            } else {
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                // Also add to selected_repos if not already there
+                                if !state.selected_repos.contains(&enhanced_repo.name) {
+                                    state.selected_repos.push(enhanced_repo.name.clone());
+                                }
+                                
+                                // Initialize options for other tabs
+                                state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
+                                state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
+                                state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
+                            }
+                        }
+                    });
                     
                     // Source column
                     let source_text = if let Some(remote) = &enhanced_repo.remote {
@@ -290,6 +305,7 @@ pub fn render_repo_list(
                                 state.selected_repo = None;
                             }
                             state.selected_repos.retain(|name| name != &repo_name);
+                            state.enabled_as_dependencies.remove(&repo_name);
                         }
                     });
                     
@@ -407,24 +423,39 @@ fn render_basic_repos(
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
     for repo in repos {
-        // Name column
-        let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &repo.name);
-        
-        if ui.selectable_label(is_selected, &repo.name).clicked() {
-            if is_selected {
-                state.selected_repo = None;
-                state.selected_repos.retain(|name| name != &repo.name);
-            } else {
-                state.selected_repo = Some(repo.name.clone());
-                if !state.selected_repos.contains(&repo.name) {
-                    state.selected_repos.push(repo.name.clone());
+        // Name column with enable/disable toggle
+        ui.horizontal(|ui| {
+            // Enable/disable checkbox for LLM context
+            let is_enabled = state.enabled_as_dependencies.contains(&repo.name);
+            let mut checkbox_enabled = is_enabled;
+            if ui.checkbox(&mut checkbox_enabled, "")
+                .on_hover_text("Enable this repository as a dependency context for the LLM")
+                .changed() {
+                if checkbox_enabled {
+                    state.enabled_as_dependencies.insert(repo.name.clone());
+                } else {
+                    state.enabled_as_dependencies.remove(&repo.name);
                 }
-                
-                state.query_options = super::types::QueryOptions::new(repo.name.clone());
-                state.file_search_options = super::types::FileSearchOptions::new(repo.name.clone());
-                state.file_view_options = super::types::FileViewOptions::new(repo.name.clone());
             }
-        }
+            
+            let is_selected = state.selected_repo.as_ref().map_or(false, |s| s == &repo.name);
+            
+            if ui.selectable_label(is_selected, &repo.name).clicked() {
+                if is_selected {
+                    state.selected_repo = None;
+                    state.selected_repos.retain(|name| name != &repo.name);
+                } else {
+                    state.selected_repo = Some(repo.name.clone());
+                    if !state.selected_repos.contains(&repo.name) {
+                        state.selected_repos.push(repo.name.clone());
+                    }
+                    
+                    state.query_options = super::types::QueryOptions::new(repo.name.clone());
+                    state.file_search_options = super::types::FileSearchOptions::new(repo.name.clone());
+                    state.file_view_options = super::types::FileViewOptions::new(repo.name.clone());
+                }
+            }
+        });
         
         // Source column
         let source_text = if let Some(remote) = &repo.remote {
@@ -483,6 +514,7 @@ fn render_basic_repos(
                     state.selected_repo = None;
                 }
                 state.selected_repos.retain(|name| name != &repo_name);
+                state.enabled_as_dependencies.remove(&repo_name);
             }
         });
         

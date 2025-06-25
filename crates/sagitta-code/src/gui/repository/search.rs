@@ -34,8 +34,30 @@ pub fn render_file_search(
     if state.selected_repo.is_none() {
         ui.label("No repository selected");
         
-        if ui.button("Select Repository").clicked() {
-            state.active_tab = super::types::RepoPanelTab::List;
+        // Repository selector dropdown
+        let repo_names = state.repo_names();
+        if !repo_names.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Select repository:");
+                ComboBox::from_id_source("search_no_repo_selector")
+                    .selected_text("Choose repository...")
+                    .show_ui(ui, |ui| {
+                        for name in repo_names {
+                            if ui.selectable_value(
+                                &mut state.selected_repo,
+                                Some(name.clone()),
+                                &name
+                            ).clicked() {
+                                state.file_search_options.repo_name = name;
+                            }
+                        }
+                    });
+            });
+        } else {
+            ui.label("No repositories available");
+            if ui.button("Go to Repository List").clicked() {
+                state.active_tab = super::types::RepoPanelTab::List;
+            }
         }
         
         return;

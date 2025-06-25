@@ -37,6 +37,7 @@ pub struct AddRepoForm {
     pub name: String,
     pub url: String,
     pub branch: String,
+    pub target_ref: String,
     pub local_path: String,
     pub use_local: bool,
     pub error_message: Option<String>,
@@ -51,6 +52,7 @@ impl Clone for AddRepoForm {
             name: self.name.clone(),
             url: self.url.clone(),
             branch: self.branch.clone(),
+            target_ref: self.target_ref.clone(),
             local_path: self.local_path.clone(),
             use_local: self.use_local,
             error_message: self.error_message.clone(),
@@ -67,6 +69,7 @@ impl Default for AddRepoForm {
             name: String::new(),
             url: String::new(),
             branch: String::new(),
+            target_ref: String::new(),
             local_path: String::new(),
             use_local: false,
             error_message: None,
@@ -394,6 +397,7 @@ pub struct RepoPanelState {
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
+    pub enabled_as_dependencies: std::collections::HashSet<String>, // Repositories enabled as LLM context dependencies
 }
 
 impl RepoPanelState {
@@ -821,9 +825,13 @@ mod tests {
         // Test all tab variants exist
         let tabs = [
             RepoPanelTab::List,
+            RepoPanelTab::Add,
+            RepoPanelTab::CreateProject,
+            RepoPanelTab::Sync,
             RepoPanelTab::Query,
             RepoPanelTab::SearchFile,
             RepoPanelTab::ViewFile,
+            RepoPanelTab::Branches,
         ];
         
         for tab in &tabs {
@@ -1361,5 +1369,98 @@ mod tests {
         assert_eq!(repo_names.len(), 1);
         assert!(repo_names.contains(&"enhanced-repo".to_string()));
         assert!(!repo_names.contains(&"basic-repo".to_string()));
+    }
+
+    #[test]
+    fn test_add_repo_form_with_target_ref() {
+        // Test that AddRepoForm includes target_ref field
+        let mut form = AddRepoForm::default();
+        
+        // Test default values
+        assert_eq!(form.name, "");
+        assert_eq!(form.url, "");
+        assert_eq!(form.branch, "");
+        assert_eq!(form.target_ref, "");
+        assert_eq!(form.local_path, "");
+        assert!(!form.use_local);
+        assert!(form.error_message.is_none());
+        assert!(form.status_message.is_none());
+        assert!(!form.adding);
+        
+        // Test setting values
+        form.name = "test-repo".to_string();
+        form.url = "https://github.com/test/repo.git".to_string();
+        form.branch = "main".to_string();
+        form.target_ref = "v1.0.0".to_string();
+        
+        assert_eq!(form.name, "test-repo");
+        assert_eq!(form.url, "https://github.com/test/repo.git");
+        assert_eq!(form.branch, "main");
+        assert_eq!(form.target_ref, "v1.0.0");
+        
+        // Test clone
+        let cloned = form.clone();
+        assert_eq!(cloned.name, form.name);
+        assert_eq!(cloned.url, form.url);
+        assert_eq!(cloned.branch, form.branch);
+        assert_eq!(cloned.target_ref, form.target_ref);
+        assert!(cloned.result_receiver.is_none()); // Receiver can't be cloned
+    }
+
+    #[test]
+    fn test_enabled_dependencies_management() {
+        // Test that enabled_as_dependencies field works correctly
+        let mut state = RepoPanelState::default();
+        
+        // Initially should be empty
+        assert!(state.enabled_as_dependencies.is_empty());
+        
+        // Add some repositories to test with
+        state.repositories = vec![
+            RepoInfo {
+                name: "repo1".to_string(),
+                remote: None,
+                branch: None,
+                local_path: None,
+                is_syncing: false,
+            },
+            RepoInfo {
+                name: "repo2".to_string(),
+                remote: None,
+                branch: None,
+                local_path: None,
+                is_syncing: false,
+            },
+            RepoInfo {
+                name: "repo3".to_string(),
+                remote: None,
+                branch: None,
+                local_path: None,
+                is_syncing: false,
+            },
+        ];
+        
+        // Enable repo1 as dependency
+        state.enabled_as_dependencies.insert("repo1".to_string());
+        assert!(state.enabled_as_dependencies.contains("repo1"));
+        assert!(!state.enabled_as_dependencies.contains("repo2"));
+        assert_eq!(state.enabled_as_dependencies.len(), 1);
+        
+        // Enable repo2 as dependency
+        state.enabled_as_dependencies.insert("repo2".to_string());
+        assert!(state.enabled_as_dependencies.contains("repo1"));
+        assert!(state.enabled_as_dependencies.contains("repo2"));
+        assert_eq!(state.enabled_as_dependencies.len(), 2);
+        
+        // Disable repo1
+        state.enabled_as_dependencies.remove("repo1");
+        assert!(!state.enabled_as_dependencies.contains("repo1"));
+        assert!(state.enabled_as_dependencies.contains("repo2"));
+        assert_eq!(state.enabled_as_dependencies.len(), 1);
+        
+        // Test that enabled dependencies can be converted to Vec
+        let deps_vec: Vec<String> = state.enabled_as_dependencies.iter().cloned().collect();
+        assert_eq!(deps_vec.len(), 1);
+        assert!(deps_vec.contains(&"repo2".to_string()));
     }
 } 

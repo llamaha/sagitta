@@ -434,8 +434,8 @@ impl RepositoryManager {
         }
     }
 
-    pub async fn add_repository(&self, name: &str, url: &str, branch: Option<&str>) -> Result<()> {
-        log::info!("[GUI RepoManager] Add repo: {} from {} (branch: {:?})", name, url, branch);
+    pub async fn add_repository(&self, name: &str, url: &str, branch: Option<&str>, target_ref: Option<&str>) -> Result<()> {
+        log::info!("[GUI RepoManager] Add repo: {} from {} (branch: {:?}, target_ref: {:?})", name, url, branch, target_ref);
         
         // Ensure client is initialized (embedding handler is optional for basic repo management)
         if self.client.is_none() {
@@ -471,7 +471,7 @@ impl RepositoryManager {
             url: Some(url.to_string()),
             local_path: None,
             branch: branch.map(String::from),
-            target_ref: None,
+            target_ref: target_ref.map(String::from),
             remote: None,
             repositories_base_path: Some(repo_base_path.clone()),
             ssh_key: None,
@@ -1262,4 +1262,32 @@ mod tests {
 
 
     // ... existing tests ...
+
+    /// Test that add_repository accepts target_ref parameter
+    #[tokio::test]
+    async fn test_add_repository_with_target_ref() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut config = AppConfig::default();
+        config.qdrant_url = "".to_string(); // Disable Qdrant for test
+        config.onnx_model_path = None;
+        config.onnx_tokenizer_path = None;
+
+        let mut manager = RepositoryManager::new(Arc::new(Mutex::new(config)));
+        
+        // Initialize without dependencies
+        let result = manager.initialize().await;
+        assert!(result.is_ok());
+        
+        // Since we don't have Qdrant client initialized, add_repository should fail
+        let result = manager.add_repository(
+            "test-repo",
+            "https://github.com/test/repo.git",
+            Some("main"),
+            Some("v1.0.0")
+        ).await;
+        
+        // Should fail due to missing Qdrant client
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Qdrant client not initialized"));
+    }
 } 

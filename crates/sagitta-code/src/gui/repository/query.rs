@@ -48,8 +48,30 @@ pub fn render_query_repo(
     if state.selected_repo.is_none() {
         ui.label("No repository selected");
         
-        if ui.button("Select Repository").clicked() {
-            state.active_tab = super::types::RepoPanelTab::List;
+        // Repository selector dropdown
+        let repo_names = state.repo_names();
+        if !repo_names.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Select repository:");
+                ComboBox::from_id_source("query_no_repo_selector")
+                    .selected_text("Choose repository...")
+                    .show_ui(ui, |ui| {
+                        for name in repo_names {
+                            if ui.selectable_value(
+                                &mut state.selected_repo,
+                                Some(name.clone()),
+                                &name
+                            ).clicked() {
+                                state.query_options.repo_name = name;
+                            }
+                        }
+                    });
+            });
+        } else {
+            ui.label("No repositories available");
+            if ui.button("Go to Repository List").clicked() {
+                state.active_tab = super::types::RepoPanelTab::List;
+            }
         }
         
         return;
@@ -412,5 +434,65 @@ fn render_query_results(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, Rep
         state.file_view_options.start_line = Some(start_line as usize);
         state.file_view_options.end_line = Some(end_line as usize);
         state.active_tab = super::types::RepoPanelTab::ViewFile;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::repository::types::{RepoPanelState, RepoPanelTab};
+    
+    #[test]
+    fn test_repository_selector_dropdown_behavior() {
+        // Test that when no repository is selected, a dropdown is shown instead of redirecting
+        let mut state = RepoPanelState::default();
+        state.selected_repo = None;
+        state.repositories = vec![
+            crate::gui::repository::types::RepoInfo {
+                name: "repo1".to_string(),
+                remote: None,
+                branch: None,
+                local_path: None,
+                is_syncing: false,
+            },
+            crate::gui::repository::types::RepoInfo {
+                name: "repo2".to_string(),
+                remote: None,
+                branch: None,
+                local_path: None,
+                is_syncing: false,
+            },
+        ];
+        
+        // Before: clicking "Select Repository" would set active_tab to List
+        // Now: a dropdown should be available to select from available repositories
+        
+        let repo_names = state.repo_names();
+        assert_eq!(repo_names.len(), 2);
+        assert_eq!(repo_names[0], "repo1");
+        assert_eq!(repo_names[1], "repo2");
+        
+        // Simulate selecting a repository from dropdown
+        state.selected_repo = Some("repo1".to_string());
+        state.query_options.repo_name = "repo1".to_string();
+        
+        assert_eq!(state.selected_repo, Some("repo1".to_string()));
+        assert_eq!(state.query_options.repo_name, "repo1");
+    }
+    
+    #[test]
+    fn test_empty_repository_list_behavior() {
+        // Test behavior when no repositories are available
+        let mut state = RepoPanelState::default();
+        state.selected_repo = None;
+        state.repositories = vec![];
+        
+        let repo_names = state.repo_names();
+        assert!(repo_names.is_empty());
+        
+        // In this case, "Go to Repository List" button should be shown
+        // which would set active_tab to List
+        state.active_tab = RepoPanelTab::List;
+        assert_eq!(state.active_tab, RepoPanelTab::List);
     }
 } 

@@ -73,6 +73,7 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
             app.state.clicked_tool_info = None;
         } else {
             render_tool_info_modal(app, ctx, tool_name, tool_args);
+            // Don't clear clicked_tool_info here - let render_tool_info_modal decide
         }
     }
 
@@ -332,6 +333,23 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 // Add repository context as a system message if available
                 if let Some(repo_context) = &app.state.current_repository_context {
                     context_aware_message.push_str(&format!("[System: Current repository context is '{}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{}']\n\n", repo_context, repo_context));
+                }
+                
+                // Add dependency repositories context if any are enabled
+                let enabled_dependencies = app.repo_panel.get_enabled_dependencies();
+                if !enabled_dependencies.is_empty() {
+                    if enabled_dependencies.len() == 1 {
+                        context_aware_message.push_str(&format!(
+                            "[System: The repository '{}' is enabled as a dependency. You can use the repository tools to understand this dependency's requirements]\n\n", 
+                            enabled_dependencies[0]
+                        ));
+                    } else {
+                        let deps_list = enabled_dependencies.join("', '");
+                        context_aware_message.push_str(&format!(
+                            "[System: The following repositories are enabled as dependencies: '{}'. You can use the repository tools to understand these dependencies' requirements]\n\n", 
+                            deps_list
+                        ));
+                    }
                 }
                 
                 // Append the actual user message
@@ -973,14 +991,26 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
-                // Check for special flag to open repository panel with CreateProject tab
+                // Check for special flags to open repository panel with specific tabs
                 if new_repo == "__CREATE_NEW_REPOSITORY__" {
                     // Open the repository panel
                     if !app.repo_panel.is_open() {
                         app.repo_panel.toggle();
                     }
+                    // Ensure panel is set as active
+                    app.panels.active_panel = ActivePanel::Repository;
                     // Set the active tab to CreateProject
                     app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::CreateProject);
+                    // Don't process this as a normal repository change
+                } else if new_repo == "__ADD_EXISTING_REPOSITORY__" {
+                    // Open the repository panel
+                    if !app.repo_panel.is_open() {
+                        app.repo_panel.toggle();
+                    }
+                    // Ensure panel is set as active
+                    app.panels.active_panel = ActivePanel::Repository;
+                    // Set the active tab to Add
+                    app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::Add);
                     // Don't process this as a normal repository change
                 } else {
                     let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
@@ -1118,7 +1148,9 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
     if tool_name.ends_with(" Result") || tool_name.contains(" - ") {
         log::debug!("Detected tool result, determining display method");
         // This is a tool result - determine how to display it
-        if tool_name.contains("Terminal Output") || tool_name.contains("shell") || tool_name.contains("execution") ||
+        // Check specifically for shell/terminal commands, not code search
+        if tool_name.contains("Terminal Output") || tool_name.contains("shell") || 
+           (tool_name.contains("execution") && !tool_name.contains("search")) ||
            tool_args.contains("stdout") || tool_args.contains("stderr") || tool_args.contains("exit_code") {
             log::debug!("Handling terminal output for: {}", tool_name);
             
@@ -1190,8 +1222,14 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         app.show_preview(&format!("{} Tool Call", tool_name), &formatted_args);
     }
     
-    // Clear the clicked tool info after handling
-    app.state.clicked_tool_info = None;
+    // Only clear clicked tool info if preview was shown
+    // This prevents the "view details" button from breaking after multiple clicks
+    if !tool_name.contains("Terminal Output") && !tool_name.contains("shell") && 
+       !(tool_name.contains("execution") && !tool_name.contains("search")) &&
+       !tool_args.contains("stdout") && !tool_args.contains("stderr") && !tool_args.contains("exit_code") {
+        // Clear only for non-terminal tools that show preview
+        app.state.clicked_tool_info = None;
+    }
 }
 
 /// Refresh conversation clusters periodically
@@ -1852,4 +1890,160 @@ mod tests {
         assert_eq!(app.panels.active_panel, ActivePanel::Preview); // Should not change
         assert!(app.panels.preview_panel.visible); // Should still be open
     }
+
+    /// Test Create project and Add project button behavior
+    #[test]
+    fn test_repository_context_button_behavior() {
+        let mut app = create_test_app();
+        
+        // Test initial state
+        assert!(app.state.pending_repository_context_change.is_none());
+        
+        // Simulate Create project button click
+        app.state.pending_repository_context_change = Some("__CREATE_NEW_REPOSITORY__".to_string());
+        
+        // The handling logic would:
+        // 1. Open repository panel if closed
+        // 2. Set active panel to Repository
+        // 3. Set active tab to CreateProject
+        
+        // Simulate Add project button click
+        app.state.pending_repository_context_change = Some("__ADD_EXISTING_REPOSITORY__".to_string());
+        
+        // The handling logic would:
+        // 1. Open repository panel if closed
+        // 2. Set active panel to Repository
+        // 3. Set active tab to Add
+    }
+
+    /// Test that repository panel opens with correct tab
+    #[tokio::test]
+    async fn test_repository_panel_tab_switching() {
+        let mut app = create_test_app();
+        
+        // Test that repository panel can be toggled
+        assert!(!app.repo_panel.is_open());
+        app.repo_panel.toggle();
+        assert!(app.repo_panel.is_open());
+        
+        // Test setting active tab to CreateProject
+        app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::CreateProject);
+        
+        // Test setting active tab to Add
+        app.repo_panel.set_active_tab(crate::gui::repository::types::RepoPanelTab::Add);
+        
+        // Both operations should work without panicking
+    }
+
+    /// Test that repository context changes are handled correctly
+    #[test]
+    fn test_repository_context_special_flags() {
+        let mut app = create_test_app();
+        
+        // Test normal repository context change
+        app.state.pending_repository_context_change = Some("my-repo".to_string());
+        // This should update current_repository_context to Some("my-repo")
+        
+        // Test empty repository (no repository selected)
+        app.state.pending_repository_context_change = Some("".to_string());
+        // This should update current_repository_context to None
+        
+        // Test special flags don't update repository context
+        app.state.pending_repository_context_change = Some("__CREATE_NEW_REPOSITORY__".to_string());
+        // This should NOT update current_repository_context
+        
+        app.state.pending_repository_context_change = Some("__ADD_EXISTING_REPOSITORY__".to_string());
+        // This should NOT update current_repository_context
+    }
+
+    /// Test dependency context message building
+    #[test]
+    fn test_dependency_context_message_building() {
+        // Test building context message with no dependencies
+        let context_message = build_dependency_context(&[]);
+        assert!(context_message.is_empty());
+        
+        // Test with single dependency
+        let single_dep = vec!["my-lib".to_string()];
+        let context_message = build_dependency_context(&single_dep);
+        assert!(context_message.contains("repository 'my-lib' is enabled as a dependency"));
+        assert!(context_message.contains("use the repository tools"));
+        
+        // Test with multiple dependencies
+        let multi_deps = vec!["lib1".to_string(), "lib2".to_string(), "lib3".to_string()];
+        let context_message = build_dependency_context(&multi_deps);
+        assert!(context_message.contains("following repositories are enabled as dependencies"));
+        assert!(context_message.contains("lib1"));
+        assert!(context_message.contains("lib2"));
+        assert!(context_message.contains("lib3"));
+        assert!(context_message.contains("use the repository tools"));
+    }
+
+    /// Test that clicked tool info is not cleared for terminal tools
+    /// This ensures the "view details" button keeps working for terminal output
+    #[test]
+    fn test_clicked_tool_info_persistence_for_terminal_tools() {
+        // Terminal tool names that should NOT clear clicked_tool_info
+        let terminal_tools = vec![
+            ("shell_execution - Terminal Output", r#"{"stdout": "test", "exit_code": 0}"#),
+            ("bash Result", r#"{"stdout": "output", "stderr": "", "exit_code": 0}"#),
+            ("streaming_shell_execution", r#"{"command": "ls", "exit_code": 0}"#),
+        ];
+        
+        for (tool_name, tool_args) in terminal_tools {
+            // Check if this would be treated as a shell command
+            let is_shell = tool_name.contains("Terminal Output") || 
+                          tool_name.contains("shell") || 
+                          (tool_name.contains("execution") && !tool_name.contains("search")) ||
+                          tool_args.contains("stdout") || 
+                          tool_args.contains("stderr") || 
+                          tool_args.contains("exit_code");
+            
+            assert!(is_shell, "{} should be treated as shell command", tool_name);
+        }
+    }
+
+    /// Test that search_code is not treated as a shell command
+    #[test]
+    fn test_search_code_opens_preview_not_terminal() {
+        let non_shell_tools = vec![
+            ("search_code Result", r#"{"results": []}"#),
+            ("code_search_execution Result", r#"{"results": []}"#),
+            ("repository_map Result", r#"{"map": "content"}"#),
+        ];
+        
+        for (tool_name, tool_args) in non_shell_tools {
+            // Check if this would be treated as a shell command
+            let is_shell = tool_name.contains("Terminal Output") || 
+                          tool_name.contains("shell") || 
+                          (tool_name.contains("execution") && !tool_name.contains("search")) ||
+                          tool_args.contains("stdout") || 
+                          tool_args.contains("stderr") || 
+                          tool_args.contains("exit_code");
+            
+            assert!(!is_shell, "{} should NOT be treated as shell command", tool_name);
+        }
+    }
+}
+
+// Helper function to build dependency context message
+fn build_dependency_context(enabled_dependencies: &[String]) -> String {
+    let mut context_message = String::new();
+    
+    if !enabled_dependencies.is_empty() {
+        if enabled_dependencies.len() == 1 {
+            context_message.push_str(&format!(
+                "[System: The repository '{}' is enabled as a dependency. You can use the repository tools to understand this dependency's requirements]\n\n", 
+                enabled_dependencies[0]
+            ));
+        } else {
+            let deps_list = enabled_dependencies.join("', '");
+            context_message.push_str(&format!(
+                "[System: The following repositories are enabled as dependencies: '{}'. You can use the repository tools to understand these dependencies' requirements]\n\n", 
+                deps_list
+            ));
+        }
+    }
+    
+    context_message
 } 

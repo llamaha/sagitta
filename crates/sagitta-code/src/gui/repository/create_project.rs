@@ -79,7 +79,7 @@ pub fn render_create_project(
     let base_path = config.repositories_base_path();
     state.project_form.path = base_path.to_string_lossy().to_string();
 
-    ui.heading("🆕 Create New Project");
+    ui.heading("Create New Project");
     ui.add_space(8.0);
 
     // Show project info if we have a project name
@@ -319,7 +319,7 @@ fn create_project(
                             
                             // Add to repository manager
                             let mut manager = repo_manager_clone.lock().await;
-                            if let Err(e) = manager.add_repository(&project_name, &full_path, None).await {
+                            if let Err(e) = manager.add_repository(&project_name, &full_path, None, None).await {
                                 log::error!("Failed to add repository after creation: {}", e);
                             } else {
                                 log::info!("Successfully added repository '{}' to Sagitta", project_name);

@@ -182,13 +182,19 @@ pub fn chat_input_ui(
                     }
                 });
             
-            // Show "Create new repository" button when "No repository" is selected
+            // Show "Create new repository" and "Add existing" buttons when "No repository" is selected
             if current_repository_context.is_none() || current_repository_context.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
                 ui.add_space(8.0);
-                if ui.button(RichText::new("🆕 Create new repository").color(accent_color).small()).clicked() {
+                if ui.button(RichText::new("🆕 Create project").color(accent_color).small()).clicked() {
                     // Set a flag to open the repository panel with CreateProject tab
                     // This will be handled by the main app
                     *on_repository_context_change = Some("__CREATE_NEW_REPOSITORY__".to_string());
+                }
+                ui.add_space(4.0);
+                if ui.button(RichText::new("➕ Add project").color(accent_color).small()).clicked() {
+                    // Set a flag to open the repository panel with Add tab
+                    // This will be handled by the main app
+                    *on_repository_context_change = Some("__ADD_EXISTING_REPOSITORY__".to_string());
                 }
             }
             

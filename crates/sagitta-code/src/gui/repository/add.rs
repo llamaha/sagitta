@@ -51,6 +51,13 @@ pub fn render_add_repo(
                 ui.label("Branch (optional):");
                 ui.add_enabled(!state.add_repo_form.adding, TextEdit::singleline(&mut state.add_repo_form.branch));
                 ui.end_row();
+                
+                ui.label("Target ref (optional):");
+                ui.horizontal(|ui| {
+                    ui.add_enabled(!state.add_repo_form.adding, TextEdit::singleline(&mut state.add_repo_form.target_ref));
+                    ui.label(RichText::new("e.g., tag, commit hash").color(theme.hint_text_color()).small());
+                });
+                ui.end_row();
             }
         });
     
@@ -123,7 +130,8 @@ pub fn render_add_repo(
                         manager.add_local_repository(&form.name, &form.local_path).await
                     } else {
                         let branch_str = if form.branch.is_empty() { None } else { Some(form.branch.as_str()) };
-                        manager.add_repository(&form.name, &form.url, branch_str).await
+                        let target_ref_str = if form.target_ref.is_empty() { None } else { Some(form.target_ref.as_str()) };
+                        manager.add_repository(&form.name, &form.url, branch_str, target_ref_str).await
                     };
                     let _ = tx.send(result.map(|_| form.name));
                 });
