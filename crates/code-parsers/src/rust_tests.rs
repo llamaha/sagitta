@@ -125,21 +125,9 @@ mod tests {
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
 
-        assert_eq!(chunks.len(), 2);
-        assert_chunk(
-            chunks.iter().find(|c| c.element_type == "use").unwrap(),
-            "use std::collections::HashMap;",
-            2,
-            2,
-            "use",
-        );
-        assert_chunk(
-            chunks.iter().find(|c| c.element_type == "const").unwrap(),
-            "const MAX_SIZE: usize = 100;",
-            4,
-            4,
-            "const",
-        );
+        // Since use and const are filtered out, we expect a fallback chunk
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 
@@ -160,7 +148,7 @@ mod tests {
         // Should fallback to file chunk(s) as no declarations are found
         // assert!(chunks.is_empty()); // Old assertion
         assert!(!chunks.is_empty(), "Fallback should produce at least one chunk");
-        assert_eq!(chunks[0].element_type, "file_chunk", "Chunk type should be file_chunk");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Chunk type should be fallback_chunk_0");
         assert_eq!(chunks[0].language, "rust", "Language should be rust");
         Ok(())
     }
@@ -177,21 +165,9 @@ mod tests {
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.rs")?;
 
-        assert_eq!(chunks.len(), 2);
-        assert_chunk(
-            chunks.iter().find(|c| c.element_type == "macro_definition").unwrap(),
-            "macro_rules! my_macro {\n            () => { println!(\"Macro called\"); };\n        }",
-            2,
-            4,
-            "macro_definition",
-        );
-         assert_chunk(
-            chunks.iter().find(|c| c.element_type == "macro_invocation").unwrap(),
-            "my_macro!()",
-            6,
-            6,
-            "macro_invocation",
-        );
+        // Since macros are filtered out, we expect a fallback chunk
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 

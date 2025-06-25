@@ -159,6 +159,36 @@ impl SyntaxParser for PythonParser {
         // Sort chunks by start line as query matches might not be ordered
         chunks.sort_by_key(|c| c.start_line);
 
+        // Fallback: If no chunks found, split into fallback chunks
+        if chunks.is_empty() && !code.trim().is_empty() {
+            log::debug!(
+                "No Python items found in {}, splitting into fallback chunks.",
+                file_path
+            );
+            let lines: Vec<&str> = code.lines().collect();
+            let num_lines = lines.len();
+            const PYTHON_FALLBACK_CHUNK_SIZE: usize = 200;
+
+            for (i, chunk_lines) in lines.chunks(PYTHON_FALLBACK_CHUNK_SIZE).enumerate() {
+                let start_line = i * PYTHON_FALLBACK_CHUNK_SIZE + 1;
+                let end_line = std::cmp::min(start_line + PYTHON_FALLBACK_CHUNK_SIZE - 1, num_lines);
+                let chunk_content = chunk_lines.join("\n");
+
+                if chunk_content.trim().is_empty() {
+                    continue;
+                }
+
+                chunks.push(CodeChunk {
+                    content: chunk_content,
+                    file_path: file_path.to_string(),
+                    start_line,
+                    end_line,
+                    language: "python".to_string(),
+                    element_type: format!("fallback_chunk_{}", i),
+                });
+            }
+        }
+
         Ok(chunks)
     }
 }

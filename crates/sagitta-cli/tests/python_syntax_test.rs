@@ -68,19 +68,8 @@ if __name__ == "__main__":
         );
         assert!(has_function, "Parser should extract function definitions");
         
-        // Validate statement extraction (import)
-        let has_import = chunks.iter().any(|chunk| 
-            chunk.element_type == "statement" && 
-            chunk.content.contains("import os")
-        );
-        assert!(has_import, "Parser should extract import statements");
-        
-        // Validate statement extraction (if)
-        let has_if_statement = chunks.iter().any(|chunk| 
-            chunk.element_type == "statement" && 
-            chunk.content.contains("if __name__ ==")
-        );
-        assert!(has_if_statement, "Parser should extract if statements");
+        // With filtering, import and if statements are not extracted as separate chunks
+        // They would only appear as part of fallback chunks if no functions/classes exist
         
         // Validate metadata
         for chunk in &chunks {
@@ -105,18 +94,11 @@ print(x + y)
         let mut parser = PythonParser::new();
         let chunks = parser.parse(simple_python, file_path)?;
         
-        assert!(!chunks.is_empty(), "Parser should extract chunks even from simple scripts");
-        
-        // These should be extracted as statements or the file might be chunked as a whole
-        let content_exists = if chunks[0].element_type == "file" {
-            // If the whole file was chunked, check that the content is there
-            chunks[0].content.contains("x = 10") && chunks[0].content.contains("y = 20")
-        } else {
-            // Otherwise check if statement extraction worked
-            chunks.iter().any(|chunk| chunk.content.contains("x = 10"))
-        };
-        
-        assert!(content_exists, "Parser should extract content from simple script");
+        // With filtering, simple scripts without functions/classes will create a fallback chunk
+        assert!(!chunks.is_empty(), "Parser should create fallback chunks for simple scripts");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Simple script should use fallback chunk");
+        assert!(chunks[0].content.contains("x = 10"), "Fallback chunk should contain content");
+        assert!(chunks[0].content.contains("y = 20"), "Fallback chunk should contain content");
         
         Ok(())
     }
@@ -138,9 +120,10 @@ print(x + y)
         let whitespace_chunks = parser.parse(whitespace_content, file_path)?;
         assert!(whitespace_chunks.is_empty(), "Parser should return empty chunks for whitespace-only content");
         
-        // Test with only 'pass' statement
+        // Test with only 'pass' statement - will create a fallback chunk since no functions/classes
         let pass_chunks = parser.parse(pass_only_content, file_path)?;
-        assert!(pass_chunks.is_empty(), "Parser should skip top-level 'pass' statements");
+        assert_eq!(pass_chunks.len(), 1, "Parser should create fallback chunk for pass-only content");
+        assert_eq!(pass_chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
         
         Ok(())
     }
@@ -154,13 +137,11 @@ print(x + y)
         let mut parser = PythonParser::new();
         let chunks = parser.parse(weird_content, file_path)?;
         
-        // Should produce some chunks - either fallback or parsed statements
-        assert!(!chunks.is_empty(), "Parser should produce chunks for unusual content");
-        
-        // Check that the content exists in some form
-        let has_content = chunks.iter().any(|chunk| chunk.content.contains("x=1"));
-        
-        assert!(has_content, "Parser should capture unusual content in some form");
+        // With filtering, this simple content without functions/classes should create a fallback chunk
+        assert!(!chunks.is_empty(), "Parser should produce fallback chunks for unusual content");
+        assert_eq!(chunks.len(), 1, "Should have one fallback chunk");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
+        assert!(chunks[0].content.contains("x=1"), "Fallback chunk should contain the content");
         
         Ok(())
     }
