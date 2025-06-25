@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
             if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
                 println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
                 println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
-                println!("🔍 DEBUG: Max history size: {}", config.openrouter.max_history_size);
+                println!("🔍 DEBUG: Max context tokens: {}", config.openrouter.max_context_tokens);
             }
             config
         }

@@ -670,25 +670,39 @@ impl AnalyticsPanel {
 
         let mut action = None;
 
-        Window::new("📊 Conversation Analytics Dashboard")
-            .default_width(800.0)
-            .default_height(600.0)
+        // Use a panel instead of window
+        egui::SidePanel::right("analytics_panel")
+            .default_width(900.0)
+            .min_width(600.0)
             .resizable(true)
-            .frame(egui::Frame::none().fill(theme.panel_background()))
+            .frame(egui::Frame::none()
+                .fill(theme.panel_background())
+                .inner_margin(egui::Margin::same(10)))
             .show(ctx, |ui| {
+                // Main scrollable area for the entire panel
+                egui::ScrollArea::vertical()
+                    .id_source("analytics_main_scroll")
+                    .show(ui, |ui| {
                 // Header with title and controls
                 ui.horizontal(|ui| {
-                    ui.heading("Conversation Analytics Dashboard");
+                    ui.heading("📊 Analytics Dashboard");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🔄 Refresh").clicked() {
+                        if ui.button("❌").on_hover_text("Close analytics panel").clicked() {
+                            self.visible = false;
+                        }
+                        ui.separator();
+                        if ui.button("🔄 Refresh").on_hover_text("Refresh analytics data").clicked() {
                             action = self.handle_refresh_request();
                         }
-                        if ui.button("📤 Export").clicked() {
+                        if ui.button("📤 Export").on_hover_text("Export analytics report").clicked() {
                             action = self.handle_export_request();
                         }
                     });
                 });
+                
+                ui.add_space(5.0);
                 ui.separator();
+                ui.add_space(5.0);
 
                 // Filters section
                 ui.horizontal(|ui| {
@@ -785,7 +799,8 @@ impl AnalyticsPanel {
                 ui.collapsing("💰 Token Usage & Cost (Legacy)", |ui| {
                     self.render_legacy_token_usage(ui, theme);
                 });
-            });
+                    }); // End of ScrollArea
+            }); // End of SidePanel
 
         action
     }
@@ -971,10 +986,13 @@ impl AnalyticsPanel {
         ui.heading("📊 Overview");
         ui.add_space(10.0);
         
-        // Key metrics cards
-        ui.horizontal(|ui| {
+        // Key metrics cards - use a grid layout for better responsiveness
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+            
             // Total conversations card
             ui.group(|ui| {
+                ui.set_min_width(150.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Total Conversations").strong());
                     ui.label(RichText::new(format!("{}", report.overall_metrics.total_conversations))
@@ -984,6 +1002,7 @@ impl AnalyticsPanel {
             
             // Success rate card
             ui.group(|ui| {
+                ui.set_min_width(150.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Success Rate").strong());
                     let success_rate = report.success_metrics.overall_success_rate * 100.0;
@@ -1004,6 +1023,7 @@ impl AnalyticsPanel {
             
             // Completion rate card
             ui.group(|ui| {
+                ui.set_min_width(150.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Completion Rate").strong());
                     ui.label(RichText::new(format!("{:.1}%", report.overall_metrics.completion_rate * 100.0))
@@ -1013,6 +1033,7 @@ impl AnalyticsPanel {
             
             // Average duration card
             ui.group(|ui| {
+                ui.set_min_width(150.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Avg Duration").strong());
                     ui.label(RichText::new(format!("{:.1} min", report.overall_metrics.avg_duration_minutes))
@@ -1044,6 +1065,78 @@ impl AnalyticsPanel {
                 ui.label(peak_hours.join(", "));
             });
         });
+        
+        ui.add_space(20.0);
+        
+        // Token usage overview
+        ui.heading("🪙 Token Usage");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+            
+            // Total tokens card
+            ui.group(|ui| {
+                ui.set_min_width(140.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Total Tokens").strong());
+                    ui.label(RichText::new(format!("{}", report.overall_metrics.total_tokens))
+                        .size(20.0).color(theme.accent_color()));
+                });
+            });
+            
+            // Peak usage card
+            ui.group(|ui| {
+                ui.set_min_width(140.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Peak Usage").strong());
+                    ui.label(RichText::new(format!("{}", report.token_usage_metrics.peak_usage))
+                        .size(20.0).color(theme.accent_color()));
+                });
+            });
+            
+            // Conversations hitting limit
+            ui.group(|ui| {
+                ui.set_min_width(140.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Hit Token Limit").strong());
+                    ui.label(RichText::new(format!("{}", report.token_usage_metrics.limit_reached_count))
+                        .size(20.0).color(if report.token_usage_metrics.limit_reached_count > 0 {
+                            Color32::from_rgb(255, 165, 0)
+                        } else {
+                            theme.accent_color()
+                        }));
+                });
+            });
+            
+            // Estimated cost
+            if let Some(cost) = report.token_usage_metrics.estimated_cost {
+                ui.group(|ui| {
+                    ui.set_min_width(140.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("Est. Cost").strong());
+                        ui.label(RichText::new(format!("${:.2}", cost))
+                            .size(20.0).color(theme.accent_color()));
+                    });
+                });
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            ui.label(format!("📊 Avg Tokens/Conv: {}", report.overall_metrics.avg_tokens_per_conversation));
+            ui.separator();
+            ui.label(format!("💬 Avg Tokens/Msg: {}", report.overall_metrics.avg_tokens_per_message));
+        });
+        
+        // Token usage by role
+        if !report.token_usage_metrics.tokens_by_role.is_empty() {
+            ui.add_space(10.0);
+            ui.label("Token Distribution by Role:");
+            for (role, tokens) in &report.token_usage_metrics.tokens_by_role {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}: ", role));
+                    ui.label(RichText::new(format!("{} tokens", tokens)).color(theme.accent_color()));
+                });
+            }
+        }
         
         ui.add_space(20.0);
         

@@ -83,10 +83,6 @@ pub struct OpenRouterConfig {
     /// Provider preferences (optional routing configuration)
     pub provider_preferences: Option<ProviderPreferences>,
     
-    /// Maximum message history size
-    #[serde(default = "default_max_history_size")]
-    pub max_history_size: usize,
-    
     /// Maximum context tokens (0 = use model default)
     #[serde(default = "default_max_context_tokens")]
     pub max_context_tokens: usize,
@@ -106,7 +102,6 @@ impl Default for OpenRouterConfig {
             api_key: None,
             model: default_openrouter_model(),
             provider_preferences: None,
-            max_history_size: default_max_history_size(),
             max_context_tokens: default_max_context_tokens(),
             max_reasoning_steps: default_max_reasoning_steps(),
             request_timeout: default_request_timeout(),
@@ -422,12 +417,8 @@ fn default_openrouter_model() -> String {
     "openai/gpt-4".to_string()
 }
 
-fn default_max_history_size() -> usize {
-    100
-}
-
 fn default_max_context_tokens() -> usize {
-    8000 // Conservative default
+    64000 // Default to 64k tokens
 }
 
 fn default_max_reasoning_steps() -> u32 {

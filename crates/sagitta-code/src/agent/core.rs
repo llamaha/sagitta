@@ -343,6 +343,7 @@ impl Agent {
             conversation_manager,
             config.conversation.clone(),
             None, // TODO: Detect workspace ID from project context
+            config.openrouter.max_context_tokens,
             system_prompt.clone(),
         ).await
         .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;

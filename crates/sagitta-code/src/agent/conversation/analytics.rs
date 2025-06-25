@@ -63,6 +63,9 @@ pub struct AnalyticsReport {
     /// Efficiency analysis
     pub efficiency_metrics: EfficiencyMetrics,
     
+    /// Token usage analysis
+    pub token_usage_metrics: TokenUsageMetrics,
+    
     /// Pattern recognition results
     pub patterns: PatternAnalysis,
     
@@ -84,6 +87,15 @@ pub struct OverallMetrics {
     
     /// Total number of messages across all conversations
     pub total_messages: usize,
+    
+    /// Total tokens used across all conversations
+    pub total_tokens: usize,
+    
+    /// Average tokens per conversation
+    pub avg_tokens_per_conversation: usize,
+    
+    /// Average tokens per message
+    pub avg_tokens_per_message: usize,
     
     /// Average messages per conversation
     pub avg_messages_per_conversation: f64,
@@ -149,6 +161,28 @@ pub struct EfficiencyMetrics {
     
     /// Resource utilization metrics
     pub resource_utilization: ResourceUtilization,
+}
+
+/// Token usage metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenUsageMetrics {
+    /// Token usage distribution by conversation
+    pub token_distribution: Vec<(Uuid, usize)>, // (conversation_id, token_count)
+    
+    /// Peak token usage in a single conversation
+    pub peak_usage: usize,
+    
+    /// Conversations that hit token limits
+    pub limit_reached_count: usize,
+    
+    /// Token usage by message role
+    pub tokens_by_role: HashMap<String, usize>, // role -> total tokens
+    
+    /// Token usage trend over time
+    pub usage_trend: Vec<(DateTime<Utc>, usize)>, // (timestamp, tokens)
+    
+    /// Estimated cost based on token usage (if applicable)
+    pub estimated_cost: Option<f64>,
 }
 
 /// Pattern recognition analysis
@@ -478,6 +512,7 @@ impl ConversationAnalyticsManager {
         let overall_metrics = self.calculate_overall_metrics(&filtered_conversations).await?;
         let success_metrics = self.analyze_success_metrics(&filtered_conversations).await?;
         let efficiency_metrics = self.analyze_efficiency(&filtered_conversations).await?;
+        let token_usage_metrics = self.analyze_token_usage(&filtered_conversations).await?;
         let patterns = self.analyze_patterns(&filtered_conversations).await?;
         let project_insights = self.generate_project_insights(&filtered_conversations).await?;
         let trending_topics = self.analyze_trending_topics(&filtered_conversations).await?;
@@ -494,6 +529,7 @@ impl ConversationAnalyticsManager {
             overall_metrics,
             success_metrics,
             efficiency_metrics,
+            token_usage_metrics,
             patterns,
             project_insights,
             trending_topics,
@@ -562,9 +598,30 @@ impl ConversationAnalyticsManager {
             }
         }
         
+        // Calculate token metrics (placeholder - in real implementation would get from MessageHistory)
+        let total_tokens: usize = conversations
+            .iter()
+            .map(|c| c.messages.iter().map(|m| m.content.len() / 4).sum::<usize>())
+            .sum();
+        
+        let avg_tokens_per_conversation = if total_conversations > 0 {
+            total_tokens / total_conversations
+        } else {
+            0
+        };
+        
+        let avg_tokens_per_message = if total_messages > 0 {
+            total_tokens / total_messages
+        } else {
+            0
+        };
+        
         Ok(OverallMetrics {
             total_conversations,
             total_messages,
+            total_tokens,
+            avg_tokens_per_conversation,
+            avg_tokens_per_message,
             avg_messages_per_conversation,
             total_branches,
             total_checkpoints,
@@ -767,6 +824,87 @@ impl ConversationAnalyticsManager {
             context_switches_per_conversation,
             efficient_patterns,
             resource_utilization,
+        })
+    }
+    
+    /// Analyze token usage across conversations
+    async fn analyze_token_usage(&self, conversations: &[&Conversation]) -> Result<TokenUsageMetrics> {
+        let mut token_distribution = Vec::new();
+        let mut tokens_by_role = HashMap::new();
+        let mut usage_trend = Vec::new();
+        let mut peak_usage = 0;
+        let mut limit_reached_count = 0;
+        let mut total_tokens = 0;
+        
+        // Note: This is a placeholder implementation
+        // In a real implementation, you would:
+        // 1. Access the MessageHistory for each conversation
+        // 2. Get the actual token counts from history.get_total_tokens()
+        // 3. Track when limits were reached
+        
+        for conversation in conversations {
+            // Placeholder: estimate tokens based on message content length
+            let estimated_tokens: usize = conversation.messages
+                .iter()
+                .map(|msg| msg.content.len() / 4) // Rough estimate: 4 chars per token
+                .sum();
+            
+            token_distribution.push((conversation.id, estimated_tokens));
+            peak_usage = peak_usage.max(estimated_tokens);
+            total_tokens += estimated_tokens;
+            
+            // Track tokens by role
+            for msg in &conversation.messages {
+                let role = format!("{:?}", msg.role); // Use Debug format for Role
+                *tokens_by_role.entry(role).or_insert(0) += msg.content.len() / 4;
+            }
+            
+            // Check if this conversation likely hit token limits
+            if estimated_tokens > 60000 { // Assuming 64k limit with buffer
+                limit_reached_count += 1;
+            }
+        }
+        
+        // Sort token distribution by usage
+        token_distribution.sort_by_key(|(_, tokens)| std::cmp::Reverse(*tokens));
+        
+        // Create usage trend (simplified - just show daily totals)
+        if !conversations.is_empty() {
+            let start_date = conversations.iter()
+                .map(|c| c.created_at)
+                .min()
+                .unwrap();
+            let end_date = Utc::now();
+            let mut current_date = start_date;
+            
+            while current_date <= end_date {
+                let daily_tokens: usize = conversations.iter()
+                    .filter(|c| c.created_at.date() == current_date.date())
+                    .map(|c| c.messages.len() * 100) // Rough estimate
+                    .sum();
+                
+                if daily_tokens > 0 {
+                    usage_trend.push((current_date, daily_tokens));
+                }
+                
+                current_date = current_date + Duration::days(1);
+            }
+        }
+        
+        // Estimate cost (using rough OpenAI pricing)
+        let estimated_cost = if total_tokens > 0 {
+            Some((total_tokens as f64 / 1000.0) * 0.03) // $0.03 per 1K tokens
+        } else {
+            None
+        };
+        
+        Ok(TokenUsageMetrics {
+            token_distribution,
+            peak_usage,
+            limit_reached_count,
+            tokens_by_role,
+            usage_trend,
+            estimated_cost,
         })
     }
     

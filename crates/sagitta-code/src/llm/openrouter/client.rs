@@ -810,7 +810,7 @@ mod tests {
                 api_key: Some("test-api-key".to_string()),
                 model: "openai/gpt-4o".to_string(),
                 provider_preferences: None,
-                max_history_size: 50,
+                max_context_tokens: 64000,
                 max_reasoning_steps: 10,
                 request_timeout: 30,
             },
