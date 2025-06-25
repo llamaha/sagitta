@@ -101,9 +101,9 @@ var GlobalCounter int = 0
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.go")?;
 
-        // Since const and var are filtered out, we expect a fallback chunk
+        // Const is a core element type, but var is not, so we expect only the const
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
+        assert_eq!(chunks[0].element_type, "const");
 
         Ok(())
     }

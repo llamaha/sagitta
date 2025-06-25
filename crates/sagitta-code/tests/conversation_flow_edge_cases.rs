@@ -1357,7 +1357,7 @@ async fn test_reasoning_engine_direct() {
     println!("🔍 Test: test_reasoning_engine_direct (with MockLLM)");
 
     let sagitta_code_config = SagittaCodeConfig::default(); 
-    let reasoning_config_data = create_reasoning_config(&sagitta_code_config);
+    let reasoning_config_data = create_reasoning_config(&sagitta_code_config, AgentMode::FullyAutonomous);
     let mock_llm_responses = vec![
         MockResponse {
             text: "Hello from direct Reasoning Engine test via MockLlmClient!".to_string(),

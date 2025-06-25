@@ -48,7 +48,7 @@ impl Tool for CodeSearchTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "search_code".to_string(),
-            description: "Search for code in repositories using semantic search.".to_string(),
+            description: "Search for code in repositories using semantic search. IMPORTANT: Always specify element_type, language, and limit parameters to get accurate results and prevent context overflow.".to_string(),
             parameters: json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -64,15 +64,15 @@ impl Tool for CodeSearchTool {
                     },
                     "limit": {
                         "type": ["integer", "null"],
-                        "description": "Maximum number of results to return (defaults to 10 if null)"
+                        "description": "Maximum number of results to return. ALWAYS specify this parameter (recommended: 5-10) to prevent context overflow"
                     },
                     "element_type": {
                         "type": ["string", "null"],
-                        "description": "Optional filter by code element type (function, struct, class, interface, enum, method, variable)"
+                        "description": "STRONGLY RECOMMENDED: Filter by code element type. Valid values: function, method, struct, class, enum, interface, trait, module, const, constant, type (for Go). If omitted, may return too many irrelevant results"
                     },
                     "language": {
                         "type": ["string", "null"],
-                        "description": "Optional filter by programming language (rust, python, javascript, etc.)"
+                        "description": "STRONGLY RECOMMENDED: Filter by programming language (e.g., rust, python, javascript, typescript, go, ruby). Improves search accuracy significantly"
                     }
                 }
             }),
@@ -104,7 +104,13 @@ impl Tool for CodeSearchTool {
         
         match result {
             Ok(response) => {
-                log::debug!("CodeSearchTool: Search successful, found {} results", response.result.len());
+                log::info!("CodeSearchTool: Search successful, found {} results", response.result.len());
+                
+                if response.result.is_empty() {
+                    log::warn!("CodeSearchTool: No results found for query '{}' in repository '{}' with filters - element_type: {:?}, language: {:?}, limit: {}", 
+                              search_params.query, search_params.repository_name, 
+                              search_params.element_type, search_params.language, search_params.limit);
+                }
                 
                 let search_results: Vec<Value> = response.result.iter().map(|result| {
                     json!({
@@ -114,16 +120,45 @@ impl Tool for CodeSearchTool {
                     })
                 }).collect();
                 
-                Ok(ToolResult::Success(json!({
+                let mut result_json = json!({
                     "search_results": search_results,
                     "total_results": response.result.len(),
                     "search_method": "regular_semantic_search"
-                })))
+                });
+                
+                // Add helpful message when no results found
+                if response.result.is_empty() {
+                    result_json["message"] = json!(
+                        "No results found. This may be due to: \
+                        1) The repository needs to be re-indexed after recent changes, \
+                        2) The search filters are too restrictive (try omitting element_type or language), \
+                        3) The indexed data only contains core element types (function, class, struct, etc.) due to optimization"
+                    );
+                }
+                
+                Ok(ToolResult::Success(result_json))
             }
             Err(e) => {
                 let error_msg = format!("Search failed: {}", e);
                 log::error!("CodeSearchTool: {}", error_msg);
-                Err(SagittaCodeError::ToolError(error_msg))
+                
+                // Check for specific error types
+                if error_msg.contains("does not exist") {
+                    Err(SagittaCodeError::ToolError(format!(
+                        "Repository '{}' has not been indexed. Please sync/index the repository first using the repository sync command.", 
+                        search_params.repository_name
+                    )))
+                } else if error_msg.contains("Search infrastructure not initialized") {
+                    Err(SagittaCodeError::ToolError(
+                        "Code search is not available. The search infrastructure (Qdrant and/or embedding models) \
+                        is not initialized. Please check that:\n\
+                        1. Qdrant is running (usually at http://localhost:6334)\n\
+                        2. Embedding model paths are configured in your settings\n\
+                        3. The application was able to connect during startup".to_string()
+                    ))
+                } else {
+                    Err(SagittaCodeError::ToolError(error_msg))
+                }
             }
         }
     }

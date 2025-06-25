@@ -14,7 +14,7 @@ fn create_test_config_with_key(api_key: Option<String>) -> SagittaCodeConfig {
             api_key,
             model: "openai/gpt-4o-mini".to_string(),
             provider_preferences: None,
-            max_history_size: 50,
+            max_context_tokens: 0,
             max_reasoning_steps: 10,
             request_timeout: 5, // Short timeout for tests
         },
