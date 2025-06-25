@@ -3,6 +3,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
+use super::element_filter::is_core_element_type;
 
 /// Parser for Python language files using Tree-sitter.
 pub struct PythonParser {
@@ -147,7 +148,10 @@ impl SyntaxParser for PythonParser {
                 }
 
                 if let Some(chunk) = self.node_to_chunk(node, code, file_path, capture_name) {
-                    chunks.push(chunk);
+                    // Only add chunks for core element types
+                    if is_core_element_type(&chunk.element_type, Some("python")) {
+                        chunks.push(chunk);
+                    }
                 }
             }
         }

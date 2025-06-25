@@ -4,6 +4,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
+use super::element_filter::is_core_element_type;
 
 /// Parser for Rust language files using Tree-sitter.
 pub struct RustParser {
@@ -148,7 +149,6 @@ impl SyntaxParser for RustParser {
 
                 if kind == "impl_item" {
                     // --- Get impl signature --- 
-                    let mut impl_signature = "";
                     // Find the body node (declaration_list or associated_type) to get signature end
                     let body_start_byte = node.children(&mut node.walk())
                         .find(|n| n.kind() == "declaration_list" || n.kind() == "associated_type")
@@ -156,9 +156,9 @@ impl SyntaxParser for RustParser {
                         .unwrap_or(end_byte); // Fallback to end of impl if no body found
                     
                     // Extract text from start of impl node up to the start of the body
-                    impl_signature = code.get(start_byte..body_start_byte).unwrap_or("").trim_end();
+                    let impl_signature = code.get(start_byte..body_start_byte).unwrap_or("").trim_end();
                     // Ensure it ends cleanly, trim trailing whitespace or '{'
-                    impl_signature = impl_signature.trim_end_matches(|c: char| c.is_whitespace() || c == '{').trim_end();
+                    let impl_signature = impl_signature.trim_end_matches(|c: char| c.is_whitespace() || c == '{').trim_end();
 
                     // Iterate children and create chunks for functions, prepending signature
                     let mut tree_cursor = node.walk();
@@ -178,14 +178,17 @@ impl SyntaxParser for RustParser {
                                 let start_line = child_node.start_position().row + 1;
                                 let end_line = child_node.end_position().row + 1;
 
-                                chunks.push(CodeChunk {
-                                    content: combined_content,
-                                    file_path: file_path.to_string(),
-                                    start_line,
-                                    end_line,
-                                    language: "rust".to_string(),
-                                    element_type: "function".to_string(),
-                                });
+                                // Only create chunk for core element types
+                                if is_core_element_type("function", Some("rust")) {
+                                    chunks.push(CodeChunk {
+                                        content: combined_content,
+                                        file_path: file_path.to_string(),
+                                        start_line,
+                                        end_line,
+                                        language: "rust".to_string(),
+                                        element_type: "function".to_string(),
+                                    });
+                                }
 
                                 covered_ranges.push((func_start, func_end));
                             }
@@ -221,7 +224,7 @@ impl SyntaxParser for RustParser {
                     _ => "unknown",
                 };
 
-                if element_type != "unknown" {
+                if element_type != "unknown" && is_core_element_type(element_type, Some("rust")) {
                     // Create chunk normally for non-impl items
                     if let Some(chunk) = self.node_to_chunk(
                         node,
@@ -233,6 +236,9 @@ impl SyntaxParser for RustParser {
                         covered_ranges.push((start_byte, end_byte));
                         chunks.push(chunk);
                     }
+                } else {
+                    // Still mark as covered even if we don't create a chunk
+                    covered_ranges.push((start_byte, end_byte));
                 }
             }
         }
@@ -266,7 +272,7 @@ impl SyntaxParser for RustParser {
                      start_line,
                      end_line,
                      language: "rust".to_string(),
-                     element_type: "file_chunk".to_string(), // Use file_chunk type
+                     element_type: format!("fallback_chunk_{}", i),
                  });
             }
         }

@@ -3,6 +3,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
+use super::element_filter::is_core_element_type;
 
 // Reuse the constant from the fallback parser or define locally if preferred
 const MAX_CHUNK_LINES: usize = 500; // Max lines for plain text fallback chunks
@@ -197,14 +198,18 @@ impl MarkdownParser {
                 format!("root_plain_text_split_{}", fallback_chunks.len() + 1)
             };
 
-            fallback_chunks.push(CodeChunk {
+            let chunk = CodeChunk {
                 content,
                 file_path: file_path.to_string(),
                 start_line,
                 end_line,
                 language: "markdown".to_string(), // Still markdown, just unstructured
-                element_type,
-            });
+                element_type: element_type.clone(),
+            };
+            // Only add chunks for core element types
+            if is_core_element_type(&chunk.element_type, Some("markdown")) {
+                fallback_chunks.push(chunk);
+            }
 
             current_line_start = end_line + 1;
             line_idx = chunk_end_line_idx;
@@ -394,14 +399,18 @@ impl MarkdownParser {
         if full_content_combined.len() <= MAX_SECTION_SIZE {
             // Fits in one chunk
             log::debug!("Creating single chunk: Start={}, End={}, Type={}", section_start_line, section_end_line, base_element_type);
-            chunks.push(CodeChunk {
+            let chunk = CodeChunk {
                 content: full_content_combined,
                 file_path: file_path.to_string(),
                 start_line: section_start_line, // Logical start is the heading (or line 1 for root)
                 end_line: section_end_line,      // Use section_end_line which is calculated as next_heading_start_line - 1
                 language: "markdown".to_string(),
-                element_type: base_element_type,
-            });
+                element_type: base_element_type.clone(),
+            };
+            // Only add chunks for core element types
+            if is_core_element_type(&chunk.element_type, Some("markdown")) {
+                chunks.push(chunk);
+            }
         } else {
             // Needs splitting
             log::debug!(
@@ -511,14 +520,18 @@ impl MarkdownParser {
                  // This end line calc is still flawed. 
                  let chunk_end_line_approx = chunk_start_line_approx + header_lines + lines_in_content_part - 1; 
 
-                chunks.push(CodeChunk {
+                let chunk = CodeChunk {
                     content: final_chunk_content,
                     file_path: file_path.to_string(),
                     start_line: chunk_start_line_approx, // Approximate start line
                     end_line: chunk_end_line_approx,     // Approximate end line
                     language: "markdown".to_string(),
-                    element_type: chunk_element_type,
-                });
+                    element_type: chunk_element_type.clone(),
+                };
+                // Only add chunks for core element types
+                if is_core_element_type(&chunk.element_type, Some("markdown")) {
+                    chunks.push(chunk);
+                }
 
                 // The start line for the *next* chunk needs to relate to the previous end line.
                 current_chunk_start_line = chunk_end_line_approx + 1; 
