@@ -101,14 +101,9 @@ var GlobalCounter int = 0
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.go")?;
 
-        // Expecting const and var
-        assert_eq!(chunks.len(), 2);
-
-        let const_chunk = chunks.iter().find(|c| c.element_type == "const").unwrap();
-        assert_chunk(const_chunk, "const Pi = 3.14", 4, 4, "const");
-
-        let var_chunk = chunks.iter().find(|c| c.element_type == "var").unwrap();
-        assert_chunk(var_chunk, "var GlobalCounter int = 0", 6, 6, "var");
+        // Since const and var are filtered out, we expect a fallback chunk
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
 
         Ok(())
     }
@@ -133,7 +128,7 @@ package main // Need package for it to be valid Go
         let chunks = parser.parse(code, "test.go")?;
         // Should fallback to file chunk as no declarations are found
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "file_chunk");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 
@@ -160,7 +155,7 @@ package main // Need package for it to be valid Go
         assert_eq!(chunks.len(), expected_chunks, "Should split into multiple fallback chunks");
 
         // Check properties of the first chunk
-        assert_eq!(chunks[0].element_type, "file_chunk");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         assert_eq!(chunks[0].start_line, 1);
         assert_eq!(chunks[0].end_line, 200);
         assert!(chunks[0].content.starts_with("package main"));
@@ -168,7 +163,7 @@ package main // Need package for it to be valid Go
 
         // Check properties of the last chunk
         let last_chunk_idx = expected_chunks - 1;
-        assert_eq!(chunks[last_chunk_idx].element_type, "file_chunk");
+        assert_eq!(chunks[last_chunk_idx].element_type, "fallback_chunk_2");
         assert_eq!(chunks[last_chunk_idx].start_line, 401); // Chunk 1: 1-200, Chunk 2: 201-400, Chunk 3: 401-502
         assert_eq!(chunks[last_chunk_idx].end_line, 502); // Total 502 lines
         assert!(chunks[last_chunk_idx].content.starts_with("// Line 398")); // First line of third chunk

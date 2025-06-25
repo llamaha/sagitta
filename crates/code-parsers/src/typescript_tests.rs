@@ -119,8 +119,9 @@ type StringOrNumber = string | number;
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.ts")?;
 
+        // Since type aliases are filtered out, we expect a fallback chunk
         assert_eq!(chunks.len(), 1);
-        assert_chunk(&chunks[0], code, 2, 2, "type", "typescript");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 
@@ -160,7 +161,7 @@ Another comment
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.ts")?;
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "file");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         assert_eq!(chunks[0].language, "typescript");
         Ok(())
     }

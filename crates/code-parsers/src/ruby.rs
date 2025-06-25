@@ -4,6 +4,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
+use super::element_filter::is_core_element_type;
 
 /// Parser for Ruby language files using Tree-sitter.
 pub struct RubyParser {
@@ -88,29 +89,42 @@ impl SyntaxParser for RubyParser {
         for mat in matches {
             for capture in mat.captures {
                 if let Some(chunk) = self.node_to_chunk(capture.node, code, file_path) {
-                    // Basic filtering: Avoid capturing very small trivial blocks if desired
-                    // if chunk.element_type == "block" && chunk.content.len() < 20 {
-                    //     continue;
-                    // }
-                    chunks.push(chunk);
+                    // Only add chunks for core element types
+                    if is_core_element_type(&chunk.element_type, Some("ruby")) {
+                        chunks.push(chunk);
+                    }
                 }
             }
         }
 
-        // Fallback: If no chunks found in non-empty file, index whole file
+        // Fallback: If no chunks found in non-empty file, split into smaller chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Ruby items found in {}, indexing as whole file.",
+                "No top-level Ruby items found in {}, splitting into smaller chunks.",
                 file_path
             );
-             chunks.push(CodeChunk {
-                 content: code.to_string(),
-                 file_path: file_path.to_string(),
-                 start_line: 1,
-                 end_line: code.lines().count(),
-                 language: "ruby".to_string(),
-                 element_type: "file".to_string(),
-             });
+            let lines: Vec<&str> = code.lines().collect();
+            let num_lines = lines.len();
+            const RUBY_FALLBACK_CHUNK_SIZE: usize = 200; // Define local constant
+
+            for (i, chunk_lines) in lines.chunks(RUBY_FALLBACK_CHUNK_SIZE).enumerate() {
+                let start_line = i * RUBY_FALLBACK_CHUNK_SIZE + 1;
+                let end_line = std::cmp::min(start_line + RUBY_FALLBACK_CHUNK_SIZE - 1, num_lines);
+                let chunk_content = chunk_lines.join("\n");
+
+                if chunk_content.trim().is_empty() {
+                    continue;
+                }
+
+                chunks.push(CodeChunk {
+                    content: chunk_content,
+                    file_path: file_path.to_string(),
+                    start_line,
+                    end_line,
+                    language: "ruby".to_string(),
+                    element_type: format!("fallback_chunk_{}", i),
+                });
+            }
         }
 
         Ok(chunks)

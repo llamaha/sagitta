@@ -21,6 +21,7 @@ pub mod fallback;
 // Core parser trait and types
 pub mod parser;
 pub mod languages;
+pub mod element_filter;
 
 // Re-export core types for convenience
 pub use parser::{CodeChunk, SyntaxParser};

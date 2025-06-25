@@ -4,6 +4,7 @@ use tree_sitter::{Node, Parser, Query, QueryCursor};
 
 // Use super::parser instead of crate::syntax::parser
 use super::parser::{CodeChunk, SyntaxParser};
+use super::element_filter::is_core_element_type;
 
 const FALLBACK_CHUNK_SIZE: usize = 200; // Define chunk size in lines
 
@@ -89,7 +90,10 @@ impl SyntaxParser for GolangParser {
         for mat in matches {
             for capture in mat.captures {
                 if let Some(chunk) = self.node_to_chunk(capture.node, code, file_path) {
-                    chunks.push(chunk);
+                    // Only add chunks for core element types
+                    if is_core_element_type(&chunk.element_type, Some("go")) {
+                        chunks.push(chunk);
+                    }
                 }
             }
         }
@@ -119,7 +123,7 @@ impl SyntaxParser for GolangParser {
                     start_line,
                     end_line,
                     language: "go".to_string(),
-                    element_type: "file_chunk".to_string(), // Indicate it's a fallback chunk
+                    element_type: format!("fallback_chunk_{}", i),
                 });
             }
         }

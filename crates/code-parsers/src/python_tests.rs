@@ -159,7 +159,9 @@ pass # A simple pass statement
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
         // The current query/logic skips top-level docstrings and pass, leaving no chunks
-        assert!(chunks.is_empty(), "Expected no chunks for comments, docstrings, and pass");
+        // With fallback mechanism, we'll get a fallback chunk
+        assert_eq!(chunks.len(), 1, "Expected one fallback chunk");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
         Ok(())
     }
 
@@ -168,7 +170,9 @@ pass # A simple pass statement
         let code = "pass";
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
-        assert!(chunks.is_empty(), "Expected top-level pass to be skipped");
+        // With fallback mechanism, we'll get a fallback chunk
+        assert_eq!(chunks.len(), 1, "Expected one fallback chunk for pass statement");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
         Ok(())
     }
 
@@ -177,7 +181,9 @@ pass # A simple pass statement
         let code = "\"\"\"Module docstring\"\"\"";
         let mut parser = create_parser();
         let chunks = parser.parse(code, "test.py")?;
-        assert!(chunks.is_empty(), "Expected top-level docstring to be skipped");
+        // With fallback mechanism, we'll get a fallback chunk
+        assert_eq!(chunks.len(), 1, "Expected one fallback chunk for docstring");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0", "Should be a fallback chunk");
         Ok(())
     }
 } 

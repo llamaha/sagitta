@@ -151,7 +151,7 @@ Another comment
         let chunks = parser.parse(code, "test.js")?;
         // Expect fallback to whole file
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "file");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 
@@ -166,7 +166,7 @@ Another comment
         let chunks = parser.parse(code, "test.js")?;
         // Expect fallback to whole file as IIFE isn't captured by the current query
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].element_type, "file");
+        assert_eq!(chunks[0].element_type, "fallback_chunk_0");
         Ok(())
     }
 
