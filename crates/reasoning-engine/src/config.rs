@@ -44,6 +44,9 @@ pub struct ReasoningConfig {
     
     /// Control whether to use intent analyzer for response analysis
     pub enable_analyze_intent: bool,
+    
+    /// Enable autonomous execution mode (TODO-based execution)
+    pub autonomous_mode: bool,
 }
 
 impl Default for ReasoningConfig {
@@ -62,6 +65,7 @@ impl Default for ReasoningConfig {
             debug: DebugConfig::default(),
             enable_analyze_input: true,
             enable_analyze_intent: true,
+            autonomous_mode: false,
         }
     }
 }
@@ -371,6 +375,7 @@ impl ReasoningConfig {
         config.max_iterations = 20; // Lower for faster feedback
         config.enable_analyze_input = true;
         config.enable_analyze_intent = true;
+        config.autonomous_mode = false;
         config
     }
     
@@ -385,6 +390,7 @@ impl ReasoningConfig {
         config.max_iterations = 100; // Higher for complex tasks
         config.enable_analyze_input = true;
         config.enable_analyze_intent = true;
+        config.autonomous_mode = true;
         config
     }
 }

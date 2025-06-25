@@ -19,6 +19,61 @@ use super::{
     tool_execution::{ToolExecutionState, CachedToolResult},
 };
 
+/// Status of a TODO item
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TodoStatus {
+    /// Not yet started
+    Pending,
+    /// Currently being worked on
+    InProgress,
+    /// Successfully completed
+    Completed,
+    /// Failed to complete
+    Failed(String),
+    /// Skipped (with reason)
+    Skipped(String),
+}
+
+/// A single TODO item representing a task to be completed
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoItem {
+    /// Unique identifier for this TODO
+    pub id: Uuid,
+    /// Human-readable description of the task
+    pub description: String,
+    /// Current status of the TODO
+    pub status: TodoStatus,
+    /// When this TODO was created
+    pub created_at: DateTime<Utc>,
+    /// When this TODO was last updated
+    pub updated_at: DateTime<Utc>,
+    /// Optional dependencies on other TODOs (by ID)
+    pub dependencies: Vec<Uuid>,
+    /// Tools expected to be used for this TODO
+    pub expected_tools: Vec<String>,
+    /// Priority level (1-5, 5 being highest)
+    pub priority: u8,
+    /// Optional parent TODO ID for hierarchical tasks
+    pub parent_id: Option<Uuid>,
+}
+
+/// A list of TODO items representing a multi-step task
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodoList {
+    /// List of TODO items
+    pub items: Vec<TodoItem>,
+    /// When this TODO list was created
+    pub created_at: DateTime<Utc>,
+    /// Context about why this TODO list was created
+    pub context: String,
+    /// The original request that generated this TODO list
+    pub original_request: String,
+    /// Whether the user has approved this TODO list
+    pub user_approved: bool,
+    /// Current active TODO being worked on
+    pub active_todo_id: Option<Uuid>,
+}
+
 /// The main reasoning state that persists across reasoning steps
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningState {
@@ -106,6 +161,9 @@ pub struct ReasoningState {
 
     /// Task completion analyzer for focused analysis
     pub task_completion_analyzer: TaskCompletionAnalyzer,
+    
+    /// Active TODO list for multi-step task execution
+    pub active_todo_list: Option<TodoList>,
 }
 
 /// Context that accumulates knowledge across reasoning steps
@@ -219,6 +277,7 @@ impl ReasoningState {
             last_analyzed_content: None,
             content_analysis_cache: HashMap::new(),
             task_completion_analyzer: TaskCompletionAnalyzer::default(),
+            active_todo_list: None,
         }
     }
     
@@ -758,6 +817,267 @@ impl ReasoningState {
             self.confidence_score
         } else {
             0.0
+        }
+    }
+    
+    /// Set active TODO list
+    pub fn set_todo_list(&mut self, todo_list: TodoList) {
+        self.active_todo_list = Some(todo_list);
+        self.updated_at = Utc::now();
+    }
+    
+    /// Get the currently active TODO item
+    pub fn get_active_todo(&self) -> Option<&TodoItem> {
+        if let Some(todo_list) = &self.active_todo_list {
+            if let Some(active_id) = &todo_list.active_todo_id {
+                todo_list.items.iter().find(|item| &item.id == active_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    
+    /// Get the next pending TODO
+    pub fn get_next_todo(&self) -> Option<&TodoItem> {
+        if let Some(todo_list) = &self.active_todo_list {
+            // Find first pending TODO that has no pending dependencies
+            todo_list.items.iter().find(|item| {
+                matches!(item.status, TodoStatus::Pending) && 
+                self.are_dependencies_satisfied(&item.dependencies, &todo_list.items)
+            })
+        } else {
+            None
+        }
+    }
+    
+    /// Check if all dependencies are satisfied
+    fn are_dependencies_satisfied(&self, dependencies: &[Uuid], items: &[TodoItem]) -> bool {
+        dependencies.iter().all(|dep_id| {
+            items.iter().any(|item| 
+                &item.id == dep_id && matches!(item.status, TodoStatus::Completed)
+            )
+        })
+    }
+    
+    /// Update TODO status
+    pub fn update_todo_status(&mut self, todo_id: Uuid, new_status: TodoStatus) -> Result<()> {
+        if let Some(todo_list) = &mut self.active_todo_list {
+            if let Some(todo) = todo_list.items.iter_mut().find(|item| item.id == todo_id) {
+                // Log status transition for debugging
+                tracing::info!(
+                    "TODO {} status change: {:?} -> {:?}", 
+                    todo_id, todo.status, new_status
+                );
+                
+                todo.status = new_status.clone();
+                todo.updated_at = Utc::now();
+                
+                // Update active TODO if completing current one
+                if matches!(todo.status, TodoStatus::Completed | TodoStatus::Failed(_) | TodoStatus::Skipped(_)) {
+                    if todo_list.active_todo_id == Some(todo_id) {
+                        // Find next TODO to work on
+                        // Calculate next TODO ID from the current todo_list
+                        let next_todo_id = todo_list.items.iter().find(|item| {
+                            if matches!(item.status, TodoStatus::Pending) {
+                                // Check dependencies within this todo_list
+                                item.dependencies.iter().all(|dep_id| {
+                                    todo_list.items.iter().any(|t| 
+                                        &t.id == dep_id && matches!(t.status, TodoStatus::Completed)
+                                    )
+                                })
+                            } else {
+                                false
+                            }
+                        }).map(|t| t.id);
+                        todo_list.active_todo_id = next_todo_id;
+                        
+                        if let Some(next_id) = next_todo_id {
+                            tracing::info!("Moving to next TODO: {}", next_id);
+                        } else {
+                            tracing::info!("No more TODOs to process");
+                        }
+                    }
+                }
+                
+                // If a TODO failed, check if we should skip dependent TODOs
+                if matches!(new_status, TodoStatus::Failed(_)) {
+                    let failed_todo_id = todo_id;
+                    // Mark dependent TODOs as skipped
+                    let dependent_ids: Vec<Uuid> = todo_list.items.iter()
+                        .filter(|item| item.dependencies.contains(&failed_todo_id))
+                        .map(|item| item.id)
+                        .collect();
+                    
+                    for dep_id in dependent_ids {
+                        if let Some(dep_todo) = todo_list.items.iter_mut().find(|item| item.id == dep_id) {
+                            if matches!(dep_todo.status, TodoStatus::Pending) {
+                                dep_todo.status = TodoStatus::Skipped(format!(
+                                    "Skipped due to dependency {} failure", 
+                                    failed_todo_id
+                                ));
+                                dep_todo.updated_at = Utc::now();
+                                tracing::info!("Skipping dependent TODO {} due to failure", dep_id);
+                            }
+                        }
+                    }
+                }
+                
+                self.updated_at = Utc::now();
+                Ok(())
+            } else {
+                Err(crate::error::ReasoningError::state(
+                    "todo_update",
+                    format!("TODO with ID {} not found", todo_id)
+                ))
+            }
+        } else {
+            Err(crate::error::ReasoningError::state(
+                "todo_update",
+                "No active TODO list".to_string()
+            ))
+        }
+    }
+    
+    /// Set active TODO
+    pub fn set_active_todo(&mut self, todo_id: Uuid) -> Result<()> {
+        if let Some(todo_list) = &mut self.active_todo_list {
+            if todo_list.items.iter().any(|item| item.id == todo_id) {
+                todo_list.active_todo_id = Some(todo_id);
+                self.updated_at = Utc::now();
+                Ok(())
+            } else {
+                Err(crate::error::ReasoningError::state(
+                    "todo_activate",
+                    format!("TODO with ID {} not found", todo_id)
+                ))
+            }
+        } else {
+            Err(crate::error::ReasoningError::state(
+                "todo_activate",
+                "No active TODO list".to_string()
+            ))
+        }
+    }
+    
+    /// Check if all TODOs are completed
+    pub fn are_all_todos_completed(&self) -> bool {
+        if let Some(todo_list) = &self.active_todo_list {
+            todo_list.items.iter().all(|item| 
+                matches!(item.status, TodoStatus::Completed | TodoStatus::Skipped(_))
+            )
+        } else {
+            true // No TODO list means no pending TODOs
+        }
+    }
+    
+    /// Get TODO completion progress (0.0 to 1.0)
+    pub fn get_todo_progress(&self) -> f32 {
+        if let Some(todo_list) = &self.active_todo_list {
+            let total = todo_list.items.len() as f32;
+            if total == 0.0 {
+                return 1.0;
+            }
+            
+            let completed = todo_list.items.iter()
+                .filter(|item| matches!(item.status, TodoStatus::Completed | TodoStatus::Skipped(_)))
+                .count() as f32;
+                
+            completed / total
+        } else {
+            0.0
+        }
+    }
+    
+    /// Check if in TODO execution mode
+    pub fn is_in_todo_execution_mode(&self) -> bool {
+        self.active_todo_list.as_ref()
+            .map(|list| list.user_approved && !self.are_all_todos_completed())
+            .unwrap_or(false)
+    }
+    
+    /// Handle TODO execution error
+    pub fn handle_todo_error(&mut self, todo_id: Uuid, error: String) -> Result<()> {
+        // Update TODO status to failed
+        self.update_todo_status(todo_id, TodoStatus::Failed(error.clone()))?;
+        
+        // Check if we can continue with other TODOs
+        if let Some(todo_list) = &self.active_todo_list {
+            let failed_todo = todo_list.items.iter().find(|t| t.id == todo_id);
+            
+            if let Some(todo) = failed_todo {
+                // Log the failure
+                tracing::error!(
+                    "TODO '{}' failed: {}", 
+                    todo.description, 
+                    error
+                );
+                
+                // Check if this was a critical TODO (has many dependents)
+                let dependent_count = todo_list.items.iter()
+                    .filter(|t| t.dependencies.contains(&todo_id))
+                    .count();
+                
+                if dependent_count > 0 {
+                    tracing::warn!(
+                        "TODO failure affects {} dependent tasks", 
+                        dependent_count
+                    );
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Get TODO execution summary
+    pub fn get_todo_summary(&self) -> Option<String> {
+        if let Some(todo_list) = &self.active_todo_list {
+            let total = todo_list.items.len();
+            let completed = todo_list.items.iter()
+                .filter(|t| matches!(t.status, TodoStatus::Completed))
+                .count();
+            let failed = todo_list.items.iter()
+                .filter(|t| matches!(t.status, TodoStatus::Failed(_)))
+                .count();
+            let skipped = todo_list.items.iter()
+                .filter(|t| matches!(t.status, TodoStatus::Skipped(_)))
+                .count();
+            let pending = todo_list.items.iter()
+                .filter(|t| matches!(t.status, TodoStatus::Pending))
+                .count();
+            let in_progress = todo_list.items.iter()
+                .filter(|t| matches!(t.status, TodoStatus::InProgress))
+                .count();
+            
+            let mut summary = format!(
+                "TODO Summary: {}/{} tasks completed\n",
+                completed, total
+            );
+            
+            if in_progress > 0 {
+                summary.push_str(&format!("- {} in progress\n", in_progress));
+            }
+            if pending > 0 {
+                summary.push_str(&format!("- {} pending\n", pending));
+            }
+            if failed > 0 {
+                summary.push_str(&format!("- {} failed\n", failed));
+                // Add details of failed tasks
+                for todo in &todo_list.items {
+                    if let TodoStatus::Failed(ref error) = todo.status {
+                        summary.push_str(&format!("  • {}: {}\n", todo.description, error));
+                    }
+                }
+            }
+            if skipped > 0 {
+                summary.push_str(&format!("- {} skipped\n", skipped));
+            }
+            
+            Some(summary)
+        } else {
+            None
         }
     }
 }
