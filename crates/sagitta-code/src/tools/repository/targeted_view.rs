@@ -176,6 +176,7 @@ impl TargetedViewTool {
                 max_calls_per_method: 3,
                 include_context: false,
                 include_docstrings: false,
+                ..Default::default()
             };
 
             let fallback_repo_map = generate_repo_map(&repo.local_path, fallback_map_options)
@@ -264,6 +265,7 @@ impl TargetedViewTool {
             max_calls_per_method: 5,
             include_context: params.include_context,
             include_docstrings: true,
+            ..Default::default()
         };
 
         let repo_map_result = generate_repo_map(&repo.local_path, map_options)

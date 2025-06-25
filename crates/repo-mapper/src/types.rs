@@ -161,6 +161,27 @@ impl MethodType {
     }
 }
 
+/// Pagination information for repository map results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationInfo {
+    /// Total number of files in the complete result
+    pub total_files: usize,
+    /// Total number of lines in the complete output
+    pub total_lines: usize,
+    /// Number of files per page
+    pub files_per_page: usize,
+    /// Current page number (1-based)
+    pub current_page: usize,
+    /// Total number of pages
+    pub total_pages: usize,
+    /// Whether there is a next page
+    pub has_next: bool,
+    /// Whether there is a previous page
+    pub has_previous: bool,
+    /// Files included in current page
+    pub files_in_page: Vec<String>,
+}
+
 /// Configuration options for repository mapping
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoMapOptions {
@@ -178,6 +199,14 @@ pub struct RepoMapOptions {
     pub include_context: bool,
     /// Whether to extract and include docstrings
     pub include_docstrings: bool,
+    /// Maximum number of files per page (None = no pagination)
+    pub files_per_page: Option<usize>,
+    /// Page number to retrieve (1-based, None = all pages)
+    pub page: Option<usize>,
+    /// Maximum lines of output before auto-pagination (None = no limit)
+    pub max_output_lines: Option<usize>,
+    /// Whether to enable smart sorting (entry points first)
+    pub smart_sort: bool,
 }
 
 impl Default for RepoMapOptions {
@@ -190,6 +219,10 @@ impl Default for RepoMapOptions {
             max_calls_per_method: 10,
             include_context: true,
             include_docstrings: true,
+            files_per_page: None,
+            page: None,
+            max_output_lines: Some(1000), // Auto-paginate after 1000 lines
+            smart_sort: true,
         }
     }
 }
@@ -203,6 +236,10 @@ pub struct RepoMapResult {
     pub summary: RepoMapSummary,
     /// Raw method information organized by file
     pub methods_by_file: HashMap<String, Vec<MethodInfo>>,
+    /// Pagination information if applicable
+    pub pagination: Option<PaginationInfo>,
+    /// Cache key for retrieving full results
+    pub cache_key: Option<String>,
 }
 
 /// Summary statistics about a repository mapping

@@ -12,16 +12,16 @@ pub fn scan_line(
     let function_pattern = Regex::new(r"^\s*def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
     let class_pattern = Regex::new(r"^\s*class\s+([a-zA-Z0-9_]+)").unwrap();
     let async_function_pattern = Regex::new(r"^\s*async\s+def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
-    let method_pattern = Regex::new(r"^\s+def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
-    let static_method_pattern = Regex::new(r"^\s+@staticmethod\s*\n\s*def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
-    let class_method_pattern = Regex::new(r"^\s+@classmethod\s*\n\s*def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
+    let _method_pattern = Regex::new(r"^\s+def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
+    let _static_method_pattern = Regex::new(r"^\s+@staticmethod\s*\n\s*def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
+    let _class_method_pattern = Regex::new(r"^\s+@classmethod\s*\n\s*def\s+([a-zA-Z0-9_]+)\s*\(").unwrap();
 
     // Check for async functions first (more specific)
     if let Some(captures) = async_function_pattern.captures(line) {
         let params = extract_params(line);
         let method_calls = extract_method_calls(context, max_calls);
         methods.push(MethodInfo {
-            name: format!("async {}", captures[1].to_string()),
+            name: format!("async {}", &captures[1]),
             method_type: MethodType::PythonAsyncFunction,
             params,
             context: context.to_string(),

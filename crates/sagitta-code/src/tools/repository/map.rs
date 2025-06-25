@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::utils::errors::SagittaCodeError;
-use repo_mapper::{generate_repo_map, RepoMapOptions};
+use repo_mapper::{generate_repo_map, get_cached_page, RepoMapOptions};
 use sagitta_search::config::AppConfig;
 
 /// Parameters for mapping a repository
@@ -25,6 +25,12 @@ pub struct RepositoryMapParams {
     pub file_extension: Option<String>,
     /// Optional: Content pattern to filter files by
     pub content_pattern: Option<String>,
+    /// Optional: Number of files per page (enables pagination)
+    pub files_per_page: Option<usize>,
+    /// Optional: Page number to retrieve (1-based)
+    pub page: Option<usize>,
+    /// Optional: Cache key for retrieving subsequent pages
+    pub cache_key: Option<String>,
 }
 
 fn default_verbosity() -> u8 {
@@ -47,6 +53,20 @@ impl RepositoryMapTool {
     
     /// Generate a repository map using the repo-mapper crate
     async fn generate_map(&self, params: &RepositoryMapParams) -> Result<serde_json::Value, SagittaCodeError> {
+        // Try to use cache if cache_key is provided
+        if let Some(ref cache_key) = params.cache_key {
+            if let (Some(page), Some(files_per_page)) = (params.page, params.files_per_page) {
+                match get_cached_page(cache_key, page, files_per_page) {
+                    Ok(result) => {
+                        return Ok(self.format_response(&result, &params.name.as_ref().unwrap_or(&"cached".to_string())));
+                    }
+                    Err(_) => {
+                        // Cache miss, continue with normal flow
+                    }
+                }
+            }
+        }
+
         let repo_manager = self.repo_manager.lock().await;
         
         // Check if repository exists and get its path
@@ -75,6 +95,10 @@ impl RepositoryMapTool {
             file_extension: params.file_extension.clone(),
             content_pattern: params.content_pattern.clone(),
             paths: params.paths.clone(),
+            files_per_page: params.files_per_page,
+            page: params.page,
+            max_output_lines: Some(1000), // Auto-paginate large outputs
+            smart_sort: true,
             max_calls_per_method: match params.verbosity {
                 0 => 3,
                 1 => 10,
@@ -84,40 +108,46 @@ impl RepositoryMapTool {
             include_docstrings: params.verbosity >= 1,
         };
 
-        // Store values we need before moving options
-        let max_calls_per_method = options.max_calls_per_method;
-        let include_context = options.include_context;
-        let include_docstrings = options.include_docstrings;
-
         // Generate the repository map
         let result = generate_repo_map(repo_path, options)
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to generate repository map: {}", e)))?;
-
-        // Convert to JSON response
-        Ok(serde_json::json!({
+        
+        Ok(self.format_response(&result, &repo_name))
+    }
+    
+    fn format_response(&self, result: &repo_mapper::RepoMapResult, repo_name: &str) -> serde_json::Value {
+        let mut response = serde_json::json!({
             "success": true,
             "repository_name": repo_name,
-            "repository_path": repo_path.to_string_lossy(),
-            "verbosity": params.verbosity,
             "map_content": result.map_content,
-            "summary": {
-                "files_scanned": result.summary.files_scanned,
-                "total_methods": result.summary.total_methods,
-                "file_type_counts": result.summary.file_type_counts,
-                "method_type_counts": result.summary.method_type_counts,
-                "languages_found": result.summary.languages_found,
-            },
-            "raw_methods_by_file": result.methods_by_file,
-            "options_used": {
-                "verbosity": params.verbosity,
-                "file_extension": params.file_extension,
-                "content_pattern": params.content_pattern,
-                "paths": params.paths,
-                "max_calls_per_method": max_calls_per_method,
-                "include_context": include_context,
-                "include_docstrings": include_docstrings,
-            }
-        }))
+            "summary": result.summary,
+        });
+        
+        // Add pagination info if present
+        if let Some(ref pagination) = result.pagination {
+            response["pagination"] = serde_json::json!(pagination);
+            
+            // Add navigation hints for LLM
+            response["navigation_hint"] = if pagination.has_next {
+                format!("To see more files, request page {} with files_per_page={}", 
+                    pagination.current_page + 1, 
+                    pagination.files_per_page).into()
+            } else {
+                "This is the last page.".into()
+            };
+        }
+        
+        // Add cache key if present
+        if let Some(ref cache_key) = result.cache_key {
+            response["cache_key"] = serde_json::json!(cache_key);
+        }
+        
+        // Only include raw methods if not paginated
+        if result.pagination.is_none() {
+            response["raw_methods_by_file"] = serde_json::json!(result.methods_by_file);
+        }
+        
+        response
     }
 }
 
@@ -126,34 +156,52 @@ impl Tool for RepositoryMapTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "repository_map".to_string(),
-            description: "Generate a high-level map of a repository's code structure using the repo-mapper crate for reliable name extraction. **Best for understanding large codebases** - provides an overview of functions, structs, classes, and their relationships without returning full file contents. Use this before 'targeted_view' to understand the codebase structure, or use it standalone when you need to understand project organization and architecture.\n\nIMPORTANT: If a repository is currently selected (shown in the UI dropdown), you can omit the 'name' parameter to map that repository. If no repository is selected or you want to map a different repository, provide the 'name' parameter.".to_string(),
+            description: "Generate a high-level map of a repository's code structure. Automatically paginates large results (>1000 lines). For subsequent pages, use the cache_key returned in the first response.".to_string(),
             category: ToolCategory::Repository,
             is_required: false,
             parameters: serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["name"],
+                "required": [],
                 "properties": {
                     "name": {
-                        "type": "string",
-                        "description": "Name of the repository to map"
+                        "type": ["string", "null"],
+                        "description": "Name of the repository to map (uses current context if not provided)"
                     },
                     "verbosity": {
                         "type": ["integer", "null"],
-                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed)"
+                        "description": "Verbosity level (0=minimal, 1=normal, 2=detailed)",
+                        "minimum": 0,
+                        "maximum": 2,
+                        "default": 1
                     },
                     "paths": {
                         "type": ["array", "null"],
                         "items": {"type": "string"},
-                        "description": "Optional: Specific paths to scan within the repository"
+                        "description": "Specific paths to scan within the repository"
                     },
                     "file_extension": {
                         "type": ["string", "null"],
-                        "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js')"
+                        "description": "Filter by file extension (e.g., 'rs', 'py', 'js')"
                     },
                     "content_pattern": {
                         "type": ["string", "null"],
-                        "description": "Optional: Content pattern to filter files by"
+                        "description": "Content pattern to filter files by"
+                    },
+                    "files_per_page": {
+                        "type": ["integer", "null"],
+                        "description": "Number of files per page (enables manual pagination)",
+                        "minimum": 1,
+                        "maximum": 100
+                    },
+                    "page": {
+                        "type": ["integer", "null"],
+                        "description": "Page number to retrieve (1-based)",
+                        "minimum": 1
+                    },
+                    "cache_key": {
+                        "type": ["string", "null"],
+                        "description": "Cache key from previous response for retrieving subsequent pages"
                     }
                 }
             }),
@@ -204,8 +252,8 @@ mod tests {
         
         assert_eq!(definition.name, "repository_map");
         assert!(!definition.description.is_empty());
-        assert!(definition.description.contains("repo-mapper crate"));
-        assert!(definition.description.contains("reliable name extraction"));
+        assert!(definition.description.contains("high-level map"));
+        assert!(definition.description.contains("Automatically paginates"));
         assert_eq!(definition.category, ToolCategory::Repository);
         assert!(!definition.is_required);
         
@@ -219,9 +267,9 @@ mod tests {
         assert!(properties.contains_key("file_extension"));
         assert!(properties.contains_key("content_pattern"));
         
-        // Check required fields
+        // Check required fields (should be empty now)
         let required = params.get("required").unwrap().as_array().unwrap();
-        assert!(required.contains(&serde_json::json!("name")));
+        assert!(required.is_empty());
     }
 
     #[tokio::test]
