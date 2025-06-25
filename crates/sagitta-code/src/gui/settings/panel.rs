@@ -42,7 +42,7 @@ pub struct SettingsPanel {
     pub openrouter_api_key: String,
     pub openrouter_model: String,
     pub openrouter_max_reasoning_steps: u32,
-    pub openrouter_max_history_size: usize,
+    pub openrouter_max_context_tokens: usize,
     
     // Conversation config fields
     pub analyze_input: bool,
@@ -77,7 +77,7 @@ impl SettingsPanel {
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
             openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
             openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
-            openrouter_max_history_size: initial_sagitta_code_config.openrouter.max_history_size,
+            openrouter_max_context_tokens: initial_sagitta_code_config.openrouter.max_context_tokens,
             
             // Conversation config fields
             analyze_input: initial_sagitta_code_config.conversation.analyze_input,
@@ -161,11 +161,11 @@ impl SettingsPanel {
                                         .speed(1.0));
                                     ui.end_row();
                                     
-                                    ui.label("Max History Size:");
-                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_history_size)
-                                        .range(1..=100)
-                                        .speed(1.0))
-                                        .on_hover_text("Maximum number of messages to include in conversation history");
+                                    ui.label("Max Context Tokens:");
+                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_context_tokens)
+                                        .range(0..=128000)
+                                        .speed(100.0))
+                                        .on_hover_text("Maximum context tokens (0 = no limit). Default: 64000");
                                     ui.end_row();
                                 });
                             
@@ -452,7 +452,7 @@ impl SettingsPanel {
         };
         updated_config.openrouter.model = self.openrouter_model.clone();
         updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
-        updated_config.openrouter.max_history_size = self.openrouter_max_history_size;
+        updated_config.openrouter.max_context_tokens = self.openrouter_max_context_tokens;
         
         // Update conversation settings
         updated_config.conversation.analyze_input = self.analyze_input;
@@ -526,7 +526,7 @@ mod tests {
                 api_key: Some("test-api-key".to_string()),
                 model: "test-model".to_string(),
                 provider_preferences: None,
-                max_history_size: 20,
+                max_context_tokens: 64000,
                 max_reasoning_steps: 10,
                 request_timeout: 30,
             },
@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, "test-api-key");
         assert_eq!(panel.openrouter_model, "test-model");
         assert_eq!(panel.openrouter_max_reasoning_steps, 10);
-        assert_eq!(panel.openrouter_max_history_size, 20);
+        assert_eq!(panel.openrouter_max_context_tokens, 64000);
 
         assert!(!panel.is_open);
     }
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, "test-api-key");
         assert_eq!(panel.openrouter_model, "test-model");
         assert_eq!(panel.openrouter_max_reasoning_steps, 10);
-        assert_eq!(panel.openrouter_max_history_size, 20);
+        assert_eq!(panel.openrouter_max_context_tokens, 64000);
     }
 
     #[test]
@@ -636,14 +636,14 @@ mod tests {
         panel.openrouter_api_key = "updated-api-key".to_string();
         panel.openrouter_model = "updated-model".to_string();
         panel.openrouter_max_reasoning_steps = 100;
-        panel.openrouter_max_history_size = 50;
+        panel.openrouter_max_context_tokens = 16000;
         
         let config = panel.create_updated_sagitta_code_config();
         
         assert_eq!(config.openrouter.api_key, Some("updated-api-key".to_string()));
         assert_eq!(config.openrouter.model, "updated-model");
         assert_eq!(config.openrouter.max_reasoning_steps, 100);
-        assert_eq!(config.openrouter.max_history_size, 50);
+        assert_eq!(config.openrouter.max_context_tokens, 16000);
     }
 
     #[test]
@@ -682,7 +682,7 @@ mod tests {
         assert_eq!(panel.openrouter_api_key, default_sagitta_code_config.openrouter.api_key.unwrap_or_default());
         assert_eq!(panel.openrouter_model, default_sagitta_code_config.openrouter.model);
         assert_eq!(panel.openrouter_max_reasoning_steps, default_sagitta_code_config.openrouter.max_reasoning_steps);
-        assert_eq!(panel.openrouter_max_history_size, default_sagitta_code_config.openrouter.max_history_size);
+        assert_eq!(panel.openrouter_max_context_tokens, default_sagitta_code_config.openrouter.max_context_tokens);
     }
 
     #[test]

@@ -138,15 +138,28 @@ EXAMPLES OF MULTI-STEP TASKS:
 
 CRITICAL INSTRUCTIONS FOR WRAP-UP AND FOLLOW-UP:
 - When you complete a task, provide a clear summary of what you accomplished
-- Only ask follow-up questions if:
-  - The task is ambiguous or incomplete
-  - There's a natural next step that requires user confirmation
+- ONLY ask follow-up questions in these specific cases:
+  - The task explicitly requires user confirmation (e.g., "ask me before proceeding")
+  - You encountered an error that prevents task completion
   - The user explicitly asked for suggestions or next steps
-- Do NOT ask follow-up questions just to be helpful or proactive
-- Do NOT end every response with "Would you like me to..." or similar questions
-- If the task is complete and clear, simply state what was done without soliciting more work
+- Do NOT ask "Would you like me to continue?" or similar questions - just continue working
+- Do NOT ask for permission to proceed with obvious next steps
+- If working through a TODO list or multi-step plan, continue until all steps are complete
+- Only return control to the user when the entire task is finished or blocked
 
-Remember: Your goal is to be thorough, communicative, and complete the user's full request while keeping them informed of your progress at each step. ALWAYS start with acknowledgment and a plan before executing any tools, and ALWAYS end with a clear wrap-up."#;
+Remember: Your goal is to be thorough, communicative, and complete the user's full request while keeping them informed of your progress at each step. ALWAYS start with acknowledgment and a plan before executing any tools, and ALWAYS end with a clear wrap-up.
+
+AUTONOMOUS MODE INSTRUCTIONS:
+When operating in autonomous mode with multi-step tasks:
+- Create a clear, numbered TODO list for complex multi-step requests
+- Format TODO lists as numbered items that are specific and actionable
+- Each TODO should represent a concrete step that can be independently executed
+- After creating a TODO list, wait for user approval before proceeding
+- Once approved, work through ALL TODOs systematically without stopping
+- Do NOT ask for approval between TODO items - complete the entire list
+- Mark each TODO as completed as you finish it
+- Only return control to the user when ALL TODOs are complete or if an error occurs
+- If a TODO fails, attempt to continue with remaining TODOs if possible"#;
 
 /// Helper function to convert AgentMessages to ReasoningEngine's LlmMessages
 fn convert_agent_messages_to_reasoning_llm_messages(
@@ -330,6 +343,7 @@ impl Agent {
             conversation_manager,
             config.conversation.clone(),
             None, // TODO: Detect workspace ID from project context
+            config.openrouter.max_context_tokens,
             system_prompt.clone(),
         ).await
         .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation-aware history manager: {}", e)))?;
@@ -359,7 +373,9 @@ impl Agent {
         let llm_adapter_for_re = Arc::new(ReasoningLlmClientAdapter::new(llm_client.clone(), tool_registry.clone()));
 
         // 2. Prepare reasoning_config
-        let reasoning_config_data = create_reasoning_config(&config);
+        // Get initial agent mode (default if not specified)
+        let initial_agent_mode = AgentMode::default(); // This will be ToolsWithConfirmation
+        let reasoning_config_data = create_reasoning_config(&config, initial_agent_mode);
         info!("ReasoningEngine config data created: {:?}", reasoning_config_data);
 
         // 3. Attempt to create the ReasoningEngine

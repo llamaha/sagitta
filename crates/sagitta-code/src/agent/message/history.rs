@@ -13,9 +13,7 @@ use crate::utils::errors::SagittaCodeError;
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
 use crate::agent::conversation::types::{Conversation, ProjectContext, ProjectType};
 use crate::config::types::ConversationConfig;
-
-/// The default maximum history size
-pub const DEFAULT_MAX_HISTORY_SIZE: usize = 20;
+use crate::llm::token_counter::TokenCounter;
 
 /// A history of messages in the conversation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,45 +21,86 @@ pub struct MessageHistory {
     /// The messages in the history
     pub messages: Vec<AgentMessage>,
     
-    /// The maximum number of messages to keep
-    pub max_size: usize,
+    /// Maximum context tokens (0 = no limit)
+    #[serde(default)]
+    pub max_context_tokens: usize,
+    
+    /// Total tokens in the current history
+    #[serde(skip, default)]
+    pub total_tokens: usize,
+    
+    /// Token counter instance
+    #[serde(skip)]
+    token_counter: Option<TokenCounter>,
 }
 
 impl MessageHistory {
     /// Create a new empty message history
-    pub fn new(max_size: usize) -> Self {
+    pub fn new() -> Self {
+        Self::with_token_limit(0)
+    }
+    
+    /// Create a new message history with token limit
+    pub fn with_token_limit(max_context_tokens: usize) -> Self {
         Self {
             messages: Vec::new(),
-            max_size,
+            max_context_tokens,
+            total_tokens: 0,
+            token_counter: TokenCounter::new().ok(),
         }
     }
     
     /// Create a new message history with a system prompt
-    pub fn with_system_prompt(max_size: usize, system_prompt: impl Into<String>) -> Self {
-        let mut history = Self::new(max_size);
+    pub fn with_system_prompt(system_prompt: impl Into<String>) -> Self {
+        let mut history = Self::new();
         history.add_system_message(system_prompt);
         history
     }
     
+    /// Get or initialize the token counter
+    fn get_token_counter(&mut self) -> Option<&TokenCounter> {
+        if self.token_counter.is_none() {
+            self.token_counter = TokenCounter::new().ok();
+        }
+        self.token_counter.as_ref()
+    }
+    
+    /// Calculate tokens for a message
+    fn calculate_message_tokens(&mut self, message: &AgentMessage) -> usize {
+        let Some(counter) = self.get_token_counter() else {
+            // Fallback: estimate 4 characters per token
+            return message.content.len() / 4;
+        };
+        
+        let role_str = match message.role {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::Function => "function",
+        };
+        
+        counter.count_message_tokens(role_str, &message.content)
+    }
+    
     /// Add a new message to the history
     pub fn add_message(&mut self, message: AgentMessage) {
-        // If we're at max capacity, remove the oldest non-system message
-        if self.messages.len() >= self.max_size {
-            // Find the index of the oldest non-system message
-            if let Some(index) = self.messages.iter()
-                .enumerate()
-                .filter(|(_, msg)| msg.role != Role::System)
-                .map(|(i, _)| i)
-                .next()
-            {
-                self.messages.remove(index);
-            } else {
-                // If all messages are system messages, remove the oldest one
-                self.messages.remove(0);
-            }
+        // Calculate tokens for the new message
+        let new_message_tokens = self.calculate_message_tokens(&message);
+        
+        // Add the message first
+        self.messages.push(message);
+        self.total_tokens += new_message_tokens;
+        
+        // Apply token-based truncation if we have a token limit
+        if self.max_context_tokens > 0 {
+            self.truncate_to_token_limit(self.max_context_tokens);
         }
         
-        self.messages.push(message);
+        debug!("Message history: {} messages, ~{} tokens (limit: {})", 
+            self.messages.len(), 
+            self.total_tokens, 
+            if self.max_context_tokens > 0 { self.max_context_tokens.to_string() } else { "none".to_string() }
+        );
     }
     
     /// Add a system message to the history
@@ -92,9 +131,61 @@ impl MessageHistory {
     /// Remove a message by its ID
     pub fn remove_message(&mut self, id: Uuid) -> Option<AgentMessage> {
         if let Some(index) = self.messages.iter().position(|m| m.id == id) {
-            Some(self.messages.remove(index))
+            let removed_msg = self.messages.remove(index);
+            let removed_tokens = self.calculate_message_tokens(&removed_msg);
+            self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
+            Some(removed_msg)
         } else {
             None
+        }
+    }
+    
+    /// Get the current total token count
+    pub fn get_total_tokens(&self) -> usize {
+        self.total_tokens
+    }
+    
+    /// Check if we're approaching a token limit
+    pub fn is_approaching_token_limit(&self, max_tokens: usize) -> bool {
+        if max_tokens == 0 {
+            false // No limit set
+        } else {
+            self.total_tokens > (max_tokens * 8 / 10) // 80% threshold
+        }
+    }
+    
+    /// Truncate history to fit within token limit
+    pub fn truncate_to_token_limit(&mut self, max_tokens: usize) {
+        if max_tokens == 0 || self.total_tokens <= max_tokens {
+            return;
+        }
+        
+        info!("Truncating message history from {} tokens to fit within {} limit", self.total_tokens, max_tokens);
+        
+        // Keep system messages and remove oldest non-system messages
+        while self.total_tokens > max_tokens && self.messages.len() > 1 {
+            if let Some(index) = self.messages.iter()
+                .enumerate()
+                .filter(|(_, msg)| msg.role != Role::System)
+                .map(|(i, _)| i)
+                .next()
+            {
+                let removed_msg = self.messages.remove(index);
+                let removed_tokens = self.calculate_message_tokens(&removed_msg);
+                self.total_tokens = self.total_tokens.saturating_sub(removed_tokens);
+                debug!("Removed message at index {} (~{} tokens)", index, removed_tokens);
+            } else {
+                break; // Only system messages left
+            }
+        }
+    }
+    
+    /// Recalculate total tokens from all messages
+    pub fn recalculate_total_tokens(&mut self) {
+        self.total_tokens = 0;
+        let messages = self.messages.clone(); // Clone to avoid borrow issues
+        for msg in messages {
+            self.total_tokens += self.calculate_message_tokens(&msg);
         }
     }
     
@@ -228,16 +319,23 @@ pub struct MessageHistoryManager {
 
 impl MessageHistoryManager {
     /// Create a new MessageHistoryManager
-    pub fn new(max_size: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            history: Arc::new(RwLock::new(MessageHistory::new(max_size))),
+            history: Arc::new(RwLock::new(MessageHistory::new())),
+        }
+    }
+    
+    /// Create a new MessageHistoryManager with token limit
+    pub fn with_token_limit(max_context_tokens: usize) -> Self {
+        Self {
+            history: Arc::new(RwLock::new(MessageHistory::with_token_limit(max_context_tokens))),
         }
     }
     
     /// Create a new MessageHistoryManager with a system prompt
-    pub fn with_system_prompt(max_size: usize, system_prompt: impl Into<String>) -> Self {
+    pub fn with_system_prompt(system_prompt: impl Into<String>) -> Self {
         Self {
-            history: Arc::new(RwLock::new(MessageHistory::with_system_prompt(max_size, system_prompt))),
+            history: Arc::new(RwLock::new(MessageHistory::with_system_prompt(system_prompt))),
         }
     }
     
@@ -342,6 +440,9 @@ pub struct ConversationAwareHistoryManager {
     
     /// Workspace ID for project context
     workspace_id: Option<Uuid>,
+    
+    /// Maximum context tokens for history truncation
+    max_context_tokens: usize,
 }
 
 impl ConversationAwareHistoryManager {
@@ -350,6 +451,7 @@ impl ConversationAwareHistoryManager {
         conversation_manager: ConversationManagerImpl,
         config: ConversationConfig,
         workspace_id: Option<Uuid>,
+        max_context_tokens: usize,
     ) -> Result<Self, SagittaCodeError> {
         Ok(Self {
             conversation_manager: Arc::new(tokio::sync::Mutex::new(conversation_manager)),
@@ -357,6 +459,7 @@ impl ConversationAwareHistoryManager {
             system_prompt: String::new(),
             config,
             workspace_id,
+            max_context_tokens,
         })
     }
     
@@ -365,6 +468,7 @@ impl ConversationAwareHistoryManager {
         conversation_manager: ConversationManagerImpl,
         config: ConversationConfig,
         workspace_id: Option<Uuid>,
+        max_context_tokens: usize,
         system_prompt: impl Into<String>,
     ) -> Result<Self, SagittaCodeError> {
         Ok(Self {
@@ -373,6 +477,7 @@ impl ConversationAwareHistoryManager {
             system_prompt: system_prompt.into(),
             config,
             workspace_id,
+            max_context_tokens,
         })
     }
     
@@ -570,10 +675,19 @@ impl ConversationAwareHistoryManager {
     /// Get the messages as LlmMessages for the LlmClient
     pub async fn to_llm_messages(&self) -> Vec<LlmMessage> {
         let messages = self.get_messages().await;
-        let history = MessageHistory {
+        let mut history = MessageHistory {
             messages,
-            max_size: usize::MAX, // No limit for conversion
+            max_context_tokens: self.max_context_tokens,
+            total_tokens: 0,
+            token_counter: None,
         };
+        
+        // Calculate total tokens and apply truncation if needed
+        history.recalculate_total_tokens();
+        if history.max_context_tokens > 0 {
+            history.truncate_to_token_limit(history.max_context_tokens);
+        }
+        
         history.to_llm_messages()
     }
     

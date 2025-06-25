@@ -187,7 +187,6 @@ mod tests {
 [openrouter]
 api_key = "test-key-123"
 model = "openai/gpt-4"
-max_history_size = 25
 max_reasoning_steps = 10
 request_timeout = 30
 
@@ -213,7 +212,6 @@ log_to_file = false
         
         assert_eq!(result.openrouter.api_key, Some("test-key-123".to_string()));
         assert_eq!(result.openrouter.model, "openai/gpt-4");
-        assert_eq!(result.openrouter.max_history_size, 25);
     }
 
     #[test]

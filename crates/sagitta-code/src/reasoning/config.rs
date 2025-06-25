@@ -4,8 +4,9 @@ use reasoning_engine::{
 use std::time::Duration;
 
 use crate::config::types::SagittaCodeConfig;
+use crate::agent::state::types::AgentMode;
 
-pub fn create_reasoning_config(agent_config: &SagittaCodeConfig) -> ReasoningConfig {
+pub fn create_reasoning_config(agent_config: &SagittaCodeConfig, agent_mode: AgentMode) -> ReasoningConfig {
     ReasoningConfig {
         max_iterations: agent_config.openrouter.max_reasoning_steps, // Respect user's configured setting
         confidence_threshold: 0.7,
@@ -77,5 +78,6 @@ pub fn create_reasoning_config(agent_config: &SagittaCodeConfig) -> ReasoningCon
         },
         enable_analyze_input: agent_config.conversation.analyze_input,
         enable_analyze_intent: agent_config.conversation.analyze_intent,
+        autonomous_mode: matches!(agent_mode, AgentMode::FullyAutonomous),
     }
 } 

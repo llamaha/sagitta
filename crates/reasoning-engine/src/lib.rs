@@ -60,6 +60,7 @@ pub mod patterns;
 pub mod confidence;
 pub mod orchestration;
 pub mod config;
+pub mod todo;
 
 // Re-export main types for convenience
 pub use error::{ReasoningError, Result};
@@ -81,6 +82,8 @@ use serde_json::Value;
 use chrono::Utc;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use crate::todo::{TodoParser, TodoExecutor, should_create_todo_list};
+use crate::state::core::{TodoItem, TodoList, TodoStatus};
 
 /// The main reasoning engine that orchestrates all components
 pub struct ReasoningEngine<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> {
@@ -321,6 +324,129 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
             // So, nothing to do here for llm_conversation_history regarding analyze_input.
         }
 
+        // TODO Detection Phase - Check if we should create a TODO list
+        if self.config.autonomous_mode && should_create_todo_list(&current_user_input_text, true) {
+            tracing::info!(%session_id, "Multi-step task detected in autonomous mode, requesting TODO list from LLM");
+            
+            // Add a system message to prompt TODO creation
+            llm_conversation_history.push(LlmMessage {
+                role: "system".to_string(),
+                parts: vec![LlmMessagePart::Text(
+                    "The user has requested a multi-step task. Please create a TODO list for this task. \n\n\
+                    Format your response as a numbered list of specific, actionable steps. \n\
+                    Start with 'I\'ll help you with that. Here\'s what I\'ll do:' followed by the numbered list.\n\
+                    Be specific about what each step will accomplish.".to_string()
+                )],
+            });
+            
+            // Call LLM to generate TODO list
+            match self.llm_client.generate(llm_conversation_history.clone(), vec![]).await {
+                Ok(todo_response) => {
+                    // Extract text content from the LlmResponse message
+                    let todo_text = todo_response.message.parts.iter()
+                        .filter_map(|part| match part {
+                            LlmMessagePart::Text(text) => Some(text.clone()),
+                            _ => None
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    
+                    if !todo_text.is_empty() {
+                        tracing::debug!(%session_id, "LLM TODO response: {}", todo_text);
+                        
+                        // Parse TODO list from response
+                        match TodoParser::parse_todo_list(&todo_text, &current_user_input_text) {
+                            Ok(mut todo_list) => {
+                                tracing::info!(%session_id, todo_count = todo_list.items.len(), "Successfully parsed TODO list");
+                                
+                                // Add LLM's response to conversation history
+                                llm_conversation_history.push(todo_response.message);
+                                
+                                // Stream the TODO list to the user
+                                let todo_chunk = crate::streaming::StreamChunk {
+                                    id: Uuid::new_v4(),
+                                    data: todo_text.into_bytes(),
+                                    chunk_type: "text".to_string(),
+                                    is_final: true,
+                                    priority: 0,
+                                    created_at: Instant::now(),
+                                    metadata: HashMap::new(),
+                                };
+                                if stream_handler.handle_chunk(todo_chunk).await.is_err() {
+                                    tracing::warn!(%session_id, "Failed to stream TODO list to user");
+                                }
+                                
+                                // Ask for user approval
+                                let approval_prompt = "\n\nDoes this plan look good? I'll start working through these steps once you approve.";
+                                let approval_chunk = crate::streaming::StreamChunk {
+                                    id: Uuid::new_v4(),
+                                    data: approval_prompt.as_bytes().to_vec(),
+                                    chunk_type: "text".to_string(),
+                                    is_final: true,
+                                    priority: 0,
+                                    created_at: Instant::now(),
+                                    metadata: HashMap::new(),
+                                };
+                                if stream_handler.handle_chunk(approval_chunk).await.is_err() {
+                                    tracing::warn!(%session_id, "Failed to stream approval prompt");
+                                }
+                                
+                                // Store TODO list in state (not approved yet)
+                                todo_list.user_approved = false;
+                                state.set_todo_list(todo_list);
+                                
+                                // Mark as awaiting clarification
+                                let _ = state.update_conversation_phase(crate::state::ConversationPhase::AwaitingClarification);
+                                
+                                // Complete this iteration - wait for user approval
+                                state.set_completed(true, "TODO list created, awaiting user approval".to_string());
+                                
+                                event_emitter.emit_event(ReasoningEvent::SessionCompleted {
+                                    session_id,
+                                    success: true,
+                                    total_duration_ms: state.updated_at.signed_duration_since(state.created_at).num_milliseconds() as u64,
+                                    steps_executed: state.history.len() as u32,
+                                    tools_used: state.get_tools_used(),
+                                }).await?;
+                                
+                                return Ok(state);
+                            }
+                            Err(e) => {
+                                tracing::warn!(%session_id, "Failed to parse TODO list: {}", e);
+                                // Continue without TODO list
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(%session_id, "Failed to generate TODO list: {}", e);
+                    // Continue without TODO list
+                }
+            }
+        }
+        
+        // Check if we're resuming with an approved TODO list
+        if let Some(todo_list) = &state.active_todo_list {
+            if todo_list.user_approved {
+                tracing::info!(%session_id, "Resuming with approved TODO list, {} items", todo_list.items.len());
+                
+                // Add a message to indicate we're starting work
+                let start_message = "Great! I'll start working through the tasks now.\n\n";
+                let start_chunk = crate::streaming::StreamChunk {
+                    id: Uuid::new_v4(),
+                    data: start_message.as_bytes().to_vec(),
+                    chunk_type: "text".to_string(),
+                    is_final: true,
+                    priority: 0,
+                    created_at: Instant::now(),
+                    metadata: HashMap::new(),
+                };
+                if stream_handler.handle_chunk(start_chunk).await.is_err() {
+                    tracing::warn!(%session_id, "Failed to stream start message");
+                }
+            }
+        }
+        
         tracing::info!(%session_id, "REACHED POINT JUST BEFORE MAIN ITERATION LOOP.");
         // DEBUG: Log state before entering main iteration loop
         tracing::debug!(%session_id, "About to enter main iteration loop with max_iterations={}", self.config.max_iterations);
@@ -420,8 +546,15 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
 
             // Attempt to call LLM with stream
             let mut stream_attempt_failed = false;
-            match self.llm_client.generate_stream(llm_conversation_history.clone()).await {
-                Ok(mut llm_stream) => {
+            
+            // Log before making LLM call
+            let history_len = llm_conversation_history.len();
+            tracing::info!(%session_id, history_len, iteration, max_iterations = self.config.max_iterations, "Making LLM call with history");
+            
+            // Add timeout wrapper around LLM call
+            let timeout_duration = Duration::from_secs(120);
+            match tokio::time::timeout(timeout_duration, self.llm_client.generate_stream(llm_conversation_history.clone())).await {
+                Ok(Ok(mut llm_stream)) => {
                     llm_call_successful = true;
                     let stream_interaction_id = Uuid::new_v4();
                     tracing::info!(%session_id, %stream_interaction_id, "LLM stream initiated.");
@@ -534,7 +667,7 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         last_stream_error
                     ));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::error!(%session_id, "Failed to initiate LLM stream: {:?}", e);
                     
                     // Check if this looks like a streaming-specific error
@@ -560,6 +693,19 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                         state.set_completed(false, error_msg);
                         break; // Break main loop
                     }
+                }
+                Err(_) => {
+                    // Timeout error
+                    tracing::error!(%session_id, "LLM call timed out after 120 seconds");
+                    let error_msg = "LLM call timed out after 120 seconds".to_string();
+                    state.add_step(ReasoningStep::llm_interaction(
+                        llm_conversation_history.last().map(|m| m.parts.iter().filter_map(|p| if let LlmMessagePart::Text(t) = p { Some(t.clone()) } else {None}).collect::<Vec<String>>().join("\n") ).unwrap_or_default(),
+                        String::new(), 
+                        false, 
+                        Some(error_msg.clone())
+                    ));
+                    llm_call_successful = false;
+                    last_stream_error = Some(error_msg);
                 }
             }
 
@@ -819,15 +965,83 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                     Ok(intent_val) => {
                         current_intent_for_loop_break_logic = Some(intent_val.clone());
                         tracing::info!(%session_id, iteration, ?intent_val, "LLM text intent analyzed.");
-                        match intent_val {
-                            DetectedIntent::ProvidesFinalAnswer | DetectedIntent::StatesInabilityToProceed => {
+                        
+                        // Check if we're in TODO execution mode
+                        if state.is_in_todo_execution_mode() {
+                            tracing::info!(%session_id, iteration, "In TODO execution mode, checking TODO progress");
+                            
+                            // Update current TODO status if needed
+                            if let Some(active_todo) = state.get_active_todo() {
+                                let todo_id = active_todo.id;
+                                
+                                // Check if current response indicates TODO completion
+                                let todo_completed = current_llm_text_response.to_lowercase().contains("completed") ||
+                                                    current_llm_text_response.to_lowercase().contains("finished") ||
+                                                    current_llm_text_response.to_lowercase().contains("done");
+                                
+                                if todo_completed {
+                                    let _ = state.update_todo_status(todo_id, TodoStatus::Completed);
+                                    tracing::info!(%session_id, iteration, ?todo_id, "Marked TODO as completed");
+                                }
+                            }
+                            
+                            // Check if all TODOs are complete
+                            if state.are_all_todos_completed() {
+                                tracing::info!(%session_id, iteration, "All TODOs completed, breaking loop");
                                 loop_should_break = true;
-                                break_reason = format!("LLM intent ({:?}) indicates completion.", intent_val);
+                                break_reason = "All TODO items completed successfully".to_string();
+                                
+                                // Generate TODO summary
+                                if let Some(summary) = state.get_todo_summary() {
+                                    // Stream the summary to the user
+                                    let summary_chunk = crate::streaming::StreamChunk {
+                                        id: Uuid::new_v4(),
+                                        data: summary.into_bytes(),
+                                        chunk_type: "text".to_string(),
+                                        is_final: true,
+                                        priority: 0,
+                                        created_at: Instant::now(),
+                                        metadata: HashMap::new(),
+                                    };
+                                    if stream_handler.handle_chunk(summary_chunk).await.is_err() {
+                                        tracing::warn!(%session_id, "Failed to stream TODO summary");
+                                    }
+                                }
+                            } else if let Some(next_todo) = state.get_next_todo() {
+                                // Continue with next TODO
+                                let next_todo_id = next_todo.id;
+                                let next_todo_desc = next_todo.description.clone();
+                                tracing::info!(%session_id, iteration, todo_desc = %next_todo_desc, "Moving to next TODO");
+                                let _ = state.set_active_todo(next_todo_id);
+                                
+                                // Add a nudge to work on the next TODO
+                                llm_conversation_history.push(LlmMessage {
+                                    role: "user".to_string(),
+                                    parts: vec![LlmMessagePart::Text(
+                                        format!("Good progress! Now please proceed with the next task: {}", next_todo_desc)
+                                    )],
+                                });
+                                nudge_performed_this_iteration = true;
+                                current_llm_text_response.clear();
+                                
+                                // Don't break - continue execution
+                                loop_should_break = false;
+                            } else {
+                                // No more TODOs but not all completed - might be waiting for current one
+                                tracing::info!(%session_id, iteration, "Continuing current TODO execution");
+                                loop_should_break = false;
                             }
-                            DetectedIntent::AsksClarifyingQuestion | DetectedIntent::RequestsMoreInput | DetectedIntent::GeneralConversation => {
-                                loop_should_break = true; // Break the loop and let the user respond
-                                break_reason = format!("LLM intent ({:?}) indicates user input needed.", intent_val);
-                            }
+                        } else {
+                            // Normal intent handling when not in TODO mode
+                            match intent_val {
+                                DetectedIntent::ProvidesFinalAnswer | DetectedIntent::StatesInabilityToProceed => {
+                                    loop_should_break = true;
+                                    break_reason = format!("LLM intent ({:?}) indicates completion.", intent_val);
+                                }
+                                DetectedIntent::AsksClarifyingQuestion | DetectedIntent::RequestsMoreInput | DetectedIntent::GeneralConversation => {
+                                    loop_should_break = true; // Break the loop and let the user respond
+                                    break_reason = format!("LLM intent ({:?}) indicates user input needed.", intent_val);
+                                }
                             DetectedIntent::ProvidesPlanWithoutExplicitAction => {
                                 if iteration < self.config.max_iterations - 1 {
                                     tracing::info!(%session_id, iteration, "LLM provided plan, nudging for tool call.");
@@ -851,10 +1065,11 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                                     break_reason = "Max iterations reached after LLM provided plan.".to_string();
                                 }
                             }
-                            DetectedIntent::Ambiguous => {
-                                tracing::warn!(%session_id, iteration, "LLM response intent is ambiguous.");
-                                loop_should_break = true;
-                                break_reason = "LLM response intent ambiguous, requires clarification.".to_string();
+                                DetectedIntent::Ambiguous => {
+                                    tracing::warn!(%session_id, iteration, "LLM response intent is ambiguous.");
+                                    loop_should_break = true;
+                                    break_reason = "LLM response intent ambiguous, requires clarification.".to_string();
+                                }
                             }
                         }
                     }
@@ -1007,21 +1222,55 @@ impl<LC: LlmClient + 'static, IA: IntentAnalyzer + 'static> ReasoningEngine<LC, 
                   });
                   
                   // NEW: Add system directive to ensure LLM processes the tool results
+                  // Check if we're in TODO execution mode for different directive
+                  let directive = if state.is_in_todo_execution_mode() {
+                      if let Some(current_todo) = state.get_active_todo() {
+                          format!("Task progress update: '{}'\n\nIf this specific task is now complete, mark it as done and move to the next task. If not complete, continue working on it without asking for permission.", current_todo.description)
+                      } else if let Some(next_todo) = state.get_next_todo() {
+                          format!("Task completed. Now proceeding with: '{}'\n\nContinue working without asking for permission.", next_todo.description)
+                      } else {
+                          "All tasks completed. Provide a brief summary of what was accomplished.".to_string()
+                      }
+                  } else {
+                      "Analyze the tool output above and respond in one of two ways:\n\n1. If you believe the task is finished, write a concise summary of what you accomplished and your final answer.\n2. If you have concrete ideas for next steps, briefly summarize your progress and ask the user whether they would like you to continue with those specific steps.\n\nDo not ask open-ended 'how can I help' questions; propose specific next actions instead. Always provide a clear wrap-up of your work.".to_string()
+                  };
+                  
                   llm_conversation_history.push(LlmMessage {
                       role: "user".to_string(),
-                      parts: vec![LlmMessagePart::Text(
-                          "Analyze the tool output above and respond in one of two ways:
-
-1. If you believe the task is finished, write a concise summary of what you accomplished and your final answer.
-2. If you have concrete ideas for next steps, briefly summarize your progress and ask the user whether they would like you to continue with those specific steps.
-
-Do not ask open-ended 'how can I help' questions; propose specific next actions instead. Always provide a clear wrap-up of your work.".to_string()
-                      )],
+                      parts: vec![LlmMessagePart::Text(directive)],
                   });
               }
 
               if !actual_orchestration_success {
                   tracing::warn!(%session_id, iteration, "Tool orchestration failed (verified). Preparing to inform LLM.");
+                  
+                  // Handle TODO-specific failures
+                  if state.is_in_todo_execution_mode() {
+                      if let Some(current_todo) = state.get_active_todo() {
+                          let current_todo_id = current_todo.id;
+                          // Extract error message from failed tools
+                          let error_messages: Vec<String> = corrected_orchestration_result.tool_results
+                              .iter()
+                              .filter_map(|(_, exec_result)| {
+                                  exec_result.result.as_ref()
+                                      .filter(|r| !r.success)
+                                      .and_then(|r| r.error.clone())
+                              })
+                              .collect();
+                          
+                          let combined_error = if error_messages.is_empty() {
+                              "Tool execution failed with unknown error".to_string()
+                          } else {
+                              error_messages.join("; ")
+                          };
+                          
+                          // Update TODO status to failed
+                          let _ = state.handle_todo_error(current_todo_id, combined_error);
+                          
+                          tracing::warn!(%session_id, iteration, todo_id = ?current_todo_id, "TODO failed due to tool errors");
+                      }
+                  }
+                  
                   // Even for failed tools, we should generate a summary so the user knows what failed
                   if !corrected_orchestration_result.tool_results.is_empty() {
                       pending_tool_summary_info = Some(corrected_orchestration_result);
