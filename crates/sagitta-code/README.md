@@ -2,16 +2,40 @@
 
 <!-- Do not update this file unless specifically asked to do so -->
 
-**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine with its own [reasoning-engine](../reasoning-engine). It provides intelligent code interaction, repository management, and conversation handling capabilities using Google's Gemini LLM.
+**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine with its own [reasoning-engine](../reasoning-engine). It provides intelligent code interaction, repository management, and conversation handling capabilities using OpenRouter or Claude Code subscription.
 
 Installation is currently a manual process, with future improvements to the install process being planned.
+
+## Supported Languages
+
+- Rust
+- Python
+- JavaScript
+- TypeScript
+- Go
+- Ruby
+- Markdown
+- YAML
+- HTML
+
+## Backend Components
+
+- **sagitta-embed**: Semantic search and embeddings
+- **sagitta-search**: Core search functionality
+- **reasoning-engine**: Multi-step reasoning capabilities
+- **code-parsers**: Language-specific code parsing
+- **git-manager**: Git repository operations
+- **repo-mapper**: Repository structure analysis
+- **terminal-stream**: Terminal output streaming
 
 ## Prerequisites
 
 1. **Rust Toolchain**: Install from [rustup.rs](https://rustup.rs/)
 2. **ONNX Runtime**: GPU-enabled version recommended (see [main README](../../README.md#prerequisites))
 3. **Qdrant**: Vector database for semantic search
-4. **Google Gemini API Key**: For LLM functionality
+4. **LLM Provider**:
+   - **Claude Max Subscription** for Claude Code (install Claude app and authenticate)
+   - **OpenRouter** for access to a wide variety of models (requires OpenRouter key)
 
 ## Installation
 
@@ -30,30 +54,22 @@ Installation is currently a manual process, with future improvements to the inst
        qdrant/qdrant:latest
    ```
 
-3. **Create the embedding model**:
-   ```bash
-   # You will need some python libraries for this step (will add these, TODO)
-   cd ../../scripts
-   python convert_all_minilm_model.py  # or convert_bge_small_model.py
-   ```
-
-4. **Run the application**:
+3. **Run the application**:
    ```bash
    ./target/release/sagitta-code
    ```
 
-## Supported Languages
+## GUI Features
 
-Currently these languages are supported:
-- Rust
-- Python  
-- JavaScript
-- TypeScript
-- Go
-- Ruby
-- Markdown
-- YAML
-- HTML
+- **Chat View**: Main conversation interface with AI assistant
+- **Repository Panel**: Manage and sync code repositories
+- **Settings Panel**: Configure LLM provider, models, and UI preferences
+- **Conversation Sidebar**: Browse and manage conversation history
+- **Events Panel**: View system events and tool execution logs
+- **Preview Panel**: Display tool outputs and code changes
+- **Analytics Panel**: Conversation statistics and usage metrics
+- **Theme Customizer**: Customize UI colors and appearance
+- **Model Selection**: Quick model switching (OpenRouter only)
 
 ## Configuration
 
@@ -63,29 +79,7 @@ Contains sagitta-search settings shared across all Sagitta tools. See [configura
 Note: Most of this can be configured in the settings menu of the GUI.
 
 ### Sagitta Code Configuration (`~/.config/sagitta/sagitta_code_config.json`)
-Contains sagitta-code specific settings:
-
-```json
-{
-  "gemini": {
-    "api_key": "your-gemini-api-key",
-    "model": "gemini-2.5-flash-preview-05-20",
-    "max_history_size": 20,
-    "max_reasoning_steps": 50
-  },
-  "ui": {
-    "dark_mode": true,
-    "theme": "default",
-    "window_width": 900,
-    "window_height": 700
-  },
-  "conversation": {
-    "auto_save": true,
-    "max_conversations": 100,
-    "auto_cleanup_days": 30
-  }
-}
-```
+Contains sagitta-code specific settings.  These are configured through the GUI.
 
 ### Data Storage
 Following XDG Base Directory conventions:

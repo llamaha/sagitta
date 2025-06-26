@@ -191,8 +191,17 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.toggle_terminal();
     }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
-        // Ctrl+M: Toggle model selection panel
-        app.panels.toggle_panel(ActivePanel::ModelSelection);
+        // Ctrl+M: Toggle model selection panel (OpenRouter only)
+        let is_openrouter = match app.config.try_lock() {
+            Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
+            Err(_) => false,
+        };
+        
+        if is_openrouter {
+            app.panels.toggle_panel(ActivePanel::ModelSelection);
+        } else {
+            log::debug!("Model selection hotkey ignored - not using OpenRouter");
+        }
     }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
@@ -358,6 +367,12 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
+                // Determine provider type before entering async block
+                let is_claude_code = match app.config.try_lock() {
+                    Ok(config) => matches!(config.provider, crate::config::types::LlmProvider::ClaudeCode),
+                    Err(_) => false,
+                };
+                
                 app.state.is_waiting_for_response = true;
                 
                 // Process in background task with STREAMING
@@ -374,12 +389,21 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                             let mut last_chunk_time = std::time::Instant::now();
                             let mut consecutive_timeouts = 0;
                             
-                            loop {
-                                // Use longer timeout for tool execution phases
-                                let timeout_duration = if chunk_count > 0 && last_chunk_time.elapsed() > std::time::Duration::from_secs(10) {
-                                    std::time::Duration::from_secs(60) // Longer timeout for tool execution
+                            loop {                                
+                                let timeout_duration = if is_claude_code {
+                                    // Claude Code needs more time for complex requests with multiple tools
+                                    if chunk_count == 0 {
+                                        std::time::Duration::from_secs(120) // 2 minutes for initial response
+                                    } else {
+                                        std::time::Duration::from_secs(60) // 1 minute for subsequent chunks
+                                    }
                                 } else {
-                                    std::time::Duration::from_secs(30) // Normal timeout
+                                    // Original timeouts for other providers
+                                    if chunk_count > 0 && last_chunk_time.elapsed() > std::time::Duration::from_secs(10) {
+                                        std::time::Duration::from_secs(60) // Longer timeout for tool execution
+                                    } else {
+                                        std::time::Duration::from_secs(30) // Normal timeout
+                                    }
                                 };
                                 
                                 match tokio::time::timeout(timeout_duration, stream.next()).await {
@@ -757,15 +781,22 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Model Selection Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.panels.toggle_panel(ActivePanel::ModelSelection);
-                        }
+                // Model Selection Panel (OpenRouter only)
+                let is_openrouter = match app.config.try_lock() {
+                    Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
+                    Err(_) => false,
+                };
+                
+                if is_openrouter {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                                app.panels.toggle_panel(ActivePanel::ModelSelection);
+                            }
+                        });
                     });
-                });
+                }
                 
                 // Analytics Panel
                 ui.horizontal(|ui| {

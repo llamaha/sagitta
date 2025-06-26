@@ -314,14 +314,27 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 
 /// Handle LLM chunk events from the agent
 fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, tool_call_id: Option<String>) {
+    // Check if this is thinking content
+    let (is_thinking, actual_content) = if content.starts_with("THINKING:") {
+        (true, content.strip_prefix("THINKING:").unwrap_or(&content).to_string())
+    } else {
+        (false, content)
+    };
+    
     let current_response_id = app.state.current_response_id.clone();
     
     match current_response_id {
         Some(current_id) => {
             // We have an ongoing response, append to it
-            log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
-                       current_id, content.chars().take(50).collect::<String>());
-            app.chat_manager.append_content(&current_id, content.clone());
+            if is_thinking {
+                log::trace!("handle_llm_chunk: Appending THINKING content for ID: '{}': '{}'", 
+                           current_id, actual_content.chars().take(50).collect::<String>());
+                app.chat_manager.append_thinking(&current_id, actual_content);
+            } else {
+                log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
+                           current_id, actual_content.chars().take(50).collect::<String>());
+                app.chat_manager.append_content(&current_id, actual_content);
+            }
             
             if is_final {
                 app.chat_manager.finish_streaming(&current_id);
@@ -342,13 +355,17 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, t
             app.state.is_streaming_response = true;
             
             // Only log for substantial content or final chunks
-            if is_final || content.len() > 20 {
+            if is_final || actual_content.len() > 20 {
                 log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
             } else {
                 log::trace!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
             }
             
-            app.chat_manager.append_content(&response_id, content.clone());
+            if is_thinking {
+                app.chat_manager.append_thinking(&response_id, actual_content.clone());
+            } else {
+                app.chat_manager.append_content(&response_id, actual_content.clone());
+            }
             
             if is_final {
                 app.chat_manager.finish_streaming(&response_id);
@@ -361,8 +378,9 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, t
                     log::trace!("handle_llm_chunk: Immediately completed response");
                 }
             } else {
-                log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
-                           response_id, content.chars().take(50).collect::<String>());
+                log::trace!("handle_llm_chunk: Appending {} content for ID: '{}': '{}'", 
+                           if is_thinking { "THINKING" } else { "REGULAR" },
+                           response_id, actual_content.chars().take(50).collect::<String>());
             }
         }
     }

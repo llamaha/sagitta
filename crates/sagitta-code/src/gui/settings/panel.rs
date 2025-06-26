@@ -12,9 +12,10 @@ use uuid::Uuid;
 use log::{info, warn, error};
 
 use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
-use crate::config::types::OpenRouterConfig;
+use crate::config::types::{OpenRouterConfig, LlmProvider, ClaudeCodeConfig};
 use crate::config::paths::{get_sagitta_code_app_config_path};
 use crate::llm::openrouter::models::ModelManager;
+use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 use super::model_selector::ModelSelector;
 
 /// Settings panel for configuring Sagitta core settings
@@ -38,11 +39,21 @@ pub struct SettingsPanel {
     performance_collection_name_prefix: String,
     performance_max_file_size_bytes: u32,
     
-    // Sagitta Code config fields
+    // Provider selection
+    pub provider: LlmProvider,
+    
+    // Sagitta Code config fields - OpenRouter
     pub openrouter_api_key: String,
     pub openrouter_model: String,
     pub openrouter_max_reasoning_steps: u32,
     pub openrouter_max_context_tokens: usize,
+    
+    // Sagitta Code config fields - Claude Code
+    pub claude_code_path: String,
+    pub claude_code_model: String,
+    pub claude_code_max_output_tokens: u32,
+    pub claude_code_timeout: u64,
+    pub claude_code_verbose: bool,
     
     // Conversation config fields
     pub analyze_input: bool,
@@ -73,11 +84,21 @@ impl SettingsPanel {
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             
-            // Sagitta Code config fields from initial_sagitta_code_config
+            // Provider selection
+            provider: initial_sagitta_code_config.provider.clone(),
+            
+            // Sagitta Code config fields from initial_sagitta_code_config - OpenRouter
             openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
             openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
             openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
             openrouter_max_context_tokens: initial_sagitta_code_config.openrouter.max_context_tokens,
+            
+            // Sagitta Code config fields - Claude Code
+            claude_code_path: initial_sagitta_code_config.claude_code.claude_path.clone(),
+            claude_code_model: initial_sagitta_code_config.claude_code.model.clone(),
+            claude_code_max_output_tokens: initial_sagitta_code_config.claude_code.max_output_tokens,
+            claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
+            claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
             
             // Conversation config fields
             analyze_input: initial_sagitta_code_config.conversation.analyze_input,
@@ -143,8 +164,27 @@ impl SettingsPanel {
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            // OpenRouter Configuration
-                            ui.heading("OpenRouter Configuration");
+                            // Provider Selection
+                            ui.heading("LLM Provider");
+                            ui.horizontal(|ui| {
+                                ui.label("Provider:");
+                                egui::ComboBox::from_id_salt("llm_provider_combo")
+                                    .selected_text(match self.provider {
+                                        LlmProvider::OpenRouter => "OpenRouter",
+                                        LlmProvider::ClaudeCode => "Claude Code",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.provider, LlmProvider::OpenRouter, "OpenRouter");
+                                        ui.selectable_value(&mut self.provider, LlmProvider::ClaudeCode, "Claude Code");
+                                    });
+                            });
+                            ui.add_space(8.0);
+                            
+                            // Show provider-specific settings
+                            match self.provider {
+                                LlmProvider::OpenRouter => {
+                                    // OpenRouter Configuration
+                                    ui.heading("OpenRouter Configuration");
                             Grid::new("openrouter_config_grid")
                                 .num_columns(2)
                                 .spacing([8.0, 8.0])
@@ -182,38 +222,84 @@ impl SettingsPanel {
                                     .on_hover_text("Detects LLM response intent for better conversation flow");
                             });
                             
-                            // Model selector (enhanced UI)
-                            ui.add_space(8.0);
-                            if let Some(ref mut model_selector) = self.model_selector {
-                                // Check if we need to refresh models when first shown
-                                if model_selector.state().show_dropdown && model_selector.state().loading == false {
-                                    // If dropdown is being shown and we haven't loaded models yet, trigger refresh
-                                    let should_refresh = model_selector.state().loading == false && 
-                                        (model_selector.state().error_message.is_none() || 
-                                         model_selector.state().search_query.is_empty());
-                                    
-                                    if should_refresh {
-                                        // This is a bit of a hack - we'll trigger refresh on first show
-                                        // In a real app, this would be handled more elegantly
-                                        info!("Triggering model refresh for first-time dropdown display");
+                                    // Model selector (enhanced UI)
+                                    ui.add_space(8.0);
+                                    if let Some(ref mut model_selector) = self.model_selector {
+                                        // Check if we need to refresh models when first shown
+                                        if model_selector.state().show_dropdown && model_selector.state().loading == false {
+                                            // If dropdown is being shown and we haven't loaded models yet, trigger refresh
+                                            let should_refresh = model_selector.state().loading == false && 
+                                                (model_selector.state().error_message.is_none() || 
+                                                 model_selector.state().search_query.is_empty());
+                                            
+                                            if should_refresh {
+                                                // This is a bit of a hack - we'll trigger refresh on first show
+                                                // In a real app, this would be handled more elegantly
+                                                info!("Triggering model refresh for first-time dropdown display");
+                                            }
+                                        }
+                                        
+                                        // Use the dynamic model selector
+                                        if model_selector.render(ui, &mut self.openrouter_model, &theme) {
+                                            // Model was changed - you can add any callback logic here
+                                            info!("Model changed to: {}", self.openrouter_model);
+                                        }
+                                    } else {
+                                        // Fallback to simple text input if no model manager available
+                                        ui.horizontal(|ui| {
+                                            ui.label("Model:");
+                                            ui.add(TextEdit::singleline(&mut self.openrouter_model)
+                                                .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
+                                            
+                                            // Note about enhanced selection
+                                            ui.small("💡 Enhanced model selection available with API key");
+                                        });
                                     }
                                 }
-                                
-                                // Use the dynamic model selector
-                                if model_selector.render(ui, &mut self.openrouter_model, &theme) {
-                                    // Model was changed - you can add any callback logic here
-                                    info!("Model changed to: {}", self.openrouter_model);
-                                }
-                            } else {
-                                // Fallback to simple text input if no model manager available
-                                ui.horizontal(|ui| {
-                                    ui.label("Model:");
-                                    ui.add(TextEdit::singleline(&mut self.openrouter_model)
-                                        .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
+                                LlmProvider::ClaudeCode => {
+                                    // Claude Code Configuration
+                                    ui.heading("Claude Code Configuration");
+                                    Grid::new("claude_code_config_grid")
+                                        .num_columns(2)
+                                        .spacing([8.0, 8.0])
+                                        .show(ui, |ui| {
+                                            ui.label("Claude Binary Path:");
+                                            ui.add(TextEdit::singleline(&mut self.claude_code_path)
+                                                .hint_text("Path to claude binary (default: claude)"));
+                                            ui.end_row();
+                                            
+                                            ui.label("Model:");
+                                            egui::ComboBox::from_id_salt("claude_model_combo")
+                                                .selected_text(&self.claude_code_model)
+                                                .show_ui(ui, |ui| {
+                                                    for model in CLAUDE_CODE_MODELS {
+                                                        ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
+                                                    }
+                                                });
+                                            ui.end_row();
+                                            
+                                            ui.label("Max Output Tokens:");
+                                            ui.add(egui::DragValue::new(&mut self.claude_code_max_output_tokens)
+                                                .range(1000..=128000)
+                                                .speed(1000.0))
+                                                .on_hover_text("Maximum output tokens. Default: 64000");
+                                            ui.end_row();
+                                            
+                                            ui.label("Timeout (seconds):");
+                                            ui.add(egui::DragValue::new(&mut self.claude_code_timeout)
+                                                .range(10..=3600)
+                                                .speed(10.0))
+                                                .on_hover_text("Request timeout in seconds. Default: 600 (10 minutes)");
+                                            ui.end_row();
+                                            
+                                            ui.label("Verbose Logging:");
+                                            ui.checkbox(&mut self.claude_code_verbose, "Enable verbose output for debugging");
+                                            ui.end_row();
+                                        });
                                     
-                                    // Note about enhanced selection
-                                    ui.small("💡 Enhanced model selection available with API key");
-                                });
+                                    ui.add_space(8.0);
+                                    ui.label("Note: Make sure to authenticate with 'claude auth' before using Claude Code provider.");
+                                }
                             }
                             
                             ui.separator();
@@ -444,6 +530,9 @@ impl SettingsPanel {
         let current_config_guard = self.sagitta_code_config.try_lock().expect("Failed to acquire sagitta_code_config lock");
         let mut updated_config = current_config_guard.clone();
         
+        // Update provider selection
+        updated_config.provider = self.provider.clone();
+        
         // Update only the OpenRouter fields that are exposed in the UI
         updated_config.openrouter.api_key = if self.openrouter_api_key.is_empty() { 
             None 
@@ -453,6 +542,13 @@ impl SettingsPanel {
         updated_config.openrouter.model = self.openrouter_model.clone();
         updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
         updated_config.openrouter.max_context_tokens = self.openrouter_max_context_tokens;
+        
+        // Update Claude Code fields
+        updated_config.claude_code.claude_path = self.claude_code_path.clone();
+        updated_config.claude_code.model = self.claude_code_model.clone();
+        updated_config.claude_code.max_output_tokens = self.claude_code_max_output_tokens;
+        updated_config.claude_code.timeout = self.claude_code_timeout;
+        updated_config.claude_code.verbose = self.claude_code_verbose;
         
         // Update conversation settings
         updated_config.conversation.analyze_input = self.analyze_input;
@@ -522,6 +618,7 @@ mod tests {
 
     fn create_test_sagitta_code_config() -> SagittaCodeConfig {
         SagittaCodeConfig {
+            provider: LlmProvider::OpenRouter,
             openrouter: OpenRouterConfig {
                 api_key: Some("test-api-key".to_string()),
                 model: "test-model".to_string(),
@@ -530,11 +627,11 @@ mod tests {
                 max_reasoning_steps: 10,
                 request_timeout: 30,
             },
+            claude_code: ClaudeCodeConfig::default(),
             sagitta: Default::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
-
         }
     }
 

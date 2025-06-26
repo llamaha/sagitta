@@ -10,7 +10,9 @@ use super::super::theme::AppTheme;
 use super::super::chat::view::{StreamingMessage, MessageAuthor};
 use crate::config::loader::load_all_configs;
 use crate::llm::openrouter::client::OpenRouterClient;
+use crate::llm::claude_code::client::ClaudeCodeClient;
 use crate::llm::client::LlmClient;
+use crate::config::types::LlmProvider;
 use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
 use crate::tools::code_search::tool::CodeSearchTool;
@@ -150,18 +152,38 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
     }
 }
 
-/// Create LLM client from config
+/// Create LLM client from config based on selected provider
 pub fn create_llm_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>> {
-    let openrouter_client_result = OpenRouterClient::new(config);
-    
-    match openrouter_client_result {
-        Ok(client) => Ok(Arc::new(client)),
-        Err(e) => {
-            log::error!(
-                "Failed to create OpenRouterClient: {}. Agent will not be initialized properly. Some features may be disabled.",
-                e
-            );
-            Err(anyhow::anyhow!("Failed to create OpenRouterClient for Agent: {}", e))
+    match config.provider {
+        LlmProvider::OpenRouter => {
+            log::info!("Creating OpenRouter LLM client");
+            let openrouter_client_result = OpenRouterClient::new(config);
+            
+            match openrouter_client_result {
+                Ok(client) => Ok(Arc::new(client)),
+                Err(e) => {
+                    log::error!(
+                        "Failed to create OpenRouterClient: {}. Agent will not be initialized properly. Some features may be disabled.",
+                        e
+                    );
+                    Err(anyhow::anyhow!("Failed to create OpenRouterClient for Agent: {}", e))
+                }
+            }
+        }
+        LlmProvider::ClaudeCode => {
+            log::info!("Creating Claude Code LLM client");
+            let claude_client_result = ClaudeCodeClient::new(config);
+            
+            match claude_client_result {
+                Ok(client) => Ok(Arc::new(client)),
+                Err(e) => {
+                    log::error!(
+                        "Failed to create ClaudeCodeClient: {}. Agent will not be initialized properly. Some features may be disabled.",
+                        e
+                    );
+                    Err(anyhow::anyhow!("Failed to create ClaudeCodeClient for Agent: {}", e))
+                }
+            }
         }
     }
 }

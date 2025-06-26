@@ -1,12 +1,34 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// LLM Provider selection
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmProvider {
+    OpenRouter,
+    ClaudeCode,
+}
+
+impl Default for LlmProvider {
+    fn default() -> Self {
+        LlmProvider::OpenRouter
+    }
+}
+
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SagittaCodeConfig {
+    /// Selected LLM provider
+    #[serde(default)]
+    pub provider: LlmProvider,
+    
     /// OpenRouter API configuration
     #[serde(default)]
     pub openrouter: OpenRouterConfig,
+    
+    /// Claude Code configuration
+    #[serde(default)]
+    pub claude_code: ClaudeCodeConfig,
     
     /// Vector DB configuration
     #[serde(default)]
@@ -30,7 +52,9 @@ pub struct SagittaCodeConfig {
 impl Default for SagittaCodeConfig {
     fn default() -> Self {
         Self {
+            provider: LlmProvider::default(),
             openrouter: OpenRouterConfig::default(),
+            claude_code: ClaudeCodeConfig::default(),
             sagitta: SagittaDbConfig::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
@@ -120,6 +144,42 @@ pub struct ProviderPreferences {
     pub sort: Option<String>,
     /// Data collection policy
     pub data_collection: Option<String>,
+}
+
+/// Configuration for Claude Code provider
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeConfig {
+    /// Path to claude binary (default: "claude")
+    #[serde(default = "default_claude_path")]
+    pub claude_path: String,
+    
+    /// Selected Claude model
+    #[serde(default = "default_claude_model")]
+    pub model: String,
+    
+    /// Maximum output tokens
+    #[serde(default = "default_claude_max_output_tokens")]
+    pub max_output_tokens: u32,
+    
+    /// Enable verbose logging for debugging
+    #[serde(default)]
+    pub verbose: bool,
+    
+    /// Request timeout in seconds
+    #[serde(default = "default_claude_timeout")]
+    pub timeout: u64,
+}
+
+impl Default for ClaudeCodeConfig {
+    fn default() -> Self {
+        Self {
+            claude_path: default_claude_path(),
+            model: default_claude_model(),
+            max_output_tokens: default_claude_max_output_tokens(),
+            verbose: false,
+            timeout: default_claude_timeout(),
+        }
+    }
 }
 
 /// Configuration for Sagitta Core
@@ -505,6 +565,22 @@ fn default_search_debounce_ms() -> u64 {
 
 fn default_request_timeout() -> u64 {
     30
+}
+
+fn default_claude_path() -> String {
+    "claude".to_string()
+}
+
+fn default_claude_model() -> String {
+    "claude-sonnet-4-20250514".to_string()
+}
+
+fn default_claude_max_output_tokens() -> u32 {
+    64000
+}
+
+fn default_claude_timeout() -> u64 {
+    600 // 10 minutes
 }
 
 // Configuration structures will go here
