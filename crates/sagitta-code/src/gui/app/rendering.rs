@@ -191,8 +191,17 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.toggle_terminal();
     }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
-        // Ctrl+M: Toggle model selection panel
-        app.panels.toggle_panel(ActivePanel::ModelSelection);
+        // Ctrl+M: Toggle model selection panel (OpenRouter only)
+        let is_openrouter = match app.config.try_lock() {
+            Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
+            Err(_) => false,
+        };
+        
+        if is_openrouter {
+            app.panels.toggle_panel(ActivePanel::ModelSelection);
+        } else {
+            log::debug!("Model selection hotkey ignored - not using OpenRouter");
+        }
     }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
@@ -757,15 +766,22 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Model Selection Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.panels.toggle_panel(ActivePanel::ModelSelection);
-                        }
+                // Model Selection Panel (OpenRouter only)
+                let is_openrouter = match app.config.try_lock() {
+                    Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
+                    Err(_) => false,
+                };
+                
+                if is_openrouter {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                                app.panels.toggle_panel(ActivePanel::ModelSelection);
+                            }
+                        });
                     });
-                });
+                }
                 
                 // Analytics Panel
                 ui.horizontal(|ui| {

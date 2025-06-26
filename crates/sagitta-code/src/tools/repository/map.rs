@@ -380,6 +380,9 @@ mod tests {
             paths: Some(vec!["src/".to_string(), "tests/".to_string()]),
             file_extension: Some("rs".to_string()),
             content_pattern: Some("async".to_string()),
+            files_per_page: None,
+            page: None,
+            cache_key: None,
         };
         
         let serialized = serde_json::to_string(&params).unwrap();

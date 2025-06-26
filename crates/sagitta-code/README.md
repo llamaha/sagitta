@@ -2,16 +2,40 @@
 
 <!-- Do not update this file unless specifically asked to do so -->
 
-**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine with its own [reasoning-engine](../reasoning-engine). It provides intelligent code interaction, repository management, and conversation handling capabilities using Google's Gemini LLM.
+**Sagitta Code** is an AI coding assistant built on top of the [sagitta-embed](../sagitta-embed) search engine with its own [reasoning-engine](../reasoning-engine). It provides intelligent code interaction, repository management, and conversation handling capabilities using Google's Gemini LLM or Claude Code.
 
 Installation is currently a manual process, with future improvements to the install process being planned.
+
+## Supported Languages
+
+- Rust
+- Python
+- JavaScript
+- TypeScript
+- Go
+- Ruby
+- Markdown
+- YAML
+- HTML
+
+## Backend Components
+
+- **sagitta-embed**: Semantic search and embeddings
+- **sagitta-search**: Core search functionality
+- **reasoning-engine**: Multi-step reasoning capabilities
+- **code-parsers**: Language-specific code parsing
+- **git-manager**: Git repository operations
+- **repo-mapper**: Repository structure analysis
+- **terminal-stream**: Terminal output streaming
 
 ## Prerequisites
 
 1. **Rust Toolchain**: Install from [rustup.rs](https://rustup.rs/)
 2. **ONNX Runtime**: GPU-enabled version recommended (see [main README](../../README.md#prerequisites))
 3. **Qdrant**: Vector database for semantic search
-4. **Google Gemini API Key**: For LLM functionality
+4. **LLM Provider**:
+   - **Google Gemini API Key** for Gemini models
+   - **Claude Max Subscription** for Claude Code (install Claude app and authenticate)
 
 ## Installation
 
@@ -42,18 +66,17 @@ Installation is currently a manual process, with future improvements to the inst
    ./target/release/sagitta-code
    ```
 
-## Supported Languages
+## GUI Features
 
-Currently these languages are supported:
-- Rust
-- Python  
-- JavaScript
-- TypeScript
-- Go
-- Ruby
-- Markdown
-- YAML
-- HTML
+- **Chat View**: Main conversation interface with AI assistant
+- **Repository Panel**: Manage and sync code repositories
+- **Settings Panel**: Configure LLM provider, models, and UI preferences
+- **Conversation Sidebar**: Browse and manage conversation history
+- **Events Panel**: View system events and tool execution logs
+- **Preview Panel**: Display tool outputs and code changes
+- **Analytics Panel**: Conversation statistics and usage metrics
+- **Theme Customizer**: Customize UI colors and appearance
+- **Model Selection**: Quick model switching (OpenRouter only)
 
 ## Configuration
 

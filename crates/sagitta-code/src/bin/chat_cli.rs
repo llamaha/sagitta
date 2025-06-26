@@ -11,6 +11,8 @@ use sagitta_code::{
     utils::init_logger,
     llm::client::LlmClient,
     llm::openrouter::client::OpenRouterClient,
+    llm::claude_code::client::ClaudeCodeClient,
+    config::types::LlmProvider,
     tools::analyze_input::TOOLS_COLLECTION_NAME,
 };
 
@@ -59,9 +61,21 @@ async fn main() -> Result<()> {
         Ok(config) => {
             println!("✓ Configuration loaded successfully");
             if std::env::var("SAGITTA_CLI_DEBUG").is_ok() {
-                println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
-                println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
-                println!("🔍 DEBUG: Max context tokens: {}", config.openrouter.max_context_tokens);
+                match config.provider {
+                    LlmProvider::OpenRouter => {
+                        println!("🔍 DEBUG: Provider: OpenRouter");
+                        println!("🔍 DEBUG: OpenRouter model: {}", config.openrouter.model);
+                        println!("🔍 DEBUG: Request timeout: {}s", config.openrouter.request_timeout);
+                        println!("🔍 DEBUG: Max context tokens: {}", config.openrouter.max_context_tokens);
+                    }
+                    LlmProvider::ClaudeCode => {
+                        println!("🔍 DEBUG: Provider: Claude Code");
+                        println!("🔍 DEBUG: Claude model: {}", config.claude_code.model);
+                        println!("🔍 DEBUG: Claude path: {}", config.claude_code.claude_path);
+                        println!("🔍 DEBUG: Max output tokens: {}", config.claude_code.max_output_tokens);
+                        println!("🔍 DEBUG: Timeout: {}s", config.claude_code.timeout);
+                    }
+                }
             }
             config
         }
@@ -76,56 +90,89 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Check for API key - follow the same pattern as OpenRouterClient
-    let api_key_available = match config.openrouter.api_key.as_ref() {
-        Some(key) if !key.is_empty() => {
-            println!("🔍 DEBUG: API key found in config (length: {})", key.len());
-            true
-        }
-        _ => {
-            // Check environment variable as fallback
-            match std::env::var("OPENROUTER_API_KEY") {
-                Ok(key) if !key.is_empty() => {
-                    println!("🔍 DEBUG: API key found in environment (length: {})", key.len());
+    // Check for credentials based on provider
+    let credentials_available = match config.provider {
+        LlmProvider::OpenRouter => {
+            match config.openrouter.api_key.as_ref() {
+                Some(key) if !key.is_empty() => {
+                    println!("🔍 DEBUG: OpenRouter API key found in config (length: {})", key.len());
                     true
                 }
                 _ => {
-                    println!("🔍 DEBUG: No API key found in config or environment");
-                    false
+                    // Check environment variable as fallback
+                    match std::env::var("OPENROUTER_API_KEY") {
+                        Ok(key) if !key.is_empty() => {
+                            println!("🔍 DEBUG: OpenRouter API key found in environment (length: {})", key.len());
+                            true
+                        }
+                        _ => {
+                            println!("🔍 DEBUG: No OpenRouter API key found in config or environment");
+                            false
+                        }
+                    }
                 }
             }
         }
+        LlmProvider::ClaudeCode => {
+            // Claude Code uses CLI authentication, no API key needed
+            println!("🔍 DEBUG: Claude Code provider - using CLI authentication");
+            true
+        }
     };
 
-    if !api_key_available {
-        eprintln!("❌ Error: OPENROUTER_API_KEY not available");
-        eprintln!("Please set your OpenRouter API key in:");
-        eprintln!("  1. Configuration file: ~/.config/sagitta/sagitta_code_config.json");
-        eprintln!("  2. Environment variable: export OPENROUTER_API_KEY=your_key_here");
+    if !credentials_available {
+        eprintln!("❌ Error: Required credentials not available for provider: {:?}", config.provider);
+        match config.provider {
+            LlmProvider::OpenRouter => {
+                eprintln!("Please set your OpenRouter API key in:");
+                eprintln!("  1. Configuration file: ~/.config/sagitta/sagitta_code_config.json");
+                eprintln!("  2. Environment variable: export OPENROUTER_API_KEY=your_key_here");
+            }
+            LlmProvider::ClaudeCode => {
+                eprintln!("Please authenticate with Claude CLI:");
+                eprintln!("  Run: claude auth");
+            }
+        }
         eprintln!("🔍 DEBUG: Current working directory: {:?}", std::env::current_dir());
         eprintln!("🔍 DEBUG: Config directory: {:?}", dirs::config_dir());
         std::process::exit(1);
     }
 
-    // Test OpenRouter client directly before initializing agent
-    println!("🔍 DEBUG: Testing OpenRouter client directly...");
-    let test_client = match OpenRouterClient::new(&config) {
-        Ok(client) => {
-            println!("✓ OpenRouter client created successfully");
-            client
+    // Test LLM client directly before initializing agent based on provider
+    println!("🔍 DEBUG: Testing LLM client directly (Provider: {:?})...", config.provider);
+    let test_client: Box<dyn LlmClient> = match config.provider {
+        LlmProvider::OpenRouter => {
+            match OpenRouterClient::new(&config) {
+                Ok(client) => {
+                    println!("✓ OpenRouter client created successfully");
+                    Box::new(client)
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to create OpenRouter client: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
-        Err(e) => {
-            eprintln!("❌ Failed to create OpenRouter client: {}", e);
-            std::process::exit(1);
+        LlmProvider::ClaudeCode => {
+            match ClaudeCodeClient::new(&config) {
+                Ok(client) => {
+                    println!("✓ Claude Code client created successfully");
+                    Box::new(client)
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to create Claude Code client: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     };
 
     // Test basic functionality
-    println!("🔍 DEBUG: Testing basic OpenRouter connectivity...");
-    match test_simple_request(&test_client).await {
-        Ok(_) => println!("✓ Basic OpenRouter connectivity test passed"),
+    println!("🔍 DEBUG: Testing basic LLM connectivity...");
+    match test_simple_request(&*test_client).await {
+        Ok(_) => println!("✓ Basic LLM connectivity test passed"),
         Err(e) => {
-            eprintln!("⚠️  Basic OpenRouter connectivity test failed: {}", e);
+            eprintln!("⚠️  Basic LLM connectivity test failed: {}", e);
             eprintln!("🔍 DEBUG: Continuing with agent initialization...");
         }
     }
@@ -331,7 +378,7 @@ async fn main() -> Result<()> {
             },
             "test" => {
                 println!("🔍 DEBUG: Running OpenRouter connectivity test...");
-                match test_simple_request(&test_client).await {
+                match test_simple_request(&*test_client).await {
                     Ok(response) => {
                         println!("✓ Test successful!");
                         println!("🔍 DEBUG: Response: {}", response);
@@ -404,8 +451,8 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Test basic OpenRouter functionality
-async fn test_simple_request(client: &OpenRouterClient) -> Result<String> {
+/// Test basic LLM functionality
+async fn test_simple_request(client: &dyn LlmClient) -> Result<String> {
     use sagitta_code::llm::client::{Message, MessagePart, Role};
     use std::collections::HashMap;
     use uuid::Uuid;
@@ -474,11 +521,23 @@ async fn initialize_agent(config: SagittaCodeConfig) -> Result<Agent> {
     println!("🔧 Setting up tools...");
     let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
     
-    // Create the LLM client for tools
-    let llm_client: Arc<dyn LlmClient> = Arc::new(
-        OpenRouterClient::new(&config)
-            .map_err(|e| anyhow!("Failed to create OpenRouterClient: {}", e))?
-    );
+    // Create the LLM client for tools based on provider
+    let llm_client: Arc<dyn LlmClient> = match config.provider {
+        LlmProvider::OpenRouter => {
+            println!("🔧 Using OpenRouter provider");
+            Arc::new(
+                OpenRouterClient::new(&config)
+                    .map_err(|e| anyhow!("Failed to create OpenRouterClient: {}", e))?
+            )
+        }
+        LlmProvider::ClaudeCode => {
+            println!("🔧 Using Claude Code provider");
+            Arc::new(
+                ClaudeCodeClient::new(&config)
+                    .map_err(|e| anyhow!("Failed to create ClaudeCodeClient: {}", e))?
+            )
+        }
+    };
     
     // Register AnalyzeInputTool
     tool_registry.register(Arc::new(
