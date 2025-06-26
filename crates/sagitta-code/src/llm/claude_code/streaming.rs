@@ -275,8 +275,14 @@ impl ClaudeCodeStream {
                                             }
                                         }
                                         ClaudeChunk::Result { result, total_cost_usd } => {
+                                            // Extract model name if result is an object with model field
+                                            if let Some(model) = result.as_object()
+                                                .and_then(|obj| obj.get("model"))
+                                                .and_then(|v| v.as_str()) {
+                                                usage.model_name = model.to_string();
+                                            }
+                                            
                                             // Final usage update
-                                            usage.model_name = result.model;
                                             usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
                                             
                                             // Only include cost if paid usage

@@ -64,7 +64,7 @@ pub enum ClaudeChunk {
     },
     #[serde(rename = "result")]
     Result {
-        result: ResultData,
+        result: serde_json::Value, // Changed to handle both string and object formats
         #[serde(rename = "total_cost_usd")]
         total_cost_usd: Option<f64>,
     },
@@ -96,8 +96,3 @@ pub struct Usage {
     pub cache_creation_input_tokens: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResultData {
-    pub model: String,
-    pub usage: Usage,
-}
