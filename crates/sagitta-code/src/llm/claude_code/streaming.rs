@@ -11,7 +11,7 @@ use crate::llm::client::{StreamChunk, MessagePart, TokenUsage};
 use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
-use super::tool_parser::parse_tool_calls_from_text;
+use super::xml_tools::parse_xml_tool_calls;
 
 /// Stream implementation for Claude Code output
 pub struct ClaudeCodeStream {
@@ -125,8 +125,8 @@ impl ClaudeCodeStream {
                                             for content in message.content {
                                                 match content {
                                                     ContentBlock::Text { text } => {
-                                                        // Parse tool calls from the text
-                                                        let (remaining_text, tool_calls) = parse_tool_calls_from_text(&text);
+                                                        // Parse XML tool calls from the text
+                                                        let (remaining_text, tool_calls) = parse_xml_tool_calls(&text);
                                                         
                                                         // Send any remaining text first
                                                         if !remaining_text.is_empty() {
@@ -174,6 +174,24 @@ impl ClaudeCodeStream {
                                                             token_usage: None,
                                                         }));
                                                     }
+                                                    ContentBlock::ToolUse { id, name, input } => {
+                                                        // Handle tool use content blocks
+                                                        if !tool_emitted.load(Ordering::Relaxed) {
+                                                            tool_emitted.store(true, Ordering::Relaxed);
+                                                            let _ = sender.send(Ok(StreamChunk {
+                                                                part: MessagePart::ToolCall {
+                                                                    tool_call_id: id,
+                                                                    name,
+                                                                    parameters: input,
+                                                                },
+                                                                is_final: false,
+                                                                finish_reason: None,
+                                                                token_usage: None,
+                                                            }));
+                                                        } else {
+                                                            log::warn!("CLAUDE_CODE: Skipping additional tool_use '{}' - only one tool per response allowed", name);
+                                                        }
+                                                    }
                                                 }
                                             }
                                             
@@ -192,12 +210,19 @@ impl ClaudeCodeStream {
                                                 }));
                                             }
                                         }
-                                        ClaudeChunk::Result { result, total_cost_usd } => {
+                                        ClaudeChunk::Result { result, total_cost_usd, subtype, is_error } => {
+                                            // Check for error results
+                                            if subtype.as_deref() == Some("error_max_turns") {
+                                                log::warn!("CLAUDE_CODE: Received error_max_turns result");
+                                            }
+                                            
                                             // Extract model name if result is an object with model field
-                                            if let Some(model) = result.as_object()
-                                                .and_then(|obj| obj.get("model"))
-                                                .and_then(|v| v.as_str()) {
-                                                usage.model_name = model.to_string();
+                                            if let Some(result_value) = result {
+                                                if let Some(model) = result_value.as_object()
+                                                    .and_then(|obj| obj.get("model"))
+                                                    .and_then(|v| v.as_str()) {
+                                                    usage.model_name = model.to_string();
+                                                }
                                             }
                                             
                                             // Final usage update
@@ -215,6 +240,44 @@ impl ClaudeCodeStream {
                                                 token_usage: Some(usage.clone()),
                                             }));
                                         }
+                                        ClaudeChunk::User { message } => {
+                                            // Handle user messages (tool results, etc.)
+                                            log::debug!("CLAUDE_CODE: Received user message with {} content blocks", message.content.len());
+                                            
+                                            // Process user content blocks
+                                            for content in message.content {
+                                                match content {
+                                                    super::message_converter::UserContentBlock::Text { text } => {
+                                                        log::debug!("CLAUDE_CODE: User text: {}", text);
+                                                    }
+                                                    super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
+                                                        // Check for permission denial messages
+                                                        if content.contains("Permission to use") && content.contains("has been denied") {
+                                                            log::warn!("CLAUDE_CODE: MCP tool permission denied: {}", content);
+                                                            // Don't propagate permission errors as API errors
+                                                            // Instead, send as a regular tool result
+                                                        } else {
+                                                            log::debug!("CLAUDE_CODE: Tool result for {}: {} (error: {:?})", tool_use_id, content, is_error);
+                                                        }
+                                                        
+                                                        // Send tool result as a message part
+                                                        let _ = sender.send(Ok(StreamChunk {
+                                                            part: MessagePart::ToolResult {
+                                                                tool_call_id: tool_use_id,
+                                                                name: "".to_string(), // Name not provided in user messages
+                                                                result: serde_json::json!({
+                                                                    "content": content,
+                                                                    "is_error": is_error.unwrap_or(false)
+                                                                }),
+                                                            },
+                                                            is_final: false,
+                                                            finish_reason: None,
+                                                            token_usage: None,
+                                                        }));
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -226,8 +289,10 @@ impl ClaudeCodeStream {
                                         // Complete JSON that failed to parse - this is an error
                                         log::error!("CLAUDE_CODE: Failed to parse complete JSON: {} - Error: {}", json_str.chars().take(200).collect::<String>(), e);
                                         
-                                        // Check for error messages
-                                        if json_str.contains("API Error") || json_str.contains("error") {
+                                        // Check for error messages (but ignore permission denials)
+                                        if json_str.contains("Permission to use") && json_str.contains("has been denied") {
+                                            log::debug!("CLAUDE_CODE: Ignoring MCP permission denial in error handling");
+                                        } else if json_str.contains("API Error") || json_str.contains("error") {
                                             let _ = sender.send(Err(SagittaCodeError::LlmError(
                                                 format!("Claude API Error: {}", json_str)
                                             )));

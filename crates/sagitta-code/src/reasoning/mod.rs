@@ -10,6 +10,8 @@ pub mod intent_analyzer;
 
 #[cfg(test)]
 pub mod test;
+#[cfg(test)]
+mod tests;
 
 use async_trait::async_trait;
 use reasoning_engine::{
@@ -1133,7 +1135,7 @@ pub use llm_adapter::ReasoningLlmClientAdapter;
 pub use intent_analyzer::SagittaCodeIntentAnalyzer;
 
 #[cfg(test)]
-mod tests {
+mod reasoning_tests {
     use super::*;
     use tokio::sync::broadcast;
     use uuid::Uuid;

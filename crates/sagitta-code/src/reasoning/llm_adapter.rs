@@ -132,9 +132,12 @@ impl ReasoningLlmClient for ReasoningLlmClientAdapter {
                                 is_final: sagitta_code_chunk.is_final, // Assuming a tool call can be final
                             }
                         }
-                        SagittaCodeMessagePart::ToolResult { name: _, result: _, tool_call_id: _ } => {
+                        SagittaCodeMessagePart::ToolResult { name, result, tool_call_id } => {
+                            // Tool results from Claude Code streaming should be logged but not sent as text
+                            // These are handled internally by the streaming parser
+                            log::debug!("Received ToolResult in stream: tool_id={}, name={}", tool_call_id, name);
                             ReasoningStreamChunk::Text {
-                                content: "[Received ToolResult from LLM stream - unhandled]".to_string(),
+                                content: String::new(), // Empty content - tool results are not user-visible
                                 is_final: sagitta_code_chunk.is_final,
                             }
                         }

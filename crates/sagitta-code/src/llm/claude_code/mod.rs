@@ -5,9 +5,12 @@ pub mod streaming;
 pub mod process;
 pub mod message_converter;
 pub mod tool_parser;
+pub mod xml_tools;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod integration_tests;
 
 pub use client::ClaudeCodeClient;
 pub use error::ClaudeCodeError;

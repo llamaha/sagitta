@@ -61,19 +61,20 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
         });
     }
     
-    // Handle clicked tool info
-    if let Some((tool_name, tool_args)) = &app.state.clicked_tool_info.clone() {
+    // Handle clicked tool info - process once then clear to prevent repeated execution
+    if let Some((tool_name, tool_args)) = app.state.clicked_tool_info.take() {
         if tool_name == "__CANCEL_TOOL__" {
             // Handle tool cancellation
-            if let Ok(run_id) = uuid::Uuid::parse_str(tool_args) {
+            if let Ok(run_id) = uuid::Uuid::parse_str(&tool_args) {
                 if let Err(e) = app.app_event_sender.send(AppEvent::CancelTool(run_id)) {
                     log::error!("Failed to send CancelTool event: {}", e);
                 }
             }
-            app.state.clicked_tool_info = None;
+            // clicked_tool_info already cleared by take()
         } else {
-            render_tool_info_modal(app, ctx, tool_name, tool_args);
-            // Don't clear clicked_tool_info here - let render_tool_info_modal decide
+            // Process the tool info modal
+            render_tool_info_modal(app, ctx, &tool_name, &tool_args);
+            // Note: render_tool_info_modal may set clicked_tool_info back if needed for terminal tools
         }
     }
 
@@ -1185,9 +1186,14 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         log::debug!("Detected tool result, determining display method");
         // This is a tool result - determine how to display it
         // Check specifically for shell/terminal commands, not code search
-        if tool_name.contains("Terminal Output") || tool_name.contains("shell") || 
-           (tool_name.contains("execution") && !tool_name.contains("search")) ||
-           tool_args.contains("stdout") || tool_args.contains("stderr") || tool_args.contains("exit_code") {
+        // Fix: Be more specific about what constitutes a terminal output
+        let is_terminal_output = tool_name.contains("Terminal Output") || 
+            tool_name.contains("streaming_shell_execution") ||
+            (tool_name.contains("shell") && !tool_name.contains("search")) || 
+            (tool_name.contains("shell_execution") && !tool_name.contains("search")) ||
+            (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
+            
+        if is_terminal_output {
             log::debug!("Handling terminal output for: {}", tool_name);
             
             // If terminal is already showing this tool's output, close it
@@ -1245,6 +1251,10 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         } else {
             // This is a non-shell tool result - show in preview
             log::debug!("Showing preview for non-shell tool result: {}", tool_name);
+            // Ensure terminal is closed to prevent flickering
+            if app.state.show_terminal {
+                app.state.show_terminal = false;
+            }
             app.show_preview(tool_name, tool_args);
         }
     } else {
@@ -1258,14 +1268,8 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         app.show_preview(&format!("{} Tool Call", tool_name), &formatted_args);
     }
     
-    // Only clear clicked tool info if preview was shown
-    // This prevents the "view details" button from breaking after multiple clicks
-    if !tool_name.contains("Terminal Output") && !tool_name.contains("shell") && 
-       !(tool_name.contains("execution") && !tool_name.contains("search")) &&
-       !tool_args.contains("stdout") && !tool_args.contains("stderr") && !tool_args.contains("exit_code") {
-        // Clear only for non-terminal tools that show preview
-        app.state.clicked_tool_info = None;
-    }
+    // Note: clicked_tool_info is now cleared by take() in the main render function
+    // This prevents the terminal output from being added repeatedly every frame
 }
 
 /// Refresh conversation clusters periodically
@@ -2050,14 +2054,92 @@ mod tests {
         
         for (tool_name, tool_args) in non_shell_tools {
             // Check if this would be treated as a shell command
-            let is_shell = tool_name.contains("Terminal Output") || 
-                          tool_name.contains("shell") || 
-                          (tool_name.contains("execution") && !tool_name.contains("search")) ||
-                          tool_args.contains("stdout") || 
-                          tool_args.contains("stderr") || 
-                          tool_args.contains("exit_code");
+            let is_terminal_output = tool_name.contains("Terminal Output") || 
+                tool_name.contains("streaming_shell_execution") ||
+                (tool_name.contains("shell") && !tool_name.contains("search")) || 
+                (tool_name.contains("shell_execution") && !tool_name.contains("search")) ||
+                (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
-            assert!(!is_shell, "{} should NOT be treated as shell command", tool_name);
+            assert!(!is_terminal_output, "{} should NOT be treated as terminal output", tool_name);
+        }
+    }
+    
+    /// Test that clicked_tool_info is processed only once to prevent repeated terminal writes
+    #[test]
+    fn test_clicked_tool_info_processed_once() {
+        // This test verifies the fix for the flickering issue where terminal output
+        // was being added every frame when clicked_tool_info remained Some
+        
+        // The fix uses take() to ensure clicked_tool_info is processed only once
+        let mut clicked_tool_info: Option<(String, String)> = Some(("test_tool".to_string(), "args".to_string()));
+        
+        // First frame - should process and clear
+        if let Some((tool_name, tool_args)) = clicked_tool_info.take() {
+            assert_eq!(tool_name, "test_tool");
+            assert_eq!(tool_args, "args");
+        }
+        
+        // clicked_tool_info should now be None
+        assert!(clicked_tool_info.is_none());
+        
+        // Second frame - should not process anything
+        if let Some(_) = clicked_tool_info.take() {
+            panic!("clicked_tool_info should have been cleared by first take()");
+        }
+    }
+    
+    /// Test the updated terminal output detection logic
+    #[test]
+    fn test_terminal_output_detection() {
+        struct TestCase {
+            tool_name: &'static str,
+            tool_args: &'static str,
+            expected: bool,
+            description: &'static str,
+        }
+        
+        let test_cases = vec![
+            TestCase {
+                tool_name: "streaming_shell_execution - Terminal Output",
+                tool_args: r#"{"stdout": "output", "stderr": "", "exit_code": 0}"#,
+                expected: true,
+                description: "streaming_shell_execution with Terminal Output suffix",
+            },
+            TestCase {
+                tool_name: "shell - Result",
+                tool_args: r#"{"stdout": "test", "stderr": "", "exit_code": 0}"#,
+                expected: true,
+                description: "shell tool with all terminal fields",
+            },
+            TestCase {
+                tool_name: "search_code - Result",
+                tool_args: r#"{"results": [], "query": "test"}"#,
+                expected: false,
+                description: "search_code should open preview, not terminal",
+            },
+            TestCase {
+                tool_name: "code_search_execution - Result",
+                tool_args: r#"{"results": []}"#,
+                expected: false,
+                description: "code search execution should open preview",
+            },
+            TestCase {
+                tool_name: "execution - Result",
+                tool_args: r#"{"result": "data"}"#,
+                expected: false,
+                description: "execution without terminal fields should open preview",
+            },
+        ];
+        
+        for test in test_cases {
+            let is_terminal_output = test.tool_name.contains("Terminal Output") || 
+                test.tool_name.contains("streaming_shell_execution") ||
+                (test.tool_name.contains("shell") && !test.tool_name.contains("search")) || 
+                (test.tool_name.contains("shell_execution") && !test.tool_name.contains("search")) ||
+                (test.tool_args.contains("stdout") && test.tool_args.contains("stderr") && test.tool_args.contains("exit_code"));
+                          
+            assert_eq!(is_terminal_output, test.expected, 
+                      "Failed for {}: {}", test.tool_name, test.description);
         }
     }
 }

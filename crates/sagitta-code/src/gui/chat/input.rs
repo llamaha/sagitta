@@ -430,13 +430,19 @@ pub fn chat_input_ui(
                 // Send/Stop button - changes based on state
                 if is_waiting || is_in_loop {
                     // Show Stop button during waiting/thinking/loop states
+                    // Use a darker shade of accent color instead of bright red
+                    let stop_color = Color32::from_rgb(
+                        (accent_color.r() as f32 * 0.7) as u8,
+                        (accent_color.g() as f32 * 0.7) as u8,
+                        (accent_color.b() as f32 * 0.7) as u8,
+                    );
                     if ui.add(
                         egui::Button::new(
                             RichText::new("⏹ Stop")
                                 .color(Color32::WHITE)
                                 .strong()
                         )
-                        .fill(error_color)
+                        .fill(stop_color)
                         .corner_radius(Rounding::same(18))
                         .min_size(Vec2::new(100.0, 36.0))
                     )

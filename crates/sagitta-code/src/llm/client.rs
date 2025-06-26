@@ -206,6 +206,8 @@ pub struct LlmResponse {
 /// Trait for LLM clients that can be used by the agent
 #[async_trait]
 pub trait LlmClient: Send + Sync {
+    /// Get the concrete type as Any for downcasting
+    fn as_any(&self) -> &dyn std::any::Any;
     /// Generate a response from the LLM
     async fn generate(&self, 
         messages: &[Message], 

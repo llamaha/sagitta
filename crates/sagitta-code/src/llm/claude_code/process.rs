@@ -47,6 +47,8 @@ impl ClaudeProcess {
             "stream-json".to_string(),
             "--max-turns".to_string(),
             "1".to_string(), // Let sagitta-code handle multi-turn
+            "--mcp-config".to_string(),
+            r#"{"mcpServers":{}}"#.to_string(), // Valid MCP config with no servers
         ];
         
         // Add model if specified

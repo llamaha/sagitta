@@ -468,6 +468,10 @@ impl OpenRouterClient {
 
 #[async_trait]
 impl LlmClient for OpenRouterClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     async fn generate(&self, 
         messages: &[Message], 
         tools: &[ToolDefinition]

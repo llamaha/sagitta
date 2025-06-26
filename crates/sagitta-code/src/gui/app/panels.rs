@@ -349,11 +349,11 @@ impl PanelManager {
             },
             ActivePanel::Preview => {
                 if matches!(self.active_panel, ActivePanel::Preview) {
-                    self.preview_panel.toggle(); // Close
+                    self.preview_panel.visible = false;
                     self.active_panel = ActivePanel::None;
                 } else {
                     self.close_all_panels();
-                    self.preview_panel.toggle(); // Open
+                    self.preview_panel.visible = true;
                     self.active_panel = ActivePanel::Preview;
                 }
             },

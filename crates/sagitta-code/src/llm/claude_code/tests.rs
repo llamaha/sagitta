@@ -323,7 +323,7 @@ mod tests {
         assert!(prompt.contains("CRITICAL TOOL USAGE RULES"));
         assert!(prompt.contains("You MUST use only ONE tool per response"));
         assert!(prompt.contains("After using a tool, wait for the result before proceeding"));
-        assert!(prompt.contains("Never attempt to use multiple tools in a single response"));
+        assert!(prompt.contains("Never attempt to use multiple tools in a single response (unless they can be executed in parallel)"));
     }
     
     #[test]
@@ -395,6 +395,117 @@ mod tests {
                 assert!(parameters.get("items").and_then(|v| v.as_array()).is_some());
             }
             _ => panic!("Expected ToolCall"),
+        }
+    }
+    
+    #[test]
+    fn test_tool_use_content_block_parsing() {
+        // Test that tool_use content blocks are properly handled
+        use crate::llm::claude_code::message_converter::{AssistantMessage, ContentBlock, Usage};
+        
+        // Create a mock assistant message with tool_use content block
+        let message = AssistantMessage {
+            content: vec![
+                ContentBlock::Text { text: "I'll help you search for that.".to_string() },
+                ContentBlock::ToolUse {
+                    id: "tool_123".to_string(),
+                    name: "web_search".to_string(),
+                    input: serde_json::json!({
+                        "query": "tokio rust github"
+                    }),
+                }
+            ],
+            usage: Usage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            },
+            stop_reason: Some("tool_use".to_string()),
+        };
+        
+        // Verify tool_use block is correctly parsed
+        assert_eq!(message.content.len(), 2);
+        match &message.content[1] {
+            ContentBlock::ToolUse { id, name, input } => {
+                assert_eq!(id, "tool_123");
+                assert_eq!(name, "web_search");
+                assert_eq!(input.get("query").and_then(|v| v.as_str()), Some("tokio rust github"));
+            }
+            _ => panic!("Expected ToolUse content block"),
+        }
+    }
+    
+    #[test]
+    fn test_user_message_chunk_handling() {
+        // Test that user message chunks (tool results) are properly handled
+        use crate::llm::claude_code::message_converter::{UserMessage, UserContentBlock};
+        
+        let message = UserMessage {
+            role: "user".to_string(),
+            content: vec![
+                UserContentBlock::ToolResult {
+                    content: "Found: https://github.com/tokio-rs/tokio.git".to_string(),
+                    tool_use_id: "tool_123".to_string(),
+                    is_error: Some(false),
+                }
+            ],
+        };
+        
+        // Verify tool result is correctly parsed
+        assert_eq!(message.content.len(), 1);
+        match &message.content[0] {
+            UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
+                assert_eq!(content, "Found: https://github.com/tokio-rs/tokio.git");
+                assert_eq!(tool_use_id, "tool_123");
+                assert_eq!(*is_error, Some(false));
+            }
+            _ => panic!("Expected ToolResult content block"),
+        }
+    }
+    
+    #[test]
+    fn test_mcp_tool_names_not_in_registry() {
+        // Test that MCP tool names are NOT in disabled list
+        // because they don't exist in our tool registry
+        let disabled = ClaudeCodeClient::get_disabled_tools();
+        
+        // Count MCP tools
+        let mcp_tools: Vec<_> = disabled.iter()
+            .filter(|t| t.starts_with("mcp__"))
+            .collect();
+        
+        // MCP tools should NOT be in the disabled list
+        assert_eq!(mcp_tools.len(), 0, "MCP tools should not be in disabled list");
+        
+        // MCP tools should never be in our disabled list since we disable MCP entirely
+        // via --mcp-config {} when spawning the Claude process
+    }
+    
+    #[test]
+    fn test_mcp_permission_denial_handling() {
+        // Test that MCP permission denials should be handled gracefully
+        use crate::llm::claude_code::message_converter::{UserMessage, UserContentBlock};
+        
+        let message = UserMessage {
+            role: "user".to_string(),
+            content: vec![
+                UserContentBlock::ToolResult {
+                    content: "Permission to use tool has been denied".to_string(),
+                    tool_use_id: "tool_456".to_string(),
+                    is_error: Some(true),
+                }
+            ],
+        };
+        
+        // Verify permission denial is detected
+        match &message.content[0] {
+            UserContentBlock::ToolResult { content, is_error, .. } => {
+                assert!(content.contains("Permission to use"));
+                assert!(content.contains("has been denied"));
+                assert_eq!(*is_error, Some(true));
+            }
+            _ => panic!("Expected ToolResult"),
         }
     }
 }

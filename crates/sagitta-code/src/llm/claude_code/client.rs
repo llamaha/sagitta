@@ -112,11 +112,14 @@ impl ClaudeCodeClient {
         
         // Add critical tool usage rules for sequential execution
         prompt.push_str("\n## CRITICAL TOOL USAGE RULES:\n");
-        prompt.push_str("- You MUST use only ONE tool per response\n");
         prompt.push_str("- After using a tool, wait for the result before proceeding\n");
         prompt.push_str("- If multiple actions are needed, use one tool, receive the result, then continue in your next response\n");
-        prompt.push_str("- Never attempt to use multiple tools in a single response\n");
+        prompt.push_str("- Never attempt to use multiple tools in a single response (unless they can be executed in parallel)\n");
         prompt.push_str("- Each tool use should be followed by waiting for and analyzing the result before deciding next steps\n");
+        prompt.push_str("- DO NOT summarize or predict what the tools will do - wait for actual results\n");
+        prompt.push_str("- DO NOT give a summary of all steps before starting - execute one step at a time\n");
+        prompt.push_str("- NEVER say things like 'Great! I found...', 'Perfect! The repository has been added...', or 'Excellent! The sync completed...' BEFORE receiving the actual tool results\n");
+        prompt.push_str("- Only describe what actually happened AFTER you receive the tool execution results\n");
         
         prompt
     }
@@ -132,28 +135,19 @@ impl ClaudeCodeClient {
     /// Get list of tools to disable (all Claude built-in tools)
     pub fn get_disabled_tools() -> Vec<String> {
         vec![
-            // Claude's built-in tools
+            // Claude's built-in tools only
             "Task", "Bash", "Glob", "Grep", "LS", "exit_plan_mode",
             "Read", "Edit", "MultiEdit", "Write", "NotebookRead",
             "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite", "WebSearch",
-            // MCP tools that might be present
-            "mcp__sagitta-mcp-stdio__ping",
-            "mcp__sagitta-mcp-stdio__repository_add",
-            "mcp__sagitta-mcp-stdio__repository_list",
-            "mcp__sagitta-mcp-stdio__repository_remove",
-            "mcp__sagitta-mcp-stdio__repository_sync",
-            "mcp__sagitta-mcp-stdio__query",
-            "mcp__sagitta-mcp-stdio__repository_search_file",
-            "mcp__sagitta-mcp-stdio__repository_view_file",
-            "mcp__sagitta-mcp-stdio__repository_map",
-            "mcp__sagitta-mcp-stdio__repository_switch_branch",
-            "mcp__sagitta-mcp-stdio__repository_list_branches"
         ].iter().map(|s| s.to_string()).collect()
     }
 }
 
 #[async_trait]
 impl LlmClient for ClaudeCodeClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     async fn generate(
         &self, 
         messages: &[Message], 

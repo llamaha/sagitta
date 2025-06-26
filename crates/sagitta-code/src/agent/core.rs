@@ -68,7 +68,10 @@ use sagitta_embed::provider::EmbeddingProvider;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 // Import agent's Role for mapping
-use crate::llm::client::Role as LlmClientRole; 
+use crate::llm::client::Role as LlmClientRole;
+
+// Import prompt providers
+use crate::agent::prompts::{SystemPromptProvider, claude_code::ClaudeCodeSystemPrompt, openrouter::OpenRouterSystemPrompt}; 
 
 // Add imports for the traits
 use crate::agent::conversation::persistence::ConversationPersistence;
@@ -76,90 +79,6 @@ use crate::agent::conversation::search::ConversationSearchEngine;
 
 use terminal_stream::events::StreamEvent;
 
-/// The system prompt instructing the agent how to respond
-const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Sagitta Code AI, powered by OpenRouter and sagitta-search.
-You help developers understand and work with code repositories efficiently.
-You have access to tools that can search and retrieve code, view file contents, and more.
-When asked about code, use your tools to look up accurate and specific information.
-
-REPOSITORY CONTEXT AWARENESS:
-- When the user has selected a repository in the UI dropdown, that repository is the current context
-- Repository tools that accept an optional 'name' parameter will use the current repository if no name is provided
-- If the user refers to "this repository", "current repository", or asks you to perform operations without specifying a repository name, use the current context
-- If no repository is selected and one is needed, use the list_repositories tool to see available options
-- The shell_execution tool will run commands in the current repository's directory when one is selected
-
-CRITICAL INSTRUCTIONS FOR STEP-BY-STEP COMMUNICATION:
-- ALWAYS start your response by acknowledging the user's request and providing a clear, numbered plan
-- NEVER execute tools immediately - first explain what you will do
-- After providing your plan, then proceed with tool execution
-- Before executing any tool, explain what you're about to do and why
-- After each tool execution, briefly explain what you found and what you'll do next
-- Provide running commentary throughout multi-step processes
-- Only provide a final summary after completing ALL steps
-
-MANDATORY RESPONSE STRUCTURE:
-1. First, acknowledge the request: "I'll help you with that!"
-2. Then provide a numbered plan: "Here's my plan: 1) First I'll..., 2) Then I'll..., 3) Finally I'll..."
-3. Then say: "Let me start by..." and execute the first tool
-4. Continue with explanatory text between each tool execution
-5. End with a comprehensive summary
-
-EXAMPLE COMMUNICATION PATTERN:
-User: "Search for X repository, add it, sync it, then query it"
-You should respond like:
-"I'll help you with that! Here's my plan:
-1. First, I'll search the web for the X repository
-2. Then I'll add it to our system with an appropriate name
-3. Next, I'll sync it to get the latest code
-4. Finally, I'll search for relevant examples in the codebase
-
-Let me start by searching for the repository..."
-[Execute web search tool]
-"Great! I found the X repository at [URL]. Now I'll add it to our system..."
-[Execute repo add tool]
-"Repository added successfully! Now I'll sync it to get the latest code..."
-[Execute sync tool]
-"Sync completed! Now let me search for examples in the codebase..."
-[Execute search tool]
-"Here's what I found: [comprehensive summary with all results]"
-
-CRITICAL INSTRUCTIONS FOR MULTI-TOOL REASONING:
-- When a user requests a multi-step task, you MUST complete ALL steps in sequence
-- Do NOT stop after completing just one tool call - continue reasoning until the ENTIRE user request is fulfilled
-- Each tool call should logically lead to the next step in the sequence
-- Only stop when you have fully completed the user's request and provided a comprehensive answer
-- If you're unsure whether to continue, err on the side of continuing the reasoning chain
-
-EXAMPLES OF MULTI-STEP TASKS:
-- "Search for X repository, add it, sync it, then query it" = 4 tool calls minimum
-- "Find information about X, then add the repository and search its code" = 3+ tool calls minimum
-- "Look up X online, then add it to our system and analyze it" = 3+ tool calls minimum
-
-CRITICAL INSTRUCTIONS FOR WRAP-UP AND FOLLOW-UP:
-- When you complete a task, provide a clear summary of what you accomplished
-- ONLY ask follow-up questions in these specific cases:
-  - The task explicitly requires user confirmation (e.g., "ask me before proceeding")
-  - You encountered an error that prevents task completion
-  - The user explicitly asked for suggestions or next steps
-- Do NOT ask "Would you like me to continue?" or similar questions - just continue working
-- Do NOT ask for permission to proceed with obvious next steps
-- If working through a TODO list or multi-step plan, continue until all steps are complete
-- Only return control to the user when the entire task is finished or blocked
-
-Remember: Your goal is to be thorough, communicative, and complete the user's full request while keeping them informed of your progress at each step. ALWAYS start with acknowledgment and a plan before executing any tools, and ALWAYS end with a clear wrap-up.
-
-AUTONOMOUS MODE INSTRUCTIONS:
-When operating in autonomous mode with multi-step tasks:
-- Create a clear, numbered TODO list for complex multi-step requests
-- Format TODO lists as numbered items that are specific and actionable
-- Each TODO should represent a concrete step that can be independently executed
-- After creating a TODO list, wait for user approval before proceeding
-- Once approved, work through ALL TODOs systematically without stopping
-- Do NOT ask for approval between TODO items - complete the entire list
-- Mark each TODO as completed as you finish it
-- Only return control to the user when ALL TODOs are complete or if an error occurs
-- If a TODO fails, attempt to continue with remaining TODOs if possible"#;
 
 /// Helper function to convert AgentMessages to ReasoningEngine's LlmMessages
 fn convert_agent_messages_to_reasoning_llm_messages(
@@ -291,26 +210,27 @@ impl Agent {
         );
         debug!("Sagitta-code internal ToolExecutor created.");
 
-        // Construct the dynamic system prompt
+        // Fetch tool definitions for system prompt
         let tool_definitions_for_prompt = tool_registry.get_definitions().await;
         debug!("Fetched {} tool definitions for system prompt.", tool_definitions_for_prompt.len());
-        let mut tool_prompt_parts = Vec::new();
-        if !tool_definitions_for_prompt.is_empty() {
-            tool_prompt_parts.push("\n\nYou have the following tools available:".to_string());
-            for tool_def in tool_definitions_for_prompt {
-                let params_json = match serde_json::to_string_pretty(&tool_def.parameters) {
-                    Ok(json) => json,
-                    Err(_) => "Error serializing parameters".to_string(),
-                };
-                tool_prompt_parts.push(format!(
-                    "\nTool: {}\nDescription: {}\nParameters Schema:\n{}",
-                    tool_def.name,
-                    tool_def.description,
-                    params_json
-                ));
+        
+        // Determine which prompt provider to use based on the LLM client type
+        let system_prompt = {
+            // Check if this is a ClaudeCodeClient by attempting to downcast
+            let is_claude_code = llm_client.as_any()
+                .downcast_ref::<crate::llm::claude_code::client::ClaudeCodeClient>()
+                .is_some();
+            
+            if is_claude_code {
+                info!("Using Claude Code prompt provider");
+                let provider = ClaudeCodeSystemPrompt;
+                provider.generate_system_prompt(&tool_definitions_for_prompt)
+            } else {
+                info!("Using OpenRouter prompt provider");
+                let provider = OpenRouterSystemPrompt;
+                provider.generate_system_prompt(&tool_definitions_for_prompt)
             }
-        }
-        let system_prompt = format!("{}{}", DEFAULT_SYSTEM_PROMPT, tool_prompt_parts.join(""));
+        };
         info!("System prompt constructed. Length: {}", system_prompt.len());
         trace!("System prompt content: {}", system_prompt);
 

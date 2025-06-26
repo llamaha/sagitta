@@ -64,9 +64,18 @@ pub enum ClaudeChunk {
     },
     #[serde(rename = "result")]
     Result {
-        result: serde_json::Value, // Changed to handle both string and object formats
+        #[serde(default)]
+        result: Option<serde_json::Value>, // Made optional to handle different result formats
         #[serde(rename = "total_cost_usd")]
         total_cost_usd: Option<f64>,
+        #[serde(default)]
+        subtype: Option<String>,
+        #[serde(default)]
+        is_error: Option<bool>,
+    },
+    #[serde(rename = "user")]
+    User {
+        message: UserMessage,
     },
 }
 
@@ -78,6 +87,25 @@ pub struct AssistantMessage {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct UserMessage {
+    pub role: String,
+    pub content: Vec<UserContentBlock>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum UserContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        content: String,
+        tool_use_id: String,
+        is_error: Option<bool>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
     #[serde(rename = "text")]
@@ -86,6 +114,12 @@ pub enum ContentBlock {
     Thinking { thinking: String },
     #[serde(rename = "redacted_thinking")]
     RedactedThinking,
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]

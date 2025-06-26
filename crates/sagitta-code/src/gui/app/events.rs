@@ -64,15 +64,28 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
         for event in events {
             match event {
                 AgentEvent::LlmMessage(message) => {
-                    // CRITICAL FIX: Only add complete messages if we're NOT currently streaming
-                    // This prevents overwriting streaming responses AND prevents duplication
+                    // Handle complete messages with better race condition detection
                     if app.state.current_response_id.is_none() && !app.state.is_streaming_response {
+                        // Normal case: no active streaming
                         let chat_message = make_chat_message_from_agent_message(&message);
                         let streaming_message: StreamingMessage = chat_message.into();
                         app.chat_manager.add_complete_message(streaming_message);
                         log::info!("SagittaCodeApp: Added complete LlmMessage as new message");
+                    } else if app.state.is_streaming_response && app.state.current_response_id.is_none() {
+                        // Race condition: streaming flag is set but no response ID
+                        // This can happen when final chunk just cleared the ID but flag is still set
+                        log::debug!("SagittaCodeApp: Detected race condition - streaming flag set but no response ID, adding message");
+                        let chat_message = make_chat_message_from_agent_message(&message);
+                        let streaming_message: StreamingMessage = chat_message.into();
+                        app.chat_manager.add_complete_message(streaming_message);
+                        app.state.is_streaming_response = false;
                     } else {
-                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?}, is_streaming: {})", app.state.current_response_id, app.state.is_streaming_response);
+                        // Active streaming - check if it's a duplicate or error recovery
+                        if let Some(response_id) = &app.state.current_response_id {
+                            log::debug!("SagittaCodeApp: Received LlmMessage during active streaming (id: {}), likely from error recovery", response_id);
+                        } else {
+                            log::warn!("SagittaCodeApp: Unexpected state - streaming with response_id but shouldn't reach here");
+                        }
                     }
                     app.state.is_waiting_for_response = false;
                 },
