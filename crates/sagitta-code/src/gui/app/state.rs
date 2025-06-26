@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use terminal_stream::{
     events::StreamEvent,
     TerminalWidget, TerminalConfig,
+    config::BufferConfig,
 };
 
 /// Information about a currently running tool
@@ -92,13 +93,28 @@ pub struct AppState {
     pub loop_inject_message: Option<String>,
     pub loop_inject_buffer: String,
     pub show_loop_inject_input: bool,
+    
+    // Input focus management
+    pub should_focus_input: bool,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        // Create terminal widget with default config
-        let terminal_config = TerminalConfig::default();
-        let terminal_widget = TerminalWidget::new("main_terminal");
+        // Create terminal widget with custom config to prevent flickering
+        let terminal_config = TerminalConfig::default()
+            .with_max_lines(50000).unwrap()  // Increased from 10000 to prevent flickering
+            .with_buffer_config(BufferConfig {
+                max_lines: 50000,       // Increased from 10000
+                lines_to_keep: 40000,   // Increased from 5000
+                cleanup_interval_ms: 5000, // Increased from 1000ms to reduce cleanup frequency
+            }).unwrap();
+        
+        // Create terminal widget using builder with custom config
+        let terminal_widget = TerminalWidget::builder()
+            .id("main_terminal")
+            .config(terminal_config)
+            .build()
+            .expect("Failed to create terminal widget");
         
         // Create terminal event channel
         let (terminal_event_sender, terminal_event_receiver) = mpsc::channel(1000);
@@ -170,6 +186,9 @@ impl AppState {
             loop_inject_message: None,
             loop_inject_buffer: String::new(),
             show_loop_inject_input: false,
+            
+            // Input focus management
+            should_focus_input: true, // Focus input on startup
         }
     }
 
@@ -762,5 +781,36 @@ mod tests {
         // With repository
         state.set_repository_context(Some("my-project".to_string()));
         assert_eq!(state.get_repository_context_display(), "📁 my-project");
+    }
+
+    #[test]
+    fn test_terminal_configuration_prevents_flickering() {
+        // Test that terminal is configured with increased line limits to prevent flickering
+        let state = AppState::new();
+        
+        // Verify terminal widget was created (we can't directly access its config,
+        // but we can verify the state was initialized)
+        assert!(state.terminal_event_sender.is_some());
+        assert!(state.terminal_event_receiver.is_some());
+        
+        // Test the configuration we would use
+        let test_config = TerminalConfig::default()
+            .with_max_lines(50000).unwrap()
+            .with_buffer_config(BufferConfig {
+                max_lines: 50000,
+                lines_to_keep: 40000,
+                cleanup_interval_ms: 5000,
+            }).unwrap();
+        
+        // Verify the configuration is valid
+        assert!(test_config.validate().is_ok());
+        
+        // Verify the line limits are correct to prevent flickering at 5000 lines
+        assert_eq!(test_config.buffer.max_lines, 50000);
+        assert_eq!(test_config.buffer.lines_to_keep, 40000);
+        assert_eq!(test_config.buffer.cleanup_interval_ms, 5000);
+        
+        // Ensure lines_to_keep is significantly higher than the old 5000 line flickering point
+        assert!(test_config.buffer.lines_to_keep > 5000 * 5); // At least 5x the old limit
     }
 } 

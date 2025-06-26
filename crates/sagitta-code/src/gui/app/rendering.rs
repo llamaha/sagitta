@@ -656,8 +656,11 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.settings_panel.toggle();
             }
             
-            // Render the settings panel
-            app.settings_panel.render(ctx, app.state.current_theme);
+            // Render the settings panel and check if it should be closed
+            if app.settings_panel.render(ctx, app.state.current_theme) {
+                // Settings panel requested to be closed
+                app.panels.toggle_panel(ActivePanel::None);
+            }
         },
         ActivePanel::ModelSelection => {
             // Handle model selection
@@ -1003,6 +1006,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.loop_inject_buffer,
                 &mut app.state.show_loop_inject_input,
                 &mut app.state.loop_inject_message,
+                // Focus management
+                &mut app.state.should_focus_input,
             );
             
             // Handle agent mode changes

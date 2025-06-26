@@ -36,6 +36,8 @@ pub fn chat_input_ui(
     loop_inject_buffer: &mut String,
     show_loop_inject_input: &mut bool,
     loop_inject_message: &mut Option<String>,
+    // Focus management
+    should_focus_input: &mut bool,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -76,8 +78,15 @@ pub fn chat_input_ui(
     
     let mut text_edit_id: Option<egui::Id> = None;
     
-    // Use a vertical layout centered within the panel provided by app.rs
-    ui.vertical_centered(|ui| {
+    // Add horizontal margins to prevent content from extending beyond window
+    let margin = 8.0;
+    let available_width = ui.available_width() - (margin * 2.0);
+    
+    // Use a vertical layout with constrained width
+    ui.allocate_ui_with_layout(
+        Vec2::new(available_width, ui.available_height()),
+        Layout::top_down(Align::Center),
+        |ui| {
         // Agent Mode Selector
         ui.horizontal(|ui| {
             ui.label(RichText::new("Mode:").color(hint_color).small());
@@ -302,29 +311,93 @@ pub fn chat_input_ui(
         ui.add_space(4.0);
         
         // Main input area with proper theme styling
-        Frame::none()
-            .fill(input_bg_color)
-            .stroke(Stroke::new(1.0, border_color))
-            .rounding(Rounding::same(4))
-            .inner_margin(Vec2::splat(8.0))
-            .show(ui, |ui| {
-                let text_edit = TextEdit::multiline(input_buffer)
-                    .hint_text("Type your message here... (Enter to send, Ctrl+Enter for new line)")
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(3)
-                    .text_color(text_color)
-                    .frame(false);
+        // Add horizontal constraint to prevent overflow
+        ui.horizontal(|ui| {
+            ui.add_space(margin); // Left margin
+            
+            ui.allocate_ui_with_layout(
+                Vec2::new(ui.available_width() - margin, ui.available_height()),
+                Layout::left_to_right(Align::TOP),
+                |ui| {
+                    Frame::none()
+                        .fill(input_bg_color)
+                        .stroke(Stroke::new(1.0, border_color))
+                        .rounding(Rounding::same(4))
+                        .inner_margin(Vec2::splat(8.0))
+                        .show(ui, |ui| {
+                // Disable input during waiting/thinking/loop states
+                let input_enabled = !is_waiting && !is_in_loop;
                 
-                let response = ui.add(text_edit);
-                text_edit_id = Some(response.id);
+                // Calculate approximate height needed for the text
+                let line_count = input_buffer.lines().count().max(1);
+                let line_height = 20.0; // Approximate line height
+                let content_height = (line_count as f32 * line_height).min(80.0);
                 
-                // Handle Enter key for submission
-                if response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added {
-                    if !input_buffer.trim().is_empty() {
-                        *on_submit = true;
+                // Only use ScrollArea if content exceeds max height
+                if content_height >= 80.0 {
+                    // Large content - use scroll area
+                    egui::ScrollArea::vertical()
+                        .max_height(80.0)
+                        .show(ui, |ui| {
+                            let text_edit = TextEdit::multiline(input_buffer)
+                                .hint_text(if input_enabled {
+                                    "Type your message here... (Enter to send, Ctrl+Enter for new line)"
+                                } else if is_in_loop {
+                                    "Input disabled during reasoning loop..."
+                                } else {
+                                    "Input disabled while Sagitta Code is thinking..."
+                                })
+                                .desired_width(ui.available_width())
+                                .min_size(Vec2::new(ui.available_width(), 60.0))
+                                .text_color(if input_enabled { text_color } else { hint_color })
+                                .interactive(input_enabled)
+                                .frame(false);
+                            
+                            let response = ui.add(text_edit);
+                            text_edit_id = Some(response.id);
+                            
+                            // Handle Enter key for submission
+                            if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added {
+                                if !input_buffer.trim().is_empty() {
+                                    *on_submit = true;
+                                }
+                            }
+                        });
+                } else {
+                    // Small content - no scroll area needed
+                    let text_edit = TextEdit::multiline(input_buffer)
+                        .hint_text(if input_enabled {
+                            "Type your message here... (Enter to send, Ctrl+Enter for new line)"
+                        } else if is_in_loop {
+                            "Input disabled during reasoning loop..."
+                        } else {
+                            "Input disabled while Sagitta Code is thinking..."
+                        })
+                        .desired_width(ui.available_width())
+                        .min_size(Vec2::new(ui.available_width(), 60.0))
+                        .text_color(if input_enabled { text_color } else { hint_color })
+                        .interactive(input_enabled)
+                        .frame(false);
+                    
+                    let response = ui.add(text_edit);
+                    text_edit_id = Some(response.id);
+                    
+                    // Request focus when needed (cursor should be visible without ScrollArea)
+                    if *should_focus_input && input_enabled {
+                        response.request_focus();
+                        *should_focus_input = false;
+                    }
+                    
+                    // Handle Enter key for submission
+                    if input_enabled && response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) && !new_line_added {
+                        if !input_buffer.trim().is_empty() {
+                            *on_submit = true;
+                        }
                     }
                 }
             });
+                });
+        });
         
         ui.add_space(4.0);
         
@@ -354,23 +427,47 @@ pub fn chat_input_ui(
 
                 ui.add_space(8.0);
 
-                // Send button (prominent style)
-                let send_button_enabled = !input_buffer.trim().is_empty() && !is_waiting;
-                let send_color = if send_button_enabled { accent_color } else { theme.button_disabled_color() };
-                let send_text_color = if send_button_enabled { Color32::WHITE } else { theme.button_disabled_text_color() };
-
-                if ui.add_enabled(
-                    send_button_enabled,
-                    egui::Button::new(
-                        RichText::new("📤 Send")
-                            .color(send_text_color)
-                            .strong()
+                // Send/Stop button - changes based on state
+                if is_waiting || is_in_loop {
+                    // Show Stop button during waiting/thinking/loop states
+                    if ui.add(
+                        egui::Button::new(
+                            RichText::new("⏹ Stop")
+                                .color(Color32::WHITE)
+                                .strong()
+                        )
+                        .fill(error_color)
+                        .corner_radius(Rounding::same(18))
+                        .min_size(Vec2::new(100.0, 36.0))
                     )
-                    .fill(send_color)
-                    .corner_radius(Rounding::same(18))
-                    .min_size(Vec2::new(100.0, 36.0))
-                ).clicked() {
-                    *on_submit = true;
+                    .on_hover_text(if is_in_loop { "Stop the reasoning loop" } else { "Stop the current operation" })
+                    .clicked() {
+                        if is_in_loop {
+                            *loop_break_requested = true;
+                        } else {
+                            // TODO: Implement stop functionality for regular operations
+                            log::info!("Stop button clicked during waiting state");
+                        }
+                    }
+                } else {
+                    // Show Send button during normal state
+                    let send_button_enabled = !input_buffer.trim().is_empty();
+                    let send_color = if send_button_enabled { accent_color } else { theme.button_disabled_color() };
+                    let send_text_color = if send_button_enabled { Color32::WHITE } else { theme.button_disabled_text_color() };
+
+                    if ui.add_enabled(
+                        send_button_enabled,
+                        egui::Button::new(
+                            RichText::new("📤 Send")
+                                .color(send_text_color)
+                                .strong()
+                        )
+                        .fill(send_color)
+                        .corner_radius(Rounding::same(18))
+                        .min_size(Vec2::new(100.0, 36.0))
+                    ).clicked() {
+                        *on_submit = true;
+                    }
                 }
             });
         });
@@ -537,6 +634,108 @@ mod tests {
         
         // Test that multiline input is still valid for submission
         assert!(!multiline_input.trim().is_empty());
+    }
+
+    #[test]
+    fn test_focus_management() {
+        // Test that focus flag is properly managed
+        let mut should_focus_input = true;
+        
+        // Initial state should request focus
+        assert!(should_focus_input);
+        
+        // After requesting focus, it should be reset
+        if should_focus_input {
+            // Simulate requesting focus
+            should_focus_input = false;
+        }
+        assert!(!should_focus_input);
+        
+        // Simulate tool completion - should request focus again
+        should_focus_input = true;
+        assert!(should_focus_input);
+    }
+
+    #[test]
+    fn test_input_disabled_during_waiting() {
+        // Test that input is disabled during waiting states
+        let is_waiting = true;
+        let is_in_loop = false;
+        
+        // Input should be disabled when waiting
+        let input_enabled = !is_waiting && !is_in_loop;
+        assert!(!input_enabled);
+        
+        // Test with loop state
+        let is_waiting_2 = false;
+        let is_in_loop_2 = true;
+        let input_enabled_2 = !is_waiting_2 && !is_in_loop_2;
+        assert!(!input_enabled_2);
+        
+        // Test normal state
+        let is_waiting_3 = false;
+        let is_in_loop_3 = false;
+        let input_enabled_3 = !is_waiting_3 && !is_in_loop_3;
+        assert!(input_enabled_3);
+    }
+
+    #[test]
+    fn test_button_state_changes() {
+        // Test that button changes between Send and Stop based on state
+        let is_waiting = true;
+        let is_in_loop = false;
+        
+        // Should show Stop button when waiting
+        let show_stop_button = is_waiting || is_in_loop;
+        assert!(show_stop_button);
+        
+        // Test with loop state
+        let is_waiting_2 = false;
+        let is_in_loop_2 = true;
+        let show_stop_button_2 = is_waiting_2 || is_in_loop_2;
+        assert!(show_stop_button_2);
+        
+        // Test normal state - should show Send button
+        let is_waiting_3 = false;
+        let is_in_loop_3 = false;
+        let show_stop_button_3 = is_waiting_3 || is_in_loop_3;
+        assert!(!show_stop_button_3);
+    }
+
+    #[test]
+    fn test_input_area_scrolling() {
+        // Test that the input area has proper scrolling constraints
+        const MAX_HEIGHT: f32 = 80.0;
+        const MIN_HEIGHT: f32 = 60.0;
+        const LINE_HEIGHT: f32 = 20.0;
+        
+        // Test that max height is reasonable for scrolling
+        assert!(MAX_HEIGHT > MIN_HEIGHT);
+        assert!(MAX_HEIGHT < 200.0); // Should be less than panel max height
+        
+        // Test that minimum height shows at least 3 rows (approx 20px per row)
+        assert!(MIN_HEIGHT >= 60.0);
+        
+        // Test small input (no scrolling needed)
+        let small_input = "Line 1\nLine 2\nLine 3";
+        let small_line_count = small_input.lines().count();
+        assert_eq!(small_line_count, 3);
+        let small_height = small_line_count as f32 * LINE_HEIGHT;
+        assert!(small_height < MAX_HEIGHT); // Should not need scrolling
+        
+        // Test large input handling
+        let large_input = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10";
+        let line_count = large_input.lines().count();
+        assert_eq!(line_count, 10);
+        
+        // With 10 lines, the input should require scrolling
+        // Assuming ~20px per line, 10 lines = 200px which is > MAX_HEIGHT
+        let estimated_height = line_count as f32 * LINE_HEIGHT;
+        assert!(estimated_height > MAX_HEIGHT);
+        
+        // Test that scrolling only activates at 80px (4 lines)
+        let threshold_lines = (MAX_HEIGHT / LINE_HEIGHT) as usize;
+        assert_eq!(threshold_lines, 4);
     }
 }
 

@@ -1186,6 +1186,9 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
     let status = if success { "completed" } else { "failed" };
     app.state.tool_results.insert(run_id.to_string(), format!("Tool {} {}", tool, status));
     
+    // Request focus on input after tool completion
+    app.state.should_focus_input = true;
+    
     // UI will update on next frame automatically
 }
 
