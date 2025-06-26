@@ -7,7 +7,7 @@ mod tests {
     use crate::llm::claude_code::message_converter::{convert_messages_to_claude, ClaudeChunk, ContentBlock};
     use crate::llm::claude_code::models::ClaudeCodeModel;
     use crate::llm::claude_code::error::ClaudeCodeError;
-    use crate::llm::claude_code::streaming::parse_tool_calls_from_text;
+    use crate::llm::claude_code::tool_parser::parse_tool_calls_from_text;
     use std::collections::HashMap;
     use uuid::Uuid;
     use serde_json::json;
@@ -314,18 +314,25 @@ mod tests {
         let prompt = ClaudeCodeClient::format_tools_for_system_prompt(&tools);
         assert!(prompt.contains("## Available Tools"));
         assert!(prompt.contains("### search"));
-        assert!(prompt.contains("<tool_name>search</tool_name>"));
+        assert!(prompt.contains("<search>"));
         assert!(prompt.contains("<query>value</query>"));
         assert!(prompt.contains("<limit>123</limit>"));
+        assert!(prompt.contains("</search>"));
+        
+        // Check for sequential tool execution rules
+        assert!(prompt.contains("CRITICAL TOOL USAGE RULES"));
+        assert!(prompt.contains("You MUST use only ONE tool per response"));
+        assert!(prompt.contains("After using a tool, wait for the result before proceeding"));
+        assert!(prompt.contains("Never attempt to use multiple tools in a single response"));
     }
     
     #[test]
     fn test_parse_tool_calls_from_text() {
-        let text = "Let me search for that.\n\n<tool_use>\n<tool_name>search</tool_name>\n<parameters>\n<query>rust documentation</query>\n</parameters>\n</tool_use>\n\nI found some results.";
+        let text = "Let me search for that. <search><query>rust documentation</query></search> I found some results.";
         
         let (remaining_text, tool_calls) = parse_tool_calls_from_text(text);
         
-        assert_eq!(remaining_text, "Let me search for that.\n\n\n\nI found some results.");
+        assert_eq!(remaining_text, "Let me search for that.  I found some results.");
         assert_eq!(tool_calls.len(), 1);
         
         match &tool_calls[0] {
@@ -339,11 +346,11 @@ mod tests {
     
     #[test]
     fn test_parse_multiple_tool_calls() {
-        let text = "<tool_use>\n<tool_name>read_file</tool_name>\n<parameters>\n<path>test.rs</path>\n</parameters>\n</tool_use>\n\n<tool_use>\n<tool_name>edit_file</tool_name>\n<parameters>\n<path>test.rs</path>\n<content>new content</content>\n</parameters>\n</tool_use>";
+        let text = "<read_file><path>test.rs</path></read_file> Then <edit_file><path>test.rs</path><content>new content</content></edit_file>";
         
         let (remaining_text, tool_calls) = parse_tool_calls_from_text(text);
         
-        assert_eq!(remaining_text, "");
+        assert_eq!(remaining_text, "Then");
         assert_eq!(tool_calls.len(), 2);
         
         match &tool_calls[0] {
@@ -359,7 +366,7 @@ mod tests {
     
     #[test]
     fn test_parse_tool_calls_with_comments() {
-        let text = "<tool_use>\n<tool_name>search</tool_name>\n<parameters>\n<query>test <!-- search query --></query>\n<limit>10 <!-- number of results --></limit>\n</parameters>\n</tool_use>";
+        let text = "<search><query>test <!-- search query --></query><limit>10 <!-- number of results --></limit></search>";
         
         let (_, tool_calls) = parse_tool_calls_from_text(text);
         
@@ -375,7 +382,7 @@ mod tests {
     
     #[test]
     fn test_parse_tool_calls_with_mixed_types() {
-        let text = "<tool_use>\n<tool_name>config</tool_name>\n<parameters>\n<enabled>true</enabled>\n<count>42</count>\n<rate>3.14</rate>\n<items>[\"a\", \"b\", \"c\"]</items>\n</parameters>\n</tool_use>";
+        let text = "<config><enabled>true</enabled><count>42</count><rate>3.14</rate><items>[\"a\", \"b\", \"c\"]</items></config>";
         
         let (_, tool_calls) = parse_tool_calls_from_text(text);
         

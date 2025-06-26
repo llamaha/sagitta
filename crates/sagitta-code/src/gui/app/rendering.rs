@@ -367,6 +367,12 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
+                // Determine provider type before entering async block
+                let is_claude_code = match app.config.try_lock() {
+                    Ok(config) => matches!(config.provider, crate::config::types::LlmProvider::ClaudeCode),
+                    Err(_) => false,
+                };
+                
                 app.state.is_waiting_for_response = true;
                 
                 // Process in background task with STREAMING
@@ -383,12 +389,21 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                             let mut last_chunk_time = std::time::Instant::now();
                             let mut consecutive_timeouts = 0;
                             
-                            loop {
-                                // Use longer timeout for tool execution phases
-                                let timeout_duration = if chunk_count > 0 && last_chunk_time.elapsed() > std::time::Duration::from_secs(10) {
-                                    std::time::Duration::from_secs(60) // Longer timeout for tool execution
+                            loop {                                
+                                let timeout_duration = if is_claude_code {
+                                    // Claude Code needs more time for complex requests with multiple tools
+                                    if chunk_count == 0 {
+                                        std::time::Duration::from_secs(120) // 2 minutes for initial response
+                                    } else {
+                                        std::time::Duration::from_secs(60) // 1 minute for subsequent chunks
+                                    }
                                 } else {
-                                    std::time::Duration::from_secs(30) // Normal timeout
+                                    // Original timeouts for other providers
+                                    if chunk_count > 0 && last_chunk_time.elapsed() > std::time::Duration::from_secs(10) {
+                                        std::time::Duration::from_secs(60) // Longer timeout for tool execution
+                                    } else {
+                                        std::time::Duration::from_secs(30) // Normal timeout
+                                    }
                                 };
                                 
                                 match tokio::time::timeout(timeout_duration, stream.next()).await {

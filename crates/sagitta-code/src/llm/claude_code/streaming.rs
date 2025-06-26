@@ -5,117 +5,17 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::task;
 use tokio::sync::mpsc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::llm::client::{StreamChunk, MessagePart, TokenUsage};
 use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
-use uuid::Uuid;
+use super::tool_parser::parse_tool_calls_from_text;
 
 /// Stream implementation for Claude Code output
 pub struct ClaudeCodeStream {
     receiver: mpsc::UnboundedReceiver<Result<StreamChunk, SagittaCodeError>>,
-}
-
-/// Parse tool calls from text containing XML tags
-pub fn parse_tool_calls_from_text(text: &str) -> (String, Vec<MessagePart>) {
-    let mut remaining_text = String::new();
-    let mut tool_calls = Vec::new();
-    let mut current_pos = 0;
-    
-    // Find all tool use blocks
-    while let Some(start) = text[current_pos..].find("<tool_use>") {
-        let start = current_pos + start;
-        
-        // Add any text before this tool call
-        if start > current_pos {
-            remaining_text.push_str(&text[current_pos..start]);
-        }
-        
-        // Find the end of this tool use block
-        if let Some(end) = text[start..].find("</tool_use>") {
-            let end = start + end + "</tool_use>".len();
-            let tool_block = &text[start..end];
-            
-            // Parse the tool name and parameters
-            if let Some(tool_name_start) = tool_block.find("<tool_name>") {
-                if let Some(tool_name_end) = tool_block.find("</tool_name>") {
-                    let name_start = tool_name_start + "<tool_name>".len();
-                    let tool_name = tool_block[name_start..tool_name_end].trim().to_string();
-                    
-                    // Parse parameters
-                    let mut params = serde_json::Map::new();
-                    if let Some(params_start) = tool_block.find("<parameters>") {
-                        if let Some(params_end) = tool_block.find("</parameters>") {
-                            let params_start = params_start + "<parameters>".len();
-                            let params_block = &tool_block[params_start..params_end];
-                            
-                            // Simple XML parameter parsing
-                            let lines = params_block.lines();
-                            for line in lines {
-                                let line = line.trim();
-                                if line.starts_with('<') && line.contains('>') {
-                                    // Extract tag name and value
-                                    if let Some(tag_end) = line.find('>') {
-                                        let tag = &line[1..tag_end];
-                                        if !tag.starts_with('/') && tag.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                                            // Find the closing tag
-                                            let close_tag = format!("</{}>", tag);
-                                            if let Some(close_pos) = line.find(&close_tag) {
-                                                let value_start = tag_end + 1;
-                                                let value = &line[value_start..close_pos];
-                                                
-                                                // Remove comments if present
-                                                let value = if let Some(comment_pos) = value.find("<!--") {
-                                                    value[..comment_pos].trim()
-                                                } else {
-                                                    value.trim()
-                                                };
-                                                
-                                                // Try to parse as JSON value
-                                                let json_value = if value == "true" || value == "false" {
-                                                    serde_json::Value::Bool(value == "true")
-                                                } else if let Ok(num) = value.parse::<i64>() {
-                                                    serde_json::Value::Number(num.into())
-                                                } else if let Ok(num) = value.parse::<f64>() {
-                                                    serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap_or(0.into()))
-                                                } else if value.starts_with('[') || value.starts_with('{') {
-                                                    serde_json::from_str(value).unwrap_or(serde_json::Value::String(value.to_string()))
-                                                } else {
-                                                    serde_json::Value::String(value.to_string())
-                                                };
-                                                
-                                                params.insert(tag.to_string(), json_value);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    let tool_call_id = Uuid::new_v4().to_string();
-                    tool_calls.push(MessagePart::ToolCall {
-                        tool_call_id,
-                        name: tool_name,
-                        parameters: serde_json::Value::Object(params),
-                    });
-                }
-            }
-            
-            current_pos = end;
-        } else {
-            // Incomplete tool block, include it as text
-            remaining_text.push_str(&text[start..]);
-            break;
-        }
-    }
-    
-    // Add any remaining text
-    if current_pos < text.len() {
-        remaining_text.push_str(&text[current_pos..]);
-    }
-    
-    (remaining_text.trim().to_string(), tool_calls)
 }
 
 impl ClaudeCodeStream {
@@ -133,6 +33,7 @@ impl ClaudeCodeStream {
                 let mut partial_data = String::new();
                 let mut usage = TokenUsage::default();
                 let mut is_paid_usage = true;
+                let tool_emitted = Arc::new(AtomicBool::new(false));
                 
                 // Collect stderr in a shared buffer
                 let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -154,6 +55,8 @@ impl ClaudeCodeStream {
                 
                 // Give stderr thread a moment to capture early errors
                 std::thread::sleep(std::time::Duration::from_millis(100));
+                
+                log::info!("CLAUDE_CODE: Starting to read from stdout");
                 
                 // Check if process already exited
                 if let Ok(Some(status)) = child.try_wait() {
@@ -180,28 +83,33 @@ impl ClaudeCodeStream {
                     }
                 }
                 
-                for line in reader.lines() {
-                    match line {
+                let mut line_count = 0;
+                
+                // Process lines as they arrive, similar to Roo-Code's readline approach
+                for line_result in reader.lines() {
+                    match line_result {
                         Ok(line) => {
-                            log::trace!("CLAUDE_CODE: Raw line: {}", line);
+                            line_count += 1;
                             
+                            // Skip empty lines
                             if line.trim().is_empty() {
                                 continue;
                             }
                             
-                            // Handle partial JSON
-                            let json_str = if !partial_data.is_empty() {
-                                partial_data.push_str(&line);
-                                let complete = partial_data.clone();
-                                partial_data.clear();
-                                complete
-                            } else {
-                                line.clone()
-                            };
+                            log::info!("CLAUDE_CODE: Received line {}: {}", line_count, line.chars().take(100).collect::<String>());
+                            log::trace!("CLAUDE_CODE: Raw line: {}", line);
                             
-                            // Try to parse the JSON
+                            // Accumulate partial JSON data between lines
+                            partial_data.push_str(&line);
+                            
+                            // Try to parse complete JSON objects
+                            let json_str = partial_data.trim();
+                            
+                            // Try to parse the JSON - if successful, clear partial data
                             match serde_json::from_str::<ClaudeChunk>(&json_str) {
                                 Ok(chunk) => {
+                                    // Successfully parsed, clear accumulated data
+                                    partial_data.clear();
                                     log::debug!("CLAUDE_CODE: Parsed chunk: {:?}", chunk);
                                     
                                     match chunk {
@@ -230,14 +138,24 @@ impl ClaudeCodeStream {
                                                             }));
                                                         }
                                                         
-                                                        // Send tool calls
+                                                        // Send tool calls with enforcement
                                                         for tool_call in tool_calls {
-                                                            let _ = sender.send(Ok(StreamChunk {
-                                                                part: tool_call,
-                                                                is_final: false,
-                                                                finish_reason: None,
-                                                                token_usage: None,
-                                                            }));
+                                                            // Check if we've already emitted a tool
+                                                            if !tool_emitted.load(Ordering::Relaxed) {
+                                                                // First tool - allow it
+                                                                tool_emitted.store(true, Ordering::Relaxed);
+                                                                let _ = sender.send(Ok(StreamChunk {
+                                                                    part: tool_call,
+                                                                    is_final: false,
+                                                                    finish_reason: None,
+                                                                    token_usage: None,
+                                                                }));
+                                                            } else {
+                                                                // Additional tool - log warning and skip
+                                                                if let MessagePart::ToolCall { name, .. } = &tool_call {
+                                                                    log::warn!("CLAUDE_CODE: Skipping additional tool call '{}' - only one tool per response allowed", name);
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                     ContentBlock::Thinking { thinking } => {
@@ -300,21 +218,27 @@ impl ClaudeCodeStream {
                                     }
                                 }
                                 Err(e) => {
-                                    // Check if it's a partial JSON
-                                    if json_str.ends_with('}') || json_str.ends_with(']') {
-                                        // Complete JSON that failed to parse
-                                        log::error!("CLAUDE_CODE: Failed to parse complete JSON: {} - Error: {}", json_str, e);
+                                    // Check if it looks like a complete JSON object that failed to parse
+                                    let looks_complete = json_str.trim_start().starts_with('{') && 
+                                                        json_str.trim_end().ends_with('}');
+                                    
+                                    if looks_complete {
+                                        // Complete JSON that failed to parse - this is an error
+                                        log::error!("CLAUDE_CODE: Failed to parse complete JSON: {} - Error: {}", json_str.chars().take(200).collect::<String>(), e);
                                         
                                         // Check for error messages
-                                        if json_str.contains("API Error") {
+                                        if json_str.contains("API Error") || json_str.contains("error") {
                                             let _ = sender.send(Err(SagittaCodeError::LlmError(
                                                 format!("Claude API Error: {}", json_str)
                                             )));
                                         }
+                                        
+                                        // Clear partial data to avoid carrying forward bad data
+                                        partial_data.clear();
                                     } else {
-                                        // Partial JSON, save for next iteration
-                                        log::trace!("CLAUDE_CODE: Saving partial data: {}", json_str);
-                                        partial_data = json_str;
+                                        // Partial JSON - keep accumulating
+                                        log::trace!("CLAUDE_CODE: Accumulating partial JSON data (length: {})", partial_data.len());
+                                        // partial_data already contains the accumulated data, so we don't need to do anything
                                     }
                                 }
                             }

@@ -72,7 +72,8 @@ impl ClaudeProcess {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", self.config.max_output_tokens.to_string());
+            .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", self.config.max_output_tokens.to_string())
+            .env_remove("ANTHROPIC_API_KEY"); // Ensure we use Claude Max subscription
         
         match cmd.spawn() {
             Ok(child) => {

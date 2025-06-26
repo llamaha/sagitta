@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::pin::Pin;
 use futures_util::Stream;
 use uuid::Uuid;
+use tokio::time::Duration;
 
 use crate::config::types::{SagittaCodeConfig, ClaudeCodeConfig};
 use crate::llm::client::{
@@ -14,6 +15,9 @@ use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
 use super::message_converter::{convert_messages_to_claude, ClaudeMessage};
 use super::models::ClaudeCodeModel;
+
+/// Process timeout for Claude Code (10 minutes like Roo-Code)
+const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Claude Code client implementing the LlmClient trait
 pub struct ClaudeCodeClient {
@@ -63,13 +67,17 @@ impl ClaudeCodeClient {
         }
         
         let mut prompt = String::from("\n\n## Available Tools\n\n");
-        prompt.push_str("You have access to the following tools. Use them by writing XML tags in your response:\n\n");
+        prompt.push_str("Tool uses are formatted using XML-style tags. The tool name itself becomes the XML tag name. ");
+        prompt.push_str("Each parameter is enclosed within its own set of tags. Here's the structure:\n\n");
+        prompt.push_str("```xml\n<actual_tool_name>\n<parameter1_name>value1</parameter1_name>\n");
+        prompt.push_str("<parameter2_name>value2</parameter2_name>\n...\n</actual_tool_name>\n```\n\n");
+        prompt.push_str("You have access to the following tools:\n\n");
         
         for tool in tools {
             prompt.push_str(&format!("### {}\n", tool.name));
             prompt.push_str(&format!("Description: {}\n", tool.description));
             prompt.push_str("Usage:\n```xml\n");
-            prompt.push_str(&format!("<tool_use>\n<tool_name>{}</tool_name>\n<parameters>\n", tool.name));
+            prompt.push_str(&format!("<{}>\n", tool.name));
             
             // Add parameter schema as example
             if let Some(props) = tool.parameters.get("properties").and_then(|p| p.as_object()) {
@@ -80,7 +88,7 @@ impl ClaudeCodeClient {
                     let description = param_schema.get("description")
                         .and_then(|d| d.as_str())
                         .unwrap_or("");
-                    prompt.push_str(&format!("  <{}>{}</{}> <!-- {} -->\n", 
+                    prompt.push_str(&format!("<{}>{}</{}> <!-- {} -->\n", 
                         param_name, 
                         match param_type {
                             "string" => "value",
@@ -96,11 +104,19 @@ impl ClaudeCodeClient {
                 }
             }
             
-            prompt.push_str("</parameters>\n</tool_use>\n```\n\n");
+            prompt.push_str(&format!("</{}>\n```\n\n", tool.name));
         }
         
-        prompt.push_str("When you need to use a tool, include the XML block in your response. ");
-        prompt.push_str("You may use multiple tools in a single response.\n");
+        prompt.push_str("Always use the actual tool name as the XML tag name for proper parsing and execution. ");
+        prompt.push_str("When you need to use a tool, include the XML block in your response.\n");
+        
+        // Add critical tool usage rules for sequential execution
+        prompt.push_str("\n## CRITICAL TOOL USAGE RULES:\n");
+        prompt.push_str("- You MUST use only ONE tool per response\n");
+        prompt.push_str("- After using a tool, wait for the result before proceeding\n");
+        prompt.push_str("- If multiple actions are needed, use one tool, receive the result, then continue in your next response\n");
+        prompt.push_str("- Never attempt to use multiple tools in a single response\n");
+        prompt.push_str("- Each tool use should be followed by waiting for and analyzing the result before deciding next steps\n");
         
         prompt
     }
