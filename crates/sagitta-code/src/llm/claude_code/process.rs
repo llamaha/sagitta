@@ -59,6 +59,8 @@ impl ClaudeProcess {
         
         // Disable tools if any
         if !tools.is_empty() {
+            log::info!("CLAUDE_CODE: Disabling {} tools", tools.len());
+            log::debug!("CLAUDE_CODE: Disabled tools: {:?}", tools);
             args.push("--disallowedTools".to_string());
             args.push(tools.join(","));
         }

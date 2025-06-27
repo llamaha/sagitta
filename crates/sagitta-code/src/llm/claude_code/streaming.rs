@@ -110,6 +110,12 @@ impl ClaudeCodeStream {
                                 Ok(chunk) => {
                                     // Successfully parsed, clear accumulated data
                                     partial_data.clear();
+                                    log::info!("CLAUDE_CODE: Parsed chunk type: {}", match &chunk {
+                                        ClaudeChunk::System { .. } => "System",
+                                        ClaudeChunk::Assistant { .. } => "Assistant",
+                                        ClaudeChunk::Result { .. } => "Result", 
+                                        ClaudeChunk::User { .. } => "User",
+                                    });
                                     log::debug!("CLAUDE_CODE: Parsed chunk: {:?}", chunk);
                                     
                                     match chunk {
@@ -121,12 +127,34 @@ impl ClaudeCodeStream {
                                             }
                                         }
                                         ClaudeChunk::Assistant { message } => {
+                                            log::info!("CLAUDE_CODE: Received Assistant message with {} content blocks", message.content.len());
                                             // Process content blocks
-                                            for content in message.content {
+                                            log::debug!("CLAUDE_CODE: Processing {} content blocks", message.content.len());
+                                            for (idx, content) in message.content.into_iter().enumerate() {
+                                                log::info!("CLAUDE_CODE: Processing content block {}: type = {:?}", idx, match &content {
+                                                    ContentBlock::Text { .. } => "Text",
+                                                    ContentBlock::ToolUse { .. } => "ToolUse",
+                                                    ContentBlock::Thinking { .. } => "Thinking",
+                                                    ContentBlock::RedactedThinking => "RedactedThinking",
+                                                });
                                                 match content {
                                                     ContentBlock::Text { text } => {
+                                                        log::info!("CLAUDE_CODE: Processing Text block with length {}: {}", text.len(), if text.len() < 200 { &text } else { &text[..200] });
+                                                        // Also log if text contains XML-like content
+                                                        if text.contains("<") && text.contains(">") {
+                                                            log::info!("CLAUDE_CODE: Text contains XML-like content");
+                                                            // Find and log the XML part
+                                                            if let Some(xml_start) = text.find("<") {
+                                                                let preview = &text[xml_start..std::cmp::min(xml_start + 100, text.len())];
+                                                                log::info!("CLAUDE_CODE: XML preview starting at position {}: {}", xml_start, preview);
+                                                            }
+                                                        }
                                                         // Parse XML tool calls from the text
                                                         let (remaining_text, tool_calls) = parse_xml_tool_calls(&text);
+                                                        log::info!("CLAUDE_CODE: After XML parsing - found {} tool calls", tool_calls.len());
+                                                        if tool_calls.is_empty() && text.contains("<") && text.contains(">") {
+                                                            log::warn!("CLAUDE_CODE: Text contained XML but no tool calls were parsed!");
+                                                        }
                                                         
                                                         // Send any remaining text first
                                                         if !remaining_text.is_empty() {

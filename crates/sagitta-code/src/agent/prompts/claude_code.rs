@@ -24,10 +24,61 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
             prompt.push_str("</tool_name>\n");
             prompt.push_str("```\n\n");
             
-            prompt.push_str("Always adhere to this format for tool use to ensure proper parsing and execution.\n\n");
+            prompt.push_str("**Examples of CORRECT tool usage:**\n");
+            prompt.push_str("```xml\n");
+            prompt.push_str("<web_search>\n");
+            prompt.push_str("<search_term>tokio rust async runtime github</search_term>\n");
+            prompt.push_str("<explanation>Finding the official Tokio repository URL for cloning</explanation>\n");
+            prompt.push_str("</web_search>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("```xml\n");
+            prompt.push_str("<add_existing_repository>\n");
+            prompt.push_str("<url>https://github.com/tokio-rs/tokio.git</url>\n");
+            prompt.push_str("<name>tokio</name>\n");
+            prompt.push_str("</add_existing_repository>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("```xml\n");
+            prompt.push_str("<sync_repository>\n");
+            prompt.push_str("<name>tokio</name>\n");
+            prompt.push_str("</sync_repository>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("**Examples of INCORRECT tool usage (DO NOT DO THIS):**\n");
+            prompt.push_str("```xml\n");
+            prompt.push_str("<!-- WRONG: Using 'explanation' instead of 'search_term' -->\n");
+            prompt.push_str("<web_search>\n");
+            prompt.push_str("<explanation>searching for tokio</explanation>\n");
+            prompt.push_str("</web_search>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("```xml\n");
+            prompt.push_str("<!-- WRONG: Missing required 'search_term' parameter -->\n");
+            prompt.push_str("<web_search>\n");
+            prompt.push_str("<explanation>I need to find the Tokio repository</explanation>\n");
+            prompt.push_str("</web_search>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("```xml\n");
+            prompt.push_str("<!-- WRONG: Missing required 'name' parameter -->\n");
+            prompt.push_str("<add_existing_repository>\n");
+            prompt.push_str("<url>https://github.com/tokio-rs/tokio.git</url>\n");
+            prompt.push_str("</add_existing_repository>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("```xml\n");
+            prompt.push_str("<!-- WRONG: Using MCP tool instead of Sagitta tool -->\n");
+            prompt.push_str("<mcp__sagitta-mcp-stdio__repository_add>\n");
+            prompt.push_str("<url>https://github.com/tokio-rs/tokio.git</url>\n");
+            prompt.push_str("</mcp__sagitta-mcp-stdio__repository_add>\n");
+            prompt.push_str("```\n\n");
+            
+            prompt.push_str("Always adhere to this format and use the EXACT parameter names shown in each tool's definition.\n\n");
             prompt.push_str("### Tools\n\n");
             
             for tool in tool_definitions {
+                log::debug!("CLAUDE_CODE_PROMPT: Adding tool {} to prompt", tool.name);
                 prompt.push_str(&format!("#### {}\n", tool.name));
                 prompt.push_str(&format!("**Description:** {}\n", tool.description));
                 
@@ -48,6 +99,9 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
                             .and_then(|d| d.as_str())
                             .unwrap_or("");
                         
+                        log::debug!("CLAUDE_CODE_PROMPT: Tool {} has parameter: {} ({})", 
+                            tool.name, param_name, if is_required { "required" } else { "optional" });
+                        
                         prompt.push_str(&format!("- `{}`: ({}) {} - {}\n", 
                             param_name,
                             if is_required { "required" } else { "optional" },
@@ -59,18 +113,33 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
                     prompt.push_str("\n**Usage:**\n```xml\n");
                     prompt.push_str(&format!("<{}>\n", tool.name));
                     
+                    // Generate more realistic example values based on tool name and parameter name
                     for (param_name, param_schema) in properties {
                         let param_type = param_schema.get("type")
                             .and_then(|t| t.as_str())
                             .unwrap_or("string");
-                        let example_value = match param_type {
-                            "string" => "example_value",
-                            "number" | "integer" => "123",
-                            "boolean" => "true",
-                            "array" => "[\"item1\", \"item2\"]",
-                            "object" => "{\"key\": \"value\"}",
-                            _ => "value"
+                        
+                        let example_value = if tool.name == "web_search" && param_name == "search_term" {
+                            "tokio rust async runtime github"
+                        } else if tool.name == "web_search" && param_name == "explanation" {
+                            "Finding the official Tokio repository for cloning"
+                        } else if tool.name == "add_existing_repository" && param_name == "url" {
+                            "https://github.com/tokio-rs/tokio.git"
+                        } else if tool.name == "add_existing_repository" && param_name == "name" {
+                            "tokio"
+                        } else if tool.name == "search_code" && param_name == "query" {
+                            "async function implementation"
+                        } else {
+                            match param_type {
+                                "string" => "example_value",
+                                "number" | "integer" => "123",
+                                "boolean" => "true",
+                                "array" => "[\"item1\", \"item2\"]",
+                                "object" => "{\"key\": \"value\"}",
+                                _ => "value"
+                            }
                         };
+                        
                         prompt.push_str(&format!("<{}>{}</{}>\n", param_name, example_value, param_name));
                     }
                     
@@ -85,6 +154,11 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
             prompt.push_str("3. **Wait for Results**: Always wait for and analyze the result of each tool before proceeding.\n");
             prompt.push_str("4. **No Hallucination**: NEVER describe the results of tools you haven't executed yet.\n");
             prompt.push_str("5. **Clear Communication**: Explain what you're about to do, execute the tool, then describe what you found.\n");
+            prompt.push_str("6. **Use Only Provided Tools**: ONLY use the tools listed above. Do NOT use any MCP tools (mcp__*) or built-in Claude tools.\n");
+            prompt.push_str("7. **No Tool Creation**: Do NOT attempt to use tools like 'explanation', 'search_term', or any tool not explicitly listed above.\n");
+            prompt.push_str("8. **Exact Parameter Names**: Use EXACTLY the parameter names shown in the tool definition. For web_search, the REQUIRED parameter is 'search_term' (not 'explanation'). The 'explanation' parameter is OPTIONAL and should be used IN ADDITION to 'search_term', not instead of it.\n");
+            prompt.push_str("9. **Required Parameters**: ALWAYS include ALL required parameters for each tool. For example, add_existing_repository requires BOTH 'url' AND 'name' parameters.\n");
+            prompt.push_str("10. **No MCP Tools**: NEVER use tools starting with 'mcp__'. These are NOT available. Use only the tools listed above.\n");
         }
         
         prompt
@@ -92,6 +166,8 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
 }
 
 const CLAUDE_CODE_BASE_PROMPT: &str = r#"You are Sagitta Code AI, an advanced code assistant powered by Claude. You help developers understand and work with code repositories efficiently through intelligent search and analysis capabilities.
+
+CRITICAL: You are running in Sagitta Code environment, NOT Claude Desktop. MCP tools (mcp__*) are NOT available. Use ONLY the Sagitta tools provided below.
 
 ## Core Capabilities
 

@@ -132,13 +132,27 @@ impl ClaudeCodeClient {
             .collect()
     }
     
-    /// Get list of tools to disable (all Claude built-in tools)
+    /// Get list of tools to disable (all Claude built-in tools and MCP tools)
     pub fn get_disabled_tools() -> Vec<String> {
         vec![
-            // Claude's built-in tools only
+            // Claude's built-in tools
             "Task", "Bash", "Glob", "Grep", "LS", "exit_plan_mode",
             "Read", "Edit", "MultiEdit", "Write", "NotebookRead",
             "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite", "WebSearch",
+            // MCP tools that might be configured
+            "mcp__sagitta-mcp-stdio__ping",
+            "mcp__sagitta-mcp-stdio__repository_add",
+            "mcp__sagitta-mcp-stdio__repository_list",
+            "mcp__sagitta-mcp-stdio__repository_remove",
+            "mcp__sagitta-mcp-stdio__repository_sync",
+            "mcp__sagitta-mcp-stdio__query",
+            "mcp__sagitta-mcp-stdio__repository_search_file",
+            "mcp__sagitta-mcp-stdio__repository_view_file",
+            "mcp__sagitta-mcp-stdio__repository_map",
+            "mcp__sagitta-mcp-stdio__repository_switch_branch",
+            "mcp__sagitta-mcp-stdio__repository_list_branches",
+            // Generic non-existent tools Claude might try
+            "explanation", "search_term"
         ].iter().map(|s| s.to_string()).collect()
     }
 }
@@ -155,12 +169,9 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<LlmResponse, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract base system prompt and append tools
-        let mut system_prompt = Self::extract_system_prompt(messages);
-        if !tools.is_empty() {
-            system_prompt.push_str(&Self::format_tools_for_system_prompt(tools));
-            log::debug!("CLAUDE_CODE: Added {} tools to system prompt", tools.len());
-        }
+        // Extract system prompt (which already includes tools from our prompt provider)
+        let system_prompt = Self::extract_system_prompt(messages);
+        log::debug!("CLAUDE_CODE: Using system prompt from messages (tools already included)");
         
         let filtered_messages = Self::filter_non_system_messages(messages);
         let claude_messages = convert_messages_to_claude(&filtered_messages);
@@ -265,12 +276,9 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate stream called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract base system prompt and append tools
-        let mut system_prompt = Self::extract_system_prompt(messages);
-        if !tools.is_empty() {
-            system_prompt.push_str(&Self::format_tools_for_system_prompt(tools));
-            log::debug!("CLAUDE_CODE: Added {} tools to system prompt", tools.len());
-        }
+        // Extract system prompt (which already includes tools from our prompt provider)
+        let system_prompt = Self::extract_system_prompt(messages);
+        log::debug!("CLAUDE_CODE: Using system prompt from messages (tools already included)");
         
         let filtered_messages = Self::filter_non_system_messages(messages);
         let claude_messages = convert_messages_to_claude(&filtered_messages);

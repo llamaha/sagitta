@@ -557,7 +557,7 @@ impl AgentToolExecutor {
 #[async_trait]
 impl ToolExecutor for AgentToolExecutor {
     async fn execute_tool(&self, name: &str, args: Value) -> ReasoningEngineResult<ToolResult> {
-        log::debug!("AgentToolExecutor::execute_tool called with name: {}, args: {:?}", name, args);
+        log::info!("REASONING: execute_tool called with name: '{}', args: {:?}", name, args);
         
         // Check if tool should be skipped due to repeated failures
         if self.should_skip_tool(name).await {
