@@ -55,7 +55,8 @@ pub struct SettingsPanel {
     pub claude_code_timeout: u64,
     pub claude_code_verbose: bool,
     
-    // Conversation config fields
+    // Reasoning engine config fields
+    pub reasoning_enabled: bool,
     pub analyze_input: bool,
     pub analyze_intent: bool,
     
@@ -100,9 +101,10 @@ impl SettingsPanel {
             claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
             claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
             
-            // Conversation config fields
-            analyze_input: initial_sagitta_code_config.conversation.analyze_input,
-            analyze_intent: initial_sagitta_code_config.conversation.analyze_intent,
+            // Reasoning engine config fields
+            reasoning_enabled: initial_sagitta_code_config.reasoning.enabled,
+            analyze_input: initial_sagitta_code_config.reasoning.analyze_input,
+            analyze_intent: initial_sagitta_code_config.reasoning.analyze_intent,
             
             // Initialize model selector as None (will be lazy-loaded)
             model_selector: None,
@@ -183,6 +185,24 @@ impl SettingsPanel {
                             });
                             ui.add_space(8.0);
                             
+                            // Reasoning Engine Settings (Global)
+                            ui.heading("Reasoning Engine");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.reasoning_enabled, "Enable Reasoning Engine")
+                                    .on_hover_text("Enable the reasoning engine for complex task orchestration. When disabled, uses direct LLM streaming.");
+                            });
+                            if self.reasoning_enabled {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.analyze_input, "Enable Analyze Input")
+                                        .on_hover_text("Analyzes initial user input to determine intent and suggest actions");
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.analyze_intent, "Enable Analyze Intent")
+                                        .on_hover_text("Detects LLM response intent for better conversation flow");
+                                });
+                            }
+                            ui.add_space(8.0);
+                            
                             // Show provider-specific settings
                             match self.provider {
                                 LlmProvider::OpenRouter => {
@@ -212,18 +232,6 @@ impl SettingsPanel {
                                     ui.end_row();
                                 });
                             
-                            ui.add_space(8.0);
-                            
-                            // Reasoning Features
-                            ui.heading("Reasoning Features");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.analyze_input, "Enable Analyze Input")
-                                    .on_hover_text("Analyzes initial user input to determine intent and suggest actions");
-                            });
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.analyze_intent, "Enable Analyze Intent")
-                                    .on_hover_text("Detects LLM response intent for better conversation flow");
-                            });
                             
                                     // Model selector (enhanced UI)
                                     ui.add_space(8.0);
@@ -555,9 +563,10 @@ impl SettingsPanel {
         updated_config.claude_code.timeout = self.claude_code_timeout;
         updated_config.claude_code.verbose = self.claude_code_verbose;
         
-        // Update conversation settings
-        updated_config.conversation.analyze_input = self.analyze_input;
-        updated_config.conversation.analyze_intent = self.analyze_intent;
+        // Update reasoning engine settings
+        updated_config.reasoning.enabled = self.reasoning_enabled;
+        updated_config.reasoning.analyze_input = self.analyze_input;
+        updated_config.reasoning.analyze_intent = self.analyze_intent;
         
         // Preserve all other OpenRouter fields (provider_preferences, request_timeout)
         // and all other config sections (sagitta, ui, logging, conversation) from the original

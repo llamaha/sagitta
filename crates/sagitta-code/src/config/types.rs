@@ -45,6 +45,10 @@ pub struct SagittaCodeConfig {
     /// Conversation management configuration
     #[serde(default)]
     pub conversation: ConversationConfig,
+    
+    /// Reasoning engine configuration
+    #[serde(default)]
+    pub reasoning: ReasoningEngineConfig,
 
 
 }
@@ -59,6 +63,7 @@ impl Default for SagittaCodeConfig {
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
+            reasoning: ReasoningEngineConfig::default(),
         }
     }
 }
@@ -267,6 +272,32 @@ impl Default for LoggingConfig {
     }
 }
 
+/// Configuration for reasoning engine behavior
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningEngineConfig {
+    /// Enable the reasoning engine for orchestrating complex tasks
+    #[serde(default = "default_enable_reasoning_engine")]
+    pub enabled: bool,
+    
+    /// Enable analyze_input tool for initial user input analysis
+    #[serde(default = "default_analyze_input")]
+    pub analyze_input: bool,
+    
+    /// Enable analyze_intent for LLM response intent detection
+    #[serde(default = "default_analyze_intent")]
+    pub analyze_intent: bool,
+}
+
+impl Default for ReasoningEngineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enable_reasoning_engine(),
+            analyze_input: default_analyze_input(),
+            analyze_intent: default_analyze_intent(),
+        }
+    }
+}
+
 /// Configuration for conversation management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationConfig {
@@ -303,13 +334,6 @@ pub struct ConversationConfig {
     #[serde(default)]
     pub sidebar: SidebarPersistentConfig,
     
-    /// Enable analyze_input tool for initial user input analysis
-    #[serde(default = "default_analyze_input")]
-    pub analyze_input: bool,
-    
-    /// Enable analyze_intent for LLM response intent detection
-    #[serde(default = "default_analyze_intent")]
-    pub analyze_intent: bool,
 }
 
 /// Configuration for persistent sidebar state
@@ -464,8 +488,6 @@ impl Default for ConversationConfig {
             auto_branching: false,
             default_tags: Vec::new(),
             sidebar: SidebarPersistentConfig::default(),
-            analyze_input: default_analyze_input(),
-            analyze_intent: default_analyze_intent(),
         }
     }
 }
@@ -514,6 +536,10 @@ fn default_auto_create() -> bool {
 }
 
 fn default_auto_checkpoints() -> bool {
+    true
+}
+
+fn default_enable_reasoning_engine() -> bool {
     true
 }
 

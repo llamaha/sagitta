@@ -413,6 +413,37 @@ impl Agent {
         // Get current conversation ID for analytics reporting
         let current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
         
+        // Check if reasoning engine is enabled
+        if !self.config.reasoning.enabled {
+            info!("Reasoning engine is disabled, using direct LLM streaming");
+            
+            // Convert agent messages to LLM messages
+            let llm_messages: Vec<Message> = agent_conversation_history.into_iter().map(|msg| {
+                Message {
+                    id: msg.id,
+                    role: msg.role,
+                    parts: msg.content.split('\n').map(|text| SagittaCodeMessagePart::Text { text: text.to_string() }).collect(),
+                    metadata: Default::default(),
+                }
+            }).collect();
+            
+            // Get tools from registry
+            let tools: Vec<LlmToolDefinition> = self.tool_registry.get_definitions().await
+                .into_iter()
+                .map(|tool| LlmToolDefinition {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                    is_required: tool.is_required,
+                })
+                .collect();
+            
+            // Use LLM client directly
+            let stream = self.llm_client.generate_stream(&llm_messages, &tools).await?;
+            
+            return Ok(Box::pin(stream));
+        }
+        
         let reasoning_llm_history = convert_agent_messages_to_reasoning_llm_messages(agent_conversation_history);
         
         // CRITICAL FIX: Always ensure we have at least one message for the reasoning engine

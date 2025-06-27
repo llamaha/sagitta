@@ -76,8 +76,8 @@ pub fn create_reasoning_config(agent_config: &SagittaCodeConfig, agent_mode: Age
             log_level: "info".to_string(),
             enable_debug_assertions: true,
         },
-        enable_analyze_input: agent_config.conversation.analyze_input,
-        enable_analyze_intent: agent_config.conversation.analyze_intent,
+        enable_analyze_input: agent_config.reasoning.analyze_input,
+        enable_analyze_intent: agent_config.reasoning.analyze_intent,
         autonomous_mode: matches!(agent_mode, AgentMode::FullyAutonomous),
     }
 } 
