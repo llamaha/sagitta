@@ -1,4 +1,4 @@
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, Read};
 use std::process::Child;
 use futures_util::Stream;
 use std::pin::Pin;
@@ -12,6 +12,7 @@ use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
 use super::xml_tools::parse_xml_tool_calls;
+use serde_json::Deserializer;
 
 /// Stream implementation for Claude Code output
 pub struct ClaudeCodeStream {
@@ -28,9 +29,9 @@ impl ClaudeCodeStream {
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
             
-            if let Some(stdout) = stdout {
-                let reader = BufReader::new(stdout);
-                let mut partial_data = String::new();
+            if let Some(mut stdout) = stdout {
+                let mut buffer = [0u8; 4096];
+                let mut json_buffer = Vec::new();
                 let mut usage = TokenUsage::default();
                 let mut is_paid_usage = true;
                 let tool_emitted = Arc::new(AtomicBool::new(false));
@@ -83,34 +84,34 @@ impl ClaudeCodeStream {
                     }
                 }
                 
-                let mut line_count = 0;
-                
-                // Process lines as they arrive, similar to Roo-Code's readline approach
-                for line_result in reader.lines() {
-                    match line_result {
-                        Ok(line) => {
-                            line_count += 1;
+                // Process bytes as they arrive for real-time streaming
+                loop {
+                    match stdout.read(&mut buffer) {
+                        Ok(0) => {
+                            // EOF reached
+                            log::info!("CLAUDE_CODE: Reached end of stdout");
+                            break;
+                        }
+                        Ok(n) => {
+                            // Append new bytes to buffer
+                            json_buffer.extend_from_slice(&buffer[..n]);
+                            log::trace!("CLAUDE_CODE: Read {} bytes, total buffer size: {}", n, json_buffer.len());
                             
-                            // Skip empty lines
-                            if line.trim().is_empty() {
-                                continue;
-                            }
+                            // Create a streaming deserializer from the buffer
+                            let deserializer = Deserializer::from_slice(&json_buffer).into_iter::<ClaudeChunk>();
+                            let mut bytes_consumed = 0;
                             
-                            log::info!("CLAUDE_CODE: Received line {}: {}", line_count, line.chars().take(100).collect::<String>());
-                            log::trace!("CLAUDE_CODE: Raw line: {}", line);
-                            
-                            // Accumulate partial JSON data between lines
-                            partial_data.push_str(&line);
-                            
-                            // Try to parse complete JSON objects
-                            let json_str = partial_data.trim();
-                            
-                            // Try to parse the JSON - if successful, clear partial data
-                            match serde_json::from_str::<ClaudeChunk>(&json_str) {
-                                Ok(chunk) => {
-                                    // Successfully parsed, clear accumulated data
-                                    partial_data.clear();
-                                    log::info!("CLAUDE_CODE: Parsed chunk type: {}", match &chunk {
+                            // Process all complete JSON objects in the buffer
+                            for (idx, result) in deserializer.enumerate() {
+                                match result {
+                                    Ok(chunk) => {
+                                        // Track how many bytes this chunk consumed by looking for newline
+                                        // JSON chunks are typically newline-delimited
+                                        bytes_consumed = json_buffer.iter().position(|&b| b == b'\n')
+                                            .map(|p| p + 1)
+                                            .unwrap_or(json_buffer.len());
+                                        
+                                        log::info!("CLAUDE_CODE: Parsed chunk type: {}", match &chunk {
                                         ClaudeChunk::System { .. } => "System",
                                         ClaudeChunk::Assistant { .. } => "Assistant",
                                         ClaudeChunk::Result { .. } => "Result", 
@@ -307,47 +308,44 @@ impl ClaudeCodeStream {
                                             }
                                         }
                                     }
-                                }
-                                Err(e) => {
-                                    // Check if it looks like a complete JSON object that failed to parse
-                                    let looks_complete = json_str.trim_start().starts_with('{') && 
-                                                        json_str.trim_end().ends_with('}');
-                                    
-                                    if looks_complete {
-                                        // Complete JSON that failed to parse - this is an error
-                                        log::error!("CLAUDE_CODE: Failed to parse complete JSON: {} - Error: {}", json_str.chars().take(200).collect::<String>(), e);
-                                        
-                                        // Check for error messages (but ignore permission denials)
-                                        if json_str.contains("Permission to use") && json_str.contains("has been denied") {
-                                            log::debug!("CLAUDE_CODE: Ignoring MCP permission denial in error handling");
-                                        } else if json_str.contains("API Error") || json_str.contains("error") {
-                                            let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                                format!("Claude API Error: {}", json_str)
-                                            )));
+                                    }
+                                    Err(e) => {
+                                        if e.is_eof() {
+                                            // Need more data - this is normal for streaming
+                                            log::trace!("CLAUDE_CODE: Need more data for complete JSON object");
+                                        } else {
+                                            // Actual parse error
+                                            log::error!("CLAUDE_CODE: JSON parse error: {}", e);
+                                            // Skip this chunk and continue
+                                            bytes_consumed = json_buffer.len();
                                         }
-                                        
-                                        // Clear partial data to avoid carrying forward bad data
-                                        partial_data.clear();
-                                    } else {
-                                        // Partial JSON - keep accumulating
-                                        log::trace!("CLAUDE_CODE: Accumulating partial JSON data (length: {})", partial_data.len());
-                                        // partial_data already contains the accumulated data, so we don't need to do anything
+                                        break; // Exit the deserialization loop
                                     }
                                 }
                             }
+                            
+                            // Remove consumed bytes from buffer
+                            if bytes_consumed > 0 {
+                                json_buffer.drain(..bytes_consumed);
+                                log::trace!("CLAUDE_CODE: Removed {} consumed bytes, {} bytes remaining", bytes_consumed, json_buffer.len());
+                            }
                         }
                         Err(e) => {
-                            log::error!("CLAUDE_CODE: Error reading line: {}", e);
+                            log::error!("CLAUDE_CODE: Error reading bytes: {}", e);
                             let _ = sender.send(Err(SagittaCodeError::LlmError(
                                 format!("Error reading claude output: {}", e)
                             )));
+                            break;
                         }
                     }
                 }
                 
-                // Handle any remaining partial data
-                if !partial_data.is_empty() {
-                    log::warn!("CLAUDE_CODE: Unprocessed partial data at end: {}", partial_data);
+                // Handle any remaining data in buffer
+                if !json_buffer.is_empty() {
+                    log::warn!("CLAUDE_CODE: {} bytes of unprocessed data at end", json_buffer.len());
+                    if let Ok(s) = std::str::from_utf8(&json_buffer) {
+                        log::warn!("CLAUDE_CODE: Unprocessed data: {}", s);
+                    }
                 }
                 
                 // Wait for process to exit

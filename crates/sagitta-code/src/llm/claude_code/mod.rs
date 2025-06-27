@@ -6,6 +6,7 @@ pub mod process;
 pub mod message_converter;
 pub mod tool_parser;
 pub mod xml_tools;
+pub mod incremental_parser;
 
 #[cfg(test)]
 mod tests;

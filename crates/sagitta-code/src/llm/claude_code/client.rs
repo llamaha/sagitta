@@ -13,7 +13,7 @@ use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
-use super::message_converter::{convert_messages_to_claude, ClaudeMessage};
+use super::message_converter::{convert_messages_to_claude, ClaudeMessage, stream_message_as_json};
 use super::models::ClaudeCodeModel;
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
@@ -132,13 +132,13 @@ impl ClaudeCodeClient {
             .collect()
     }
     
-    /// Get list of tools to disable (all Claude built-in tools and MCP tools)
+    /// Get list of tools to disable (all Claude built-in tools except WebSearch, and MCP tools)
     pub fn get_disabled_tools() -> Vec<String> {
         vec![
-            // Claude's built-in tools
+            // Claude's built-in tools (except WebSearch which we want to use)
             "Task", "Bash", "Glob", "Grep", "LS", "exit_plan_mode",
             "Read", "Edit", "MultiEdit", "Write", "NotebookRead",
-            "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite", "WebSearch",
+            "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite",
             // MCP tools that might be configured
             "mcp__sagitta-mcp-stdio__ping",
             "mcp__sagitta-mcp-stdio__repository_add",
@@ -176,11 +176,29 @@ impl LlmClient for ClaudeCodeClient {
         let filtered_messages = Self::filter_non_system_messages(messages);
         let claude_messages = convert_messages_to_claude(&filtered_messages);
         
-        // Spawn process and collect response
-        let child = self.process_manager
-            .spawn(&system_prompt, &claude_messages, &Self::get_disabled_tools())
+        // Spawn process with piped stdin
+        let mut child = self.process_manager
+            .spawn(&system_prompt, &Self::get_disabled_tools())
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
+        
+        // Get stdin handle and stream messages
+        if let Some(mut stdin) = child.stdin.take() {
+            // Write messages to stdin synchronously in blocking task
+            let messages_to_write = claude_messages;
+            tokio::task::spawn_blocking(move || {
+                for message in &messages_to_write {
+                    if let Err(e) = stream_message_as_json(&message, &mut stdin) {
+                        log::error!("CLAUDE_CODE: Failed to write message to stdin: {}", e);
+                        break;
+                    }
+                }
+                // Explicitly drop stdin to close it
+                drop(stdin);
+            });
+        } else {
+            return Err(SagittaCodeError::LlmError("Failed to get stdin handle".to_string()));
+        }
         
         let stream = ClaudeCodeStream::new(child);
         
@@ -283,11 +301,29 @@ impl LlmClient for ClaudeCodeClient {
         let filtered_messages = Self::filter_non_system_messages(messages);
         let claude_messages = convert_messages_to_claude(&filtered_messages);
         
-        // Spawn process
-        let child = self.process_manager
-            .spawn(&system_prompt, &claude_messages, &Self::get_disabled_tools())
+        // Spawn process with piped stdin
+        let mut child = self.process_manager
+            .spawn(&system_prompt, &Self::get_disabled_tools())
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
+        
+        // Get stdin handle and stream messages
+        if let Some(mut stdin) = child.stdin.take() {
+            // Spawn a task to write messages to stdin
+            let messages_to_write = claude_messages;
+            tokio::task::spawn_blocking(move || {
+                for message in &messages_to_write {
+                    if let Err(e) = stream_message_as_json(&message, &mut stdin) {
+                        log::error!("CLAUDE_CODE: Failed to write message to stdin: {}", e);
+                        break;
+                    }
+                }
+                // Explicitly drop stdin to close it
+                drop(stdin);
+            });
+        } else {
+            return Err(SagittaCodeError::LlmError("Failed to get stdin handle".to_string()));
+        }
         
         let stream = ClaudeCodeStream::new(child);
         Ok(Box::pin(stream))

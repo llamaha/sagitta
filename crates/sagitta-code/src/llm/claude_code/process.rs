@@ -25,21 +25,16 @@ impl ClaudeProcess {
     pub async fn spawn(
         &self,
         system_prompt: &str,
-        messages: &[ClaudeMessage],
         tools: &[String], // Tool names to disable
     ) -> Result<Child, ClaudeCodeError> {
-        // Convert messages to JSON format like Roo-Code does
-        let messages_json = serde_json::to_string(messages)?;
-        
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
-        log::debug!("CLAUDE_CODE: Messages JSON: {}", messages_json);
         log::debug!("CLAUDE_CODE: System prompt: {}", system_prompt);
         
         let mut args = vec![
-            "-p".to_string(),
-            messages_json,
+            "--input-format".to_string(),
+            "stream-json".to_string(),
             "--system-prompt".to_string(),
             system_prompt.to_string(),
             "--verbose".to_string(),
@@ -73,7 +68,7 @@ impl ClaudeProcess {
         
         let mut cmd = Command::new(&self.config.claude_path);
         cmd.args(&args)
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", self.config.max_output_tokens.to_string())

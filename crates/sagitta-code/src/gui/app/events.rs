@@ -510,6 +510,9 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
     let (state_message, event_type) = match &state {
         AgentState::Idle => {
             app.state.is_waiting_for_response = false;
+            app.state.is_thinking = false;
+            app.state.is_responding = false;
+            app.state.is_executing_tool = false;
             if app.state.is_in_loop {
                 log::info!("Agent exited loop state - updating UI (handle_state_change)");
                 app.state.is_in_loop = false;

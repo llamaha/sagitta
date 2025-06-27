@@ -7,7 +7,12 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
     fn generate_system_prompt(&self, tool_definitions: &[ToolDefinition]) -> String {
         let mut prompt = String::from(CLAUDE_CODE_BASE_PROMPT);
         
-        if !tool_definitions.is_empty() {
+        // Filter out web_search tool since Claude uses its native WebSearch
+        let filtered_tools: Vec<&ToolDefinition> = tool_definitions.iter()
+            .filter(|tool| tool.name != "web_search")
+            .collect();
+        
+        if !filtered_tools.is_empty() {
             prompt.push_str("\n\n## Available Tools\n\n");
             prompt.push_str("You have access to a set of tools that are executed upon user approval. ");
             prompt.push_str("**CRITICAL: You can ONLY use ONE tool per message.** You will receive the result of that tool use in the user's response before you can use another tool. ");
@@ -25,13 +30,6 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
             prompt.push_str("```\n\n");
             
             prompt.push_str("**Examples of CORRECT tool usage:**\n");
-            prompt.push_str("```xml\n");
-            prompt.push_str("<web_search>\n");
-            prompt.push_str("<search_term>tokio rust async runtime github</search_term>\n");
-            prompt.push_str("<explanation>Finding the official Tokio repository URL for cloning</explanation>\n");
-            prompt.push_str("</web_search>\n");
-            prompt.push_str("```\n\n");
-            
             prompt.push_str("```xml\n");
             prompt.push_str("<add_existing_repository>\n");
             prompt.push_str("<url>https://github.com/tokio-rs/tokio.git</url>\n");
@@ -75,9 +73,10 @@ impl SystemPromptProvider for ClaudeCodeSystemPrompt {
             prompt.push_str("```\n\n");
             
             prompt.push_str("Always adhere to this format and use the EXACT parameter names shown in each tool's definition.\n\n");
+            prompt.push_str("**Note:** For web searches, use your built-in WebSearch capability instead of any web_search tool.\n\n");
             prompt.push_str("### Tools\n\n");
             
-            for tool in tool_definitions {
+            for tool in &filtered_tools {
                 log::debug!("CLAUDE_CODE_PROMPT: Adding tool {} to prompt", tool.name);
                 prompt.push_str(&format!("#### {}\n", tool.name));
                 prompt.push_str(&format!("**Description:** {}\n", tool.description));
