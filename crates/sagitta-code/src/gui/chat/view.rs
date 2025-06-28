@@ -112,6 +112,7 @@ pub struct StreamingMessage {
     pub thinking_is_streaming: bool,      // Whether thinking is currently streaming
     pub thinking_fade_start: Option<std::time::Instant>, // When to start fading out thinking
     pub thinking_should_fade: bool,       // Whether thinking should fade out
+    pub thinking_collapsed: bool,         // Whether thinking content is collapsed
 }
 
 impl StreamingMessage {
@@ -129,6 +130,7 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
@@ -146,6 +148,7 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
@@ -163,16 +166,17 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
     pub fn append_content(&mut self, chunk: &str) {
         self.content.push_str(chunk);
         
-        // NEW: When actual content starts streaming, begin fading out thinking
-        if !chunk.is_empty() && self.has_thinking_content() && !self.thinking_should_fade {
-            self.start_thinking_fade();
-        }
+        // Don't fade out thinking - we want to keep it visible
+        // if !chunk.is_empty() && self.has_thinking_content() && !self.thinking_should_fade {
+        //     self.start_thinking_fade();
+        // }
     }
     
     pub fn set_thinking(&mut self, thinking_content: String) {
@@ -217,22 +221,9 @@ impl StreamingMessage {
     }
     
     pub fn should_show_thinking(&self) -> bool {
-        if !self.has_thinking_content() {
-            return false;
-        }
-        
-        // If we're not fading, always show
-        if !self.thinking_should_fade {
-            return true;
-        }
-        
-        // If we're fading, check if fade duration has elapsed
-        if let Some(fade_start) = self.thinking_fade_start {
-            let fade_duration = std::time::Duration::from_secs(2); // 2 second fade
-            fade_start.elapsed() < fade_duration
-        } else {
-            true
-        }
+        // Always show thinking if we have any content
+        // Don't fade or hide it after completion
+        self.has_thinking_content()
     }
     
     pub fn get_thinking_opacity(&self) -> f32 {
@@ -324,6 +315,7 @@ impl From<ChatMessage> for StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
 }
@@ -336,10 +328,11 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
     
     // Create empty HashMap for backward compatibility
     let empty_running_tools = HashMap::new();
-    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools);
+    let mut empty_collapsed_thinking = HashMap::new();
+    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -405,7 +398,7 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                         }
                         
                         // Render the message group with adjusted width for margins
-                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools) {
+                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
                             clicked_tool = Some(tool_info);
                         }
                     }
@@ -454,6 +447,7 @@ fn render_message_group(
     app_theme: AppTheme,
     copy_state: &mut CopyButtonState,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
+    collapsed_thinking: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -566,14 +560,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state) {
+            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -612,12 +606,13 @@ fn render_single_message_content(
     app_theme: AppTheme,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     copy_state: &mut CopyButtonState,
+    collapsed_thinking: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
     // Thinking content (if any) - now with streaming and fade support
     if message.should_show_thinking() {
-        render_thinking_content(ui, message, &bg_color, max_width, app_theme);
+        render_thinking_content(ui, message, &bg_color, max_width, app_theme, collapsed_thinking);
         ui.add_space(2.0); // Reduced spacing
     }
     
@@ -677,7 +672,7 @@ fn render_single_message_content(
 }
 
 /// Render thinking content with streaming support and fade-out effects
-fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
     // Check if we should show thinking content
     if !message.should_show_thinking() {
         return;
@@ -688,14 +683,21 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
         None => return,
     };
     
-    // Get opacity for fade effect
-    let opacity = message.get_thinking_opacity();
+    // Get or initialize collapsed state for this message
+    // Start expanded by default so users can see thinking as it streams
+    let is_collapsed = collapsed_thinking.entry(message.id.clone()).or_insert(false);
     
-    // Apply opacity to the entire thinking section
+    // No opacity/fade effect - always show at full opacity
     ui.scope(|ui| {
-        ui.set_opacity(opacity);
         
+        // Collapsible header
         ui.horizontal(|ui| {
+            // Collapse/expand button
+            let arrow = if *is_collapsed { "▶" } else { "▼" };
+            if ui.small_button(arrow).clicked() {
+                *is_collapsed = !*is_collapsed;
+            }
+            
             // Thinking icon with animation if streaming
             if message.thinking_is_streaming {
                 let time = ui.input(|i| i.time);
@@ -704,25 +706,38 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
             } else {
                 ui.label(RichText::new("💭").size(14.0));
             }
-            ui.add_space(4.0);
             
-            // Thinking content with enhanced styling
-            ui.vertical(|ui| {
-                ui.set_max_width(max_width - 40.0);
-                
-                // Header with status
-                let status_text = if message.thinking_is_streaming {
-                    "Thinking..."
-                } else if message.thinking_should_fade {
-                    "Thought complete"
+            // Header with status
+            let status_text = if message.thinking_is_streaming {
+                "Thinking..."
+            } else {
+                "Thinking"
+            };
+            
+            ui.label(RichText::new(status_text)
+                .italics()
+                .color(app_theme.hint_text_color())
+                .size(11.0));
+            
+            // Show preview when collapsed
+            if *is_collapsed {
+                ui.add_space(8.0);
+                let preview = if thinking_content.len() > 50 {
+                    format!("{}...", &thinking_content[..50])
                 } else {
-                    "Thinking"
+                    thinking_content.to_string()
                 };
-                
-                ui.label(RichText::new(status_text)
+                ui.label(RichText::new(preview)
                     .italics()
                     .color(app_theme.hint_text_color())
                     .size(10.0));
+            }
+        });
+        
+        // Show full content if not collapsed
+        if !*is_collapsed {
+            ui.indent(message.id.clone(), |ui| {
+                ui.set_max_width(max_width - 40.0);
                 
                 // Thinking content in a subtle frame
                 Frame::none()
@@ -748,7 +763,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
                         }
                     });
             });
-        });
+        }
     });
     
     // Request repaint for animations and fade effects
@@ -1730,6 +1745,7 @@ mod tests {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
 

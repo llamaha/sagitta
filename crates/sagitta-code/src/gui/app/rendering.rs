@@ -1164,7 +1164,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 let messages = app.chat_manager.get_all_messages();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

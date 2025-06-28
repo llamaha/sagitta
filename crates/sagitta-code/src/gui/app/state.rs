@@ -81,6 +81,9 @@ pub struct AppState {
     // Running tool tracking
     pub running_tools: HashMap<ToolRunId, RunningToolInfo>,
     
+    // Thinking content state
+    pub collapsed_thinking: HashMap<String, bool>, // message_id -> collapsed state
+    
     // Sidebar state
     pub sidebar_action: Option<SidebarAction>,
     pub editing_conversation_id: Option<Uuid>,
@@ -173,6 +176,9 @@ impl AppState {
             
             // Running tool tracking
             running_tools: HashMap::new(),
+            
+            // Thinking content state
+            collapsed_thinking: HashMap::new(),
             
             // Sidebar state
             sidebar_action: None,

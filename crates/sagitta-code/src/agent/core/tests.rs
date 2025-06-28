@@ -687,7 +687,7 @@ mod tests {
         let event_task = tokio::spawn(async move {
             while let Ok(event) = event_receiver.recv().await {
                 match event {
-                    crate::agent::events::AgentEvent::LlmChunk { content, is_final } => {
+                    crate::agent::events::AgentEvent::LlmChunk { content, is_final, is_thinking } => {
                         println!("Test: Agent event - LlmChunk: '{}' (final: {})", content, is_final);
                     },
                     crate::agent::events::AgentEvent::ToolCall { tool_call } => {

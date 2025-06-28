@@ -865,14 +865,16 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: text.clone(),
                             is_final: chunk.is_final,
+                            is_thinking: false,
                         }) {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk: {}", e);
                         }
                     }
                     SagittaCodeMessagePart::Thought { text } => {
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
-                            content: format!("THINKING: {}", text),
+                            content: text.clone(),
                             is_final: chunk.is_final,
+                            is_thinking: true,
                         }) {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for thought: {}", e);
                         }
@@ -943,6 +945,7 @@ impl ReasoningStreamHandlerTrait for AgentStreamHandler {
                         if let Err(e) = self.agent_event_sender.send(AgentEvent::LlmChunk {
                             content: "⏳ Processing...".to_string(),
                             is_final: chunk.is_final,
+                            is_thinking: false,
                         }) {
                             log::warn!("AgentStreamHandler: Failed to send AgentEvent::LlmChunk for other type: {}", e);
                         }

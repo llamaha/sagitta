@@ -411,7 +411,7 @@ mod cli_app {
                     sagitta_code::agent::events::AgentEvent::LlmMessage(msg) => {
                         // We'll handle printing full messages elsewhere
                     },
-                    sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final } => {
+                    sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final, is_thinking } => {
                         print!("{}", content);
                         io::stdout().flush().unwrap();
                         if is_final {

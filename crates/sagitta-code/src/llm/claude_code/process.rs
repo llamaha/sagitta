@@ -25,7 +25,6 @@ impl ClaudeProcess {
     pub async fn spawn(
         &self,
         prompt: &str,
-        tools: &[String], // Tool names to disable
     ) -> Result<Child, ClaudeCodeError> {
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
@@ -38,24 +37,18 @@ impl ClaudeProcess {
             "--verbose".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
-            "--max-turns".to_string(),
-            "1".to_string(), // Let sagitta-code handle multi-turn
-            "--mcp-config".to_string(),
-            r#"{"mcpServers":{}}"#.to_string(), // Valid MCP config with no servers
         ];
+        
+        // Add max-turns if not unlimited (0)
+        if self.config.max_turns > 0 {
+            args.push("--max-turns".to_string());
+            args.push(self.config.max_turns.to_string());
+        }
         
         // Add model if specified
         if !self.config.model.is_empty() {
             args.push("--model".to_string());
             args.push(self.config.model.clone());
-        }
-        
-        // Disable tools if any
-        if !tools.is_empty() {
-            log::info!("CLAUDE_CODE: Disabling {} tools", tools.len());
-            log::debug!("CLAUDE_CODE: Disabled tools: {:?}", tools);
-            args.push("--disallowedTools".to_string());
-            args.push(tools.join(","));
         }
         
         log::trace!("CLAUDE_CODE: Full args: {:?}", args);

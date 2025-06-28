@@ -60,100 +60,12 @@ impl ClaudeCodeClient {
             .unwrap_or_else(|| "You are a helpful AI assistant.".to_string())
     }
     
-    /// Format tools as text for inclusion in system prompt
-    pub fn format_tools_for_system_prompt(tools: &[ToolDefinition]) -> String {
-        if tools.is_empty() {
-            return String::new();
-        }
-        
-        let mut prompt = String::from("\n\n## Available Tools\n\n");
-        prompt.push_str("Tool uses are formatted using XML-style tags. The tool name itself becomes the XML tag name. ");
-        prompt.push_str("Each parameter is enclosed within its own set of tags. Here's the structure:\n\n");
-        prompt.push_str("```xml\n<actual_tool_name>\n<parameter1_name>value1</parameter1_name>\n");
-        prompt.push_str("<parameter2_name>value2</parameter2_name>\n...\n</actual_tool_name>\n```\n\n");
-        prompt.push_str("You have access to the following tools:\n\n");
-        
-        for tool in tools {
-            prompt.push_str(&format!("### {}\n", tool.name));
-            prompt.push_str(&format!("Description: {}\n", tool.description));
-            prompt.push_str("Usage:\n```xml\n");
-            prompt.push_str(&format!("<{}>\n", tool.name));
-            
-            // Add parameter schema as example
-            if let Some(props) = tool.parameters.get("properties").and_then(|p| p.as_object()) {
-                for (param_name, param_schema) in props {
-                    let param_type = param_schema.get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("string");
-                    let description = param_schema.get("description")
-                        .and_then(|d| d.as_str())
-                        .unwrap_or("");
-                    prompt.push_str(&format!("<{}>{}</{}> <!-- {} -->\n", 
-                        param_name, 
-                        match param_type {
-                            "string" => "value",
-                            "number" | "integer" => "123",
-                            "boolean" => "true",
-                            "array" => "[item1, item2]",
-                            "object" => "{\"key\": \"value\"}",
-                            _ => "value"
-                        },
-                        param_name,
-                        description
-                    ));
-                }
-            }
-            
-            prompt.push_str(&format!("</{}>\n```\n\n", tool.name));
-        }
-        
-        prompt.push_str("Always use the actual tool name as the XML tag name for proper parsing and execution. ");
-        prompt.push_str("When you need to use a tool, include the XML block in your response.\n");
-        
-        // Add critical tool usage rules for sequential execution
-        prompt.push_str("\n## CRITICAL TOOL USAGE RULES:\n");
-        prompt.push_str("- After using a tool, wait for the result before proceeding\n");
-        prompt.push_str("- If multiple actions are needed, use one tool, receive the result, then continue in your next response\n");
-        prompt.push_str("- Never attempt to use multiple tools in a single response (unless they can be executed in parallel)\n");
-        prompt.push_str("- Each tool use should be followed by waiting for and analyzing the result before deciding next steps\n");
-        prompt.push_str("- DO NOT summarize or predict what the tools will do - wait for actual results\n");
-        prompt.push_str("- DO NOT give a summary of all steps before starting - execute one step at a time\n");
-        prompt.push_str("- NEVER say things like 'Great! I found...', 'Perfect! The repository has been added...', or 'Excellent! The sync completed...' BEFORE receiving the actual tool results\n");
-        prompt.push_str("- Only describe what actually happened AFTER you receive the tool execution results\n");
-        
-        prompt
-    }
-    
     /// Filter out system messages as they're handled separately
     pub fn filter_non_system_messages(messages: &[Message]) -> Vec<Message> {
         messages.iter()
             .filter(|m| !matches!(m.role, Role::System))
             .cloned()
             .collect()
-    }
-    
-    /// Get list of tools to disable (all Claude built-in tools except WebSearch, and MCP tools)
-    pub fn get_disabled_tools() -> Vec<String> {
-        vec![
-            // Claude's built-in tools (except WebSearch which we want to use)
-            "Task", "Bash", "Glob", "Grep", "LS", "exit_plan_mode",
-            "Read", "Edit", "MultiEdit", "Write", "NotebookRead",
-            "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite",
-            // MCP tools that might be configured
-            "mcp__sagitta-mcp-stdio__ping",
-            "mcp__sagitta-mcp-stdio__repository_add",
-            "mcp__sagitta-mcp-stdio__repository_list",
-            "mcp__sagitta-mcp-stdio__repository_remove",
-            "mcp__sagitta-mcp-stdio__repository_sync",
-            "mcp__sagitta-mcp-stdio__query",
-            "mcp__sagitta-mcp-stdio__repository_search_file",
-            "mcp__sagitta-mcp-stdio__repository_view_file",
-            "mcp__sagitta-mcp-stdio__repository_map",
-            "mcp__sagitta-mcp-stdio__repository_switch_branch",
-            "mcp__sagitta-mcp-stdio__repository_list_branches",
-            // Generic non-existent tools Claude might try
-            "explanation", "search_term"
-        ].iter().map(|s| s.to_string()).collect()
     }
 }
 
@@ -190,7 +102,7 @@ impl LlmClient for ClaudeCodeClient {
         
         // Spawn process with prompt
         let child = self.process_manager
-            .spawn(&prompt, &Self::get_disabled_tools())
+            .spawn(&prompt)
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
         
@@ -309,7 +221,7 @@ impl LlmClient for ClaudeCodeClient {
         
         // Spawn process with prompt
         let child = self.process_manager
-            .spawn(&prompt, &Self::get_disabled_tools())
+            .spawn(&prompt)
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
         

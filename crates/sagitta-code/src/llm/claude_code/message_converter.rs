@@ -133,6 +133,7 @@ pub enum UserContentBlock {
     Text { text: String },
     #[serde(rename = "tool_result")]
     ToolResult {
+        #[serde(deserialize_with = "deserialize_tool_result_content")]
         content: String,
         tool_use_id: String,
         is_error: Option<bool>,
@@ -162,6 +163,57 @@ pub struct Usage {
     pub output_tokens: i32,
     pub cache_read_input_tokens: Option<i32>,
     pub cache_creation_input_tokens: Option<i32>,
+}
+
+/// Custom deserializer for tool result content that can be either a string or an array
+fn deserialize_tool_result_content<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    
+    struct ContentVisitor;
+    
+    impl<'de> Visitor<'de> for ContentVisitor {
+        type Value = String;
+        
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or an array of content blocks")
+        }
+        
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value.to_string())
+        }
+        
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(value)
+        }
+        
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut parts = Vec::new();
+            
+            while let Some(value) = seq.next_element::<serde_json::Value>()? {
+                if let Some(obj) = value.as_object() {
+                    if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+            
+            Ok(parts.join("\n"))
+        }
+    }
+    
+    deserializer.deserialize_any(ContentVisitor)
 }
 
 /// Stream a message as JSON to a writer

@@ -341,6 +341,7 @@ impl AgentToolExecutor {
             let _ = event_sender.send(AgentEvent::LlmChunk {
                 content: format!("\n{}\n\n", llm_feedback),
                 is_final: false,
+                is_thinking: false,
             });
             
             let _ = event_sender.send(AgentEvent::Error(error_message.to_string()));
@@ -833,6 +834,7 @@ impl AgentEventEmitter {
         if let Err(e) = self.event_sender.send(AgentEvent::LlmChunk {
             content: content.clone(),
             is_final,
+            is_thinking: false,
         }) {
             log::warn!("AgentEventEmitter: Failed to send streaming text chunk: {}", e);
         } else {

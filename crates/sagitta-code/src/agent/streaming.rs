@@ -134,6 +134,7 @@ impl StreamingProcessor {
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
                                             content: text.clone(),
                                             is_final: chunk.is_final,
+                                            is_thinking: false,
                                         });
                                         trace!("Stream: Text chunk received: '{}', final: {}", text, chunk.is_final);
                                         
@@ -158,8 +159,9 @@ impl StreamingProcessor {
                                     MessagePart::Thought { text } => {
                                         // Emit thought chunk event (different from text chunks)
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
-                                            content: format!("THINKING:{}", text),  // Prefix to distinguish thinking
+                                            content: text.clone(),
                                             is_final: chunk.is_final,
+                                            is_thinking: true,
                                         });
                                         trace!("Stream: Thought chunk received: '{}', final: {}", text, chunk.is_final);
                                         

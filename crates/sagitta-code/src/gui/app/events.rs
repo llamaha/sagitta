@@ -89,16 +89,16 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     }
                     app.state.is_waiting_for_response = false;
                 },
-                AgentEvent::LlmChunk { content, is_final } => {
+                AgentEvent::LlmChunk { content, is_final, is_thinking } => {
                     // Only log substantial chunks or final chunks to reduce noise
                     if is_final || content.len() > 20 {
-                        log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", 
-                                  content.chars().take(50).collect::<String>(), is_final);
+                        log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}, is_thinking: {}", 
+                                  content.chars().take(50).collect::<String>(), is_final, is_thinking);
                     } else {
-                        log::trace!("SagittaCodeApp: GUI received small LlmChunk - length: {}, is_final: {}", 
-                                   content.len(), is_final);
+                        log::trace!("SagittaCodeApp: GUI received small LlmChunk - length: {}, is_final: {}, is_thinking: {}", 
+                                   content.len(), is_final, is_thinking);
                     }
-                    handle_llm_chunk(app, content, is_final, None);
+                    handle_llm_chunk(app, content, is_final, Some(is_thinking));
                 },
                 AgentEvent::ToolCall { tool_call } => {
                     handle_tool_call(app, tool_call);
@@ -326,13 +326,10 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 }
 
 /// Handle LLM chunk events from the agent
-fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, tool_call_id: Option<String>) {
-    // Check if this is thinking content
-    let (is_thinking, actual_content) = if content.starts_with("THINKING:") {
-        (true, content.strip_prefix("THINKING:").unwrap_or(&content).to_string())
-    } else {
-        (false, content)
-    };
+fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, is_thinking: Option<bool>) {
+    // Use the is_thinking parameter or default to false
+    let is_thinking = is_thinking.unwrap_or(false);
+    let actual_content = content;
     
     let current_response_id = app.state.current_response_id.clone();
     
@@ -1055,8 +1052,8 @@ impl SagittaCodeApp {
     pub fn handle_agent_event(&mut self, event: AgentEvent, ctx: &egui::Context) {
         // Process the event through the existing handler
         match event {
-            AgentEvent::LlmChunk { content, is_final } => {
-                handle_llm_chunk(self, content, is_final, None);
+            AgentEvent::LlmChunk { content, is_final, is_thinking } => {
+                handle_llm_chunk(self, content, is_final, Some(is_thinking));
             },
             AgentEvent::ToolCall { tool_call } => {
                 handle_tool_call(self, tool_call);

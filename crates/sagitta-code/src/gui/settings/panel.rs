@@ -54,6 +54,7 @@ pub struct SettingsPanel {
     pub claude_code_max_output_tokens: u32,
     pub claude_code_timeout: u64,
     pub claude_code_verbose: bool,
+    pub claude_code_max_turns: u32,
     
     // Reasoning engine config fields
     pub reasoning_enabled: bool,
@@ -100,6 +101,7 @@ impl SettingsPanel {
             claude_code_max_output_tokens: initial_sagitta_code_config.claude_code.max_output_tokens,
             claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
             claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
+            claude_code_max_turns: initial_sagitta_code_config.claude_code.max_turns,
             
             // Reasoning engine config fields
             reasoning_enabled: initial_sagitta_code_config.reasoning.enabled,
@@ -305,6 +307,18 @@ impl SettingsPanel {
                                             
                                             ui.label("Verbose Logging:");
                                             ui.checkbox(&mut self.claude_code_verbose, "Enable verbose output for debugging");
+                                            ui.end_row();
+                                            
+                                            ui.label("Max Turns:");
+                                            ui.horizontal(|ui| {
+                                                ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
+                                                    .clamp_range(0..=100)
+                                                    .suffix(" turns"))
+                                                    .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
+                                                if self.claude_code_max_turns == 0 {
+                                                    ui.label("(unlimited)");
+                                                }
+                                            });
                                             ui.end_row();
                                         });
                                     
@@ -562,6 +576,7 @@ impl SettingsPanel {
         updated_config.claude_code.max_output_tokens = self.claude_code_max_output_tokens;
         updated_config.claude_code.timeout = self.claude_code_timeout;
         updated_config.claude_code.verbose = self.claude_code_verbose;
+        updated_config.claude_code.max_turns = self.claude_code_max_turns;
         
         // Update reasoning engine settings
         updated_config.reasoning.enabled = self.reasoning_enabled;

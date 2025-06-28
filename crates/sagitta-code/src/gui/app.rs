@@ -277,7 +277,7 @@ impl SagittaCodeApp {
         // This is a temporary measure to get tests to pass.
         // The tests should be refactored to use handle_agent_event.
         use crate::agent::events::AgentEvent;
-        self.handle_agent_event(AgentEvent::LlmChunk { content, is_final }, ctx);
+        self.handle_agent_event(AgentEvent::LlmChunk { content, is_final, is_thinking: false }, ctx);
     }
 
     /// Render the application UI

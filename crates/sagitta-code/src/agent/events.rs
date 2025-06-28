@@ -27,6 +27,9 @@ pub enum AgentEvent {
         
         /// Whether this is the final chunk
         is_final: bool,
+        
+        /// Whether this is thinking content
+        is_thinking: bool,
     },
     
     /// A tool call from the LLM

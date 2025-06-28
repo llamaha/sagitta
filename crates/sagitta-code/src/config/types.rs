@@ -173,6 +173,10 @@ pub struct ClaudeCodeConfig {
     /// Request timeout in seconds
     #[serde(default = "default_claude_timeout")]
     pub timeout: u64,
+    
+    /// Maximum turns for multi-turn conversations (0 = unlimited)
+    #[serde(default = "default_claude_max_turns")]
+    pub max_turns: u32,
 }
 
 impl Default for ClaudeCodeConfig {
@@ -183,6 +187,7 @@ impl Default for ClaudeCodeConfig {
             max_output_tokens: default_claude_max_output_tokens(),
             verbose: false,
             timeout: default_claude_timeout(),
+            max_turns: default_claude_max_turns(),
         }
     }
 }
@@ -607,6 +612,10 @@ fn default_claude_max_output_tokens() -> u32 {
 
 fn default_claude_timeout() -> u64 {
     600 // 10 minutes
+}
+
+fn default_claude_max_turns() -> u32 {
+    0 // 0 means unlimited turns
 }
 
 // Configuration structures will go here

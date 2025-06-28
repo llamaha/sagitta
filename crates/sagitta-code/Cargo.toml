@@ -106,10 +106,6 @@ gui = [
 name = "sagitta-code"
 path = "src/main.rs"
 
-[[bin]]
-name = "chat_cli"
-path = "src/bin/chat_cli.rs"
-
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.12"
