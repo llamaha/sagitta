@@ -1,5 +1,4 @@
 pub mod claude_code;
-pub mod openrouter;
 
 use crate::tools::types::ToolDefinition;
 

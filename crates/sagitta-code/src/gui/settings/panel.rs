@@ -12,11 +12,9 @@ use uuid::Uuid;
 use log::{info, warn, error};
 
 use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
-use crate::config::types::{OpenRouterConfig, LlmProvider, ClaudeCodeConfig};
+use crate::config::types::ClaudeCodeConfig;
 use crate::config::paths::{get_sagitta_code_app_config_path};
-use crate::llm::openrouter::models::ModelManager;
 use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
-use super::model_selector::ModelSelector;
 
 /// Settings panel for configuring Sagitta core settings
 pub struct SettingsPanel {
@@ -39,15 +37,6 @@ pub struct SettingsPanel {
     performance_collection_name_prefix: String,
     performance_max_file_size_bytes: u32,
     
-    // Provider selection
-    pub provider: LlmProvider,
-    
-    // Sagitta Code config fields - OpenRouter
-    pub openrouter_api_key: String,
-    pub openrouter_model: String,
-    pub openrouter_max_reasoning_steps: u32,
-    pub openrouter_max_context_tokens: usize,
-    
     // Sagitta Code config fields - Claude Code
     pub claude_code_path: String,
     pub claude_code_model: String,
@@ -56,13 +45,6 @@ pub struct SettingsPanel {
     pub claude_code_verbose: bool,
     pub claude_code_max_turns: u32,
     
-    // Reasoning engine config fields
-    pub reasoning_enabled: bool,
-    pub analyze_input: bool,
-    pub analyze_intent: bool,
-    
-    // Model selector for dynamic model selection
-    model_selector: Option<ModelSelector>,
 }
 
 impl SettingsPanel {
@@ -86,15 +68,6 @@ impl SettingsPanel {
             performance_collection_name_prefix: initial_app_config.performance.collection_name_prefix.clone(),
             performance_max_file_size_bytes: initial_app_config.performance.max_file_size_bytes as u32,
             
-            // Provider selection
-            provider: initial_sagitta_code_config.provider.clone(),
-            
-            // Sagitta Code config fields from initial_sagitta_code_config - OpenRouter
-            openrouter_api_key: initial_sagitta_code_config.openrouter.api_key.clone().unwrap_or_default(),
-            openrouter_model: initial_sagitta_code_config.openrouter.model.clone(),
-            openrouter_max_reasoning_steps: initial_sagitta_code_config.openrouter.max_reasoning_steps,
-            openrouter_max_context_tokens: initial_sagitta_code_config.openrouter.max_context_tokens,
-            
             // Sagitta Code config fields - Claude Code
             claude_code_path: initial_sagitta_code_config.claude_code.claude_path.clone(),
             claude_code_model: initial_sagitta_code_config.claude_code.model.clone(),
@@ -102,27 +75,9 @@ impl SettingsPanel {
             claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
             claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
             claude_code_max_turns: initial_sagitta_code_config.claude_code.max_turns,
-            
-            // Reasoning engine config fields
-            reasoning_enabled: initial_sagitta_code_config.reasoning.enabled,
-            analyze_input: initial_sagitta_code_config.reasoning.analyze_input,
-            analyze_intent: initial_sagitta_code_config.reasoning.analyze_intent,
-            
-            // Initialize model selector as None (will be lazy-loaded)
-            model_selector: None,
         }
     }
     
-    /// Create a new settings panel with model manager for enhanced model selection
-    pub fn with_model_manager(
-        initial_sagitta_code_config: SagittaCodeConfig, 
-        initial_app_config: AppConfig,
-        model_manager: Arc<ModelManager>
-    ) -> Self {
-        let mut panel = Self::new(initial_sagitta_code_config, initial_app_config);
-        panel.model_selector = Some(ModelSelector::new(model_manager));
-        panel
-    }
     
     /// Toggle the panel visibility
     pub fn toggle(&mut self) {
@@ -171,161 +126,60 @@ impl SettingsPanel {
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            // Provider Selection
-                            ui.heading("LLM Provider");
-                            ui.horizontal(|ui| {
-                                ui.label("Provider:");
-                                egui::ComboBox::from_id_salt("llm_provider_combo")
-                                    .selected_text(match self.provider {
-                                        LlmProvider::OpenRouter => "OpenRouter",
-                                        LlmProvider::ClaudeCode => "Claude Code",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.provider, LlmProvider::OpenRouter, "OpenRouter");
-                                        ui.selectable_value(&mut self.provider, LlmProvider::ClaudeCode, "Claude Code");
-                                    });
-                            });
-                            ui.add_space(8.0);
-                            
-                            // Reasoning Engine Settings (Global)
-                            ui.heading("Reasoning Engine");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut self.reasoning_enabled, "Enable Reasoning Engine")
-                                    .on_hover_text("Enable the reasoning engine for complex task orchestration. When disabled, uses direct LLM streaming.");
-                            });
-                            if self.reasoning_enabled {
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut self.analyze_input, "Enable Analyze Input")
-                                        .on_hover_text("Analyzes initial user input to determine intent and suggest actions");
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut self.analyze_intent, "Enable Analyze Intent")
-                                        .on_hover_text("Detects LLM response intent for better conversation flow");
-                                });
-                            }
-                            ui.add_space(8.0);
-                            
-                            // Show provider-specific settings
-                            match self.provider {
-                                LlmProvider::OpenRouter => {
-                                    // OpenRouter Configuration
-                                    ui.heading("OpenRouter Configuration");
-                            Grid::new("openrouter_config_grid")
+                            // Claude Code Configuration
+                            ui.heading("Claude Code Configuration");
+                            Grid::new("claude_code_config_grid")
                                 .num_columns(2)
                                 .spacing([8.0, 8.0])
                                 .show(ui, |ui| {
-                                    ui.label("API Key:");
-                                    ui.add(TextEdit::singleline(&mut self.openrouter_api_key)
-                                        .password(true)
-                                        .hint_text("Enter your OpenRouter API key"));
+                                    ui.label("Claude Binary Path:");
+                                    ui.add(TextEdit::singleline(&mut self.claude_code_path)
+                                        .hint_text("Path to claude binary (default: claude)"));
                                     ui.end_row();
                                     
-                                    ui.label("Max Reasoning Steps:");
-                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_reasoning_steps)
-                                        .range(1..=100)
-                                        .speed(1.0));
+                                    ui.label("Model:");
+                                    egui::ComboBox::from_id_salt("claude_model_combo")
+                                        .selected_text(&self.claude_code_model)
+                                        .show_ui(ui, |ui| {
+                                            for model in CLAUDE_CODE_MODELS {
+                                                ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
+                                            }
+                                        });
                                     ui.end_row();
                                     
-                                    ui.label("Max Context Tokens:");
-                                    ui.add(egui::DragValue::new(&mut self.openrouter_max_context_tokens)
-                                        .range(0..=128000)
-                                        .speed(100.0))
-                                        .on_hover_text("Maximum context tokens (0 = no limit). Default: 64000");
+                                    ui.label("Max Output Tokens:");
+                                    ui.add(egui::DragValue::new(&mut self.claude_code_max_output_tokens)
+                                        .range(1000..=128000)
+                                        .speed(1000.0))
+                                        .on_hover_text("Maximum output tokens. Default: 64000");
+                                    ui.end_row();
+                                    
+                                    ui.label("Timeout (seconds):");
+                                    ui.add(egui::DragValue::new(&mut self.claude_code_timeout)
+                                        .range(10..=3600)
+                                        .speed(10.0))
+                                        .on_hover_text("Request timeout in seconds. Default: 600 (10 minutes)");
+                                    ui.end_row();
+                                    
+                                    ui.label("Verbose Logging:");
+                                    ui.checkbox(&mut self.claude_code_verbose, "Enable verbose output for debugging");
+                                    ui.end_row();
+                                    
+                                    ui.label("Max Turns:");
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
+                                            .clamp_range(0..=100)
+                                            .suffix(" turns"))
+                                            .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
+                                        if self.claude_code_max_turns == 0 {
+                                            ui.label("(unlimited)");
+                                        }
+                                    });
                                     ui.end_row();
                                 });
                             
-                            
-                                    // Model selector (enhanced UI)
-                                    ui.add_space(8.0);
-                                    if let Some(ref mut model_selector) = self.model_selector {
-                                        // Check if we need to refresh models when first shown
-                                        if model_selector.state().show_dropdown && model_selector.state().loading == false {
-                                            // If dropdown is being shown and we haven't loaded models yet, trigger refresh
-                                            let should_refresh = model_selector.state().loading == false && 
-                                                (model_selector.state().error_message.is_none() || 
-                                                 model_selector.state().search_query.is_empty());
-                                            
-                                            if should_refresh {
-                                                // This is a bit of a hack - we'll trigger refresh on first show
-                                                // In a real app, this would be handled more elegantly
-                                                info!("Triggering model refresh for first-time dropdown display");
-                                            }
-                                        }
-                                        
-                                        // Use the dynamic model selector
-                                        if model_selector.render(ui, &mut self.openrouter_model, &theme) {
-                                            // Model was changed - you can add any callback logic here
-                                            info!("Model changed to: {}", self.openrouter_model);
-                                        }
-                                    } else {
-                                        // Fallback to simple text input if no model manager available
-                                        ui.horizontal(|ui| {
-                                            ui.label("Model:");
-                                            ui.add(TextEdit::singleline(&mut self.openrouter_model)
-                                                .hint_text("e.g., openai/gpt-4, anthropic/claude-3-5-sonnet"));
-                                            
-                                            // Note about enhanced selection
-                                            ui.small("💡 Enhanced model selection available with API key");
-                                        });
-                                    }
-                                }
-                                LlmProvider::ClaudeCode => {
-                                    // Claude Code Configuration
-                                    ui.heading("Claude Code Configuration");
-                                    Grid::new("claude_code_config_grid")
-                                        .num_columns(2)
-                                        .spacing([8.0, 8.0])
-                                        .show(ui, |ui| {
-                                            ui.label("Claude Binary Path:");
-                                            ui.add(TextEdit::singleline(&mut self.claude_code_path)
-                                                .hint_text("Path to claude binary (default: claude)"));
-                                            ui.end_row();
-                                            
-                                            ui.label("Model:");
-                                            egui::ComboBox::from_id_salt("claude_model_combo")
-                                                .selected_text(&self.claude_code_model)
-                                                .show_ui(ui, |ui| {
-                                                    for model in CLAUDE_CODE_MODELS {
-                                                        ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
-                                                    }
-                                                });
-                                            ui.end_row();
-                                            
-                                            ui.label("Max Output Tokens:");
-                                            ui.add(egui::DragValue::new(&mut self.claude_code_max_output_tokens)
-                                                .range(1000..=128000)
-                                                .speed(1000.0))
-                                                .on_hover_text("Maximum output tokens. Default: 64000");
-                                            ui.end_row();
-                                            
-                                            ui.label("Timeout (seconds):");
-                                            ui.add(egui::DragValue::new(&mut self.claude_code_timeout)
-                                                .range(10..=3600)
-                                                .speed(10.0))
-                                                .on_hover_text("Request timeout in seconds. Default: 600 (10 minutes)");
-                                            ui.end_row();
-                                            
-                                            ui.label("Verbose Logging:");
-                                            ui.checkbox(&mut self.claude_code_verbose, "Enable verbose output for debugging");
-                                            ui.end_row();
-                                            
-                                            ui.label("Max Turns:");
-                                            ui.horizontal(|ui| {
-                                                ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
-                                                    .clamp_range(0..=100)
-                                                    .suffix(" turns"))
-                                                    .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
-                                                if self.claude_code_max_turns == 0 {
-                                                    ui.label("(unlimited)");
-                                                }
-                                            });
-                                            ui.end_row();
-                                        });
-                                    
-                                    ui.add_space(8.0);
-                                    ui.label("Note: Make sure to authenticate with 'claude auth' before using Claude Code provider.");
-                                }
-                            }
+                            ui.add_space(8.0);
+                            ui.label("Note: Make sure to authenticate with 'claude auth' before using Claude Code provider.");
                             
                             ui.separator();
                             ui.add_space(8.0);
@@ -557,19 +411,6 @@ impl SettingsPanel {
         let current_config_guard = self.sagitta_code_config.try_lock().expect("Failed to acquire sagitta_code_config lock");
         let mut updated_config = current_config_guard.clone();
         
-        // Update provider selection
-        updated_config.provider = self.provider.clone();
-        
-        // Update only the OpenRouter fields that are exposed in the UI
-        updated_config.openrouter.api_key = if self.openrouter_api_key.is_empty() { 
-            None 
-        } else { 
-            Some(self.openrouter_api_key.clone()) 
-        };
-        updated_config.openrouter.model = self.openrouter_model.clone();
-        updated_config.openrouter.max_reasoning_steps = self.openrouter_max_reasoning_steps;
-        updated_config.openrouter.max_context_tokens = self.openrouter_max_context_tokens;
-        
         // Update Claude Code fields
         updated_config.claude_code.claude_path = self.claude_code_path.clone();
         updated_config.claude_code.model = self.claude_code_model.clone();
@@ -578,12 +419,7 @@ impl SettingsPanel {
         updated_config.claude_code.verbose = self.claude_code_verbose;
         updated_config.claude_code.max_turns = self.claude_code_max_turns;
         
-        // Update reasoning engine settings
-        updated_config.reasoning.enabled = self.reasoning_enabled;
-        updated_config.reasoning.analyze_input = self.analyze_input;
-        updated_config.reasoning.analyze_intent = self.analyze_intent;
-        
-        // Preserve all other OpenRouter fields (provider_preferences, request_timeout)
+        // Preserve all other fields
         // and all other config sections (sagitta, ui, logging, conversation) from the original
         
         updated_config
@@ -607,7 +443,7 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, OpenRouterConfig, UiConfig, LoggingConfig, ConversationConfig};
+    use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig};
     // Import specific loader functions for more direct testing of file operations
     use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 
@@ -647,15 +483,6 @@ mod tests {
 
     fn create_test_sagitta_code_config() -> SagittaCodeConfig {
         SagittaCodeConfig {
-            provider: LlmProvider::OpenRouter,
-            openrouter: OpenRouterConfig {
-                api_key: Some("test-api-key".to_string()),
-                model: "test-model".to_string(),
-                provider_preferences: None,
-                max_context_tokens: 64000,
-                max_reasoning_steps: 10,
-                request_timeout: 30,
-            },
             claude_code: ClaudeCodeConfig::default(),
             sagitta: Default::default(),
             ui: UiConfig::default(),
@@ -680,11 +507,6 @@ mod tests {
         assert_eq!(panel.performance_max_file_size_bytes, 2 * 1024 * 1024);
 
         // Check values from create_test_sagitta_code_config()
-        assert_eq!(panel.openrouter_api_key, "test-api-key");
-        assert_eq!(panel.openrouter_model, "test-model");
-        assert_eq!(panel.openrouter_max_reasoning_steps, 10);
-        assert_eq!(panel.openrouter_max_context_tokens, 64000);
-
         assert!(!panel.is_open);
     }
 
@@ -705,12 +527,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_settings_panel_sagitta_code_config_population() {
-        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
+        let panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
-        assert_eq!(panel.openrouter_api_key, "test-api-key");
-        assert_eq!(panel.openrouter_model, "test-model");
-        assert_eq!(panel.openrouter_max_reasoning_steps, 10);
-        assert_eq!(panel.openrouter_max_context_tokens, 64000);
+        // Check Claude Code defaults
+        assert_eq!(panel.claude_code_path, "claude");
+        assert!(!panel.claude_code_verbose);
     }
 
     #[test]
@@ -759,31 +580,15 @@ mod tests {
         let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
         
         // Set some test values
-        panel.openrouter_api_key = "updated-api-key".to_string();
-        panel.openrouter_model = "updated-model".to_string();
-        panel.openrouter_max_reasoning_steps = 100;
-        panel.openrouter_max_context_tokens = 16000;
+        panel.claude_code_path = "/custom/claude".to_string();
+        panel.claude_code_verbose = true;
+        panel.claude_code_max_output_tokens = 10000;
         
         let config = panel.create_updated_sagitta_code_config();
         
-        assert_eq!(config.openrouter.api_key, Some("updated-api-key".to_string()));
-        assert_eq!(config.openrouter.model, "updated-model");
-        assert_eq!(config.openrouter.max_reasoning_steps, 100);
-        assert_eq!(config.openrouter.max_context_tokens, 16000);
-    }
-
-    #[test]
-    fn test_create_updated_sagitta_code_config_empty_api_key() {
-        let mut panel = SettingsPanel::new(create_test_sagitta_code_config(), create_test_sagitta_config());
-        
-        // Set empty API key
-        panel.openrouter_api_key = "".to_string();
-        panel.openrouter_model = "test-model".to_string();
-        
-        let config = panel.create_updated_sagitta_code_config();
-        
-        assert_eq!(config.openrouter.api_key, None);
-        assert_eq!(config.openrouter.model, "test-model");
+        assert_eq!(config.claude_code.claude_path, "/custom/claude");
+        assert_eq!(config.claude_code.verbose, true);
+        assert_eq!(config.claude_code.max_output_tokens, 10000);
     }
 
     #[test]
@@ -805,10 +610,9 @@ mod tests {
         assert_eq!(panel.performance_max_file_size_bytes as u64, default_app_config.performance.max_file_size_bytes);
 
         // Check SagittaCodeConfig derived fields
-        assert_eq!(panel.openrouter_api_key, default_sagitta_code_config.openrouter.api_key.unwrap_or_default());
-        assert_eq!(panel.openrouter_model, default_sagitta_code_config.openrouter.model);
-        assert_eq!(panel.openrouter_max_reasoning_steps, default_sagitta_code_config.openrouter.max_reasoning_steps);
-        assert_eq!(panel.openrouter_max_context_tokens, default_sagitta_code_config.openrouter.max_context_tokens);
+        assert_eq!(panel.claude_code_path, default_sagitta_code_config.claude_code.claude_path);
+        assert_eq!(panel.claude_code_model, default_sagitta_code_config.claude_code.model);
+        assert_eq!(panel.claude_code_verbose, default_sagitta_code_config.claude_code.verbose);
     }
 
     #[test]
@@ -819,8 +623,8 @@ mod tests {
         let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_sagitta_config.clone());
         
         // Modify some values
-        panel.openrouter_api_key = "new_key".to_string();
-        panel.openrouter_model = "new_model".to_string();
+        panel.claude_code_path = "/new/claude".to_string();
+        panel.claude_code_verbose = true;
         panel.qdrant_url = "http://new_url:6334".to_string();
         
         // Create updated configs
@@ -829,8 +633,8 @@ mod tests {
         
         // Verify changes were applied
         assert_eq!(updated_sagitta_config.qdrant_url, "http://new_url:6334");
-        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("new_key".to_string()));
-        assert_eq!(updated_sagitta_code_config.openrouter.model, "new_model");
+        assert_eq!(updated_sagitta_code_config.claude_code.claude_path, "/new/claude");
+        assert_eq!(updated_sagitta_code_config.claude_code.verbose, true);
     }
 
     #[test]
@@ -897,7 +701,7 @@ mod tests {
         let mut panel = SettingsPanel::new(initial_sagitta_code_config.clone(), initial_sagitta_config.clone());
         
         // Modify only UI-exposed fields
-        panel.openrouter_api_key = "updated-key".to_string();
+        panel.claude_code_path = "/updated/claude".to_string();
         panel.qdrant_url = "http://updated:6334".to_string();
         
         // Create updated configs
@@ -906,7 +710,7 @@ mod tests {
         
         // Verify UI-exposed fields were updated
         assert_eq!(updated_sagitta_config.qdrant_url, "http://updated:6334");
-        assert_eq!(updated_sagitta_code_config.openrouter.api_key, Some("updated-key".to_string()));
+        assert_eq!(updated_sagitta_code_config.claude_code.claude_path, "/updated/claude");
         
         // Verify non-UI fields were preserved
         assert_eq!(updated_sagitta_config.repositories.len(), 2);

@@ -1,30 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// LLM Provider selection
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LlmProvider {
-    OpenRouter,
-    ClaudeCode,
-}
-
-impl Default for LlmProvider {
-    fn default() -> Self {
-        LlmProvider::OpenRouter
-    }
-}
 
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SagittaCodeConfig {
-    /// Selected LLM provider
-    #[serde(default)]
-    pub provider: LlmProvider,
-    
-    /// OpenRouter API configuration
-    #[serde(default)]
-    pub openrouter: OpenRouterConfig,
     
     /// Claude Code configuration
     #[serde(default)]
@@ -45,25 +25,16 @@ pub struct SagittaCodeConfig {
     /// Conversation management configuration
     #[serde(default)]
     pub conversation: ConversationConfig,
-    
-    /// Reasoning engine configuration
-    #[serde(default)]
-    pub reasoning: ReasoningEngineConfig,
-
-
 }
 
 impl Default for SagittaCodeConfig {
     fn default() -> Self {
         Self {
-            provider: LlmProvider::default(),
-            openrouter: OpenRouterConfig::default(),
             claude_code: ClaudeCodeConfig::default(),
             sagitta: SagittaDbConfig::default(),
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
-            reasoning: ReasoningEngineConfig::default(),
         }
     }
 }
@@ -99,57 +70,6 @@ impl SagittaCodeConfig {
     }
 }
 
-/// Configuration for OpenRouter API
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenRouterConfig {
-    /// OpenRouter API key
-    pub api_key: Option<String>,
-    
-    /// Selected model (e.g., "openai/gpt-4", "anthropic/claude-3-5-sonnet")
-    #[serde(default = "default_openrouter_model")]
-    pub model: String,
-    
-    /// Provider preferences (optional routing configuration)
-    pub provider_preferences: Option<ProviderPreferences>,
-    
-    /// Maximum context tokens (0 = use model default)
-    #[serde(default = "default_max_context_tokens")]
-    pub max_context_tokens: usize,
-    
-    /// Maximum reasoning steps to prevent infinite loops
-    #[serde(default = "default_max_reasoning_steps")]
-    pub max_reasoning_steps: u32,
-    
-    /// Request timeout in seconds
-    #[serde(default = "default_request_timeout")]
-    pub request_timeout: u64,
-}
-
-impl Default for OpenRouterConfig {
-    fn default() -> Self {
-        Self {
-            api_key: None,
-            model: default_openrouter_model(),
-            provider_preferences: None,
-            max_context_tokens: default_max_context_tokens(),
-            max_reasoning_steps: default_max_reasoning_steps(),
-            request_timeout: default_request_timeout(),
-        }
-    }
-}
-
-/// Provider preferences for OpenRouter routing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderPreferences {
-    /// Preferred providers in order
-    pub order: Option<Vec<String>>,
-    /// Whether to allow fallbacks
-    pub allow_fallbacks: Option<bool>,
-    /// Sort by price, throughput, or latency
-    pub sort: Option<String>,
-    /// Data collection policy
-    pub data_collection: Option<String>,
-}
 
 /// Configuration for Claude Code provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,32 +193,6 @@ impl Default for LoggingConfig {
             log_to_file: false,
             log_file_path: crate::config::paths::get_logs_path().ok()
                 .map(|p| p.join("sagitta_code.log")),
-        }
-    }
-}
-
-/// Configuration for reasoning engine behavior
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReasoningEngineConfig {
-    /// Enable the reasoning engine for orchestrating complex tasks
-    #[serde(default = "default_enable_reasoning_engine")]
-    pub enabled: bool,
-    
-    /// Enable analyze_input tool for initial user input analysis
-    #[serde(default = "default_analyze_input")]
-    pub analyze_input: bool,
-    
-    /// Enable analyze_intent for LLM response intent detection
-    #[serde(default = "default_analyze_intent")]
-    pub analyze_intent: bool,
-}
-
-impl Default for ReasoningEngineConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_enable_reasoning_engine(),
-            analyze_input: default_analyze_input(),
-            analyze_intent: default_analyze_intent(),
         }
     }
 }
@@ -500,18 +394,6 @@ impl Default for ConversationConfig {
 /// Configuration for project workspaces
 
 
-fn default_openrouter_model() -> String {
-    "openai/gpt-4".to_string()
-}
-
-fn default_max_context_tokens() -> usize {
-    64000 // Default to 64k tokens
-}
-
-fn default_max_reasoning_steps() -> u32 {
-    50
-}
-
 fn default_dark_mode() -> bool {
     true
 }
@@ -543,20 +425,6 @@ fn default_auto_create() -> bool {
 fn default_auto_checkpoints() -> bool {
     true
 }
-
-fn default_enable_reasoning_engine() -> bool {
-    true
-}
-
-fn default_analyze_input() -> bool {
-    true
-}
-
-fn default_analyze_intent() -> bool {
-    true
-}
-
-
 
 fn default_organization_mode() -> String {
     "Recency".to_string()
@@ -592,10 +460,6 @@ fn default_enable_lazy_loading() -> bool {
 
 fn default_search_debounce_ms() -> u64 {
     300
-}
-
-fn default_request_timeout() -> u64 {
-    30
 }
 
 fn default_claude_path() -> String {

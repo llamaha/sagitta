@@ -17,8 +17,7 @@ mod tests {
     use std::time::Duration;
     use futures_util::{StreamExt, Stream};
     use crate::agent::state::types::AgentMode;
-    use crate::llm::openrouter::client::OpenRouterClient;
-    use crate::tools::registry::ToolRegistry;
+        use crate::tools::registry::ToolRegistry;
     use crate::agent::recovery::RecoveryConfig;
     use std::sync::Arc;
     use std::path::Path;
@@ -30,12 +29,13 @@ mod tests {
     use std::pin::Pin;
     use crate::agent::message::types::{AgentMessage, ToolCall};
     use crate::agent::events::AgentEvent;
-    use crate::reasoning::llm_adapter::ReasoningLlmClientAdapter;
-    use reasoning_engine::traits::{LlmClient as ReasoningLlmClient, LlmMessage, LlmMessagePart};
-    use reasoning_engine::streaming::StreamChunk as ReasoningStreamChunk;
-    use reasoning_engine::traits::StreamHandler as ReasoningStreamHandlerTrait;
+    // Reasoning engine imports removed
+    // use crate::reasoning::llm_adapter::ReasoningLlmClientAdapter;
+    // use reasoning_engine::traits::{LlmClient as ReasoningLlmClient, LlmMessage, LlmMessagePart};
+    // use reasoning_engine::streaming::StreamChunk as ReasoningStreamChunk;
+    // use reasoning_engine::traits::StreamHandler as ReasoningStreamHandlerTrait;
     use std::time::Instant;
-    use crate::agent::core::AgentStreamHandler;
+    // use crate::agent::core::AgentStreamHandler; // Removed with reasoning engine
 
     // Mock tool for testing
     #[derive(Debug)]
@@ -542,6 +542,7 @@ mod tests {
     }
     */
 
+    /* // Commented out - OpenRouter has been removed
     #[tokio::test]
     #[ignore] // Remove this to run the test with real Gemini API
     async fn test_multi_tool_reasoning_chain_with_real_gemini() {
@@ -561,8 +562,9 @@ mod tests {
         
         // Create a real configuration with the API key
         let mut config = SagittaCodeConfig::default();
-        config.openrouter.api_key = Some(api_key);
-        config.openrouter.model = "openai/gpt-4".to_string(); // Use OpenRouter model
+        // OpenRouter config has been removed
+        // config.openrouter.api_key = Some(api_key);
+        // config.openrouter.model = "openai/gpt-4".to_string();
         
         // Create tool registry with mock tools that simulate the real tools
         let tool_registry = Arc::new(ToolRegistry::new());
@@ -646,8 +648,10 @@ mod tests {
 
         // Create the LlmClient (GeminiClient in this case)
         // The config already has the API key loaded if the test isn't skipped.
-        let llm_client = Arc::new(OpenRouterClient::new(&config)
-            .expect("Failed to create GeminiClient for test"));
+        // OpenRouterClient has been removed
+        // let llm_client = Arc::new(OpenRouterClient::new(&config)
+        //     .expect("Failed to create GeminiClient for test"));
+        let llm_client = Arc::new(MockLlmClient::new(vec!["Test response"]));
         
         let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, llm_client).await.unwrap();
         
@@ -859,6 +863,7 @@ mod tests {
             println!("Test: The fix should ensure the stream doesn't end after the first tool call");
         }
     }
+    */"
     
     // Helper struct for tracking tool execution order
     #[derive(Debug)]
@@ -1478,6 +1483,7 @@ mod tests {
         }
     }
 
+    /* // Commented out - uses removed reasoning engine components
     #[tokio::test]
     async fn test_assistant_message_saved_via_stream_complete() {
         use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
@@ -1664,7 +1670,9 @@ mod tests {
         
         println!("Test: ✅ Stream complete assistant message save test passed");
     }
+    */"
 
+    /* // Commented out - uses removed reasoning engine
     #[tokio::test]
     async fn test_reasoning_adapter_basic() {
         use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
@@ -1730,6 +1738,7 @@ mod tests {
         
         println!("Test: ✅ Reasoning adapter basic test passed");
     }
+    */"
 
     #[tokio::test]
     async fn test_concurrent_reasoning_lock_failure() {

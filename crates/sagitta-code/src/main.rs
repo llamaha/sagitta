@@ -163,9 +163,7 @@ mod cli_app {
     use sagitta_embed::EmbeddingModelType;
     use qdrant_client::Payload;
     use sagitta_code::llm::client::LlmClient; // Corrected path
-    use sagitta_code::llm::openrouter::client::OpenRouterClient; // Updated path
     use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
-    use sagitta_code::config::types::LlmProvider;
 
     pub async fn run(config: SagittaCodeConfig) -> Result<()> {
         log::info!("Starting Sagitta Code CLI");
@@ -207,22 +205,13 @@ mod cli_app {
         // Create and register tools before creating the agent
         let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
         
-        // Create the LLM client first for tools that need it
-        let llm_client_cli: Arc<dyn LlmClient> = match config.provider {
-            LlmProvider::OpenRouter => {
-                log::info!("Creating OpenRouter LLM client for CLI");
-                Arc::new(
-                    OpenRouterClient::new(&config)
-                        .map_err(|e| anyhow!("Failed to create OpenRouterClient for CLI: {}", e))?
-                )
-            }
-            LlmProvider::ClaudeCode => {
-                log::info!("Creating Claude Code LLM client for CLI");
-                Arc::new(
-                    ClaudeCodeClient::new(&config)
-                        .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?
-                )
-            }
+        // Create the Claude Code LLM client
+        let llm_client_cli: Arc<dyn LlmClient> = {
+            log::info!("Creating Claude Code LLM client for CLI");
+            Arc::new(
+                ClaudeCodeClient::new(&config)
+                    .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?
+            )
         };
         
         // Register AnalyzeInputTool first, passing the qdrant_client

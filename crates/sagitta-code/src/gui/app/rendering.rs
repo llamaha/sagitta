@@ -192,17 +192,8 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.state.toggle_terminal();
     }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
-        // Ctrl+M: Toggle model selection panel (OpenRouter only)
-        let is_openrouter = match app.config.try_lock() {
-            Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
-            Err(_) => false,
-        };
-        
-        if is_openrouter {
-            app.panels.toggle_panel(ActivePanel::ModelSelection);
-        } else {
-            log::debug!("Model selection hotkey ignored - not using OpenRouter");
-        }
+        // Ctrl+M: Toggle model selection panel
+        app.panels.toggle_panel(ActivePanel::ModelSelection);
     }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
@@ -368,11 +359,8 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
-                // Determine provider type before entering async block
-                let is_claude_code = match app.config.try_lock() {
-                    Ok(config) => matches!(config.provider, crate::config::types::LlmProvider::ClaudeCode),
-                    Err(_) => false,
-                };
+                // Always using Claude Code now
+                let is_claude_code = true;
                 
                 app.state.is_waiting_for_response = true;
                 
@@ -669,12 +657,12 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 // Update the current model in the app configuration
                 app.panels.set_current_model(selected_model.clone());
                 
-                // Update the OpenRouter configuration
+                // Update the Claude Code configuration
                 let config = app.config.clone();
                 let model_id = selected_model.clone();
                 tokio::spawn(async move {
                     let mut config_guard = config.lock().await;
-                    config_guard.openrouter.model = model_id.clone();
+                    config_guard.claude_code.model = model_id.clone();
                     
                     // Respect test isolation by using save_config which handles test paths
                     if let Err(err) = crate::config::save_config(&*config_guard) {
@@ -785,22 +773,15 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Model Selection Panel (OpenRouter only)
-                let is_openrouter = match app.config.try_lock() {
-                    Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
-                    Err(_) => false,
-                };
-                
-                if is_openrouter {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                                app.panels.toggle_panel(ActivePanel::ModelSelection);
-                            }
-                        });
+                // Model Selection Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::ModelSelection);
+                        }
                     });
-                }
+                });
                 
                 // Analytics Panel
                 ui.horizontal(|ui| {

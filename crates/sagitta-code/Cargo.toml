@@ -9,7 +9,6 @@ description = "Sagitta AI code agent built on sagitta-search"
 sagitta-search = { path = "../sagitta-search", features = ["onnx"] }
 sagitta-embed = { path = "../sagitta-embed", features = ["onnx"] }
 repo-mapper = { path = "../repo-mapper" }
-reasoning-engine = { path = "../reasoning-engine" }
 git-manager = { path = "../git-manager" }
 terminal-stream = { path = "../terminal-stream" }
 
