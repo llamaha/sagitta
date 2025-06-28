@@ -208,6 +208,10 @@ pub struct LlmResponse {
 pub trait LlmClient: Send + Sync {
     /// Get the concrete type as Any for downcasting
     fn as_any(&self) -> &dyn std::any::Any;
+    
+    /// Get the client type identifier
+    fn client_type(&self) -> &str;
+    
     /// Generate a response from the LLM
     async fn generate(&self, 
         messages: &[Message], 

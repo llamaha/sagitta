@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::pin::Pin;
+use std::sync::Arc;
 use futures_util::Stream;
 use uuid::Uuid;
 use tokio::time::Duration;
@@ -16,6 +17,8 @@ use super::streaming::ClaudeCodeStream;
 use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
 use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
+use super::mcp_integration::McpIntegration;
+use crate::tools::registry::ToolRegistry;
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
 const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -25,6 +28,8 @@ pub struct ClaudeCodeClient {
     config: ClaudeCodeConfig,
     process_manager: ClaudeProcess,
     interface: ClaudeInterface,
+    mcp_integration: Option<McpIntegration>,
+    mcp_config_path: Option<String>,
 }
 
 impl ClaudeCodeClient {
@@ -46,7 +51,29 @@ impl ClaudeCodeClient {
             process_manager: ClaudeProcess::new(claude_config.clone()),
             interface: ClaudeInterface::new(claude_config.clone()),
             config: claude_config,
+            mcp_integration: None,
+            mcp_config_path: None,
         })
+    }
+    
+    /// Initialize MCP integration with tool registry
+    pub async fn initialize_mcp(&mut self, tool_registry: Arc<ToolRegistry>) -> Result<(), SagittaCodeError> {
+        log::info!("CLAUDE_CODE: Initializing MCP integration");
+        
+        let mut mcp = McpIntegration::new(tool_registry);
+        
+        // Start the MCP server and get config
+        let mcp_config = mcp.start().await
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {}", e)))?;
+        
+        // Extract the config path
+        if let Some(path) = mcp_config.get("mcp_config_path").and_then(|v| v.as_str()) {
+            self.mcp_config_path = Some(path.to_string());
+            log::info!("CLAUDE_CODE: MCP config created at: {}", path);
+        }
+        
+        self.mcp_integration = Some(mcp);
+        Ok(())
     }
     
     /// Extract system prompt from messages
@@ -70,6 +97,35 @@ impl ClaudeCodeClient {
             .cloned()
             .collect()
     }
+    
+    /// Get MCP integration details for tests
+    pub fn get_mcp_integration(&self) -> Option<serde_json::Value> {
+        if self.mcp_integration.is_some() && self.mcp_config_path.is_some() {
+            // Read the config to get the actual server name
+            if let Ok(content) = std::fs::read_to_string(self.mcp_config_path.as_ref().unwrap()) {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(servers) = config["mcpServers"].as_object() {
+                        if let Some(server_name) = servers.keys().next() {
+                            return Some(serde_json::json!({
+                                "mcp_config_path": self.mcp_config_path.as_ref().unwrap(),
+                                "server_name": server_name
+                            }));
+                        }
+                    }
+                }
+            }
+            None
+        } else {
+            None
+        }
+    }
+    
+    /// Get Claude CLI arguments with MCP config
+    pub fn get_claude_cli_args(&self) -> Option<Vec<String>> {
+        self.mcp_config_path.as_ref().map(|path| {
+            vec!["--mcp-config".to_string(), path.clone()]
+        })
+    }
 }
 
 #[async_trait]
@@ -77,6 +133,11 @@ impl LlmClient for ClaudeCodeClient {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+    
+    fn client_type(&self) -> &str {
+        "claude_code"
+    }
+    
     async fn generate(
         &self, 
         messages: &[Message], 
@@ -84,30 +145,65 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<LlmResponse, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Get only the latest user message as the prompt
-        let user_messages: Vec<&Message> = messages.iter()
-            .filter(|m| matches!(m.role, Role::User))
-            .collect();
+        // Build conversation history as a prompt
+        let mut prompt = String::new();
         
-        let prompt = if let Some(last_user_msg) = user_messages.last() {
-            // Extract text from the message parts
-            last_user_msg.parts.iter()
-                .filter_map(|part| match part {
-                    MessagePart::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
+        for message in messages {
+            match message.role {
+                Role::User => {
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    prompt.push_str(&format!("Human: {}\n\n", text));
+                }
+                Role::Assistant => {
+                    // Only include actual text content, not thinking
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !text.is_empty() {
+                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                    }
+                }
+                Role::System => {
+                    // Skip system messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping system message in prompt");
+                }
+                Role::Function => {
+                    // Skip function messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping function message in prompt");
+                }
+            }
+        }
+        
+        // Ensure we have a prompt
+        if prompt.trim().is_empty() {
+            log::warn!("CLAUDE_CODE: Empty prompt after processing messages");
+            prompt = "Human: Hello\n\n".to_string();
+        }
+        
+        log::debug!("CLAUDE_CODE: Final prompt:\n{}", prompt);
+        
+        // Spawn process with prompt and MCP config if available
+        let child = if let Some(ref mcp_path) = self.mcp_config_path {
+            self.process_manager
+                .spawn_with_mcp(&prompt, Some(mcp_path))
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         } else {
-            log::warn!("CLAUDE_CODE: No user messages found, using default prompt");
-            "Hello".to_string()
+            self.process_manager
+                .spawn(&prompt)
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
-        
-        // Spawn process with prompt
-        let child = self.process_manager
-            .spawn(&prompt)
-            .await
-            .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
         
         let stream = ClaudeCodeStream::new(child);
         
@@ -203,30 +299,65 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate stream called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Get only the latest user message as the prompt
-        let user_messages: Vec<&Message> = messages.iter()
-            .filter(|m| matches!(m.role, Role::User))
-            .collect();
+        // Build conversation history as a prompt
+        let mut prompt = String::new();
         
-        let prompt = if let Some(last_user_msg) = user_messages.last() {
-            // Extract text from the message parts
-            last_user_msg.parts.iter()
-                .filter_map(|part| match part {
-                    MessagePart::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
+        for message in messages {
+            match message.role {
+                Role::User => {
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    prompt.push_str(&format!("Human: {}\n\n", text));
+                }
+                Role::Assistant => {
+                    // Only include actual text content, not thinking
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !text.is_empty() {
+                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                    }
+                }
+                Role::System => {
+                    // Skip system messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping system message in prompt");
+                }
+                Role::Function => {
+                    // Skip function messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping function message in prompt");
+                }
+            }
+        }
+        
+        // Ensure we have a prompt
+        if prompt.trim().is_empty() {
+            log::warn!("CLAUDE_CODE: Empty prompt after processing messages");
+            prompt = "Human: Hello\n\n".to_string();
+        }
+        
+        log::debug!("CLAUDE_CODE: Final prompt:\n{}", prompt);
+        
+        // Spawn process with prompt and MCP config if available
+        let child = if let Some(ref mcp_path) = self.mcp_config_path {
+            self.process_manager
+                .spawn_with_mcp(&prompt, Some(mcp_path))
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         } else {
-            log::warn!("CLAUDE_CODE: No user messages found, using default prompt");
-            "Hello".to_string()
+            self.process_manager
+                .spawn(&prompt)
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
         };
-        
-        // Spawn process with prompt
-        let child = self.process_manager
-            .spawn(&prompt)
-            .await
-            .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
         
         let stream = ClaudeCodeStream::new(child);
         Ok(Box::pin(stream))
@@ -288,5 +419,17 @@ impl ClaudeCodeClient {
     /// Get available models
     pub async fn get_available_models(&self) -> Result<Vec<String>, SagittaCodeError> {
         self.interface.get_available_models().await
+    }
+}
+
+impl Drop for ClaudeCodeClient {
+    fn drop(&mut self) {
+        // Clean up MCP integration
+        if let Some(mut mcp) = self.mcp_integration.take() {
+            // We can't use async in drop, so we spawn a task to clean up
+            tokio::spawn(async move {
+                mcp.stop().await;
+            });
+        }
     }
 }

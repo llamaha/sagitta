@@ -108,21 +108,18 @@ impl StreamingProcessor {
                 // Set state to responding with streaming
                 self.state_manager.set_responding(true, "Streaming response").await?;
                 
-                // Process the stream and handle tool calls
+                // Process the stream
                 let event_sender = self.event_sender.clone();
                 let history_manager = self.history.clone();
                 let state_manager = self.state_manager.clone();
-                let tool_executor = self.tool_executor.clone();
-                let continue_reasoning_flag = self.continue_reasoning_after_tool.clone();
                 
                 let message_id = assistant_message.id;
                 
-                // Transform the stream to handle tool calls and update state
+                // Transform the stream to update state
                 let mapped_stream = stream.map(move |result| {
                     let event_sender = event_sender.clone();
                     let history_manager = history_manager.clone();
                     let state_manager = state_manager.clone();
-                    let tool_executor = tool_executor.clone();
                     let message_id = message_id;
                     
                     async move {
@@ -174,55 +171,12 @@ impl StreamingProcessor {
                                         }
                                     },
                                     MessagePart::ToolCall { tool_call_id, name, parameters } => {
-                                        // Create a tool call
-                                        let tool_call = ToolCall {
-                                            id: tool_call_id.clone(),
-                                            name: name.clone(),
-                                            arguments: parameters.clone(),
-                                            result: None,
-                                            successful: false,
-                                            execution_time: None,
-                                        };
-                                        info!("Stream: LLM requested tool call. ID: {}, Name: {}, Args: {:?}", tool_call_id, name, parameters);
+                                        // For Claude CLI, tools are executed through MCP
+                                        // We don't need to do anything - just log and continue
+                                        info!("Stream: Claude CLI executed tool through MCP - ID: {}, Name: {}", tool_call_id, name);
                                         
-                                        // Emit tool call event
-                                        let _ = event_sender.send(AgentEvent::ToolCall {
-                                            tool_call: tool_call.clone(),
-                                        });
-                                        
-                                        // Add the tool call to the message
-                                        if let Some(msg) = history_manager.get_message(message_id).await {
-                                            let mut updated = msg.clone();
-                                            updated.tool_calls.push(tool_call);
-                                            
-                                            let _ = history_manager.remove_message(message_id).await;
-                                            let _ = history_manager.add_message(updated).await;
-                                        }
-                                        
-                                        // Execute the tool asynchronously if in auto mode
-                                        if state_manager.get_agent_mode().await == AgentMode::FullyAutonomous {
-                                            let tc_id = tool_call_id.clone();
-                                            let tc_name = name.clone();
-                                            let tc_params = parameters.clone();
-                                            let tool_executor_clone = tool_executor.clone();
-                                            
-                                            // Execute the tool asynchronously without blocking the stream
-                                            tokio::spawn(async move {
-                                                match tool_executor_clone.lock().await.execute_tool_with_id(&tc_id, &tc_name, tc_params).await {
-                                                    Ok(tool_result) => {
-                                                        info!("Stream: Tool execution completed for ID: {}. Success: {}", tc_id, tool_result.is_success());
-                                                        
-                                                        // Note: The reasoning continuation should be handled by the tool event listener
-                                                        // The stream will naturally end here, and the agent should continue reasoning
-                                                        // via the tool completion event handling mechanism
-                                                    },
-                                                    Err(err) => {
-                                                        error!("Stream: Tool execution failed for ID: {}: {}", tc_id, err);
-                                                        // The error will be handled by the tool event listener
-                                                    }
-                                                }
-                                            });
-                                        }
+                                        // Don't emit events, don't track tool calls, don't execute
+                                        // Claude CLI handles everything through MCP
                                     },
                                     MessagePart::ToolResult { .. } => {
                                         warn!("Stream: Received unexpected ToolResult part in stream. This should be handled via ToolExecutionEvent.");

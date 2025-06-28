@@ -26,6 +26,15 @@ impl ClaudeProcess {
         &self,
         prompt: &str,
     ) -> Result<Child, ClaudeCodeError> {
+        self.spawn_with_mcp(prompt, None).await
+    }
+    
+    /// Spawn the claude process with optional MCP configuration
+    pub async fn spawn_with_mcp(
+        &self,
+        prompt: &str,
+        mcp_config_path: Option<&str>,
+    ) -> Result<Child, ClaudeCodeError> {
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
@@ -37,6 +46,7 @@ impl ClaudeProcess {
             "--verbose".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
+            "--dangerously-skip-permissions".to_string(),
         ];
         
         // Add max-turns if not unlimited (0)
@@ -49,6 +59,49 @@ impl ClaudeProcess {
         if !self.config.model.is_empty() {
             args.push("--model".to_string());
             args.push(self.config.model.clone());
+        }
+        
+        // Add MCP config if provided
+        if let Some(mcp_path) = mcp_config_path {
+            args.push("--mcp-config".to_string());
+            args.push(mcp_path.to_string());
+            log::info!("CLAUDE_CODE: Using MCP config: {}", mcp_path);
+            
+            // Allow all MCP tools from our server
+            // Claude CLI prefixes MCP tools with mcp__servername__toolname
+            // Try multiple approaches based on GitHub issues
+            args.push("--allowedTools".to_string());
+            
+            // Build a list of all MCP tool patterns
+            let mcp_tools = vec![
+                // Shell execution
+                "mcp__*__streaming_shell_execution",
+                // File operations
+                "mcp__*__read_file",
+                // Repository tools
+                "mcp__*__view_file",
+                "mcp__*__list_repositories",
+                "mcp__*__add_existing_repository",
+                "mcp__*__sync_repository", 
+                "mcp__*__remove_repository",
+                "mcp__*__search_file_in_repository",
+                "mcp__*__repository_map",
+                "mcp__*__targeted_view",
+                // Code search
+                "mcp__*__search_code",
+                // Web search
+                "mcp__*__web_search",
+                // Code editing
+                "mcp__*__edit_file",
+                "mcp__*__validate",
+                "mcp__*__semantic_edit",
+                // Wildcards as fallback
+                "mcp__*",
+                "*"
+            ];
+            
+            args.push(mcp_tools.join(","));
+            log::info!("CLAUDE_CODE: Allowing MCP tools: {}", mcp_tools.join(","));
         }
         
         log::trace!("CLAUDE_CODE: Full args: {:?}", args);

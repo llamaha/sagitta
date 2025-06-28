@@ -116,13 +116,24 @@ pub fn init_logger() {
                 record.args()
             )
         })
-        .target(env_logger::Target::Stdout) // Explicitly set target
+        .target(
+            if std::env::var("RUST_LOG_TARGET").as_deref() == Ok("stderr") {
+                env_logger::Target::Stderr
+            } else {
+                env_logger::Target::Stdout
+            }
+        )
         .write_style(env_logger::WriteStyle::Auto); // Ensure colors are attempted
         
     // Initialize the logger - this is the ONLY logger initialization
     builder.init();
     
-    log::info!("Logger initialized with effective filters: sagitta_code=info, zbus=error, hyper=warn, egui=warn (and all submodules)");
+    let target = if std::env::var("RUST_LOG_TARGET").as_deref() == Ok("stderr") {
+        "stderr"
+    } else {
+        "stdout"
+    };
+    log::info!("Logger initialized with target: {}, effective filters: sagitta_code=info, zbus=error, hyper=warn, egui=warn (and all submodules)", target);
 }
 
 #[cfg(test)]

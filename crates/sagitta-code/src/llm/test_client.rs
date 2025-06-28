@@ -46,6 +46,14 @@ impl Default for TestLlmClient {
 
 #[async_trait]
 impl LlmClient for TestLlmClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn client_type(&self) -> &str {
+        "test"
+    }
+    
     async fn generate(&self, _messages: &[Message], _tools: &[ToolDefinition]) -> Result<LlmResponse, SagittaCodeError> {
         let mut responses = self.responses.lock().unwrap();
         let response = responses.pop().unwrap_or_else(|| "I understand.".to_string());
@@ -120,9 +128,5 @@ impl LlmClient for TestLlmClient {
 
     async fn generate_stream_with_thinking_and_grounding(&self, messages: &[Message], tools: &[ToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream_with_thinking(messages, tools, thinking_config).await
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 } 

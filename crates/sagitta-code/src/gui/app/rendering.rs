@@ -103,7 +103,6 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // Tools list with descriptions
                     let tools = vec![
-                        ("analyze_input", "Analyze user input to determine relevant tools and search strategies"),
                         ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
                         ("read_file", "Read file contents from repositories"),
                         ("view_file", "View specific files in a repository with line range support"),

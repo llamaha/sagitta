@@ -5373,6 +5373,7 @@ dependencies = [
  "repo-mapper",
  "rfd",
  "sagitta-embed",
+ "sagitta-mcp",
  "sagitta-search",
  "serde",
  "serde_json",

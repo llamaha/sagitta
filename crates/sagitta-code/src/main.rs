@@ -152,16 +152,10 @@ mod cli_app {
     use sagitta_search::config::load_config as load_sagitta_config;
     use sagitta_search::qdrant_client_trait::QdrantClientTrait;
     use qdrant_client::Qdrant;
-    use qdrant_client::qdrant::{
-        CreateCollection, VectorParams, VectorsConfig,
-        Distance, PointStruct, UpsertPoints,
-        vectors_config::Config as VectorsConfigEnum,
-    };
-    use sagitta_code::tools::analyze_input::TOOLS_COLLECTION_NAME;
+    // Qdrant collection imports removed - no longer needed after removing analyze_input tool
     use serde_json;
     use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
     use sagitta_embed::EmbeddingModelType;
-    use qdrant_client::Payload;
     use sagitta_code::llm::client::LlmClient; // Corrected path
     use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
 
@@ -205,19 +199,10 @@ mod cli_app {
         // Create and register tools before creating the agent
         let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new());
         
-        // Create the Claude Code LLM client
-        let llm_client_cli: Arc<dyn LlmClient> = {
-            log::info!("Creating Claude Code LLM client for CLI");
-            Arc::new(
-                ClaudeCodeClient::new(&config)
-                    .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?
-            )
-        };
+        // Create the Claude Code LLM client (we'll wrap it in Arc later)
+        let mut claude_client = ClaudeCodeClient::new(&config)
+            .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?;
         
-        // Register AnalyzeInputTool first, passing the qdrant_client
-        tool_registry.register(Arc::new(sagitta_code::tools::analyze_input::AnalyzeInputTool::new(tool_registry.clone(), embedding_provider.clone(), qdrant_client.clone()))).await.unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to register AnalyzeInputTool: {}", e);
-        });
 
         // Register shell execution tools
         let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -231,95 +216,16 @@ mod cli_app {
         // - Project creation: Use shell_execution with commands like "cargo init my-project", "npm init", "python -m venv myenv"
         // - Test execution: Use shell_execution with commands like "cargo test", "npm test", "pytest", "go test"
         
-        // --- Populate Qdrant tool collection (run once or ensure exists) ---
-        // This logic is NOW MOVED to after all tools are registered.
-        let vector_size = embedding_provider.dimension() as u64;
-        match qdrant_client.collection_exists(TOOLS_COLLECTION_NAME.to_string()).await {
-            Ok(exists) => {
-                if !exists {
-                    log::info!("CLI: Creating Qdrant tool collection: {}", TOOLS_COLLECTION_NAME);
-                    let create_collection_request = CreateCollection {
-                        collection_name: TOOLS_COLLECTION_NAME.to_string(),
-                        vectors_config: Some(VectorsConfig {
-                            config: Some(VectorsConfigEnum::ParamsMap(
-                                qdrant_client::qdrant::VectorParamsMap {
-                                    map: std::collections::HashMap::from([
-                                        ("dense".to_string(), VectorParams {
-                                            size: vector_size,
-                                            distance: Distance::Cosine.into(),
-                                            hnsw_config: None,
-                                            quantization_config: None,
-                                            on_disk: None,
-                                            datatype: None,
-                                            multivector_config: None,
-                                        })
-                                    ])
-                                }
-                            ))
-                        }),
-                        shard_number: None,
-                        sharding_method: None,
-                        replication_factor: None,
-                        write_consistency_factor: None,
-                        on_disk_payload: None,
-                        hnsw_config: None,
-                        wal_config: None,
-                        optimizers_config: None,
-                        init_from_collection: None,
-                        quantization_config: None,
-                        sparse_vectors_config: None,
-                        timeout: None,
-                        strict_mode_config: None,
-                    };
-                    if let Err(e) = qdrant_client.create_collection_detailed(create_collection_request).await {
-                        log::error!("CLI: Failed to create Qdrant tool collection \'{}\': {}", TOOLS_COLLECTION_NAME, e);
-                    }
-                } else {
-                    log::info!("CLI: Qdrant tool collection \'{}\' already exists.", TOOLS_COLLECTION_NAME);
-                }
-            }
-            Err(e) => {
-                log::error!("CLI: Failed to check Qdrant tool collection '{}': {}. Tool analysis might fail.", TOOLS_COLLECTION_NAME, e);
-            }
+        // Note: Qdrant tool collection setup removed - was only used by analyze_input tool which is no longer needed
+        
+        // Initialize MCP integration with the tool registry
+        log::info!("CLI: Initializing MCP integration for Claude");
+        if let Err(e) = claude_client.initialize_mcp(tool_registry.clone()).await {
+            log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work.", e);
         }
         
-        let all_tool_defs = tool_registry.get_definitions().await;
-        let mut points_to_upsert = Vec::new();
-        for (idx, tool_def) in all_tool_defs.iter().enumerate() {
-            let tool_desc_text = format!("{}: {}", tool_def.name, tool_def.description);
-            match embedding_provider.embed_batch(&[&tool_desc_text]) {
-                Ok(mut embeddings) => {
-                    if let Some(embedding) = embeddings.pop() {
-                        let mut payload_map: std::collections::HashMap<String, qdrant_client::qdrant::Value> = std::collections::HashMap::new();
-                        payload_map.insert("tool_name".to_string(), tool_def.name.clone().into());
-                        payload_map.insert("description".to_string(), tool_def.description.clone().into());
-                        let params_json_str = serde_json::to_string(&tool_def.parameters).unwrap_or_else(|_| "{}".to_string());
-                        payload_map.insert("parameter_schema".to_string(), params_json_str.into());
-                        
-                        points_to_upsert.push(PointStruct::new(
-                            qdrant_client::qdrant::PointId::from(idx as u64), // Explicit PointId conversion for u64
-                            qdrant_client::qdrant::NamedVectors::default()
-                                .add_vector("dense", embedding), 
-                            qdrant_client::Payload::from(payload_map) // Explicit Payload conversion
-                        ));
-                    }
-                }
-                Err(e) => log::warn!("CLI: Failed to generate embedding for tool '{}' during Qdrant population: {}", tool_def.name, e),
-            }
-        }
-        if !points_to_upsert.is_empty() {
-            let upsert_request = UpsertPoints {
-                collection_name: TOOLS_COLLECTION_NAME.to_string(),
-                wait: Some(true),
-                points: points_to_upsert,
-                ordering: None,
-                shard_key_selector: None,
-            };
-            if let Err(e) = qdrant_client.upsert_points(upsert_request).await {
-                log::error!("CLI: Failed to upsert tool definitions to Qdrant: {}", e);
-            }
-        }
-        // --- End Qdrant tool collection population ---
+        // Now wrap the client in Arc for use with the agent
+        let llm_client_cli: Arc<dyn LlmClient> = Arc::new(claude_client);
         
         // Create concrete persistence and search engine for the CLI app
         let storage_path = if let Some(path) = &config.conversation.storage_path {
@@ -497,43 +403,61 @@ mod cli_app {
 // MCP server mode
 mod mcp_app {
     use super::*;
-    use sagitta_code::mcp::McpServer;
+    use sagitta_code::mcp::{McpServer, EnhancedMcpServer};
+    use sagitta_code::llm::claude_code::mcp_integration::run_internal_mcp_server;
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
     
-    pub async fn run(sagitta_code_config: SagittaCodeConfig) -> Result<()> {
-        log::info!("Starting Sagitta Code MCP Server");
-        
-        // Load sagitta-search AppConfig
-        let sagitta_config_path_val = sagitta_code_config.sagitta_config_path();
-        let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
-            Ok(config) => config,
-            Err(e) => {
-                log::warn!("Failed to load sagitta-search config from {}: {}. Using default.", sagitta_config_path_val.display(), e);
-                SagittaAppConfig::default()
-            }
-        };
-        
-        // Create and run MCP server
-        let server = McpServer::new(sagitta_app_config).await
-            .context("Failed to create MCP server")?;
-        
-        server.run().await
-            .context("MCP server failed")?;
-        
-        Ok(())
+    pub async fn run(sagitta_code_config: SagittaCodeConfig, is_internal: bool) -> Result<()> {
+        if is_internal {
+            log::info!("Starting Sagitta Code Internal MCP Server");
+            
+            // For internal mode, just run the sagitta-mcp Server directly
+            // No need for ToolRegistry or any of that complexity
+            let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new()); // Still needed by function signature
+            
+            // Run the internal MCP server (which now uses sagitta-mcp Server)
+            run_internal_mcp_server(tool_registry).await
+        } else {
+            log::info!("Starting Sagitta Code MCP Server");
+            
+            // Load sagitta-search AppConfig
+            let sagitta_config_path_val = sagitta_code_config.sagitta_config_path();
+            let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
+                Ok(config) => config,
+                Err(e) => {
+                    log::warn!("Failed to load sagitta-search config from {}: {}. Using default.", sagitta_config_path_val.display(), e);
+                    SagittaAppConfig::default()
+                }
+            };
+            
+            // Create and run regular MCP server
+            let server = McpServer::new(sagitta_app_config).await
+                .context("Failed to create MCP server")?;
+            
+            server.run().await
+                .context("MCP server failed")?;
+            
+            Ok(())
+        }
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize the logger
-    init_logger();
-    
     // Check for MCP mode from environment or command line args
     let args: Vec<String> = std::env::args().collect();
     let is_mcp_mode = args.contains(&"--mcp".to_string()) || 
                       std::env::var("SAGITTA_MCP_MODE").is_ok();
+    let is_mcp_internal = args.contains(&"--mcp-internal".to_string());
+    
+    // Initialize the logger - but for MCP modes, ensure logs don't go to stdout
+    if is_mcp_mode || is_mcp_internal {
+        // For MCP server mode, we need to redirect logs away from stdout
+        // since stdout is used for the JSON-RPC protocol
+        std::env::set_var("RUST_LOG_TARGET", "stderr");
+    }
+    init_logger();
     
     // Load the configuration
     let config = match load_config() {
@@ -546,8 +470,8 @@ async fn main() -> Result<()> {
     };
     
     // Run in MCP mode if requested
-    if is_mcp_mode {
-        return mcp_app::run(config).await;
+    if is_mcp_mode || is_mcp_internal {
+        return mcp_app::run(config, is_mcp_internal).await;
     }
     
     // Run the appropriate app version based on features

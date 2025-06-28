@@ -6,6 +6,7 @@ pub mod process;
 pub mod message_converter;
 pub mod incremental_parser;
 pub mod claude_interface;
+pub mod mcp_integration;
 
 #[cfg(test)]
 mod tests;

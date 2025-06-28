@@ -52,7 +52,6 @@ pub struct SettingsPanel {
     pub claude_code_allowed_tools: String, // Comma-separated list
     pub claude_code_disallowed_tools: String, // Comma-separated list
     pub claude_code_additional_directories: String, // Comma-separated list of paths
-    pub claude_code_mcp_config: Option<String>,
     pub claude_code_auto_ide: bool,
     
 }
@@ -97,7 +96,6 @@ impl SettingsPanel {
                 .map(|p| p.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
                 .join(","),
-            claude_code_mcp_config: initial_sagitta_code_config.claude_code.mcp_config.clone(),
             claude_code_auto_ide: initial_sagitta_code_config.claude_code.auto_ide,
         }
     }
@@ -282,13 +280,7 @@ impl SettingsPanel {
                                     .num_columns(2)
                                     .spacing([8.0, 8.0])
                                     .show(ui, |ui| {
-                                        ui.label("MCP Config:")
-                                            .on_hover_text("Model Context Protocol configuration file path or JSON string");
-                                        let mut mcp_config_text = self.claude_code_mcp_config.clone().unwrap_or_default();
-                                        ui.add(TextEdit::singleline(&mut mcp_config_text)
-                                            .hint_text("Path to MCP config file or JSON config"));
-                                        self.claude_code_mcp_config = if mcp_config_text.is_empty() { None } else { Some(mcp_config_text) };
-                                        ui.end_row();
+                                        // MCP config is now handled internally - no need for user configuration
                                         
                                         ui.label("Auto IDE Connect:");
                                         ui.checkbox(&mut self.claude_code_auto_ide, "Automatically connect to IDE on startup");
@@ -573,7 +565,7 @@ impl SettingsPanel {
                 .collect()
         };
         
-        updated_config.claude_code.mcp_config = self.claude_code_mcp_config.clone();
+        // MCP config is now handled internally
         updated_config.claude_code.auto_ide = self.claude_code_auto_ide;
         
         // Preserve all other fields

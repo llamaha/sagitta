@@ -5,6 +5,8 @@
 
 pub mod types;
 pub mod server;
+pub mod enhanced_server;
 
 pub use server::McpServer;
+pub use enhanced_server::EnhancedMcpServer;
 pub use types::*;

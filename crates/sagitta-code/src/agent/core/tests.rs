@@ -592,16 +592,7 @@ mod tests {
         let tool_registry = Arc::new(ToolRegistry::new());
         let embedding_provider = Arc::new(MockEmbeddingProvider::new());
         
-        // Add some basic mock tools that the reasoning engine might expect
-        let analyze_input_tool = MockTool {
-            name: "analyze_input".to_string(),
-            result: ToolResult::Success(serde_json::json!({
-                "analysis": "Simple test analysis",
-                "intent": "question", 
-                "action_needed": true
-            })),
-        };
-        tool_registry.register(Arc::new(analyze_input_tool)).await.unwrap();
+        // Add some basic mock tools
         
         let text_tool = MockTool {
             name: "generate_text".to_string(),
@@ -756,16 +747,7 @@ mod tests {
         let tool_registry = Arc::new(ToolRegistry::new());
         let embedding_provider = Arc::new(MockEmbeddingProvider::new());
         
-        // Add some basic mock tools that the reasoning engine might expect
-        let analyze_input_tool = MockTool {
-            name: "analyze_input".to_string(),
-            result: ToolResult::Success(serde_json::json!({
-                "analysis": "Simple test analysis",
-                "intent": "question", 
-                "action_needed": true
-            })),
-        };
-        tool_registry.register(Arc::new(analyze_input_tool)).await.unwrap();
+        // Add some basic mock tools
         
         let text_tool = MockTool {
             name: "generate_text".to_string(),
@@ -874,16 +856,7 @@ mod tests {
         let tool_registry = Arc::new(ToolRegistry::new());
         let embedding_provider = Arc::new(MockEmbeddingProvider::new());
         
-        // Add some basic mock tools that the reasoning engine might expect
-        let analyze_input_tool = MockTool {
-            name: "analyze_input".to_string(),
-            result: ToolResult::Success(serde_json::json!({
-                "analysis": "Simple test analysis",
-                "intent": "question", 
-                "action_needed": true
-            })),
-        };
-        tool_registry.register(Arc::new(analyze_input_tool)).await.unwrap();
+        // Add some basic mock tools
         
         let text_tool = MockTool {
             name: "generate_text".to_string(),

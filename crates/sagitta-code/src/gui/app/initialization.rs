@@ -24,8 +24,6 @@ use crate::tools::repository::remove::RemoveRepositoryTool;
 use crate::tools::repository::map::RepositoryMapTool;
 use crate::tools::repository::targeted_view::TargetedViewTool;
 use crate::tools::web_search::WebSearchTool;
-use crate::tools::analyze_input::AnalyzeInputTool;
-use crate::tools::analyze_input::TOOLS_COLLECTION_NAME; // Import the const
 use crate::tools::code_edit::edit::EditTool; // Corrected import for EditTool
 use crate::config::SagittaCodeConfig;
 use crate::tools::registry::ToolRegistry;
@@ -61,13 +59,7 @@ use std::path::Path; // For Path::new
 // Qdrant imports
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use qdrant_client::Qdrant;
-use qdrant_client::qdrant::{
-    CreateCollection, VectorParams, VectorsConfig, UpsertPoints, // Added UpsertPoints
-    Distance, PointStruct, // Renamed to avoid conflict with a potential local Payload struct
-    vectors_config::Config as VectorsConfigEnum,
-    // VectorParamsBuilder, // Not needed for direct VectorParams construction
-};
-use qdrant_client::Payload as QdrantPayload; // Corrected Payload import
+// Qdrant collection imports removed - no longer needed after removing analyze_input tool
 
 /// Get the default conversation storage path
 pub fn get_default_conversation_storage_path() -> PathBuf {
@@ -151,20 +143,28 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
 }
 
 /// Create LLM client from config (always Claude Code now)
-pub fn create_llm_client(config: &SagittaCodeConfig) -> Result<Arc<dyn LlmClient>> {
+pub async fn create_llm_client(config: &SagittaCodeConfig, tool_registry: Option<Arc<ToolRegistry>>) -> Result<Arc<dyn LlmClient>> {
     log::info!("Creating Claude Code LLM client");
-    let claude_client_result = ClaudeCodeClient::new(config);
-    
-    match claude_client_result {
-        Ok(client) => Ok(Arc::new(client)),
+    let mut claude_client = match ClaudeCodeClient::new(config) {
+        Ok(client) => client,
         Err(e) => {
             log::error!(
                 "Failed to create ClaudeCodeClient: {}. Agent will not be initialized properly. Some features may be disabled.",
                 e
             );
-            Err(anyhow::anyhow!("Failed to create ClaudeCodeClient for Agent: {}", e))
+            return Err(anyhow::anyhow!("Failed to create ClaudeCodeClient for Agent: {}", e));
+        }
+    };
+    
+    // Initialize MCP if tool registry is provided
+    if let Some(registry) = tool_registry {
+        log::info!("Initializing MCP integration for Claude Code client");
+        if let Err(e) = claude_client.initialize_mcp(registry).await {
+            log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work properly.", e);
         }
     }
+    
+    Ok(Arc::new(claude_client))
 }
 
 /// Initialize Qdrant client from config
@@ -240,12 +240,15 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // Configure theme
     configure_theme_from_config(app).await;
     
-    // Create LLM client
+    // Initialize ToolRegistry early (we'll register tools later)
+    let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
+    
+    // Create LLM client with tool registry for MCP
     let config_guard = app.config.lock().await;
-    let llm_client = create_llm_client(&*config_guard).map_err(|e| {
+    let llm_client = create_llm_client(&*config_guard, Some(tool_registry.clone())).await.map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
-            format!("CRITICAL: Failed to initialize LLM Client (OpenRouter): {}. Agent is disabled.", e),
+            format!("CRITICAL: Failed to initialize LLM Client: {}. Agent is disabled.", e),
         );
         app.chat_manager.add_complete_message(error_message);
         e
@@ -273,63 +276,9 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         return Err(anyhow::anyhow!("Failed to initialize Qdrant client for GUI"));
     };
 
-    // Use the locally scoped embedding_handler_arc, which is correctly typed.
-    let vector_size = embedding_handler_arc.dimension() as u64;
+    // Note: Qdrant tool collection setup removed - was only used by analyze_input tool which is no longer needed
 
-    // Ensure Qdrant "tools" collection exists - ALWAYS RECREATE FOR CLEAN STATE
-    log::info!("GUI: Deleting existing Qdrant tool collection '{}' for clean state", TOOLS_COLLECTION_NAME);
-    let _ = qdrant_client.delete_collection(TOOLS_COLLECTION_NAME.to_string()).await; // Ignore error if not found
-    
-    log::info!("GUI: Creating fresh Qdrant tool collection: {}", TOOLS_COLLECTION_NAME);
-    let create_collection_request = CreateCollection {
-        collection_name: TOOLS_COLLECTION_NAME.to_string(),
-        vectors_config: Some(VectorsConfig {
-            config: Some(VectorsConfigEnum::ParamsMap(
-                qdrant_client::qdrant::VectorParamsMap {
-                    map: std::collections::HashMap::from([
-                        ("dense".to_string(), VectorParams {
-                            size: vector_size,
-                            distance: Distance::Cosine.into(),
-                            hnsw_config: None,
-                            quantization_config: None,
-                            on_disk: None,
-                            datatype: None,
-                            multivector_config: None,
-                        })
-                    ])
-                }
-            ))
-        }),
-        shard_number: None,
-        sharding_method: None,
-        replication_factor: None,
-        write_consistency_factor: None,
-        on_disk_payload: None,
-        hnsw_config: None,
-        wal_config: None,
-        optimizers_config: None,
-        init_from_collection: None,
-        quantization_config: None,
-        sparse_vectors_config: None,
-        timeout: None,
-        strict_mode_config: None,
-    };
-
-    if let Err(e) = qdrant_client.create_collection_detailed(create_collection_request).await {
-        log::error!("GUI: Failed to create Qdrant tool collection '{}': {}", TOOLS_COLLECTION_NAME, e);
-        app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant collection creation failed: {}", e));
-        // Not returning error here, as agent might still function partially
-    } else {
-        log::info!("GUI: Successfully created fresh Qdrant tool collection '{}'", TOOLS_COLLECTION_NAME);
-    }
-
-    // Populate/update tools in Qdrant. This should ideally be done *after* all tools are registered in tool_registry.
-    // For now, we'll do a pre-registration population based on constructing them here, 
-    // or assume tool_registry is populated by this point (which it isn't yet fully).
-    // This part needs careful placement. Let's assume tools are registered first, then we populate Qdrant.
-
-    // Initialize ToolRegistry
-    let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
+    // Tool registry already initialized earlier for MCP
     
     // Get the configured working directory instead of using current_dir
     let config_guard = app.config.lock().await;
@@ -381,7 +330,6 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     }
 
     // Register tools first - ALL TOOLS TO CAPTURE ALL SCHEMA ERRORS
-    tool_registry.register(Arc::new(AnalyzeInputTool::new(tool_registry.clone(), embedding_provider_adapter.clone(), qdrant_client.clone()))).await?;
     
     // Register shell execution tools with working directory manager
     tool_registry.register(Arc::new(StreamingShellExecutionTool::new_with_working_dir_manager(
@@ -427,47 +375,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // tool_registry.register(Arc::new(CommitChangesTool::new(repo_manager.clone()))).await?;
     // tool_registry.register(Arc::new(CreateBranchTool::new(repo_manager.clone()))).await?;
 
-    // Now populate Qdrant with all registered tools
-    let all_tool_defs_for_qdrant = tool_registry.get_definitions().await;
-    let mut points_to_upsert_gui = Vec::new();
-    for (idx, tool_def) in all_tool_defs_for_qdrant.iter().enumerate() {
-        let tool_desc_text = format!("{}: {}", tool_def.name, tool_def.description);
-        match sagitta_search::embed_text_with_pool(&embedding_handler_arc, &[&tool_desc_text]).await {
-            Ok(mut embeddings) => {
-                if let Some(embedding) = embeddings.pop() {
-                    let mut payload_map: std::collections::HashMap<String, qdrant_client::qdrant::Value> = std::collections::HashMap::new();
-                    payload_map.insert("tool_name".to_string(), tool_def.name.clone().into());
-                    payload_map.insert("description".to_string(), tool_def.description.clone().into());
-                    let params_json_str = serde_json::to_string(&tool_def.parameters).unwrap_or_else(|_| "{}".to_string());
-                    payload_map.insert("parameter_schema".to_string(), params_json_str.into());
-                    
-                    points_to_upsert_gui.push(PointStruct::new(
-                        qdrant_client::qdrant::PointId::from(idx as u64), // Explicit PointId conversion for u64
-                        qdrant_client::qdrant::NamedVectors::default()
-                            .add_vector("dense", embedding), 
-                        qdrant_client::Payload::from(payload_map) // Explicit Payload conversion
-                    ));
-                } else {
-                    log::warn!("GUI: Embedding batch returned empty for tool '{}'", tool_def.name);
-                }
-            }
-            Err(e) => log::warn!("GUI: Failed to generate embedding for tool '{}': {}", tool_def.name, e),
-        }
-    }
-    if !points_to_upsert_gui.is_empty() {
-        let upsert_request_gui = UpsertPoints {
-            collection_name: TOOLS_COLLECTION_NAME.to_string(),
-            wait: Some(true),
-            points: points_to_upsert_gui,
-            ordering: None,
-            shard_key_selector: None,
-        };
-        if let Err(e) = qdrant_client.upsert_points(upsert_request_gui).await {
-            log::error!("GUI: Failed to upsert tool definitions to Qdrant: {}", e);
-            app.panels.events_panel.add_event(super::SystemEventType::Error, format!("Qdrant tool upsert failed: {}", e));
-        }
-    }
-    // --- End Qdrant tool collection population ---
+    // Note: Qdrant tool population removed - was only used by analyze_input tool which is no longer needed
 
     // Create conversation persistence
     let config_guard = app.config.lock().await;
@@ -678,14 +586,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_llm_client_with_invalid_config() {
+    #[tokio::test]
+    async fn test_create_llm_client_with_invalid_config() {
         let mut config = SagittaCodeConfig::default();
         
         // Set invalid claude path to force failure (if binary doesn't exist)
         config.claude_code.claude_path = "/nonexistent/claude/path".to_string();
         
-        let result = create_llm_client(&config);
+        let result = create_llm_client(&config, None).await;
         
         // May succeed or fail depending on validation - test structure is important
         match result {
@@ -695,7 +603,7 @@ mod tests {
             }
             Err(e) => {
                 // Expected failure with invalid config
-                assert!(e.to_string().contains("Failed to create OpenRouterClient"));
+                assert!(e.to_string().contains("Failed to create ClaudeCodeClient"));
             }
         }
     }
@@ -826,10 +734,6 @@ mod tests {
 
     #[test]
     fn test_initialization_constants() {
-        // Test that important constants are accessible
-        assert!(!TOOLS_COLLECTION_NAME.is_empty());
-        assert!(TOOLS_COLLECTION_NAME.len() > 0);
-        
         // Test path generation doesn't panic
         let path = get_default_conversation_storage_path();
         assert!(!path.as_os_str().is_empty());

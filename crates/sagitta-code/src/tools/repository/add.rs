@@ -356,11 +356,7 @@ impl Tool for AddExistingRepositoryTool {
                             "C:\\Users\\user\\projects\\myproject"
                         ]
                     }
-                },
-                "oneOf": [
-                    { "required": ["url"] },
-                    { "required": ["local_path"] }
-                ]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }
