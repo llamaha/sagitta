@@ -173,10 +173,10 @@ impl StreamingMessage {
     pub fn append_content(&mut self, chunk: &str) {
         self.content.push_str(chunk);
         
-        // Don't fade out thinking - we want to keep it visible
-        // if !chunk.is_empty() && self.has_thinking_content() && !self.thinking_should_fade {
-        //     self.start_thinking_fade();
-        // }
+        // Start fading thinking content when we get regular content
+        if !chunk.is_empty() && self.has_thinking_content() && !self.thinking_should_fade {
+            self.start_thinking_fade();
+        }
     }
     
     pub fn set_thinking(&mut self, thinking_content: String) {
@@ -221,9 +221,13 @@ impl StreamingMessage {
     }
     
     pub fn should_show_thinking(&self) -> bool {
-        // Always show thinking if we have any content
-        // Don't fade or hide it after completion
-        self.has_thinking_content()
+        // Show thinking if we have content AND opacity > 0
+        if !self.has_thinking_content() {
+            return false;
+        }
+        
+        // Check if it's faded out
+        self.get_thinking_opacity() > 0.0
     }
     
     pub fn get_thinking_opacity(&self) -> f32 {

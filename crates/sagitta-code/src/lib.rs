@@ -25,6 +25,9 @@ pub mod gui;
 /// Tasks
 pub mod tasks;
 
+/// MCP (Model Context Protocol) server
+pub mod mcp;
+
 /// Conversation functionality 
 pub mod conversation {
     pub use crate::agent::conversation::*;

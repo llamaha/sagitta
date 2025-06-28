@@ -121,4 +121,8 @@ impl LlmClient for TestLlmClient {
     async fn generate_stream_with_thinking_and_grounding(&self, messages: &[Message], tools: &[ToolDefinition], thinking_config: &ThinkingConfig, grounding_config: &GroundingConfig) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream_with_thinking(messages, tools, thinking_config).await
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 } 

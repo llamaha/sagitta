@@ -40,10 +40,20 @@ pub struct SettingsPanel {
     // Sagitta Code config fields - Claude Code
     pub claude_code_path: String,
     pub claude_code_model: String,
+    pub claude_code_fallback_model: Option<String>,
     pub claude_code_max_output_tokens: u32,
-    pub claude_code_timeout: u64,
+    pub claude_code_debug: bool,
     pub claude_code_verbose: bool,
+    pub claude_code_timeout: u64,
     pub claude_code_max_turns: u32,
+    pub claude_code_output_format: String,
+    pub claude_code_input_format: String,
+    pub claude_code_dangerously_skip_permissions: bool,
+    pub claude_code_allowed_tools: String, // Comma-separated list
+    pub claude_code_disallowed_tools: String, // Comma-separated list
+    pub claude_code_additional_directories: String, // Comma-separated list of paths
+    pub claude_code_mcp_config: Option<String>,
+    pub claude_code_auto_ide: bool,
     
 }
 
@@ -71,10 +81,24 @@ impl SettingsPanel {
             // Sagitta Code config fields - Claude Code
             claude_code_path: initial_sagitta_code_config.claude_code.claude_path.clone(),
             claude_code_model: initial_sagitta_code_config.claude_code.model.clone(),
+            claude_code_fallback_model: initial_sagitta_code_config.claude_code.fallback_model.clone(),
             claude_code_max_output_tokens: initial_sagitta_code_config.claude_code.max_output_tokens,
-            claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
+            claude_code_debug: initial_sagitta_code_config.claude_code.debug,
             claude_code_verbose: initial_sagitta_code_config.claude_code.verbose,
+            claude_code_timeout: initial_sagitta_code_config.claude_code.timeout,
             claude_code_max_turns: initial_sagitta_code_config.claude_code.max_turns,
+            claude_code_output_format: initial_sagitta_code_config.claude_code.output_format.clone(),
+            claude_code_input_format: initial_sagitta_code_config.claude_code.input_format.clone(),
+            claude_code_dangerously_skip_permissions: initial_sagitta_code_config.claude_code.dangerously_skip_permissions,
+            claude_code_allowed_tools: initial_sagitta_code_config.claude_code.allowed_tools.join(","),
+            claude_code_disallowed_tools: initial_sagitta_code_config.claude_code.disallowed_tools.join(","),
+            claude_code_additional_directories: initial_sagitta_code_config.claude_code.additional_directories
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            claude_code_mcp_config: initial_sagitta_code_config.claude_code.mcp_config.clone(),
+            claude_code_auto_ide: initial_sagitta_code_config.claude_code.auto_ide,
         }
     }
     
@@ -128,55 +152,149 @@ impl SettingsPanel {
                         .show(ui, |ui| {
                             // Claude Code Configuration
                             ui.heading("Claude Code Configuration");
-                            Grid::new("claude_code_config_grid")
-                                .num_columns(2)
-                                .spacing([8.0, 8.0])
-                                .show(ui, |ui| {
-                                    ui.label("Claude Binary Path:");
-                                    ui.add(TextEdit::singleline(&mut self.claude_code_path)
-                                        .hint_text("Path to claude binary (default: claude)"));
-                                    ui.end_row();
-                                    
-                                    ui.label("Model:");
-                                    egui::ComboBox::from_id_salt("claude_model_combo")
-                                        .selected_text(&self.claude_code_model)
-                                        .show_ui(ui, |ui| {
-                                            for model in CLAUDE_CODE_MODELS {
-                                                ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
+                            
+                            // Basic Settings
+                            ui.collapsing("Basic Settings", |ui| {
+                                Grid::new("claude_code_basic_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Claude Binary Path:");
+                                        ui.add(TextEdit::singleline(&mut self.claude_code_path)
+                                            .hint_text("Path to claude binary (default: claude)"));
+                                        ui.end_row();
+                                        
+                                        ui.label("Model:");
+                                        egui::ComboBox::from_id_salt("claude_model_combo")
+                                            .selected_text(&self.claude_code_model)
+                                            .show_ui(ui, |ui| {
+                                                for model in CLAUDE_CODE_MODELS {
+                                                    ui.selectable_value(&mut self.claude_code_model, model.id.to_string(), model.name);
+                                                }
+                                            });
+                                        ui.end_row();
+                                        
+                                        ui.label("Fallback Model:");
+                                        let mut fallback_text = self.claude_code_fallback_model.clone().unwrap_or_default();
+                                        ui.add(TextEdit::singleline(&mut fallback_text)
+                                            .hint_text("Optional fallback model when primary is unavailable"));
+                                        self.claude_code_fallback_model = if fallback_text.is_empty() { None } else { Some(fallback_text) };
+                                        ui.end_row();
+                                        
+                                        ui.label("Max Output Tokens:");
+                                        ui.add(egui::DragValue::new(&mut self.claude_code_max_output_tokens)
+                                            .range(1000..=128000)
+                                            .speed(1000.0))
+                                            .on_hover_text("Maximum output tokens. Default: 64000");
+                                        ui.end_row();
+                                        
+                                        ui.label("Max Turns:");
+                                        ui.horizontal(|ui| {
+                                            ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
+                                                .clamp_range(0..=100)
+                                                .suffix(" turns"))
+                                                .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
+                                            if self.claude_code_max_turns == 0 {
+                                                ui.label("(unlimited)");
                                             }
                                         });
-                                    ui.end_row();
-                                    
-                                    ui.label("Max Output Tokens:");
-                                    ui.add(egui::DragValue::new(&mut self.claude_code_max_output_tokens)
-                                        .range(1000..=128000)
-                                        .speed(1000.0))
-                                        .on_hover_text("Maximum output tokens. Default: 64000");
-                                    ui.end_row();
-                                    
-                                    ui.label("Timeout (seconds):");
-                                    ui.add(egui::DragValue::new(&mut self.claude_code_timeout)
-                                        .range(10..=3600)
-                                        .speed(10.0))
-                                        .on_hover_text("Request timeout in seconds. Default: 600 (10 minutes)");
-                                    ui.end_row();
-                                    
-                                    ui.label("Verbose Logging:");
-                                    ui.checkbox(&mut self.claude_code_verbose, "Enable verbose output for debugging");
-                                    ui.end_row();
-                                    
-                                    ui.label("Max Turns:");
-                                    ui.horizontal(|ui| {
-                                        ui.add(egui::DragValue::new(&mut self.claude_code_max_turns)
-                                            .clamp_range(0..=100)
-                                            .suffix(" turns"))
-                                            .on_hover_text("Maximum number of turns for multi-turn conversations (0 = unlimited)");
-                                        if self.claude_code_max_turns == 0 {
-                                            ui.label("(unlimited)");
-                                        }
+                                        ui.end_row();
+                                        
+                                        ui.label("Timeout (seconds):");
+                                        ui.add(egui::DragValue::new(&mut self.claude_code_timeout)
+                                            .range(10..=3600)
+                                            .speed(10.0))
+                                            .on_hover_text("Request timeout in seconds. Default: 600 (10 minutes)");
+                                        ui.end_row();
                                     });
-                                    ui.end_row();
-                                });
+                            });
+                            
+                            // Format and Debug Settings
+                            ui.collapsing("Format and Debug Settings", |ui| {
+                                Grid::new("claude_code_format_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Output Format:");
+                                        egui::ComboBox::from_id_salt("output_format_combo")
+                                            .selected_text(&self.claude_code_output_format)
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut self.claude_code_output_format, "text".to_string(), "Text");
+                                                ui.selectable_value(&mut self.claude_code_output_format, "json".to_string(), "JSON");
+                                                ui.selectable_value(&mut self.claude_code_output_format, "stream-json".to_string(), "Stream JSON");
+                                            });
+                                        ui.end_row();
+                                        
+                                        ui.label("Input Format:");
+                                        egui::ComboBox::from_id_salt("input_format_combo")
+                                            .selected_text(&self.claude_code_input_format)
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut self.claude_code_input_format, "text".to_string(), "Text");
+                                                ui.selectable_value(&mut self.claude_code_input_format, "stream-json".to_string(), "Stream JSON");
+                                            });
+                                        ui.end_row();
+                                        
+                                        ui.label("Debug Mode:");
+                                        ui.checkbox(&mut self.claude_code_debug, "Enable debug mode for verbose output");
+                                        ui.end_row();
+                                        
+                                        ui.label("Verbose Logging:");
+                                        ui.checkbox(&mut self.claude_code_verbose, "Enable verbose logging for debugging");
+                                        ui.end_row();
+                                    });
+                            });
+                            
+                            // Tool and Permission Settings
+                            ui.collapsing("Tool and Permission Settings", |ui| {
+                                Grid::new("claude_code_tools_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Allowed Tools:")
+                                            .on_hover_text("Comma-separated list of allowed tools (empty = all allowed)");
+                                        ui.add(TextEdit::singleline(&mut self.claude_code_allowed_tools)
+                                            .hint_text("e.g., bash,read,write"));
+                                        ui.end_row();
+                                        
+                                        ui.label("Disallowed Tools:")
+                                            .on_hover_text("Comma-separated list of disallowed tools");
+                                        ui.add(TextEdit::singleline(&mut self.claude_code_disallowed_tools)
+                                            .hint_text("e.g., bash,exec"));
+                                        ui.end_row();
+                                        
+                                        ui.label("Additional Directories:")
+                                            .on_hover_text("Comma-separated list of additional paths to allow tool access");
+                                        ui.add(TextEdit::singleline(&mut self.claude_code_additional_directories)
+                                            .hint_text("e.g., /home/user/projects,/tmp"));
+                                        ui.end_row();
+                                        
+                                        ui.label("Skip Permissions:");
+                                        ui.checkbox(&mut self.claude_code_dangerously_skip_permissions, 
+                                            "⚠️ Dangerously skip all permission checks (for sandboxes only)")
+                                            .on_hover_text("WARNING: Only enable in secure sandbox environments!");
+                                        ui.end_row();
+                                    });
+                            });
+                            
+                            // Integration Settings
+                            ui.collapsing("Integration Settings", |ui| {
+                                Grid::new("claude_code_integration_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("MCP Config:")
+                                            .on_hover_text("Model Context Protocol configuration file path or JSON string");
+                                        let mut mcp_config_text = self.claude_code_mcp_config.clone().unwrap_or_default();
+                                        ui.add(TextEdit::singleline(&mut mcp_config_text)
+                                            .hint_text("Path to MCP config file or JSON config"));
+                                        self.claude_code_mcp_config = if mcp_config_text.is_empty() { None } else { Some(mcp_config_text) };
+                                        ui.end_row();
+                                        
+                                        ui.label("Auto IDE Connect:");
+                                        ui.checkbox(&mut self.claude_code_auto_ide, "Automatically connect to IDE on startup");
+                                        ui.end_row();
+                                    });
+                            });
                             
                             ui.add_space(8.0);
                             ui.label("Note: Make sure to authenticate with 'claude auth' before using Claude Code provider.");
@@ -414,10 +532,49 @@ impl SettingsPanel {
         // Update Claude Code fields
         updated_config.claude_code.claude_path = self.claude_code_path.clone();
         updated_config.claude_code.model = self.claude_code_model.clone();
+        updated_config.claude_code.fallback_model = self.claude_code_fallback_model.clone();
         updated_config.claude_code.max_output_tokens = self.claude_code_max_output_tokens;
-        updated_config.claude_code.timeout = self.claude_code_timeout;
+        updated_config.claude_code.debug = self.claude_code_debug;
         updated_config.claude_code.verbose = self.claude_code_verbose;
+        updated_config.claude_code.timeout = self.claude_code_timeout;
         updated_config.claude_code.max_turns = self.claude_code_max_turns;
+        updated_config.claude_code.output_format = self.claude_code_output_format.clone();
+        updated_config.claude_code.input_format = self.claude_code_input_format.clone();
+        updated_config.claude_code.dangerously_skip_permissions = self.claude_code_dangerously_skip_permissions;
+        
+        // Parse comma-separated lists
+        updated_config.claude_code.allowed_tools = if self.claude_code_allowed_tools.trim().is_empty() {
+            Vec::new()
+        } else {
+            self.claude_code_allowed_tools
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        
+        updated_config.claude_code.disallowed_tools = if self.claude_code_disallowed_tools.trim().is_empty() {
+            Vec::new()
+        } else {
+            self.claude_code_disallowed_tools
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        
+        updated_config.claude_code.additional_directories = if self.claude_code_additional_directories.trim().is_empty() {
+            Vec::new()
+        } else {
+            self.claude_code_additional_directories
+                .split(',')
+                .map(|s| PathBuf::from(s.trim()))
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect()
+        };
+        
+        updated_config.claude_code.mcp_config = self.claude_code_mcp_config.clone();
+        updated_config.claude_code.auto_ide = self.claude_code_auto_ide;
         
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging, conversation) from the original

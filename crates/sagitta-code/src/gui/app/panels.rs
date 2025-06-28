@@ -316,7 +316,19 @@ impl PanelManager {
 
     /// Render the model selection panel and return any selected model
     pub fn render_model_selection_panel(&mut self, ctx: &Context, theme: AppTheme) -> Option<String> {
-        self.model_selection_panel.render(ctx, theme)
+        let mut selected_model = None;
+        
+        if self.model_selection_panel.visible {
+            egui::Window::new("Model Selection")
+                .resizable(true)
+                .show(ctx, |ui| {
+                    if self.model_selection_panel.render(ui, &theme) {
+                        selected_model = Some(self.model_selection_panel.get_current_model().to_string());
+                    }
+                });
+        }
+        
+        selected_model
     }
 
     pub fn show_preview(&mut self, title: &str, content: &str) {

@@ -29,62 +29,83 @@ impl IncrementalJsonParser {
         for ch in data.chars() {
             self.buffer.push(ch);
             
-            // Track JSON structure
-            if !self.escape_next {
-                match ch {
-                    '"' if !self.in_string => {
-                        self.in_string = true;
-                        // Check if we're entering a "text" field
-                        if self.buffer.ends_with("\"text\":\"") {
-                            self.in_text_field = true;
+            // Detect text content streaming first, before JSON structure tracking
+            if self.in_text_field && !self.escape_next {
+                if ch == '\\' {
+                    // Starting an escape sequence, don't emit the backslash
+                    self.escape_next = true;
+                } else if ch == '"' {
+                    // Ending the text field
+                    self.in_text_field = false;
+                    self.in_string = false;
+                } else {
+                    // Regular character
+                    events.push(StreamEvent::TextChar(ch));
+                }
+            } else if self.in_text_field && self.escape_next {
+                // Process escaped character
+                let escaped_char = match ch {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '\\' => '\\',
+                    '"' => '"',
+                    '/' => '/',
+                    'b' => '\u{0008}',  // backspace
+                    'f' => '\u{000C}',  // form feed
+                    _ => ch,  // For unrecognized escapes, just use the character
+                };
+                events.push(StreamEvent::TextChar(escaped_char));
+                self.escape_next = false;
+            } else {
+                // Track JSON structure
+                if !self.escape_next {
+                    match ch {
+                        '"' if !self.in_string => {
+                            self.in_string = true;
+                            // Check if we're entering a "text" field
+                            // Need to check before adding the current quote
+                            let buf_before_quote = &self.buffer[..self.buffer.len()-1];
+                            if buf_before_quote.ends_with("\"text\":") {
+                                self.in_text_field = true;
+                            }
                         }
-                    }
-                    '"' if self.in_string => {
-                        self.in_string = false;
-                        if self.in_text_field {
-                            self.in_text_field = false;
+                        '"' if self.in_string => {
+                            self.in_string = false;
                         }
-                    }
-                    '\\' if self.in_string => self.escape_next = true,
-                    '{' if !self.in_string => {
-                        self.depth += 1;
-                        self.brace_stack.push('{');
-                    }
-                    '[' if !self.in_string => {
-                        self.depth += 1;
-                        self.brace_stack.push('[');
-                    }
-                    '}' if !self.in_string => {
-                        if let Some('{') = self.brace_stack.last() {
-                            self.brace_stack.pop();
-                            self.depth -= 1;
-                            if self.depth == 0 {
-                                // Complete JSON object
-                                if let Ok(value) = serde_json::from_str::<Value>(&self.buffer) {
-                                    events.push(StreamEvent::CompleteJson(value));
-                                    self.buffer.clear();
-                                    self.current_path.clear();
+                        '\\' if self.in_string => self.escape_next = true,
+                        '{' if !self.in_string => {
+                            self.depth += 1;
+                            self.brace_stack.push('{');
+                        }
+                        '[' if !self.in_string => {
+                            self.depth += 1;
+                            self.brace_stack.push('[');
+                        }
+                        '}' if !self.in_string => {
+                            if let Some('{') = self.brace_stack.last() {
+                                self.brace_stack.pop();
+                                self.depth -= 1;
+                                if self.depth == 0 {
+                                    // Complete JSON object
+                                    if let Ok(value) = serde_json::from_str::<Value>(&self.buffer) {
+                                        events.push(StreamEvent::CompleteJson(value));
+                                        self.buffer.clear();
+                                        self.current_path.clear();
+                                    }
                                 }
                             }
                         }
-                    }
-                    ']' if !self.in_string => {
-                        if let Some('[') = self.brace_stack.last() {
-                            self.brace_stack.pop();
-                            self.depth -= 1;
+                        ']' if !self.in_string => {
+                            if let Some('[') = self.brace_stack.last() {
+                                self.brace_stack.pop();
+                                self.depth -= 1;
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            } else {
-                self.escape_next = false;
-            }
-            
-            // Detect text content streaming
-            if self.in_text_field && !self.escape_next && ch != '"' {
-                // Don't emit escaped characters or quotes
-                if ch != '\\' || self.buffer.chars().rev().nth(1) == Some('\\') {
-                    events.push(StreamEvent::TextChar(ch));
+                } else {
+                    self.escape_next = false;
                 }
             }
         }
@@ -164,7 +185,16 @@ mod tests {
         let mut parser = IncrementalJsonParser::new();
         
         let chunk = r#"{"text":"Line 1\nLine 2\"quoted\""}"#;
+        println!("Test input: {}", chunk);
         let events = parser.feed(chunk);
+        
+        // Debug: print all events
+        for (i, event) in events.iter().enumerate() {
+            match event {
+                StreamEvent::TextChar(ch) => println!("Event {}: TextChar('{}')", i, ch),
+                StreamEvent::CompleteJson(_) => println!("Event {}: CompleteJson", i),
+            }
+        }
         
         let text_chars: Vec<char> = events.iter()
             .filter_map(|e| match e {
@@ -174,6 +204,8 @@ mod tests {
             .collect();
         
         let text: String = text_chars.into_iter().collect();
-        assert_eq!(text, r#"Line 1\nLine 2\"quoted\""#);
+        println!("Extracted: '{}'", text);
+        println!("Expected:  'Line 1\\nLine 2\"quoted\"'");
+        assert_eq!(text, "Line 1\nLine 2\"quoted\"");
     }
 }

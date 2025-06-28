@@ -82,9 +82,16 @@ pub struct ClaudeCodeConfig {
     #[serde(default = "default_claude_model")]
     pub model: String,
     
+    /// Fallback model when default is overloaded
+    pub fallback_model: Option<String>,
+    
     /// Maximum output tokens
     #[serde(default = "default_claude_max_output_tokens")]
     pub max_output_tokens: u32,
+    
+    /// Enable debug mode
+    #[serde(default)]
+    pub debug: bool,
     
     /// Enable verbose logging for debugging
     #[serde(default)]
@@ -97,6 +104,37 @@ pub struct ClaudeCodeConfig {
     /// Maximum turns for multi-turn conversations (0 = unlimited)
     #[serde(default = "default_claude_max_turns")]
     pub max_turns: u32,
+    
+    /// Output format: "text", "json", "stream-json"
+    #[serde(default = "default_output_format")]
+    pub output_format: String,
+    
+    /// Input format: "text", "stream-json"
+    #[serde(default = "default_input_format")]
+    pub input_format: String,
+    
+    /// Bypass all permission checks (for sandboxes)
+    #[serde(default)]
+    pub dangerously_skip_permissions: bool,
+    
+    /// Allowed tools (comma-separated list)
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    
+    /// Disallowed tools (comma-separated list)
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+    
+    /// Additional directories to allow tool access to
+    #[serde(default)]
+    pub additional_directories: Vec<PathBuf>,
+    
+    /// MCP configuration file or string
+    pub mcp_config: Option<String>,
+    
+    /// Automatically connect to IDE on startup
+    #[serde(default)]
+    pub auto_ide: bool,
 }
 
 impl Default for ClaudeCodeConfig {
@@ -104,10 +142,20 @@ impl Default for ClaudeCodeConfig {
         Self {
             claude_path: default_claude_path(),
             model: default_claude_model(),
+            fallback_model: None,
             max_output_tokens: default_claude_max_output_tokens(),
+            debug: false,
             verbose: false,
             timeout: default_claude_timeout(),
             max_turns: default_claude_max_turns(),
+            output_format: default_output_format(),
+            input_format: default_input_format(),
+            dangerously_skip_permissions: false,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            additional_directories: Vec::new(),
+            mcp_config: None,
+            auto_ide: false,
         }
     }
 }
@@ -482,7 +530,13 @@ fn default_claude_max_turns() -> u32 {
     0 // 0 means unlimited turns
 }
 
-// Configuration structures will go here
+fn default_output_format() -> String {
+    "text".to_string()
+}
+
+fn default_input_format() -> String {
+    "text".to_string()
+}
 
 #[cfg(test)]
 mod tests {

@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Show pool stats before embedding
     let stats = embedding_pool.pool_stats().await;
     println!("Embedding pool stats before processing:");
-    println!("  Available models: {}/{}", stats.available_models, stats.max_models);
+    println!("  Available models: {}/{}", stats.available_providers, stats.max_providers);
     println!("  Available permits: {}", stats.available_permits);
     println!("  Utilization: {:.1}%", stats.utilization() * 100.0);
 
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Show pool stats after embedding
     let stats = embedding_pool.pool_stats().await;
     println!("Embedding pool stats after processing:");
-    println!("  Available models: {}/{}", stats.available_models, stats.max_models);
+    println!("  Available models: {}/{}", stats.available_providers, stats.max_providers);
     println!("  Available permits: {}", stats.available_permits);
     println!("  Utilization: {:.1}%", stats.utilization() * 100.0);
 

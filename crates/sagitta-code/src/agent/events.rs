@@ -80,7 +80,7 @@ pub enum AgentEvent {
     /// An error has occurred
     Error(String),
     
-    // New events for reasoning-engine integration
+    // Additional agent events
     /// Reasoning session started
     ReasoningStarted {
         session_id: Uuid,
@@ -103,14 +103,14 @@ pub enum AgentEvent {
         description: String,
     },
     
-    /// Tool execution completed (from reasoning engine)
+    /// Tool execution completed
     ToolCompleted {
         tool_name: String,
         success: bool,
         duration_ms: u64,
     },
     
-    /// Decision made by reasoning engine
+    /// Decision made by agent
     DecisionMade {
         session_id: Uuid,
         decision: String,

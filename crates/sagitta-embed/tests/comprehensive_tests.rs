@@ -361,9 +361,9 @@ async fn test_embedding_pool_stats() {
     if let Ok(pool) = EmbeddingPool::new(processing_config, embedding_config) {
         let stats = pool.pool_stats().await;
         
-        assert_eq!(stats.max_models, 3);
+        assert_eq!(stats.max_providers, 3);
         assert_eq!(stats.available_permits, 3);
-        assert_eq!(stats.available_models, 0); // No models created yet
+        assert_eq!(stats.available_providers, 0); // No models created yet
         assert!(!stats.is_at_capacity());
         assert_eq!(stats.utilization(), 0.0);
     }

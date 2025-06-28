@@ -65,9 +65,8 @@ impl TestEnv {
         
         writeln!(config_file, "tenant_id = \"{}\"", TEST_TENANT_ID).unwrap();
         writeln!(config_file, "qdrant_url = \"{}\"", QDRANT_URL_TEST).unwrap();
-        // Use auto-download feature instead of hardcoded paths
-        // Use the FP32 version which might be more stable
-        writeln!(config_file, "embed_model = \"bge-small-fp32\"").unwrap();
+        // Use a special test model name that we can handle differently
+        writeln!(config_file, "embed_model = \"test-default\"").unwrap();
         writeln!(config_file, "vector_dimension = {}", VECTOR_DIMENSION).unwrap(); 
         
         writeln!(config_file, "\n[performance]").unwrap();

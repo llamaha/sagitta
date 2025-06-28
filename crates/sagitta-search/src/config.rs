@@ -787,6 +787,9 @@ mod tests {
 
     #[test]
     fn test_load_config_malformed_toml() {
+        // Clear test environment variable to ensure we use the provided path
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+        
         let temp_dir = tempdir().unwrap();
         let (config_path, _data_path) = setup_test_env(temp_dir.path());
 
@@ -810,6 +813,9 @@ mod tests {
 
     #[test]
     fn test_load_config_unreadable_file() {
+        // Clear test environment variable to ensure we use the provided path
+        std::env::remove_var("SAGITTA_TEST_CONFIG_PATH");
+        
         let temp_dir = tempdir().unwrap();
         let (config_path, _data_path) = setup_test_env(temp_dir.path());
 

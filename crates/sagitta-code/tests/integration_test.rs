@@ -149,6 +149,10 @@ impl LlmClient for MockLlmClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         self.generate_stream(messages, tools).await
     }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[tokio::test]

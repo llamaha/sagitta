@@ -6,7 +6,6 @@ members = [
     "crates/sagitta-mcp",
     "crates/sagitta-embed",
     "crates/repo-mapper",
-    "crates/reasoning-engine",
     "crates/git-manager",
     "crates/terminal-stream",
     "crates/code-parsers"

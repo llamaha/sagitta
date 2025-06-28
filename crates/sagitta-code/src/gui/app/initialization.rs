@@ -682,8 +682,8 @@ mod tests {
     fn test_create_llm_client_with_invalid_config() {
         let mut config = SagittaCodeConfig::default();
         
-        // Set invalid API key to force failure
-        config.openrouter.api_key = Some("invalid_key".to_string());
+        // Set invalid claude path to force failure (if binary doesn't exist)
+        config.claude_code.claude_path = "/nonexistent/claude/path".to_string();
         
         let result = create_llm_client(&config);
         

@@ -494,10 +494,46 @@ mod cli_app {
     }
 }
 
+// MCP server mode
+mod mcp_app {
+    use super::*;
+    use sagitta_code::mcp::McpServer;
+    use sagitta_search::config::AppConfig as SagittaAppConfig;
+    use sagitta_search::config::load_config as load_sagitta_config;
+    
+    pub async fn run(sagitta_code_config: SagittaCodeConfig) -> Result<()> {
+        log::info!("Starting Sagitta Code MCP Server");
+        
+        // Load sagitta-search AppConfig
+        let sagitta_config_path_val = sagitta_code_config.sagitta_config_path();
+        let sagitta_app_config = match load_sagitta_config(Some(&sagitta_config_path_val)) {
+            Ok(config) => config,
+            Err(e) => {
+                log::warn!("Failed to load sagitta-search config from {}: {}. Using default.", sagitta_config_path_val.display(), e);
+                SagittaAppConfig::default()
+            }
+        };
+        
+        // Create and run MCP server
+        let server = McpServer::new(sagitta_app_config).await
+            .context("Failed to create MCP server")?;
+        
+        server.run().await
+            .context("MCP server failed")?;
+        
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize the logger
     init_logger();
+    
+    // Check for MCP mode from environment or command line args
+    let args: Vec<String> = std::env::args().collect();
+    let is_mcp_mode = args.contains(&"--mcp".to_string()) || 
+                      std::env::var("SAGITTA_MCP_MODE").is_ok();
     
     // Load the configuration
     let config = match load_config() {
@@ -508,6 +544,11 @@ async fn main() -> Result<()> {
             SagittaCodeConfig::default()
         }
     };
+    
+    // Run in MCP mode if requested
+    if is_mcp_mode {
+        return mcp_app::run(config).await;
+    }
     
     // Run the appropriate app version based on features
     #[cfg(feature = "gui")]

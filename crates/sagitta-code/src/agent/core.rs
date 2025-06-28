@@ -75,7 +75,7 @@ pub struct Agent {
     
     /// The configuration
     config: SagittaCodeConfig,
-    state: Arc<tokio::sync::Mutex<AgentState>>, // General agent state, distinct from reasoning engine state
+    state: Arc<tokio::sync::Mutex<AgentState>>,
     
     /// Pending tool calls waiting for human approval
     pending_tool_calls: Arc<tokio::sync::Mutex<HashMap<String, (ToolCall, u32, AgentMessage)>>>, // Review if new engine handles this
@@ -256,26 +256,10 @@ impl Agent {
         
         self.state_manager.set_thinking("Processing user message with thinking").await?;
         
-        self.history.add_user_message(&message_text).await;
-        debug!("Added current user message to history manager.");
-
-        // Fetch the complete conversation history from ConversationAwareHistoryManager
-        let mut agent_conversation_history: Vec<AgentMessage> = self.history.get_messages().await; // Corrected method name
-        debug!("Fetched {} messages from history manager for LLM.", agent_conversation_history.len());
-        
-        // CRITICAL FIX: Ensure we always have at least the current user message in the history
-        if agent_conversation_history.is_empty() || !agent_conversation_history.iter().any(|msg| {
-            msg.role == LlmClientRole::User && msg.content.trim() == message_text.trim()
-        }) {
-            warn!("History is missing current user message, adding it manually");
-            let user_message = AgentMessage::user(message_text.clone());
-            agent_conversation_history.push(user_message);
-        }
-        
         // Get current conversation ID for analytics reporting
         let current_conversation_id = self.history.get_current_conversation().await.ok().flatten().map(|c| c.id);
         
-        // Always use direct LLM streaming (reasoning engine has been removed)
+        // Use direct LLM streaming
         info!("Using direct LLM streaming");
         
         // Use the streaming processor for direct LLM streaming

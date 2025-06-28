@@ -61,6 +61,8 @@ impl EmbeddingModel {
         match s {
             "bge-small-en-v1.5-q" | "bge-small-fast" => Self::BgeSmallEnV15Quantized,
             "bge-small-en-v1.5-fp16" | "bge-small-fp32" => Self::BgeSmallEnV15Fp32,
+            // Don't try to download test-default model
+            "test-default" => Self::Custom("test-default".to_string()),
             custom => Self::Custom(custom.to_string()),
         }
     }

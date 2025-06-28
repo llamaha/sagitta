@@ -15,6 +15,7 @@ use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
 use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
+use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
 const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -23,6 +24,7 @@ const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
 pub struct ClaudeCodeClient {
     config: ClaudeCodeConfig,
     process_manager: ClaudeProcess,
+    interface: ClaudeInterface,
 }
 
 impl ClaudeCodeClient {
@@ -42,6 +44,7 @@ impl ClaudeCodeClient {
         
         Ok(Self {
             process_manager: ClaudeProcess::new(claude_config.clone()),
+            interface: ClaudeInterface::new(claude_config.clone()),
             config: claude_config,
         })
     }
@@ -258,5 +261,32 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::warn!("CLAUDE_CODE: Grounding not supported by Claude Code");
         self.generate_stream_with_thinking(messages, tools, thinking_config).await
+    }
+}
+
+impl ClaudeCodeClient {
+    /// Get the Claude interface for advanced configuration
+    pub fn interface(&self) -> &ClaudeInterface {
+        &self.interface
+    }
+
+    /// Get model information
+    pub fn get_model_info(&self) -> Result<ClaudeModelInfo, SagittaCodeError> {
+        self.interface.get_model_info()
+    }
+
+    /// Get complete configuration information
+    pub async fn get_config_info(&self) -> Result<ClaudeConfigInfo, SagittaCodeError> {
+        self.interface.get_config_info().await
+    }
+
+    /// Validate the Claude binary and configuration
+    pub async fn validate(&self) -> Result<(), SagittaCodeError> {
+        self.interface.validate().await
+    }
+
+    /// Get available models
+    pub async fn get_available_models(&self) -> Result<Vec<String>, SagittaCodeError> {
+        self.interface.get_available_models().await
     }
 }
