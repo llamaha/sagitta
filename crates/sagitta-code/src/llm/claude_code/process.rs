@@ -24,19 +24,17 @@ impl ClaudeProcess {
     /// Spawn the claude process with the given arguments
     pub async fn spawn(
         &self,
-        system_prompt: &str,
+        prompt: &str,
         tools: &[String], // Tool names to disable
     ) -> Result<Child, ClaudeCodeError> {
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
-        log::debug!("CLAUDE_CODE: System prompt: {}", system_prompt);
+        log::debug!("CLAUDE_CODE: Prompt: {}", prompt);
         
         let mut args = vec![
-            "--input-format".to_string(),
-            "stream-json".to_string(),
-            "--system-prompt".to_string(),
-            system_prompt.to_string(),
+            "-p".to_string(),
+            prompt.to_string(),
             "--verbose".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
@@ -68,7 +66,7 @@ impl ClaudeProcess {
         
         let mut cmd = Command::new(&self.config.claude_path);
         cmd.args(&args)
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", self.config.max_output_tokens.to_string())

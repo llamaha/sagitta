@@ -13,7 +13,7 @@ use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
-use super::message_converter::{convert_messages_to_claude, ClaudeMessage, stream_message_as_json};
+use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
@@ -169,36 +169,30 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<LlmResponse, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract system prompt (which already includes tools from our prompt provider)
-        let system_prompt = Self::extract_system_prompt(messages);
-        log::debug!("CLAUDE_CODE: Using system prompt from messages (tools already included)");
+        // Get only the latest user message as the prompt
+        let user_messages: Vec<&Message> = messages.iter()
+            .filter(|m| matches!(m.role, Role::User))
+            .collect();
         
-        let filtered_messages = Self::filter_non_system_messages(messages);
-        let claude_messages = convert_messages_to_claude(&filtered_messages);
+        let prompt = if let Some(last_user_msg) = user_messages.last() {
+            // Extract text from the message parts
+            last_user_msg.parts.iter()
+                .filter_map(|part| match part {
+                    MessagePart::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            log::warn!("CLAUDE_CODE: No user messages found, using default prompt");
+            "Hello".to_string()
+        };
         
-        // Spawn process with piped stdin
-        let mut child = self.process_manager
-            .spawn(&system_prompt, &Self::get_disabled_tools())
+        // Spawn process with prompt
+        let child = self.process_manager
+            .spawn(&prompt, &Self::get_disabled_tools())
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
-        
-        // Get stdin handle and stream messages
-        if let Some(mut stdin) = child.stdin.take() {
-            // Write messages to stdin synchronously in blocking task
-            let messages_to_write = claude_messages;
-            tokio::task::spawn_blocking(move || {
-                for message in &messages_to_write {
-                    if let Err(e) = stream_message_as_json(&message, &mut stdin) {
-                        log::error!("CLAUDE_CODE: Failed to write message to stdin: {}", e);
-                        break;
-                    }
-                }
-                // Explicitly drop stdin to close it
-                drop(stdin);
-            });
-        } else {
-            return Err(SagittaCodeError::LlmError("Failed to get stdin handle".to_string()));
-        }
         
         let stream = ClaudeCodeStream::new(child);
         
@@ -294,36 +288,30 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate stream called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract system prompt (which already includes tools from our prompt provider)
-        let system_prompt = Self::extract_system_prompt(messages);
-        log::debug!("CLAUDE_CODE: Using system prompt from messages (tools already included)");
+        // Get only the latest user message as the prompt
+        let user_messages: Vec<&Message> = messages.iter()
+            .filter(|m| matches!(m.role, Role::User))
+            .collect();
         
-        let filtered_messages = Self::filter_non_system_messages(messages);
-        let claude_messages = convert_messages_to_claude(&filtered_messages);
+        let prompt = if let Some(last_user_msg) = user_messages.last() {
+            // Extract text from the message parts
+            last_user_msg.parts.iter()
+                .filter_map(|part| match part {
+                    MessagePart::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            log::warn!("CLAUDE_CODE: No user messages found, using default prompt");
+            "Hello".to_string()
+        };
         
-        // Spawn process with piped stdin
-        let mut child = self.process_manager
-            .spawn(&system_prompt, &Self::get_disabled_tools())
+        // Spawn process with prompt
+        let child = self.process_manager
+            .spawn(&prompt, &Self::get_disabled_tools())
             .await
             .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
-        
-        // Get stdin handle and stream messages
-        if let Some(mut stdin) = child.stdin.take() {
-            // Spawn a task to write messages to stdin
-            let messages_to_write = claude_messages;
-            tokio::task::spawn_blocking(move || {
-                for message in &messages_to_write {
-                    if let Err(e) = stream_message_as_json(&message, &mut stdin) {
-                        log::error!("CLAUDE_CODE: Failed to write message to stdin: {}", e);
-                        break;
-                    }
-                }
-                // Explicitly drop stdin to close it
-                drop(stdin);
-            });
-        } else {
-            return Err(SagittaCodeError::LlmError("Failed to get stdin handle".to_string()));
-        }
         
         let stream = ClaudeCodeStream::new(child);
         Ok(Box::pin(stream))

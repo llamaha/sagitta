@@ -25,6 +25,7 @@ use crate::agent::conversation::search::text::TextConversationSearchEngine;
 use crate::agent::conversation::context_manager::ConversationContextManager;
 use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
+use crate::agent::streaming::StreamingProcessor;
 use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
 use crate::llm::openrouter::client::OpenRouterClient;
@@ -417,30 +418,22 @@ impl Agent {
         if !self.config.reasoning.enabled {
             info!("Reasoning engine is disabled, using direct LLM streaming");
             
-            // Convert agent messages to LLM messages
-            let llm_messages: Vec<Message> = agent_conversation_history.into_iter().map(|msg| {
-                Message {
-                    id: msg.id,
-                    role: msg.role,
-                    parts: msg.content.split('\n').map(|text| SagittaCodeMessagePart::Text { text: text.to_string() }).collect(),
-                    metadata: Default::default(),
-                }
-            }).collect();
+            // Use the streaming processor for direct LLM streaming
+            let continue_reasoning_flag = Arc::new(Mutex::new(false));
+            let processor = StreamingProcessor::new(
+                self.llm_client.clone(),
+                self.tool_registry.clone(),
+                self.history.clone(),
+                self.state_manager.clone(),
+                self.tool_executor.clone(),
+                self.event_sender.clone(),
+                continue_reasoning_flag,
+            );
             
-            // Get tools from registry
-            let tools: Vec<LlmToolDefinition> = self.tool_registry.get_definitions().await
-                .into_iter()
-                .map(|tool| LlmToolDefinition {
-                    name: tool.name,
-                    description: tool.description,
-                    parameters: tool.parameters,
-                    is_required: tool.is_required,
-                })
-                .collect();
+            // Use the streaming processor which properly emits events
+            let stream = processor.process_message_stream(message_text).await?;
             
-            // Use LLM client directly
-            let stream = self.llm_client.generate_stream(&llm_messages, &tools).await?;
-            
+            // StreamChunk already has the correct structure, just return it
             return Ok(Box::pin(stream));
         }
         
