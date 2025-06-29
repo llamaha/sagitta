@@ -41,6 +41,7 @@ use serde_json;
 use uuid;
 use std::time::Instant;
 use std::collections::HashMap;
+use regex;
 
 #[cfg(feature = "gui")]
 use egui_notify::Toasts;
@@ -1018,22 +1019,53 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
 fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
-    // Simple parsing for [text](tool://id) pattern
-    if let (Some(start_bracket), Some(end_bracket), Some(start_paren), Some(end_paren)) = (
-        text.find('['),
-        text.find(']'),
-        text.find("](tool://"),
-        text.rfind(')')
-    ) {
-        if start_bracket < end_bracket && end_bracket < start_paren && start_paren < end_paren {
-            // Extract parts
-            let before_text = &text[..start_bracket];
-            let link_text = &text[start_bracket + 1..end_bracket];
-            let tool_call_id = &text[start_paren + 9..end_paren]; // 9 = "](tool://".len()
-            let after_text = &text[end_paren + 1..];
+    // Parse all [text](tool://id) patterns in the text
+    let mut processed_text = text.to_string();
+    let mut tool_links = Vec::new();
+    
+    // Find all tool:// links and replace them with placeholder buttons
+    let pattern = regex::Regex::new(r"\[([^\]]+)\]\(tool://([^)]+)\)").unwrap();
+    
+    for (i, caps) in pattern.captures_iter(text).enumerate() {
+        let link_text = caps.get(1).unwrap().as_str();
+        let tool_call_id = caps.get(2).unwrap().as_str();
+        tool_links.push((link_text.to_string(), tool_call_id.to_string()));
+        
+        // Replace the markdown link with a placeholder
+        let placeholder = format!("__TOOL_LINK_{}__", i);
+        processed_text = processed_text.replace(&caps[0], &placeholder);
+    }
+    
+    if tool_links.is_empty() {
+        // No tool links, render normally with CommonMark
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
+        
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
             
-            ui.horizontal_wrapped(|ui| {
-                // Render text before link
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, text);
+        });
+        
+        ui.style_mut().visuals.override_text_color = None;
+        return None;
+    }
+    
+    // Split the processed text by placeholders and render with buttons
+    ui.horizontal_wrapped(|ui| {
+        let mut remaining = processed_text.as_str();
+        
+        for (i, (link_text, tool_call_id)) in tool_links.iter().enumerate() {
+            let placeholder = format!("__TOOL_LINK_{}__", i);
+            
+            if let Some(split_pos) = remaining.find(&placeholder) {
+                // Render text before the placeholder
+                let before_text = &remaining[..split_pos];
                 if !before_text.is_empty() {
                     let before_clean = before_text.replace("*", "");
                     if before_text.contains("*") {
@@ -1043,42 +1075,27 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
                     }
                 }
                 
-                // Render clickable button
+                // Render the clickable button
                 let button = ui.small_button(format!("📋 {}", link_text));
                 if button.clicked() {
                     clicked_tool = Some(("Tool Result".to_string(), tool_call_id.to_string()));
                 }
                 
-                // Render text after link
-                if !after_text.is_empty() {
-                    let after_clean = after_text.replace("*", "").trim().to_string();
-                    if !after_clean.is_empty() {
-                        ui.label(RichText::new(after_clean).color(app_theme.text_color()));
-                    }
-                }
-            });
-            
-            return clicked_tool;
+                // Update remaining text
+                remaining = &remaining[split_pos + placeholder.len()..];
+            }
         }
-    }
-    
-    // Fallback: render normally if no tool links found
-    let original_text_color = ui.style().visuals.text_color();
-    ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
-    
-    COMMONMARK_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let viewer = CommonMarkViewer::new()
-            .max_image_width(Some(max_width as usize))
-            .default_width(Some(max_width as usize));
         
-        ui.set_max_width(max_width);
-        ui.style_mut().wrap = Some(true);
-        viewer.show(ui, &mut *cache, text);
+        // Render any remaining text after the last placeholder
+        if !remaining.is_empty() {
+            let remaining_clean = remaining.replace("*", "").trim().to_string();
+            if !remaining_clean.is_empty() {
+                ui.label(RichText::new(remaining_clean).color(app_theme.text_color()));
+            }
+        }
     });
     
-    ui.style_mut().visuals.override_text_color = None;
-    None
+    clicked_tool
 }
 
 /// Render code block compactly

@@ -1235,7 +1235,17 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
             if app.state.show_terminal {
                 app.state.show_terminal = false;
             }
-            app.show_preview(tool_name, tool_args);
+            
+            // For "Tool Result", tool_args contains the tool call ID - look up actual result
+            if tool_name == "Tool Result" {
+                if let Some(tool_result) = app.state.tool_results.get(tool_args).cloned() {
+                    app.show_preview(&format!("Tool Result ({})", tool_args), &tool_result);
+                } else {
+                    app.show_preview(tool_name, &format!("Tool result not found for ID: {}", tool_args));
+                }
+            } else {
+                app.show_preview(tool_name, tool_args);
+            }
         }
     } else {
         // This is a tool call - format tool arguments nicely and show in preview
