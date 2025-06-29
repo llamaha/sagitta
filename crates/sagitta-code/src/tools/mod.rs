@@ -8,7 +8,6 @@ pub mod repository;
 pub mod file_operations;
 pub mod web_search;
 pub mod code_search;
-pub mod analyze_input;
 pub mod executor;
 pub mod working_directory;
 pub mod working_directory_tools;

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::types::{SagittaCodeConfig, OpenRouterConfig};
+use super::types::SagittaCodeConfig;
 use super::paths::get_sagitta_code_app_config_path;
 
 const CONFIG_FILENAME: &str = "sagitta_code_config.json";
@@ -126,30 +126,18 @@ pub fn load_all_configs() -> Result<(SagittaCodeConfig, Option<sagitta_search::c
 
 /// Validate configuration and apply defaults where needed
 fn validate_config(config: &mut SagittaCodeConfig) -> Result<()> {
-    // Validate OpenRouter configuration
-    if config.openrouter.model.is_empty() {
-        return Err(anyhow!("OpenRouter model cannot be empty"));
+    // Validate Claude Code configuration
+    if config.claude_code.claude_path.is_empty() {
+        return Err(anyhow!("Claude binary path cannot be empty"));
     }
     
-    // Validate API key if provided
-    if let Some(ref api_key) = config.openrouter.api_key {
-        if api_key.is_empty() {
-            return Err(anyhow!("OpenRouter API key cannot be empty if provided"));
-        }
-    }
-    
-    // Check for API key in environment if not in config
-    if config.openrouter.api_key.is_none() {
-        if let Ok(env_key) = std::env::var("OPENROUTER_API_KEY") {
-            if !env_key.is_empty() {
-                config.openrouter.api_key = Some(env_key);
-            }
-        }
+    if config.claude_code.model.is_empty() {
+        return Err(anyhow!("Claude model cannot be empty"));
     }
     
     // Validate timeout value
-    if config.openrouter.request_timeout == 0 {
-        return Err(anyhow!("OpenRouter request timeout must be greater than 0"));
+    if config.claude_code.timeout == 0 {
+        return Err(anyhow!("Claude timeout must be greater than 0"));
     }
     
     Ok(())
@@ -163,8 +151,8 @@ mod tests {
 
     fn create_test_config() -> SagittaCodeConfig {
         let mut config = SagittaCodeConfig::default();
-        config.openrouter.api_key = Some("test-api-key".to_string());
-        config.openrouter.model = "openai/gpt-4".to_string();
+        config.claude_code.model = "claude-sonnet-4-20250514".to_string();
+        config.claude_code.claude_path = "claude".to_string();
         config
     }
 
@@ -184,11 +172,11 @@ mod tests {
     fn test_load_config_from_valid_file() {
         let temp_file = NamedTempFile::new().unwrap();
         let config_content = r#"
-[openrouter]
-api_key = "test-key-123"
-model = "openai/gpt-4"
-max_reasoning_steps = 10
-request_timeout = 30
+[claude_code]
+claude_path = "claude"
+model = "claude-sonnet-4-20250514"
+max_output_tokens = 8192
+timeout = 600
 
 [sagitta]
 
@@ -202,16 +190,14 @@ log_level = "info"
 log_to_file = false
 
 [conversation]
-
-[workspaces]
 "#;
         
         fs::write(temp_file.path(), config_content).unwrap();
         
         let result = load_config_from_path(temp_file.path()).unwrap();
         
-        assert_eq!(result.openrouter.api_key, Some("test-key-123".to_string()));
-        assert_eq!(result.openrouter.model, "openai/gpt-4");
+        assert_eq!(result.claude_code.claude_path, "claude");
+        assert_eq!(result.claude_code.model, "claude-sonnet-4-20250514");
     }
 
     #[test]
@@ -251,8 +237,8 @@ log_to_file = false
         // Verify the file was created and contains the expected content
         assert!(config_path.exists());
         let content = fs::read_to_string(&config_path).unwrap();
-        assert!(content.contains("test-api-key"));
-        assert!(content.contains("openai/gpt-4"));
+        assert!(content.contains("claude-sonnet-4-20250514"));
+        assert!(content.contains("claude"));
     }
 
     #[test]
@@ -276,14 +262,14 @@ log_to_file = false
     fn test_save_config_serialization() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut test_config = SagittaCodeConfig::default();
-        test_config.openrouter.api_key = Some("serialization-test-key".to_string());
-        test_config.openrouter.model = "openai/gpt-4".to_string();
+        test_config.claude_code.model = "claude-sonnet-4-20250514".to_string();
+        test_config.claude_code.claude_path = "claude".to_string();
         
         save_config_to_path(&test_config, temp_file.path()).unwrap();
         
         let content = fs::read_to_string(temp_file.path()).unwrap();
-        assert!(content.contains("serialization-test-key"));
-        assert!(content.contains("openai/gpt-4"));
+        assert!(content.contains("claude-sonnet-4-20250514"));
+        assert!(content.contains("claude"));
     }
 
     #[test]
@@ -298,8 +284,8 @@ log_to_file = false
         let loaded_config = load_config_from_path(temp_file.path()).unwrap();
         
         // Should be identical
-        assert_eq!(original_config.openrouter.api_key, loaded_config.openrouter.api_key);
-        assert_eq!(original_config.openrouter.model, loaded_config.openrouter.model);
+        assert_eq!(original_config.claude_code.model, loaded_config.claude_code.model);
+        assert_eq!(original_config.claude_code.claude_path, loaded_config.claude_code.claude_path);
     }
 
     #[test]
@@ -312,33 +298,31 @@ log_to_file = false
     #[test]
     fn test_validate_config_empty_model() {
         let mut invalid_config = SagittaCodeConfig::default();
-        invalid_config.openrouter.api_key = Some("test-key".to_string());
-        invalid_config.openrouter.model = "".to_string();
+        invalid_config.claude_code.model = "".to_string();
         
         let result = validate_config(&mut invalid_config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("model cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("Claude model cannot be empty"));
     }
 
     #[test]
-    fn test_validate_config_empty_api_key() {
+    fn test_validate_config_empty_claude_path() {
         let mut invalid_config = SagittaCodeConfig::default();
-        invalid_config.openrouter.api_key = Some("".to_string());
-        invalid_config.openrouter.model = "openai/gpt-4".to_string();
+        invalid_config.claude_code.claude_path = "".to_string();
         
         let result = validate_config(&mut invalid_config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("API key cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("Claude binary path cannot be empty"));
     }
 
     #[test]
-    fn test_validate_config_none_api_key() {
-        let mut valid_config = SagittaCodeConfig::default();
-        valid_config.openrouter.api_key = None;
-        valid_config.openrouter.model = "openai/gpt-4".to_string();
+    fn test_validate_config_zero_timeout() {
+        let mut invalid_config = SagittaCodeConfig::default();
+        invalid_config.claude_code.timeout = 0;
         
-        let result = validate_config(&mut valid_config);
-        assert!(result.is_ok()); // None API key is valid
+        let result = validate_config(&mut invalid_config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Claude timeout must be greater than 0"));
     }
 
     #[test]
@@ -359,64 +343,56 @@ log_to_file = false
     fn test_config_with_special_characters() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut config_with_special_chars = SagittaCodeConfig::default();
-        config_with_special_chars.openrouter.api_key = Some("key-with-special-chars!@#$%^&*()".to_string());
-        config_with_special_chars.openrouter.model = "model-with-dashes-and_underscores".to_string();
+        config_with_special_chars.claude_code.model = "claude-model-with-dashes_underscores".to_string();
+        config_with_special_chars.claude_code.claude_path = "/path/with/special-chars!@#".to_string();
         
         // Save and load
         save_config_to_path(&config_with_special_chars, temp_file.path()).unwrap();
         let loaded = load_config_from_path(temp_file.path()).unwrap();
         
-        assert_eq!(config_with_special_chars.openrouter.api_key, loaded.openrouter.api_key);
-        assert_eq!(config_with_special_chars.openrouter.model, loaded.openrouter.model);
+        assert_eq!(config_with_special_chars.claude_code.model, loaded.claude_code.model);
+        assert_eq!(config_with_special_chars.claude_code.claude_path, loaded.claude_code.claude_path);
     }
 
     #[test]
     fn test_config_with_unicode() {
         let temp_file = NamedTempFile::new().unwrap();
         let mut config_with_unicode = SagittaCodeConfig::default();
-        config_with_unicode.openrouter.api_key = Some("🔑-unicode-key-🚀".to_string());
-        config_with_unicode.openrouter.model = "model-with-émojis-🤖".to_string();
+        config_with_unicode.claude_code.model = "claude-with-émojis-🤖".to_string();
+        config_with_unicode.claude_code.claude_path = "/path/with/unicode-🚀".to_string();
         
         // Save and load
         save_config_to_path(&config_with_unicode, temp_file.path()).unwrap();
         let loaded = load_config_from_path(temp_file.path()).unwrap();
         
-        assert_eq!(config_with_unicode.openrouter.api_key, loaded.openrouter.api_key);
-        assert_eq!(config_with_unicode.openrouter.model, loaded.openrouter.model);
+        assert_eq!(config_with_unicode.claude_code.model, loaded.claude_code.model);
+        assert_eq!(config_with_unicode.claude_code.claude_path, loaded.claude_code.claude_path);
     }
 
     #[test]
     fn test_partial_config_file() {
-        // Temporarily unset OPENROUTER_API_KEY to ensure test isolation
-        let original_env = std::env::var("OPENROUTER_API_KEY").ok();
-        std::env::remove_var("OPENROUTER_API_KEY");
-        
         let temp_file = NamedTempFile::new().unwrap();
         let partial_content = r#"
-[openrouter]
-model = "partial-model"
+[claude_code]
+model = "claude-sonnet-4-20250514"
 "#;
         
         fs::write(temp_file.path(), partial_content).unwrap();
         
         let result = load_config_from_path(temp_file.path()).unwrap();
         
-        assert_eq!(result.openrouter.model, "partial-model");
-        assert!(result.openrouter.api_key.is_none());
-        
-        // Restore original environment variable if it was set
-        if let Some(original_key) = original_env {
-            std::env::set_var("OPENROUTER_API_KEY", original_key);
-        }
+        assert_eq!(result.claude_code.model, "claude-sonnet-4-20250514");
+        // claude_path should use default
+        assert_eq!(result.claude_code.claude_path, "claude");
     }
 
     #[test]
     fn test_config_with_extra_fields() {
         let temp_file = NamedTempFile::new().unwrap();
         let content_with_extra = r#"
-[openrouter]
-api_key = "test-key"
-model = "test-model"
+[claude_code]
+claude_path = "claude"
+model = "claude-sonnet-4-20250514"
 extra_field = "this should be ignored"
 
 [unknown_section]
@@ -428,8 +404,8 @@ unknown_field = "also ignored"
         // Should still load successfully, ignoring unknown fields
         let result = load_config_from_path(temp_file.path()).unwrap();
         
-        assert_eq!(result.openrouter.api_key, Some("test-key".to_string()));
-        assert_eq!(result.openrouter.model, "test-model");
+        assert_eq!(result.claude_code.claude_path, "claude");
+        assert_eq!(result.claude_code.model, "claude-sonnet-4-20250514");
     }
 
     #[test]
@@ -455,9 +431,9 @@ unknown_field = "also ignored"
         // Create a config file without the repository context field
         let temp_file = NamedTempFile::new().unwrap();
         let config_content = r#"
-[openrouter]
-api_key = "test-key"
-model = "openai/gpt-4"
+[claude_code]
+claude_path = "claude"
+model = "claude-sonnet-4-20250514"
 
 [ui]
 theme = "dark"

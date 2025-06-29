@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use terminal_stream::events::StreamEvent;
 use crate::agent::events::ToolRunId;
 
 /// Represents an item in the chat timeline
@@ -26,7 +25,7 @@ pub struct ToolCard {
     pub tool_name: String,
     pub status: ToolCardStatus,
     pub progress: Option<f32>,
-    pub logs: Vec<StreamEvent>,
+    pub logs: Vec<String>,
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
     pub input_params: serde_json::Value,
@@ -432,7 +431,7 @@ impl StreamingChatManager {
     }
     
     /// Append a log event to a tool card
-    pub fn append_tool_card_log(&self, run_id: ToolRunId, event: StreamEvent) {
+    pub fn append_tool_card_log(&self, run_id: ToolRunId, event: String) {
         let mut tool_cards = self.tool_cards.lock().unwrap();
         if let Some(card) = tool_cards.get_mut(&run_id) {
             card.logs.push(event.clone());

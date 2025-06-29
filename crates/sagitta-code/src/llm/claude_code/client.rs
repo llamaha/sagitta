@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::pin::Pin;
+use std::sync::Arc;
 use futures_util::Stream;
 use uuid::Uuid;
 use tokio::time::Duration;
@@ -13,8 +14,11 @@ use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
-use super::message_converter::{convert_messages_to_claude, ClaudeMessage};
+use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
+use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
+use super::mcp_integration::McpIntegration;
+use crate::tools::registry::ToolRegistry;
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
 const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -23,6 +27,9 @@ const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
 pub struct ClaudeCodeClient {
     config: ClaudeCodeConfig,
     process_manager: ClaudeProcess,
+    interface: ClaudeInterface,
+    mcp_integration: Option<McpIntegration>,
+    mcp_config_path: Option<String>,
 }
 
 impl ClaudeCodeClient {
@@ -42,8 +49,31 @@ impl ClaudeCodeClient {
         
         Ok(Self {
             process_manager: ClaudeProcess::new(claude_config.clone()),
+            interface: ClaudeInterface::new(claude_config.clone()),
             config: claude_config,
+            mcp_integration: None,
+            mcp_config_path: None,
         })
+    }
+    
+    /// Initialize MCP integration with tool registry
+    pub async fn initialize_mcp(&mut self, tool_registry: Arc<ToolRegistry>) -> Result<(), SagittaCodeError> {
+        log::info!("CLAUDE_CODE: Initializing MCP integration");
+        
+        let mut mcp = McpIntegration::new(tool_registry);
+        
+        // Start the MCP server and get config
+        let mcp_config = mcp.start().await
+            .map_err(|e| SagittaCodeError::LlmError(format!("Failed to start MCP: {}", e)))?;
+        
+        // Extract the config path
+        if let Some(path) = mcp_config.get("mcp_config_path").and_then(|v| v.as_str()) {
+            self.mcp_config_path = Some(path.to_string());
+            log::info!("CLAUDE_CODE: MCP config created at: {}", path);
+        }
+        
+        self.mcp_integration = Some(mcp);
+        Ok(())
     }
     
     /// Extract system prompt from messages
@@ -60,67 +90,6 @@ impl ClaudeCodeClient {
             .unwrap_or_else(|| "You are a helpful AI assistant.".to_string())
     }
     
-    /// Format tools as text for inclusion in system prompt
-    pub fn format_tools_for_system_prompt(tools: &[ToolDefinition]) -> String {
-        if tools.is_empty() {
-            return String::new();
-        }
-        
-        let mut prompt = String::from("\n\n## Available Tools\n\n");
-        prompt.push_str("Tool uses are formatted using XML-style tags. The tool name itself becomes the XML tag name. ");
-        prompt.push_str("Each parameter is enclosed within its own set of tags. Here's the structure:\n\n");
-        prompt.push_str("```xml\n<actual_tool_name>\n<parameter1_name>value1</parameter1_name>\n");
-        prompt.push_str("<parameter2_name>value2</parameter2_name>\n...\n</actual_tool_name>\n```\n\n");
-        prompt.push_str("You have access to the following tools:\n\n");
-        
-        for tool in tools {
-            prompt.push_str(&format!("### {}\n", tool.name));
-            prompt.push_str(&format!("Description: {}\n", tool.description));
-            prompt.push_str("Usage:\n```xml\n");
-            prompt.push_str(&format!("<{}>\n", tool.name));
-            
-            // Add parameter schema as example
-            if let Some(props) = tool.parameters.get("properties").and_then(|p| p.as_object()) {
-                for (param_name, param_schema) in props {
-                    let param_type = param_schema.get("type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("string");
-                    let description = param_schema.get("description")
-                        .and_then(|d| d.as_str())
-                        .unwrap_or("");
-                    prompt.push_str(&format!("<{}>{}</{}> <!-- {} -->\n", 
-                        param_name, 
-                        match param_type {
-                            "string" => "value",
-                            "number" | "integer" => "123",
-                            "boolean" => "true",
-                            "array" => "[item1, item2]",
-                            "object" => "{\"key\": \"value\"}",
-                            _ => "value"
-                        },
-                        param_name,
-                        description
-                    ));
-                }
-            }
-            
-            prompt.push_str(&format!("</{}>\n```\n\n", tool.name));
-        }
-        
-        prompt.push_str("Always use the actual tool name as the XML tag name for proper parsing and execution. ");
-        prompt.push_str("When you need to use a tool, include the XML block in your response.\n");
-        
-        // Add critical tool usage rules for sequential execution
-        prompt.push_str("\n## CRITICAL TOOL USAGE RULES:\n");
-        prompt.push_str("- You MUST use only ONE tool per response\n");
-        prompt.push_str("- After using a tool, wait for the result before proceeding\n");
-        prompt.push_str("- If multiple actions are needed, use one tool, receive the result, then continue in your next response\n");
-        prompt.push_str("- Never attempt to use multiple tools in a single response\n");
-        prompt.push_str("- Each tool use should be followed by waiting for and analyzing the result before deciding next steps\n");
-        
-        prompt
-    }
-    
     /// Filter out system messages as they're handled separately
     pub fn filter_non_system_messages(messages: &[Message]) -> Vec<Message> {
         messages.iter()
@@ -129,31 +98,46 @@ impl ClaudeCodeClient {
             .collect()
     }
     
-    /// Get list of tools to disable (all Claude built-in tools)
-    pub fn get_disabled_tools() -> Vec<String> {
-        vec![
-            // Claude's built-in tools
-            "Task", "Bash", "Glob", "Grep", "LS", "exit_plan_mode",
-            "Read", "Edit", "MultiEdit", "Write", "NotebookRead",
-            "NotebookEdit", "WebFetch", "TodoRead", "TodoWrite", "WebSearch",
-            // MCP tools that might be present
-            "mcp__sagitta-mcp-stdio__ping",
-            "mcp__sagitta-mcp-stdio__repository_add",
-            "mcp__sagitta-mcp-stdio__repository_list",
-            "mcp__sagitta-mcp-stdio__repository_remove",
-            "mcp__sagitta-mcp-stdio__repository_sync",
-            "mcp__sagitta-mcp-stdio__query",
-            "mcp__sagitta-mcp-stdio__repository_search_file",
-            "mcp__sagitta-mcp-stdio__repository_view_file",
-            "mcp__sagitta-mcp-stdio__repository_map",
-            "mcp__sagitta-mcp-stdio__repository_switch_branch",
-            "mcp__sagitta-mcp-stdio__repository_list_branches"
-        ].iter().map(|s| s.to_string()).collect()
+    /// Get MCP integration details for tests
+    pub fn get_mcp_integration(&self) -> Option<serde_json::Value> {
+        if self.mcp_integration.is_some() && self.mcp_config_path.is_some() {
+            // Read the config to get the actual server name
+            if let Ok(content) = std::fs::read_to_string(self.mcp_config_path.as_ref().unwrap()) {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(servers) = config["mcpServers"].as_object() {
+                        if let Some(server_name) = servers.keys().next() {
+                            return Some(serde_json::json!({
+                                "mcp_config_path": self.mcp_config_path.as_ref().unwrap(),
+                                "server_name": server_name
+                            }));
+                        }
+                    }
+                }
+            }
+            None
+        } else {
+            None
+        }
+    }
+    
+    /// Get Claude CLI arguments with MCP config
+    pub fn get_claude_cli_args(&self) -> Option<Vec<String>> {
+        self.mcp_config_path.as_ref().map(|path| {
+            vec!["--mcp-config".to_string(), path.clone()]
+        })
     }
 }
 
 #[async_trait]
 impl LlmClient for ClaudeCodeClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn client_type(&self) -> &str {
+        "claude_code"
+    }
+    
     async fn generate(
         &self, 
         messages: &[Message], 
@@ -161,21 +145,65 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<LlmResponse, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract base system prompt and append tools
-        let mut system_prompt = Self::extract_system_prompt(messages);
-        if !tools.is_empty() {
-            system_prompt.push_str(&Self::format_tools_for_system_prompt(tools));
-            log::debug!("CLAUDE_CODE: Added {} tools to system prompt", tools.len());
+        // Build conversation history as a prompt
+        let mut prompt = String::new();
+        
+        for message in messages {
+            match message.role {
+                Role::User => {
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    prompt.push_str(&format!("Human: {}\n\n", text));
+                }
+                Role::Assistant => {
+                    // Only include actual text content, not thinking
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !text.is_empty() {
+                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                    }
+                }
+                Role::System => {
+                    // Skip system messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping system message in prompt");
+                }
+                Role::Function => {
+                    // Skip function messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping function message in prompt");
+                }
+            }
         }
         
-        let filtered_messages = Self::filter_non_system_messages(messages);
-        let claude_messages = convert_messages_to_claude(&filtered_messages);
+        // Ensure we have a prompt
+        if prompt.trim().is_empty() {
+            log::warn!("CLAUDE_CODE: Empty prompt after processing messages");
+            prompt = "Human: Hello\n\n".to_string();
+        }
         
-        // Spawn process and collect response
-        let child = self.process_manager
-            .spawn(&system_prompt, &claude_messages, &Self::get_disabled_tools())
-            .await
-            .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
+        log::debug!("CLAUDE_CODE: Final prompt:\n{}", prompt);
+        
+        // Spawn process with prompt and MCP config if available
+        let child = if let Some(ref mcp_path) = self.mcp_config_path {
+            self.process_manager
+                .spawn_with_mcp(&prompt, Some(mcp_path))
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
+        } else {
+            self.process_manager
+                .spawn(&prompt)
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
+        };
         
         let stream = ClaudeCodeStream::new(child);
         
@@ -271,21 +299,65 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::debug!("CLAUDE_CODE: Generate stream called with {} messages and {} tools", messages.len(), tools.len());
         
-        // Extract base system prompt and append tools
-        let mut system_prompt = Self::extract_system_prompt(messages);
-        if !tools.is_empty() {
-            system_prompt.push_str(&Self::format_tools_for_system_prompt(tools));
-            log::debug!("CLAUDE_CODE: Added {} tools to system prompt", tools.len());
+        // Build conversation history as a prompt
+        let mut prompt = String::new();
+        
+        for message in messages {
+            match message.role {
+                Role::User => {
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    prompt.push_str(&format!("Human: {}\n\n", text));
+                }
+                Role::Assistant => {
+                    // Only include actual text content, not thinking
+                    let text = message.parts.iter()
+                        .filter_map(|part| match part {
+                            MessagePart::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !text.is_empty() {
+                        prompt.push_str(&format!("Assistant: {}\n\n", text));
+                    }
+                }
+                Role::System => {
+                    // Skip system messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping system message in prompt");
+                }
+                Role::Function => {
+                    // Skip function messages for Claude CLI
+                    log::debug!("CLAUDE_CODE: Skipping function message in prompt");
+                }
+            }
         }
         
-        let filtered_messages = Self::filter_non_system_messages(messages);
-        let claude_messages = convert_messages_to_claude(&filtered_messages);
+        // Ensure we have a prompt
+        if prompt.trim().is_empty() {
+            log::warn!("CLAUDE_CODE: Empty prompt after processing messages");
+            prompt = "Human: Hello\n\n".to_string();
+        }
         
-        // Spawn process
-        let child = self.process_manager
-            .spawn(&system_prompt, &claude_messages, &Self::get_disabled_tools())
-            .await
-            .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?;
+        log::debug!("CLAUDE_CODE: Final prompt:\n{}", prompt);
+        
+        // Spawn process with prompt and MCP config if available
+        let child = if let Some(ref mcp_path) = self.mcp_config_path {
+            self.process_manager
+                .spawn_with_mcp(&prompt, Some(mcp_path))
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
+        } else {
+            self.process_manager
+                .spawn(&prompt)
+                .await
+                .map_err(|e| SagittaCodeError::LlmError(e.to_string()))?
+        };
         
         let stream = ClaudeCodeStream::new(child);
         Ok(Box::pin(stream))
@@ -320,5 +392,44 @@ impl LlmClient for ClaudeCodeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> {
         log::warn!("CLAUDE_CODE: Grounding not supported by Claude Code");
         self.generate_stream_with_thinking(messages, tools, thinking_config).await
+    }
+}
+
+impl ClaudeCodeClient {
+    /// Get the Claude interface for advanced configuration
+    pub fn interface(&self) -> &ClaudeInterface {
+        &self.interface
+    }
+
+    /// Get model information
+    pub fn get_model_info(&self) -> Result<ClaudeModelInfo, SagittaCodeError> {
+        self.interface.get_model_info()
+    }
+
+    /// Get complete configuration information
+    pub async fn get_config_info(&self) -> Result<ClaudeConfigInfo, SagittaCodeError> {
+        self.interface.get_config_info().await
+    }
+
+    /// Validate the Claude binary and configuration
+    pub async fn validate(&self) -> Result<(), SagittaCodeError> {
+        self.interface.validate().await
+    }
+
+    /// Get available models
+    pub async fn get_available_models(&self) -> Result<Vec<String>, SagittaCodeError> {
+        self.interface.get_available_models().await
+    }
+}
+
+impl Drop for ClaudeCodeClient {
+    fn drop(&mut self) {
+        // Clean up MCP integration
+        if let Some(mut mcp) = self.mcp_integration.take() {
+            // We can't use async in drop, so we spawn a task to clean up
+            tokio::spawn(async move {
+                mcp.stop().await;
+            });
+        }
     }
 }

@@ -5,6 +5,7 @@ pub mod conversation;
 pub mod events;
 pub mod recovery;
 pub mod streaming;
+pub mod prompts;
 
 // New reasoning engine modules
 // pub mod reasoning_adapter;

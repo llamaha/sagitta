@@ -46,6 +46,14 @@ impl Default for TestLlmClient {
 
 #[async_trait]
 impl LlmClient for TestLlmClient {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn client_type(&self) -> &str {
+        "test"
+    }
+    
     async fn generate(&self, _messages: &[Message], _tools: &[ToolDefinition]) -> Result<LlmResponse, SagittaCodeError> {
         let mut responses = self.responses.lock().unwrap();
         let response = responses.pop().unwrap_or_else(|| "I understand.".to_string());

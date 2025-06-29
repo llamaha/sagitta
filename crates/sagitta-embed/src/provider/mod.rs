@@ -21,10 +21,14 @@ pub trait EmbeddingProvider: Send + Sync + Debug {
 // Provider modules
 #[cfg(feature = "onnx")]
 pub mod onnx;
+pub mod default;
+pub mod factory;
 
 // Re-export commonly used types
 #[cfg(feature = "onnx")]
 pub use onnx::{OnnxEmbeddingModel, OnnxSessionPool};
+pub use default::DefaultEmbeddingProvider;
+pub use factory::create_embedding_provider;
 
 #[cfg(test)]
 mod tests {

@@ -33,6 +33,7 @@ use crate::gui::theme::AppTheme;
 use crate::gui::symbols;
 use crate::gui::app::RunningToolInfo;
 use crate::agent::events::ToolRunId;
+use super::{ChatItem, ToolCard, ToolCardStatus};
 use catppuccin_egui::Theme as CatppuccinTheme;
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::cell::RefCell;
@@ -41,6 +42,7 @@ use serde_json;
 use uuid;
 use std::time::Instant;
 use std::collections::HashMap;
+use regex;
 
 #[cfg(feature = "gui")]
 use egui_notify::Toasts;
@@ -112,6 +114,7 @@ pub struct StreamingMessage {
     pub thinking_is_streaming: bool,      // Whether thinking is currently streaming
     pub thinking_fade_start: Option<std::time::Instant>, // When to start fading out thinking
     pub thinking_should_fade: bool,       // Whether thinking should fade out
+    pub thinking_collapsed: bool,         // Whether thinking content is collapsed
 }
 
 impl StreamingMessage {
@@ -129,6 +132,7 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
@@ -146,6 +150,7 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
@@ -163,13 +168,14 @@ impl StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
     
     pub fn append_content(&mut self, chunk: &str) {
         self.content.push_str(chunk);
         
-        // NEW: When actual content starts streaming, begin fading out thinking
+        // Start fading thinking content when we get regular content
         if !chunk.is_empty() && self.has_thinking_content() && !self.thinking_should_fade {
             self.start_thinking_fade();
         }
@@ -217,22 +223,13 @@ impl StreamingMessage {
     }
     
     pub fn should_show_thinking(&self) -> bool {
+        // Show thinking if we have content AND opacity > 0
         if !self.has_thinking_content() {
             return false;
         }
         
-        // If we're not fading, always show
-        if !self.thinking_should_fade {
-            return true;
-        }
-        
-        // If we're fading, check if fade duration has elapsed
-        if let Some(fade_start) = self.thinking_fade_start {
-            let fade_duration = std::time::Duration::from_secs(2); // 2 second fade
-            fade_start.elapsed() < fade_duration
-        } else {
-            true
-        }
+        // Check if it's faded out
+        self.get_thinking_opacity() > 0.0
     }
     
     pub fn get_thinking_opacity(&self) -> f32 {
@@ -324,22 +321,25 @@ impl From<ChatMessage> for StreamingMessage {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
 }
 
 pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState) {
-    // Convert legacy messages to streaming messages for modern rendering
-    let streaming_messages: Vec<StreamingMessage> = messages.iter()
-        .map(|msg| msg.clone().into())
+    // Convert legacy messages to ChatItems for modern rendering
+    let chat_items: Vec<ChatItem> = messages.iter()
+        .map(|msg| ChatItem::Message(msg.clone().into()))
         .collect();
     
     // Create empty HashMap for backward compatibility
     let empty_running_tools = HashMap::new();
-    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools);
+    let mut empty_collapsed_thinking = HashMap::new();
+    let empty_tool_results = HashMap::new();
+    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -374,7 +374,14 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                         .rounding(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
-                        let conversation_text = format_conversation_for_copying(messages);
+                        // Extract messages from ChatItems for conversation copying
+                        let messages: Vec<StreamingMessage> = items.iter()
+                            .filter_map(|item| match item {
+                                ChatItem::Message(msg) => Some(msg.clone()),
+                                ChatItem::ToolCard(_) => None, // Tool cards aren't included in conversation copy
+                            })
+                            .collect();
+                        let conversation_text = format_conversation_for_copying(&messages);
                         ui.output_mut(|o| o.copied_text = conversation_text.clone());
                         copy_state.start_copy_feedback(conversation_text);
                         ui.ctx().request_repaint(); // Request repaint for animation
@@ -395,23 +402,41 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                     
                     ui.add_space(12.0);
                     
-                    // Group consecutive messages from the same author
-                    let grouped_messages = group_consecutive_messages(messages);
-                    
-                    // Render each message group
-                    for (group_index, group) in grouped_messages.iter().enumerate() {
-                        if group_index > 0 {
-                            ui.add_space(8.0); // Reduced space between different message groups
+                    // Render each chat item (messages and tool cards)
+                    for (item_index, item) in items.iter().enumerate() {
+                        if item_index > 0 {
+                            ui.add_space(8.0); // Space between items
                         }
                         
-                        // Render the message group with adjusted width for margins
-                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools) {
-                            clicked_tool = Some(tool_info);
+                        match item {
+                            ChatItem::Message(message) => {
+                                // Render individual messages
+                                let messages_group = vec![message];
+                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
+                                    clicked_tool = Some(tool_info);
+                                }
+                            }
+                            ChatItem::ToolCard(tool_card) => {
+                                // Render tool card
+                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state) {
+                                    clicked_tool = Some(tool_info);
+                                }
+                            }
                         }
                     }
                     ui.add_space(16.0);
                 });
         });
+    
+    // Handle tool result clicks
+    if let Some((title, tool_call_id)) = &clicked_tool {
+        if title == "Tool Result" {
+            // Look up the actual tool result
+            if let Some(result) = tool_results.get(tool_call_id) {
+                return Some((format!("Tool Result for {}", tool_call_id), result.clone()));
+            }
+        }
+    }
     
     clicked_tool
 }
@@ -454,6 +479,7 @@ fn render_message_group(
     app_theme: AppTheme,
     copy_state: &mut CopyButtonState,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
+    collapsed_thinking: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     if message_group.is_empty() {
         return None;
@@ -566,14 +592,14 @@ fn render_message_group(
                 ui.vertical(|ui| {
                     ui.set_max_width(total_width - 80.0); // Leave space for timestamp
                     
-                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state) {
+                    if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width - 80.0, app_theme, running_tools, copy_state, collapsed_thinking) {
                         clicked_tool = Some(tool_info);
                     }
                 });
             });
         } else {
             // Single message in group - use full width
-            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state) {
+            if let Some(tool_info) = render_single_message_content(ui, message, &bg_color, total_width, app_theme, running_tools, copy_state, collapsed_thinking) {
                 clicked_tool = Some(tool_info);
             }
         }
@@ -612,12 +638,13 @@ fn render_single_message_content(
     app_theme: AppTheme,
     running_tools: &HashMap<ToolRunId, RunningToolInfo>,
     copy_state: &mut CopyButtonState,
+    collapsed_thinking: &mut HashMap<String, bool>,
 ) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
     // Thinking content (if any) - now with streaming and fade support
     if message.should_show_thinking() {
-        render_thinking_content(ui, message, &bg_color, max_width, app_theme);
+        render_thinking_content(ui, message, &bg_color, max_width, app_theme, collapsed_thinking);
         ui.add_space(2.0); // Reduced spacing
     }
     
@@ -636,7 +663,9 @@ fn render_single_message_content(
         if *pos > last_pos && last_pos < content.len() {
             let content_chunk = &content[last_pos..*pos.min(&content.len())];
             if !content_chunk.is_empty() {
-                render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme);
+                if let Some(tool_info) = render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme) {
+                    clicked_tool = Some(tool_info);
+                }
             }
         }
         
@@ -654,7 +683,9 @@ fn render_single_message_content(
     if last_pos < content.len() {
         let remaining_content = &content[last_pos..];
         if !remaining_content.is_empty() {
-            render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme);
+            if let Some(tool_info) = render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme) {
+                clicked_tool = Some(tool_info);
+            }
         }
     }
     
@@ -677,7 +708,7 @@ fn render_single_message_content(
 }
 
 /// Render thinking content with streaming support and fade-out effects
-fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
     // Check if we should show thinking content
     if !message.should_show_thinking() {
         return;
@@ -688,14 +719,21 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
         None => return,
     };
     
-    // Get opacity for fade effect
-    let opacity = message.get_thinking_opacity();
+    // Get or initialize collapsed state for this message
+    // Start expanded by default so users can see thinking as it streams
+    let is_collapsed = collapsed_thinking.entry(message.id.clone()).or_insert(false);
     
-    // Apply opacity to the entire thinking section
+    // No opacity/fade effect - always show at full opacity
     ui.scope(|ui| {
-        ui.set_opacity(opacity);
         
+        // Collapsible header
         ui.horizontal(|ui| {
+            // Collapse/expand button
+            let arrow = if *is_collapsed { "▶" } else { "▼" };
+            if ui.small_button(arrow).clicked() {
+                *is_collapsed = !*is_collapsed;
+            }
+            
             // Thinking icon with animation if streaming
             if message.thinking_is_streaming {
                 let time = ui.input(|i| i.time);
@@ -704,25 +742,38 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
             } else {
                 ui.label(RichText::new("💭").size(14.0));
             }
-            ui.add_space(4.0);
             
-            // Thinking content with enhanced styling
-            ui.vertical(|ui| {
-                ui.set_max_width(max_width - 40.0);
-                
-                // Header with status
-                let status_text = if message.thinking_is_streaming {
-                    "Thinking..."
-                } else if message.thinking_should_fade {
-                    "Thought complete"
+            // Header with status
+            let status_text = if message.thinking_is_streaming {
+                "Thinking..."
+            } else {
+                "Thinking"
+            };
+            
+            ui.label(RichText::new(status_text)
+                .italics()
+                .color(app_theme.hint_text_color())
+                .size(11.0));
+            
+            // Show preview when collapsed
+            if *is_collapsed {
+                ui.add_space(8.0);
+                let preview = if thinking_content.len() > 50 {
+                    format!("{}...", &thinking_content[..50])
                 } else {
-                    "Thinking"
+                    thinking_content.to_string()
                 };
-                
-                ui.label(RichText::new(status_text)
+                ui.label(RichText::new(preview)
                     .italics()
                     .color(app_theme.hint_text_color())
                     .size(10.0));
+            }
+        });
+        
+        // Show full content if not collapsed
+        if !*is_collapsed {
+            ui.indent(message.id.clone(), |ui| {
+                ui.set_max_width(max_width - 40.0);
                 
                 // Thinking content in a subtle frame
                 Frame::none()
@@ -748,7 +799,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
                         }
                     });
             });
-        });
+        }
     });
     
     // Request repaint for animations and fade effects
@@ -780,9 +831,27 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     ui.label(RichText::new(status_icon).color(status_color).size(14.0));
                     ui.add_space(4.0);
                     
-                    // Tool name
-                    ui.label(RichText::new("Tool").color(app_theme.hint_text_color()).size(11.0));
-                    ui.label(RichText::new(&tool_call.name).color(app_theme.text_color()).strong().size(12.0));
+                    // Tool execution preview
+                    ui.label(RichText::new("🔧").size(12.0));
+                    
+                    // Show formatted arguments (which includes tool name and parameters)
+                    let display_text = if !tool_call.arguments.is_empty() {
+                        &tool_call.arguments
+                    } else {
+                        &format!("Executing {}", tool_call.name)
+                    };
+                    
+                    // Truncate very long display text and add ellipsis
+                    let truncated_text = if display_text.len() > 80 {
+                        format!("{}...", &display_text[..77])
+                    } else {
+                        display_text.to_string()
+                    };
+                    
+                    ui.label(RichText::new(&truncated_text)
+                        .color(app_theme.text_color())
+                        .strong()
+                        .size(12.0));
                     
                     // Status text
                     let status_text = match &tool_call.status {
@@ -898,12 +967,118 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
     clicked_tool_result
 }
 
+/// Render a standalone tool card
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+    let mut clicked_tool_result = None;
+    
+    // Create a frame for the tool card
+    Frame::none()
+        .fill(app_theme.code_background())
+        .rounding(Rounding::same(6))
+        .stroke(Stroke::new(1.0, app_theme.border_color()))
+        .inner_margin(12.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Tool status icon
+                let (status_icon, status_color) = match tool_card.status {
+                    ToolCardStatus::Completed { success: true } => ("✅", app_theme.success_color()),
+                    ToolCardStatus::Completed { success: false } => ("❌", app_theme.error_color()),
+                    ToolCardStatus::Failed { .. } => ("❌", app_theme.error_color()),
+                    ToolCardStatus::Running => ("🔄", app_theme.accent_color()),
+                    ToolCardStatus::Cancelled => ("⏹️", app_theme.hint_text_color()),
+                };
+                
+                ui.label(RichText::new(status_icon).color(status_color).size(16.0));
+                ui.add_space(8.0);
+                
+                // Tool name and description
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&format!("🔧 {}", tool_card.tool_name))
+                        .color(app_theme.text_color())
+                        .strong()
+                        .size(14.0));
+                    
+                    // Show progress if running
+                    if tool_card.status == ToolCardStatus::Running {
+                        if let Some(progress) = tool_card.progress {
+                            ui.add(egui::ProgressBar::new(progress)
+                                .desired_width(200.0)
+                                .desired_height(6.0)
+                                .fill(app_theme.accent_color()));
+                        } else {
+                            ui.add(egui::ProgressBar::new(0.0)
+                                .desired_width(200.0)
+                                .desired_height(6.0)
+                                .fill(app_theme.accent_color())
+                                .animate(true));
+                        }
+                    }
+                    
+                    // Show timing info
+                    if let Some(completed_at) = tool_card.completed_at {
+                        let duration = completed_at.signed_duration_since(tool_card.started_at);
+                        ui.label(RichText::new(&format!("Completed in {:.1}s", duration.num_milliseconds() as f64 / 1000.0))
+                            .color(app_theme.hint_text_color())
+                            .size(11.0));
+                    } else if tool_card.status == ToolCardStatus::Running {
+                        ui.label(RichText::new("Running...")
+                            .color(app_theme.hint_text_color())
+                            .size(11.0));
+                    }
+                });
+                
+                // Right-aligned action buttons
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    match &tool_card.status {
+                        ToolCardStatus::Completed { success: true } => {
+                            if tool_card.result.is_some() {
+                                // View details button
+                                if ui.small_button("View details").clicked() {
+                                    let result_json = tool_card.result.as_ref().unwrap();
+                                    let display_title = format!("{} - Result", tool_card.tool_name);
+                                    clicked_tool_result = Some((display_title, serde_json::to_string_pretty(result_json).unwrap_or_else(|_| result_json.to_string())));
+                                }
+                                
+                                // Copy button
+                                let copy_text = copy_state.get_button_text("Copy");
+                                let copy_color = copy_state.get_button_color(app_theme);
+                                
+                                if ui.add(egui::Button::new(copy_text)
+                                    .small()
+                                    .fill(copy_color.gamma_multiply(0.1)))
+                                    .clicked() {
+                                    let result_text = serde_json::to_string_pretty(tool_card.result.as_ref().unwrap())
+                                        .unwrap_or_else(|_| tool_card.result.as_ref().unwrap().to_string());
+                                    ui.output_mut(|o| o.copied_text = result_text.clone());
+                                    copy_state.start_copy_feedback(result_text);
+                                }
+                            }
+                        }
+                        ToolCardStatus::Running => {
+                            // Cancel button for running tools
+                            if ui.small_button("Cancel").clicked() {
+                                clicked_tool_result = Some(("__CANCEL_TOOL__".to_string(), tool_card.run_id.to_string()));
+                            }
+                        }
+                        ToolCardStatus::Failed { error } => {
+                            ui.label(RichText::new(&format!("Error: {}", error))
+                                .color(app_theme.error_color())
+                                .size(11.0));
+                        }
+                        _ => {}
+                    }
+                });
+            });
+        });
+    
+    clicked_tool_result
+}
+
 /// Render message content in a compact format
-fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     // Use message_type for summary/finalization
     if message.message_type == MessageType::Summary {
-        render_text_content_compact(ui, &message.content, &bg_color, max_width, app_theme);
-        return;
+        return render_text_content_compact(ui, &message.content, &bg_color, max_width, app_theme);
     }
     
     // Set up content area
@@ -911,11 +1086,11 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
     ui.style_mut().wrap = Some(true);
     
     // Render content based on type
-    if message.content.contains("```") {
-        render_mixed_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme);
+    let clicked_tool = if message.content.contains("```") {
+        render_mixed_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
     } else {
-        render_text_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme);
-    }
+        render_text_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
+    };
     
     // Show streaming cursor if message is still streaming but not in thinking_is_streaming phase
     // SUPPRESS spinner for reasoning-engine summary messages
@@ -932,27 +1107,139 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
             ui.add(egui::Spinner::new().size(12.0).color(cursor_color));
         });
     }
+    
+    clicked_tool
 }
 
 /// Render text content compactly using markdown with proper theme colors
-fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
-    // Set the text color from theme before rendering
-    let original_text_color = ui.style().visuals.text_color();
-    ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
-    
-    COMMONMARK_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let viewer = CommonMarkViewer::new()
-            .max_image_width(Some(max_width as usize))
-            .default_width(Some(max_width as usize));
+fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+    // Check if text contains tool:// links
+    if text.contains("tool://") {
+        render_text_with_tool_links(ui, text, bg_color, max_width, app_theme)
+    } else {
+        // Set the text color from theme before rendering
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
-        ui.set_max_width(max_width);
-        ui.style_mut().wrap = Some(true);
-        viewer.show(ui, &mut *cache, text);
-    });
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
+            
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, text);
+        });
+        
+        // Restore original text color
+        ui.style_mut().visuals.override_text_color = None;
+        None
+    }
+}
+
+/// Render text with tool:// links as clickable buttons
+fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+    let mut clicked_tool = None;
     
-    // Restore original text color
-    ui.style_mut().visuals.override_text_color = None;
+    // Parse all [text](tool://id) patterns in the text
+    let mut processed_text = text.to_string();
+    let mut tool_links = Vec::new();
+    
+    // Find all tool:// links and replace them with placeholder buttons
+    let pattern = regex::Regex::new(r"\[([^\]]+)\]\(tool://([^)]+)\)").unwrap();
+    
+    for (i, caps) in pattern.captures_iter(text).enumerate() {
+        let link_text = caps.get(1).unwrap().as_str();
+        let tool_call_id = caps.get(2).unwrap().as_str();
+        tool_links.push((link_text.to_string(), tool_call_id.to_string()));
+        
+        // Replace the markdown link with a placeholder
+        let placeholder = format!("__TOOL_LINK_{}__", i);
+        processed_text = processed_text.replace(&caps[0], &placeholder);
+    }
+    
+    
+    if tool_links.is_empty() {
+        // No tool links, render normally with CommonMark
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
+        
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
+            
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, text);
+        });
+        
+        ui.style_mut().visuals.override_text_color = None;
+        return None;
+    }
+    
+    // Process the text with proper markdown rendering and tool link buttons
+    let mut remaining_text = processed_text.as_str();
+    
+    for (i, (link_text, tool_call_id)) in tool_links.iter().enumerate() {
+        let placeholder = format!("__TOOL_LINK_{}__", i);
+        
+        if let Some(split_pos) = remaining_text.find(&placeholder) {
+            // Render text before the placeholder using CommonMark
+            let before_text = &remaining_text[..split_pos];
+            if !before_text.trim().is_empty() {
+                let original_text_color = ui.style().visuals.text_color();
+                ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
+                
+                COMMONMARK_CACHE.with(|cache| {
+                    let mut cache = cache.borrow_mut();
+                    let viewer = CommonMarkViewer::new()
+                        .max_image_width(Some(max_width as usize))
+                        .default_width(Some(max_width as usize));
+                    
+                    ui.set_max_width(max_width);
+                    ui.style_mut().wrap = Some(true);
+                    viewer.show(ui, &mut *cache, before_text);
+                });
+                
+                ui.style_mut().visuals.override_text_color = None;
+            }
+            
+            // Render the clickable button
+            ui.horizontal(|ui| {
+                let button = ui.small_button(format!("📋 {}", link_text));
+                if button.clicked() {
+                    clicked_tool = Some(("Tool Result".to_string(), tool_call_id.to_string()));
+                }
+            });
+            
+            // Update remaining text
+            remaining_text = &remaining_text[split_pos + placeholder.len()..];
+        }
+    }
+    
+    // Render any remaining text after the last placeholder using CommonMark
+    if !remaining_text.trim().is_empty() {
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
+        
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
+            
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, remaining_text);
+        });
+        
+        ui.style_mut().visuals.override_text_color = None;
+    }
+    
+    clicked_tool
 }
 
 /// Render code block compactly
@@ -994,27 +1281,36 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
         .show(ui, |ui| {
             ui.set_max_width(max_width - 16.0);
             
-            // Collapsible for long code
+            // Scrollable for long code
             let line_count = remaining_text.lines().count();
             if line_count > 10 {
-                egui::CollapsingHeader::new(RichText::new(format!("{} lines of code", line_count)).small())
-                    .default_open(false)
+                // Show line count indicator
+                ui.label(RichText::new(format!("{} lines of code", line_count))
+                    .small()
+                    .color(app_theme.hint_text_color()));
+                ui.add_space(2.0);
+                
+                // Use scrollable area with max height for ~10 lines
+                ScrollArea::vertical()
+                    .max_height(120.0) // Approximately 10 lines at 12px line height
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        render_syntax_highlighted_code(ui, remaining_text, &bg_color, max_width - 32.0);
+                        render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 32.0);
                     });
             } else {
-                render_syntax_highlighted_code(ui, remaining_text, &bg_color, max_width - 16.0);
+                render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 16.0);
             }
         });
 }
 
 /// Render syntax highlighted code
-fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32) {
+fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_color: &Color32, max_width: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
     let syntect_theme = &theme_set.themes["base16-ocean.dark"];
-    let syntax = syntax_set.find_syntax_by_extension("rs")
+    let syntax = syntax_set.find_syntax_by_extension(language)
+        .or_else(|| syntax_set.find_syntax_by_name(language))
         .or_else(|| syntax_set.find_syntax_by_extension("txt"))
         .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
     
@@ -1614,7 +1910,7 @@ fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
 }
 
 /// Render mixed content (text + code blocks) compactly
-fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     if let Some((old_content, new_content, language)) = detect_diff_content(content) {
         // Render diff header
         ui.horizontal(|ui| {
@@ -1658,7 +1954,7 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                     });
             }
         );
-        return;
+        return None;
     }
     
     let parts: Vec<&str> = content.split("```").collect();
@@ -1702,13 +1998,16 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                         }
                     );
                 } else {
-                    render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
+                    if let Some(tool_info) = render_text_content_compact(ui, part, &bg_color, max_width, app_theme) {
+                        return Some(tool_info);
+                    }
                 }
             }
         } else {
             render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
         }
     }
+    None
 }
 
 #[cfg(test)]
@@ -1730,6 +2029,7 @@ mod tests {
             thinking_is_streaming: false,
             thinking_fade_start: None,
             thinking_should_fade: false,
+            thinking_collapsed: true,  // Default to collapsed
         }
     }
 

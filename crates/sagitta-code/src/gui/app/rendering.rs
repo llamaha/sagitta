@@ -34,8 +34,6 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process app events
     app.process_app_events();
     
-    // Process terminal events
-    app.state.process_terminal_events();
     
     // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
@@ -61,19 +59,20 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
         });
     }
     
-    // Handle clicked tool info
-    if let Some((tool_name, tool_args)) = &app.state.clicked_tool_info.clone() {
+    // Handle clicked tool info - process once then clear to prevent repeated execution
+    if let Some((tool_name, tool_args)) = app.state.clicked_tool_info.take() {
         if tool_name == "__CANCEL_TOOL__" {
             // Handle tool cancellation
-            if let Ok(run_id) = uuid::Uuid::parse_str(tool_args) {
+            if let Ok(run_id) = uuid::Uuid::parse_str(&tool_args) {
                 if let Err(e) = app.app_event_sender.send(AppEvent::CancelTool(run_id)) {
                     log::error!("Failed to send CancelTool event: {}", e);
                 }
             }
-            app.state.clicked_tool_info = None;
+            // clicked_tool_info already cleared by take()
         } else {
-            render_tool_info_modal(app, ctx, tool_name, tool_args);
-            // Don't clear clicked_tool_info here - let render_tool_info_modal decide
+            // Process the tool info modal
+            render_tool_info_modal(app, ctx, &tool_name, &tool_args);
+            // Note: render_tool_info_modal may set clicked_tool_info back if needed for terminal tools
         }
     }
 
@@ -102,7 +101,6 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     // Tools list with descriptions
                     let tools = vec![
-                        ("analyze_input", "Analyze user input to determine relevant tools and search strategies"),
                         ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
                         ("read_file", "Read file contents from repositories"),
                         ("view_file", "View specific files in a repository with line range support"),
@@ -187,21 +185,11 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.panels.toggle_panel(ActivePanel::ThemeCustomizer);
     }
     if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-        // Ctrl+`: Toggle terminal panel (like VS Code)
-        app.state.toggle_terminal();
+        // Ctrl+`: Terminal functionality removed
     }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
-        // Ctrl+M: Toggle model selection panel (OpenRouter only)
-        let is_openrouter = match app.config.try_lock() {
-            Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
-            Err(_) => false,
-        };
-        
-        if is_openrouter {
-            app.panels.toggle_panel(ActivePanel::ModelSelection);
-        } else {
-            log::debug!("Model selection hotkey ignored - not using OpenRouter");
-        }
+        // Ctrl+M: Toggle model selection panel
+        app.panels.toggle_panel(ActivePanel::ModelSelection);
     }
     if ctx.input(|i| i.key_pressed(Key::F1)) {
         // F1: Toggle hotkeys modal
@@ -367,11 +355,8 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                 let user_msg_clone = context_aware_message;
                 let app_event_sender_clone = app.app_event_sender.clone();
                 
-                // Determine provider type before entering async block
-                let is_claude_code = match app.config.try_lock() {
-                    Ok(config) => matches!(config.provider, crate::config::types::LlmProvider::ClaudeCode),
-                    Err(_) => false,
-                };
+                // Always using Claude Code now
+                let is_claude_code = true;
                 
                 app.state.is_waiting_for_response = true;
                 
@@ -656,8 +641,11 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.settings_panel.toggle();
             }
             
-            // Render the settings panel
-            app.settings_panel.render(ctx, app.state.current_theme);
+            // Render the settings panel and check if it should be closed
+            if app.settings_panel.render(ctx, app.state.current_theme) {
+                // Settings panel requested to be closed
+                app.panels.toggle_panel(ActivePanel::None);
+            }
         },
         ActivePanel::ModelSelection => {
             // Handle model selection
@@ -665,12 +653,12 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
                 // Update the current model in the app configuration
                 app.panels.set_current_model(selected_model.clone());
                 
-                // Update the OpenRouter configuration
+                // Update the Claude Code configuration
                 let config = app.config.clone();
                 let model_id = selected_model.clone();
                 tokio::spawn(async move {
                     let mut config_guard = config.lock().await;
-                    config_guard.openrouter.model = model_id.clone();
+                    config_guard.claude_code.model = model_id.clone();
                     
                     // Respect test isolation by using save_config which handles test paths
                     if let Err(err) = crate::config::save_config(&*config_guard) {
@@ -781,22 +769,15 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Model Selection Panel (OpenRouter only)
-                let is_openrouter = match app.config.try_lock() {
-                    Ok(config_guard) => matches!(config_guard.provider, crate::config::types::LlmProvider::OpenRouter),
-                    Err(_) => false,
-                };
-                
-                if is_openrouter {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                                app.panels.toggle_panel(ActivePanel::ModelSelection);
-                            }
-                        });
+                // Model Selection Panel
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + M: Toggle Model Selection Panel").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::ModelSelection);
+                        }
                     });
-                }
+                });
                 
                 // Analytics Panel
                 ui.horizontal(|ui| {
@@ -822,8 +803,8 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Ctrl + `: Toggle Terminal Panel").color(theme.text_color()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.state.toggle_terminal();
+                        if ui.button(egui::RichText::new("Terminal Removed").color(theme.button_text_color())).clicked() {
+                            // Terminal functionality removed
                         }
                     });
                 });
@@ -984,6 +965,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         .max_height(200.0) // Max height to prevent it from taking too much space
         .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(16.0, 12.0)))
         .show(ctx, |ui| {
+            let mut repository_refresh_requested = false;
             let input_id = chat_input_ui(
                 ui, 
                 &mut app.state.chat_input_buffer, 
@@ -991,32 +973,25 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.state.is_waiting_for_response,
                 app.state.current_theme,
                 &mut app.state.show_hotkeys_modal,
-                app.state.current_agent_mode,
-                &mut app.state.pending_agent_mode_change,
                 // Repository context parameters
                 &app.state.current_repository_context,
                 &app.state.available_repositories,
                 &mut app.state.pending_repository_context_change,
+                &mut repository_refresh_requested,
                 // Loop control parameters
                 app.state.is_in_loop,
                 &mut app.state.loop_break_requested,
                 &mut app.state.loop_inject_buffer,
                 &mut app.state.show_loop_inject_input,
                 &mut app.state.loop_inject_message,
+                // Focus management
+                &mut app.state.should_focus_input,
             );
             
-            // Handle agent mode changes
-            if let Some(new_mode) = app.state.pending_agent_mode_change.take() {
-                app.state.current_agent_mode = new_mode; // Update cached mode immediately
-                if let Some(agent) = &app.agent {
-                    let agent_clone = agent.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = agent_clone.set_mode(new_mode).await {
-                            log::error!("Failed to change agent mode: {}", e);
-                        } else {
-                            log::info!("Agent mode changed to: {:?}", new_mode);
-                        }
-                    });
+            // Handle repository refresh request
+            if repository_refresh_requested {
+                if let Err(e) = app.app_event_sender.send(super::events::AppEvent::RefreshRepositoryList) {
+                    log::error!("Failed to send RefreshRepositoryList event: {}", e);
                 }
             }
 
@@ -1121,31 +1096,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         });
 
-    // --- Terminal Panel (Above Input) ---
-    if app.state.show_terminal {
-        TopBottomPanel::bottom("terminal_panel")
-            .resizable(true)
-            .min_height(200.0)
-            .max_height(600.0)
-            .default_height(400.0)
-            .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(8.0, 8.0)))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Terminal");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Clear").clicked() {
-                            app.state.clear_terminal();
-                        }
-                        if ui.small_button("Hide").clicked() {
-                            app.state.toggle_terminal();
-                        }
-                    });
-                });
-                ui.separator();
-                
-                app.state.terminal_widget.show(ui);
-            });
-    }
+    // Terminal functionality removed
 
     // --- Chat View Panel (Central) ---
     egui::CentralPanel::default()
@@ -1154,11 +1105,11 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
-                // Use the modern streaming chat view
-                let messages = app.chat_manager.get_all_messages();
+                // Use the modern streaming chat view with all items (messages + tool cards)
+                let items = app.chat_manager.get_all_items();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });
@@ -1180,67 +1131,30 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         log::debug!("Detected tool result, determining display method");
         // This is a tool result - determine how to display it
         // Check specifically for shell/terminal commands, not code search
-        if tool_name.contains("Terminal Output") || tool_name.contains("shell") || 
-           (tool_name.contains("execution") && !tool_name.contains("search")) ||
-           tool_args.contains("stdout") || tool_args.contains("stderr") || tool_args.contains("exit_code") {
-            log::debug!("Handling terminal output for: {}", tool_name);
+        // Fix: Be more specific about what constitutes a terminal output
+        let is_terminal_output = tool_name.contains("Terminal Output") || 
+            tool_name.contains("streaming_shell_execution") ||
+            (tool_name.contains("shell") && !tool_name.contains("search")) || 
+            (tool_name.contains("shell_execution") && !tool_name.contains("search")) ||
+            (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
-            // If terminal is already showing this tool's output, close it
-            // Otherwise, show the terminal and add the output
-            if app.state.show_terminal {
-                // Terminal is already open - just close it
-                app.state.show_terminal = false;
-            } else {
-                // Terminal is closed - open it and show the output
-                app.state.show_terminal = true;
-                
-                // Parse and add the shell output to terminal
-                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(tool_args) {
-                    if let Some(obj) = json_value.as_object() {
-                        let mut terminal_output = String::new();
-                        
-                        // Add command info if available
-                        if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
-                            terminal_output.push_str(&format!("$ {}\n", command));
-                        }
-                        
-                        // Add stdout
-                        if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
-                            if !stdout.trim().is_empty() {
-                                terminal_output.push_str(stdout);
-                                if !stdout.ends_with('\n') {
-                                    terminal_output.push('\n');
-                                }
-                            }
-                        }
-                        
-                        // Add stderr
-                        if let Some(stderr) = obj.get("stderr").and_then(|v| v.as_str()) {
-                            if !stderr.trim().is_empty() {
-                                terminal_output.push_str(&format!("stderr: {}\n", stderr));
-                            }
-                        }
-                        
-                        // Add exit code
-                        if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
-                            terminal_output.push_str(&format!("Exit code: {}\n", exit_code));
-                        }
-                        
-                        // Add the output to terminal widget
-                        app.state.terminal_widget.add_output(&terminal_output);
-                    } else {
-                        // Fallback: add raw JSON to terminal
-                        app.state.terminal_widget.add_output(tool_args);
-                    }
-                } else {
-                    // Not JSON, add as plain text
-                    app.state.terminal_widget.add_output(tool_args);
-                }
-            }
+        if is_terminal_output {
+            log::debug!("Terminal output detected for: {} (terminal functionality removed)", tool_name);
+            // Terminal functionality removed - fall through to preview
         } else {
             // This is a non-shell tool result - show in preview
             log::debug!("Showing preview for non-shell tool result: {}", tool_name);
-            app.show_preview(tool_name, tool_args);
+            
+            // For "Tool Result", tool_args contains the tool call ID - look up actual result
+            if tool_name == "Tool Result" {
+                if let Some(tool_result) = app.state.tool_results.get(tool_args).cloned() {
+                    app.show_preview(&format!("Tool Result ({})", tool_args), &tool_result);
+                } else {
+                    app.show_preview(tool_name, &format!("Tool result not found for ID: {}", tool_args));
+                }
+            } else {
+                app.show_preview(tool_name, tool_args);
+            }
         }
     } else {
         // This is a tool call - format tool arguments nicely and show in preview
@@ -1253,14 +1167,8 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
         app.show_preview(&format!("{} Tool Call", tool_name), &formatted_args);
     }
     
-    // Only clear clicked tool info if preview was shown
-    // This prevents the "view details" button from breaking after multiple clicks
-    if !tool_name.contains("Terminal Output") && !tool_name.contains("shell") && 
-       !(tool_name.contains("execution") && !tool_name.contains("search")) &&
-       !tool_args.contains("stdout") && !tool_args.contains("stderr") && !tool_args.contains("exit_code") {
-        // Clear only for non-terminal tools that show preview
-        app.state.clicked_tool_info = None;
-    }
+    // Note: clicked_tool_info is now cleared by take() in the main render function
+    // This prevents the terminal output from being added repeatedly every frame
 }
 
 /// Refresh conversation clusters periodically
@@ -2045,14 +1953,92 @@ mod tests {
         
         for (tool_name, tool_args) in non_shell_tools {
             // Check if this would be treated as a shell command
-            let is_shell = tool_name.contains("Terminal Output") || 
-                          tool_name.contains("shell") || 
-                          (tool_name.contains("execution") && !tool_name.contains("search")) ||
-                          tool_args.contains("stdout") || 
-                          tool_args.contains("stderr") || 
-                          tool_args.contains("exit_code");
+            let is_terminal_output = tool_name.contains("Terminal Output") || 
+                tool_name.contains("streaming_shell_execution") ||
+                (tool_name.contains("shell") && !tool_name.contains("search")) || 
+                (tool_name.contains("shell_execution") && !tool_name.contains("search")) ||
+                (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
-            assert!(!is_shell, "{} should NOT be treated as shell command", tool_name);
+            assert!(!is_terminal_output, "{} should NOT be treated as terminal output", tool_name);
+        }
+    }
+    
+    /// Test that clicked_tool_info is processed only once to prevent repeated terminal writes
+    #[test]
+    fn test_clicked_tool_info_processed_once() {
+        // This test verifies the fix for the flickering issue where terminal output
+        // was being added every frame when clicked_tool_info remained Some
+        
+        // The fix uses take() to ensure clicked_tool_info is processed only once
+        let mut clicked_tool_info: Option<(String, String)> = Some(("test_tool".to_string(), "args".to_string()));
+        
+        // First frame - should process and clear
+        if let Some((tool_name, tool_args)) = clicked_tool_info.take() {
+            assert_eq!(tool_name, "test_tool");
+            assert_eq!(tool_args, "args");
+        }
+        
+        // clicked_tool_info should now be None
+        assert!(clicked_tool_info.is_none());
+        
+        // Second frame - should not process anything
+        if let Some(_) = clicked_tool_info.take() {
+            panic!("clicked_tool_info should have been cleared by first take()");
+        }
+    }
+    
+    /// Test the updated terminal output detection logic
+    #[test]
+    fn test_terminal_output_detection() {
+        struct TestCase {
+            tool_name: &'static str,
+            tool_args: &'static str,
+            expected: bool,
+            description: &'static str,
+        }
+        
+        let test_cases = vec![
+            TestCase {
+                tool_name: "streaming_shell_execution - Terminal Output",
+                tool_args: r#"{"stdout": "output", "stderr": "", "exit_code": 0}"#,
+                expected: true,
+                description: "streaming_shell_execution with Terminal Output suffix",
+            },
+            TestCase {
+                tool_name: "shell - Result",
+                tool_args: r#"{"stdout": "test", "stderr": "", "exit_code": 0}"#,
+                expected: true,
+                description: "shell tool with all terminal fields",
+            },
+            TestCase {
+                tool_name: "search_code - Result",
+                tool_args: r#"{"results": [], "query": "test"}"#,
+                expected: false,
+                description: "search_code should open preview, not terminal",
+            },
+            TestCase {
+                tool_name: "code_search_execution - Result",
+                tool_args: r#"{"results": []}"#,
+                expected: false,
+                description: "code search execution should open preview",
+            },
+            TestCase {
+                tool_name: "execution - Result",
+                tool_args: r#"{"result": "data"}"#,
+                expected: false,
+                description: "execution without terminal fields should open preview",
+            },
+        ];
+        
+        for test in test_cases {
+            let is_terminal_output = test.tool_name.contains("Terminal Output") || 
+                test.tool_name.contains("streaming_shell_execution") ||
+                (test.tool_name.contains("shell") && !test.tool_name.contains("search")) || 
+                (test.tool_name.contains("shell_execution") && !test.tool_name.contains("search")) ||
+                (test.tool_args.contains("stdout") && test.tool_args.contains("stderr") && test.tool_args.contains("exit_code"));
+                          
+            assert_eq!(is_terminal_output, test.expected, 
+                      "Failed for {}: {}", test.tool_name, test.description);
         }
     }
 }

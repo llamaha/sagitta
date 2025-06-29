@@ -24,30 +24,36 @@ impl ClaudeProcess {
     /// Spawn the claude process with the given arguments
     pub async fn spawn(
         &self,
-        system_prompt: &str,
-        messages: &[ClaudeMessage],
-        tools: &[String], // Tool names to disable
+        prompt: &str,
     ) -> Result<Child, ClaudeCodeError> {
-        // Convert messages to JSON format like Roo-Code does
-        let messages_json = serde_json::to_string(messages)?;
-        
+        self.spawn_with_mcp(prompt, None).await
+    }
+    
+    /// Spawn the claude process with optional MCP configuration
+    pub async fn spawn_with_mcp(
+        &self,
+        prompt: &str,
+        mcp_config_path: Option<&str>,
+    ) -> Result<Child, ClaudeCodeError> {
         log::info!("CLAUDE_CODE: Spawning claude process");
         log::info!("CLAUDE_CODE: Binary path: {}", self.config.claude_path);
         log::info!("CLAUDE_CODE: Model: {}", self.config.model);
-        log::debug!("CLAUDE_CODE: Messages JSON: {}", messages_json);
-        log::debug!("CLAUDE_CODE: System prompt: {}", system_prompt);
+        log::debug!("CLAUDE_CODE: Prompt: {}", prompt);
         
         let mut args = vec![
             "-p".to_string(),
-            messages_json,
-            "--system-prompt".to_string(),
-            system_prompt.to_string(),
+            prompt.to_string(),
             "--verbose".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
-            "--max-turns".to_string(),
-            "1".to_string(), // Let sagitta-code handle multi-turn
+            "--dangerously-skip-permissions".to_string(),
         ];
+        
+        // Add max-turns if not unlimited (0)
+        if self.config.max_turns > 0 {
+            args.push("--max-turns".to_string());
+            args.push(self.config.max_turns.to_string());
+        }
         
         // Add model if specified
         if !self.config.model.is_empty() {
@@ -55,10 +61,61 @@ impl ClaudeProcess {
             args.push(self.config.model.clone());
         }
         
-        // Disable tools if any
-        if !tools.is_empty() {
+        // Add MCP config if provided
+        if let Some(mcp_path) = mcp_config_path {
+            args.push("--mcp-config".to_string());
+            args.push(mcp_path.to_string());
+            log::info!("CLAUDE_CODE: Using MCP config: {}", mcp_path);
+            
+            // Allow all MCP tools from our server
+            // Claude CLI prefixes MCP tools with mcp__servername__toolname
+            // Try multiple approaches based on GitHub issues
+            args.push("--allowedTools".to_string());
+            
+            // Build a list of all MCP tool patterns
+            let mcp_tools = vec![
+                // Shell execution
+                "mcp__*__streaming_shell_execution",
+                // File operations
+                "mcp__*__read_file",
+                // Repository tools
+                "mcp__*__view_file",
+                "mcp__*__list_repositories",
+                "mcp__*__add_existing_repository",
+                "mcp__*__sync_repository", 
+                "mcp__*__remove_repository",
+                "mcp__*__search_file_in_repository",
+                "mcp__*__repository_map",
+                "mcp__*__targeted_view",
+                // Code search
+                "mcp__*__search_code",
+                // Web search
+                "mcp__*__web_search",
+                // Code editing
+                "mcp__*__edit_file",
+                "mcp__*__validate",
+                "mcp__*__semantic_edit",
+                // Wildcards as fallback
+                "mcp__*",
+                "*"
+            ];
+            
+            args.push(mcp_tools.join(","));
+            log::info!("CLAUDE_CODE: Allowing MCP tools: {}", mcp_tools.join(","));
+            
+            // Disable Claude native tools that are duplicated by our MCP tools
             args.push("--disallowedTools".to_string());
-            args.push(tools.join(","));
+            let disallowed_tools = vec![
+                "Read",         // We have mcp__*__view_file
+                // "Edit",         // We have mcp__*__edit_file
+                // "MultiEdit",    // We have mcp__*__edit_file
+                // "Write",        // We have mcp__*__edit_file
+                "Glob",         // We have mcp__*__search_file_in_repository
+                "Grep",         // We have mcp__*__search_code and mcp__*__query
+                "LS",           // We have directory listing through MCP tools
+            ];
+            args.push(disallowed_tools.join(","));
+            log::info!("CLAUDE_CODE: Disallowing native tools: {}", disallowed_tools.join(","));
         }
         
         log::trace!("CLAUDE_CODE: Full args: {:?}", args);

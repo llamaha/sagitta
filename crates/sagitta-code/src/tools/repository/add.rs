@@ -10,7 +10,6 @@ use std::path::Path;
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::utils::errors::SagittaCodeError;
-use terminal_stream::events::StreamEvent;
 
 /// Parameters for adding a repository
 #[derive(Debug, Deserialize, Serialize)]
@@ -32,7 +31,6 @@ pub struct AddExistingRepositoryParams {
 #[derive(Debug)]
 pub struct AddExistingRepositoryTool {
     pub repo_manager: Arc<Mutex<RepositoryManager>>,
-    progress_sender: Option<mpsc::Sender<StreamEvent>>,
 }
 
 impl AddExistingRepositoryTool {
@@ -40,18 +38,15 @@ impl AddExistingRepositoryTool {
     pub fn new(repo_manager: Arc<Mutex<RepositoryManager>>) -> Self {
         Self {
             repo_manager,
-            progress_sender: None,
         }
     }
     
     /// Create a new add existing repository tool with progress reporting
     pub fn new_with_progress_sender(
         repo_manager: Arc<Mutex<RepositoryManager>>, 
-        progress_sender: Option<mpsc::Sender<StreamEvent>>
     ) -> Self {
         Self {
             repo_manager,
-            progress_sender,
         }
     }
     
@@ -189,36 +184,14 @@ impl AddExistingRepositoryTool {
         // Validate parameters first
         self.validate_parameters(params)?;
 
-        // Send initial progress update
-        if let Some(ref sender) = self.progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: format!("Adding repository '{}'...", params.name),
-                percentage: Some(10.0),
-            }).await;
-        }
-
         let mut repo_manager = self.repo_manager.lock().await;
         
         // Step 1: Add the repository
         let add_result = if let Some(local_path) = &params.local_path {
             // Add local repository
-            if let Some(ref sender) = self.progress_sender {
-                let _ = sender.send(StreamEvent::Progress {
-                    message: format!("Registering local repository from '{}'...", local_path),
-                    percentage: Some(25.0),
-                }).await;
-            }
-            
             repo_manager.add_local_repository(&params.name, local_path).await
         } else if let Some(url) = &params.url {
             // Add remote repository
-            if let Some(ref sender) = self.progress_sender {
-                let _ = sender.send(StreamEvent::Progress {
-                    message: format!("Cloning repository from '{}'...", url),
-                    percentage: Some(25.0),
-                }).await;
-            }
-            
             let branch = params.branch.as_deref();
             repo_manager.add_repository(&params.name, url, branch, None).await
         } else {
@@ -228,34 +201,15 @@ impl AddExistingRepositoryTool {
         // Handle add result
         let was_already_existing = match add_result {
             Ok(_) => {
-                if let Some(ref sender) = self.progress_sender {
-                    let _ = sender.send(StreamEvent::Progress {
-                        message: format!("Repository '{}' added successfully", params.name),
-                        percentage: Some(50.0),
-                    }).await;
-                }
                 false
             }
             Err(e) => {
                 let error_msg = e.to_string();
                 if error_msg.contains("already exists in configuration") {
                     // Repository already exists - that's fine, we can still sync it
-                    if let Some(ref sender) = self.progress_sender {
-                        let _ = sender.send(StreamEvent::Progress {
-                            message: format!("Repository '{}' already exists, proceeding to sync", params.name),
-                            percentage: Some(50.0),
-                        }).await;
-                    }
                     true
                 } else {
                     // Real error - return it
-                    if let Some(ref sender) = self.progress_sender {
-                        let _ = sender.send(StreamEvent::Progress {
-                            message: format!("Failed to add repository '{}': {}", params.name, e),
-                            percentage: None,
-                        }).await;
-                    }
-                    
                     return Err(SagittaCodeError::ToolError(format!(
                         "Failed to add repository '{}': {}\n\n\
                         Possible solutions:\n\
@@ -270,22 +224,8 @@ impl AddExistingRepositoryTool {
         };
 
         // Step 2: Automatically sync the repository
-        if let Some(ref sender) = self.progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: format!("Starting sync for repository '{}'...", params.name),
-                percentage: Some(60.0),
-            }).await;
-        }
-
         match repo_manager.sync_repository(&params.name).await {
             Ok(_) => {
-                if let Some(ref sender) = self.progress_sender {
-                    let _ = sender.send(StreamEvent::Progress {
-                        message: format!("Successfully synced repository '{}'", params.name),
-                        percentage: Some(100.0),
-                    }).await;
-                }
-                
                 let status_msg = if was_already_existing {
                     format!("Repository '{}' was already configured and has been synced successfully. The repository is now ready for searching and querying.", params.name)
                 } else {
@@ -295,13 +235,6 @@ impl AddExistingRepositoryTool {
                 Ok(status_msg)
             }
             Err(e) => {
-                if let Some(ref sender) = self.progress_sender {
-                    let _ = sender.send(StreamEvent::Progress {
-                        message: format!("Sync failed for repository '{}': {}", params.name, e),
-                        percentage: None,
-                    }).await;
-                }
-                
                 // Repository was added but sync failed - still return success but mention sync failure
                 let warning_msg = if was_already_existing {
                     format!("Repository '{}' is available but initial sync failed: {}. IMPORTANT: You need to run the sync_repository tool with repository_name '{}' before you can search or query this repository.", params.name, e, params.name)
@@ -356,11 +289,7 @@ impl Tool for AddExistingRepositoryTool {
                             "C:\\Users\\user\\projects\\myproject"
                         ]
                     }
-                },
-                "oneOf": [
-                    { "required": ["url"] },
-                    { "required": ["local_path"] }
-                ]
+                }
             }),
             metadata: std::collections::HashMap::new(),
         }

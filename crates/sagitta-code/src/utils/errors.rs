@@ -29,9 +29,6 @@ pub enum SagittaCodeError {
     #[error("Parse error: {0}")]
     ParseError(String),
     
-    #[error("Reasoning engine error: {0}")]
-    ReasoningError(String),
-    
     #[error("Unknown error: {0}")]
     Unknown(String),
 }
@@ -225,11 +222,10 @@ mod tests {
             SagittaCodeError::NetworkError("network".to_string()),
             SagittaCodeError::EventError("event".to_string()),
             SagittaCodeError::ParseError("parse error".to_string()),
-            SagittaCodeError::ReasoningError("reasoning error".to_string()),
             SagittaCodeError::Unknown("unknown".to_string()),
         ];
         
-        assert_eq!(errors.len(), 11); // Corrected count from 10 to 11
+        assert_eq!(errors.len(), 10); // Updated count after removing ReasoningError
         
         for error in errors {
             // Each error should have a meaningful string representation

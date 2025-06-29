@@ -15,6 +15,7 @@ use super::SagittaCodeApp;
 use crate::config::types::SagittaCodeConfig;
 use sagitta_search::AppConfig;
 use crate::gui::repository::manager::RepositoryManager;
+use serde_json::{Value, Map};
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub enum AppEvent {
         suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>,
     },
     RepositoryListUpdated(Vec<String>),
+    RefreshRepositoryList,
     CancelTool(ToolRunId),
     // Add other app-level UI events here if needed
 }
@@ -64,34 +66,57 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
         for event in events {
             match event {
                 AgentEvent::LlmMessage(message) => {
-                    // CRITICAL FIX: Only add complete messages if we're NOT currently streaming
-                    // This prevents overwriting streaming responses AND prevents duplication
+                    // Handle complete messages with better race condition detection
                     if app.state.current_response_id.is_none() && !app.state.is_streaming_response {
+                        // Normal case: no active streaming
                         let chat_message = make_chat_message_from_agent_message(&message);
                         let streaming_message: StreamingMessage = chat_message.into();
                         app.chat_manager.add_complete_message(streaming_message);
                         log::info!("SagittaCodeApp: Added complete LlmMessage as new message");
+                    } else if app.state.is_streaming_response && app.state.current_response_id.is_none() {
+                        // Race condition: streaming flag is set but no response ID
+                        // This can happen when final chunk just cleared the ID but flag is still set
+                        log::debug!("SagittaCodeApp: Detected race condition - streaming flag set but no response ID, adding message");
+                        let chat_message = make_chat_message_from_agent_message(&message);
+                        let streaming_message: StreamingMessage = chat_message.into();
+                        app.chat_manager.add_complete_message(streaming_message);
+                        app.state.is_streaming_response = false;
                     } else {
-                        log::warn!("SagittaCodeApp: Ignoring complete LlmMessage because we're currently streaming (response_id: {:?}, is_streaming: {})", app.state.current_response_id, app.state.is_streaming_response);
+                        // Active streaming - check if it's a duplicate or error recovery
+                        if let Some(response_id) = &app.state.current_response_id {
+                            log::debug!("SagittaCodeApp: Received LlmMessage during active streaming (id: {}), likely from error recovery", response_id);
+                        } else {
+                            log::warn!("SagittaCodeApp: Unexpected state - streaming with response_id but shouldn't reach here");
+                        }
                     }
                     app.state.is_waiting_for_response = false;
                 },
-                AgentEvent::LlmChunk { content, is_final } => {
-                    // Only log substantial chunks or final chunks to reduce noise
-                    if is_final || content.len() > 20 {
-                        log::info!("SagittaCodeApp: GUI received AgentEvent::LlmChunk - content: '{}', is_final: {}", 
-                                  content.chars().take(50).collect::<String>(), is_final);
-                    } else {
-                        log::trace!("SagittaCodeApp: GUI received small LlmChunk - length: {}, is_final: {}", 
-                                   content.len(), is_final);
+                AgentEvent::LlmChunk { content, is_final, is_thinking } => {
+                    // Ignore thinking chunks since we don't display them anymore
+                    if !is_thinking {
+                        handle_llm_chunk(app, content, is_final);
                     }
-                    handle_llm_chunk(app, content, is_final, None);
                 },
                 AgentEvent::ToolCall { tool_call } => {
-                    handle_tool_call(app, tool_call);
+                    // Tool calls are now handled inline in the streaming response
+                    // Just log for tracking purposes
+                    log::debug!("Tool call received (now handled inline): {}", tool_call.name);
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                    handle_tool_call_result(app, tool_call_id, tool_name, result);
+                    // Store tool result for preview display
+                    let result_string = match &result {
+                        crate::tools::types::ToolResult::Success(data) => {
+                            serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
+                        },
+                        crate::tools::types::ToolResult::Error { error } => {
+                            format!("Error: {}", error)
+                        }
+                    };
+                    
+                    // Store the result for potential preview display
+                    app.state.tool_results.insert(tool_call_id.clone(), result_string);
+                    
+                    log::info!("Tool call {} ({}) completed and result stored for preview", tool_call_id, tool_name);
                 },
                 AgentEvent::ToolCallPending { tool_call } => {
                     // Add to events panel instead of chat to save space
@@ -289,6 +314,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 log::info!("Received RepositoryListUpdated event with {} repositories: {:?}", repo_list.len(), repo_list);
                 app.handle_repository_list_update(repo_list);
             },
+            AppEvent::RefreshRepositoryList => {
+                log::debug!("Received RefreshRepositoryList event, triggering manual refresh");
+                app.trigger_repository_list_refresh();
+            },
             AppEvent::CancelTool(run_id) => {
                 log::info!("Received CancelTool event for run_id: {}", run_id);
                 handle_tool_cancellation(app, run_id);
@@ -313,28 +342,15 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 }
 
 /// Handle LLM chunk events from the agent
-fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, tool_call_id: Option<String>) {
-    // Check if this is thinking content
-    let (is_thinking, actual_content) = if content.starts_with("THINKING:") {
-        (true, content.strip_prefix("THINKING:").unwrap_or(&content).to_string())
-    } else {
-        (false, content)
-    };
+fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool) {
+    let actual_content = content;
     
     let current_response_id = app.state.current_response_id.clone();
     
     match current_response_id {
         Some(current_id) => {
             // We have an ongoing response, append to it
-            if is_thinking {
-                log::trace!("handle_llm_chunk: Appending THINKING content for ID: '{}': '{}'", 
-                           current_id, actual_content.chars().take(50).collect::<String>());
-                app.chat_manager.append_thinking(&current_id, actual_content);
-            } else {
-                log::trace!("handle_llm_chunk: Appending REGULAR content for ID: '{}': '{}'", 
-                           current_id, actual_content.chars().take(50).collect::<String>());
-                app.chat_manager.append_content(&current_id, actual_content);
-            }
+            app.chat_manager.append_content(&current_id, actual_content);
             
             if is_final {
                 app.chat_manager.finish_streaming(&current_id);
@@ -354,33 +370,13 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, t
             app.state.current_response_id = Some(response_id.clone());
             app.state.is_streaming_response = true;
             
-            // Only log for substantial content or final chunks
-            if is_final || actual_content.len() > 20 {
-                log::info!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
-            } else {
-                log::trace!("SagittaCodeApp: Started NEW agent response with ID: {}", response_id);
-            }
-            
-            if is_thinking {
-                app.chat_manager.append_thinking(&response_id, actual_content.clone());
-            } else {
-                app.chat_manager.append_content(&response_id, actual_content.clone());
-            }
+            app.chat_manager.append_content(&response_id, actual_content.clone());
             
             if is_final {
                 app.chat_manager.finish_streaming(&response_id);
                 app.state.current_response_id = None;
                 app.state.is_streaming_response = false;
                 app.state.is_waiting_for_response = false;
-                if std::env::var("SAGITTA_STREAMING_DEBUG").is_ok() {
-                    log::debug!("handle_llm_chunk: Immediately completed response for ID: '{}'", response_id);
-                } else {
-                    log::trace!("handle_llm_chunk: Immediately completed response");
-                }
-            } else {
-                log::trace!("handle_llm_chunk: Appending {} content for ID: '{}': '{}'", 
-                           if is_thinking { "THINKING" } else { "REGULAR" },
-                           response_id, actual_content.chars().take(50).collect::<String>());
             }
         }
     }
@@ -389,9 +385,10 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, t
 /// Handle tool call events
 pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
     // Add to events panel for system tracking
+    let preview = format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default());
     app.panels.events_panel.add_event(
         SystemEventType::ToolExecution,
-        format!("Executing tool (events.rs): {}", tool_call.name)
+        format!("🔧 {}", preview)
     );
     
     // Store pending tool call in state
@@ -411,7 +408,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             
         let view_tool_call = ViewToolCall {
             name: tool_call.name.clone(),
-            arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+            arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
             result: None,
             status: MessageStatus::Streaming,
             content_position,
@@ -424,7 +421,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             let content_position = Some(last_agent_msg.content.len());
             let view_tool_call = ViewToolCall {
                 name: tool_call.name.clone(),
-                arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+                arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
                 result: None,
                 status: MessageStatus::Streaming,
                 content_position,
@@ -497,6 +494,9 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
     let (state_message, event_type) = match &state {
         AgentState::Idle => {
             app.state.is_waiting_for_response = false;
+            app.state.is_thinking = false;
+            app.state.is_responding = false;
+            app.state.is_executing_tool = false;
             if app.state.is_in_loop {
                 log::info!("Agent exited loop state - updating UI (handle_state_change)");
                 app.state.is_in_loop = false;
@@ -1039,8 +1039,11 @@ impl SagittaCodeApp {
     pub fn handle_agent_event(&mut self, event: AgentEvent, ctx: &egui::Context) {
         // Process the event through the existing handler
         match event {
-            AgentEvent::LlmChunk { content, is_final } => {
-                handle_llm_chunk(self, content, is_final, None);
+            AgentEvent::LlmChunk { content, is_final, is_thinking } => {
+                // Ignore thinking chunks since we don't display them anymore
+                if !is_thinking {
+                    handle_llm_chunk(self, content, is_final);
+                }
             },
             AgentEvent::ToolCall { tool_call } => {
                 handle_tool_call(self, tool_call);
@@ -1141,11 +1144,7 @@ impl SagittaCodeApp {
         }
     }
 
-    /// Handle repository list update
-    pub fn handle_repository_list_update(&mut self, repo_list: Vec<String>) {
-        log::info!("Received repository list update with {} repositories: {:?}", repo_list.len(), repo_list);
-        self.state.update_available_repositories(repo_list);
-    }
+    // Method moved to app.rs
 }
 
 /// Handle tool run started event
@@ -1186,24 +1185,16 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
     let status = if success { "completed" } else { "failed" };
     app.state.tool_results.insert(run_id.to_string(), format!("Tool {} {}", tool, status));
     
+    // Request focus on input after tool completion
+    app.state.should_focus_input = true;
+    
     // UI will update on next frame automatically
 }
 
 /// Handle tool stream event (progress updates)
-pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: terminal_stream::events::StreamEvent) {
-    match &event {
-        terminal_stream::events::StreamEvent::Progress { message, percentage } => {
-            // Update progress in running tools tracking
-            if let Some(tool_info) = app.state.running_tools.get_mut(&run_id) {
-                tool_info.progress = percentage.map(|p| p as f32 / 100.0);
-                log::debug!("Tool {} progress: {} ({}%)", run_id, message, percentage.unwrap_or(0.0));
-            }
-        },
-        _ => {
-            // Handle other stream events if needed
-            log::debug!("Tool stream event for run {}: {:?}", run_id, event);
-        }
-    }
+pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
+    // Simplified tool stream handling without terminal_stream
+    log::debug!("Tool stream event for run {}: {}", run_id, event);
 }
 
 /// Handle tool cancellation request
@@ -1964,5 +1955,126 @@ mod tests {
         // Verify messages were loaded into chat manager
         assert_eq!(app.chat_manager.get_all_messages().len(), 2);
         assert!(!app.state.conversation_data_loading);
+    }
+}
+
+/// Format tool arguments for user-friendly display
+pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> String {
+    // Try to parse as JSON first
+    let parsed: Result<Value, _> = serde_json::from_str(arguments);
+    
+    match parsed {
+        Ok(json) => {
+            // Format based on tool type
+            match tool_name {
+                name if name.contains("repository_list") || name.contains("list_repositories") => {
+                    "Listing available repositories".to_string()
+                },
+                name if name.contains("query") || name.contains("search") => {
+                    if let Some(query_text) = json.get("queryText").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else if let Some(query_text) = json.get("query").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else {
+                        "Performing search".to_string()
+                    }
+                },
+                name if name.contains("view_file") || name.contains("read_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Reading file: {}", file_path)
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Reading file: {}", file_path)
+                    } else {
+                        "Reading file".to_string()
+                    }
+                },
+                name if name.contains("edit_file") || name.contains("write_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Editing file: {}", file_path)
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Editing file: {}", file_path)
+                    } else {
+                        "Editing file".to_string()
+                    }
+                },
+                name if name.contains("shell") || name.contains("execution") => {
+                    if let Some(command) = json.get("command").and_then(|v| v.as_str()) {
+                        format!("Running: {}", command.chars().take(60).collect::<String>())
+                    } else {
+                        "Executing command".to_string()
+                    }
+                },
+                name if name.contains("repository_add") || name.contains("add_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Adding repository: {}", name)
+                    } else {
+                        "Adding repository".to_string()
+                    }
+                },
+                name if name.contains("repository_sync") || name.contains("sync_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Syncing repository: {}", name)
+                    } else {
+                        "Syncing repository".to_string()
+                    }
+                },
+                name if name.contains("search_file") => {
+                    if let Some(pattern) = json.get("pattern").and_then(|v| v.as_str()) {
+                        format!("Searching files for: {}", pattern)
+                    } else {
+                        "Searching files".to_string()
+                    }
+                },
+                name if name.contains("repository_map") => {
+                    if let Some(repo_name) = json.get("repositoryName").and_then(|v| v.as_str()) {
+                        format!("Mapping repository: {}", repo_name)
+                    } else {
+                        "Mapping repository structure".to_string()
+                    }
+                },
+                name if name.contains("switch_branch") => {
+                    if let Some(branch) = json.get("branchName").and_then(|v| v.as_str()) {
+                        format!("Switching to branch: {}", branch)
+                    } else {
+                        "Switching branch".to_string()
+                    }
+                },
+                _ => {
+                    // Generic formatting for unknown tools
+                    if let Some(obj) = json.as_object() {
+                        // Show key parameters
+                        let key_params: Vec<String> = obj.iter()
+                            .take(2) // Limit to first 2 parameters
+                            .map(|(k, v)| {
+                                let value_str = match v {
+                                    Value::String(s) => s.chars().take(30).collect::<String>(),
+                                    Value::Number(n) => n.to_string(),
+                                    Value::Bool(b) => b.to_string(),
+                                    _ => "...".to_string(),
+                                };
+                                format!("{}={}", k, value_str)
+                            })
+                            .collect();
+                        
+                        if key_params.is_empty() {
+                            format!("Executing {}", tool_name)
+                        } else {
+                            format!("Executing {} with {}", tool_name, key_params.join(", "))
+                        }
+                    } else {
+                        format!("Executing {}", tool_name)
+                    }
+                }
+            }
+        },
+        Err(_) => {
+            // Fallback for non-JSON arguments
+            if arguments.is_empty() {
+                format!("Executing {}", tool_name)
+            } else {
+                let preview = arguments.chars().take(50).collect::<String>();
+                format!("Executing {} with: {}", tool_name, preview)
+            }
+        }
     }
 } 

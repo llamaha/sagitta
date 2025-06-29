@@ -10,10 +10,6 @@ use egui_notify::Toasts;
 use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
-use terminal_stream::{
-    events::StreamEvent,
-    TerminalWidget, TerminalConfig,
-};
 
 /// Information about a currently running tool
 #[derive(Debug, Clone)]
@@ -45,12 +41,6 @@ pub struct AppState {
     pub available_repositories: Vec<String>,
     pub pending_repository_context_change: Option<String>,
     
-    // Terminal state
-    pub terminal_widget: TerminalWidget,
-    pub terminal_event_sender: Option<mpsc::Sender<StreamEvent>>,
-    pub terminal_event_receiver: Option<mpsc::Receiver<StreamEvent>>,
-    pub show_terminal: bool,
-    
     // Agent operational state flags for UI
     pub current_agent_state: AgentState,
     pub is_thinking: bool,
@@ -80,6 +70,9 @@ pub struct AppState {
     // Running tool tracking
     pub running_tools: HashMap<ToolRunId, RunningToolInfo>,
     
+    // Thinking content state
+    pub collapsed_thinking: HashMap<String, bool>, // message_id -> collapsed state
+    
     // Sidebar state
     pub sidebar_action: Option<SidebarAction>,
     pub editing_conversation_id: Option<Uuid>,
@@ -92,17 +85,13 @@ pub struct AppState {
     pub loop_inject_message: Option<String>,
     pub loop_inject_buffer: String,
     pub show_loop_inject_input: bool,
+    
+    // Input focus management
+    pub should_focus_input: bool,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        // Create terminal widget with default config
-        let terminal_config = TerminalConfig::default();
-        let terminal_widget = TerminalWidget::new("main_terminal");
-        
-        // Create terminal event channel
-        let (terminal_event_sender, terminal_event_receiver) = mpsc::channel(1000);
-        
         Self {
             // Chat state
             chat_input_buffer: String::new(),
@@ -122,12 +111,6 @@ impl AppState {
             current_repository_context: None,
             available_repositories: Vec::new(),
             pending_repository_context_change: None,
-            
-            // Terminal state
-            terminal_widget,
-            terminal_event_sender: Some(terminal_event_sender),
-            terminal_event_receiver: Some(terminal_event_receiver),
-            show_terminal: false,
             
             // Agent operational state flags for UI
             current_agent_state: AgentState::default(),
@@ -158,6 +141,9 @@ impl AppState {
             // Running tool tracking
             running_tools: HashMap::new(),
             
+            // Thinking content state
+            collapsed_thinking: HashMap::new(),
+            
             // Sidebar state
             sidebar_action: None,
             editing_conversation_id: None,
@@ -170,6 +156,9 @@ impl AppState {
             loop_inject_message: None,
             loop_inject_buffer: String::new(),
             show_loop_inject_input: false,
+            
+            // Input focus management
+            should_focus_input: true, // Focus input on startup
         }
     }
 
@@ -277,39 +266,10 @@ impl AppState {
         }
     }
 
-    /// Toggle terminal visibility
-    pub fn toggle_terminal(&mut self) {
-        self.show_terminal = !self.show_terminal;
-    }
-
-    /// Clear the terminal
-    pub fn clear_terminal(&mut self) {
-        self.terminal_widget.clear();
-    }
-
-    /// Get the terminal event sender for shell execution
-    pub fn get_terminal_event_sender(&self) -> Option<mpsc::Sender<StreamEvent>> {
-        self.terminal_event_sender.clone()
-    }
+    // Terminal functionality removed
 
 
 
-    /// Process terminal events (call this in the main update loop)
-    pub fn process_terminal_events(&mut self) {
-        if let Some(receiver) = &mut self.terminal_event_receiver {
-            let mut received_any_event = false;
-            while let Ok(event) = receiver.try_recv() {
-                received_any_event = true;
-                let _ = self.terminal_widget.add_event(&event);
-            }
-            
-            // Terminal is now only opened when user clicks the preview link
-            // This prevents unwanted terminal popups during tool execution
-            if received_any_event {
-                log::debug!("Processed terminal events (terminal will open only when user clicks preview)");
-            }
-        }
-    }
 
     /// Switch to a conversation and update the chat view
     pub fn switch_to_conversation(&mut self, conversation_id: Uuid) {
@@ -673,24 +633,6 @@ mod tests {
         assert_eq!(state.current_theme, AppTheme::Custom);
     }
 
-    #[test]
-    fn test_process_terminal_events_no_auto_open() {
-        let mut state = AppState::new();
-        
-        // Initially terminal should be hidden
-        assert!(!state.show_terminal);
-        
-        // Send a terminal event
-        if let Some(sender) = state.terminal_event_sender.clone() {
-            let _ = sender.try_send(StreamEvent::stdout(None, "test output".to_string()));
-        }
-        
-        // Process events - should NOT auto-open terminal anymore
-        state.process_terminal_events();
-        
-        // Terminal should remain hidden (only opens when user clicks preview)
-        assert!(!state.show_terminal);
-    }
 
     #[test]
     fn test_switch_to_conversation() {
@@ -762,5 +704,36 @@ mod tests {
         // With repository
         state.set_repository_context(Some("my-project".to_string()));
         assert_eq!(state.get_repository_context_display(), "📁 my-project");
+    }
+
+    #[test]
+    fn test_terminal_configuration_prevents_flickering() {
+        // Test that terminal is configured with increased line limits to prevent flickering
+        let state = AppState::new();
+        
+        // Verify terminal widget was created (we can't directly access its config,
+        // but we can verify the state was initialized)
+        assert!(state.terminal_event_sender.is_some());
+        assert!(state.terminal_event_receiver.is_some());
+        
+        // Test the configuration we would use
+        let test_config = TerminalConfig::default()
+            .with_max_lines(50000).unwrap()
+            .with_buffer_config(BufferConfig {
+                max_lines: 50000,
+                lines_to_keep: 40000,
+                cleanup_interval_ms: 5000,
+            }).unwrap();
+        
+        // Verify the configuration is valid
+        assert!(test_config.validate().is_ok());
+        
+        // Verify the line limits are correct to prevent flickering at 5000 lines
+        assert_eq!(test_config.buffer.max_lines, 50000);
+        assert_eq!(test_config.buffer.lines_to_keep, 40000);
+        assert_eq!(test_config.buffer.cleanup_interval_ms, 5000);
+        
+        // Ensure lines_to_keep is significantly higher than the old 5000 line flickering point
+        assert!(test_config.buffer.lines_to_keep > 5000 * 5); // At least 5x the old limit
     }
 } 

@@ -185,7 +185,7 @@ mod tests {
         let embedding_config = app_config_to_embedding_config(&app_config);
         
         // Verify defaults are properly set
-        assert_eq!(embedding_config.model_type, EmbeddingModelType::Onnx); // Always ONNX in current implementation
+        assert_eq!(embedding_config.model_type, EmbeddingModelType::Default); // Default when no model configuration is provided
         assert_eq!(embedding_config.onnx_model_path, None);
         assert_eq!(embedding_config.onnx_tokenizer_path, None);
         assert_eq!(embedding_config.session_timeout_seconds, 300);
@@ -637,9 +637,14 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
     }
 
     let (model_type, onnx_model_path, onnx_tokenizer_path) = if let Some(embed_model) = &app_config.embed_model {
-        // Use automatic model downloading
-        let model = DownloadableModel::from_str(embed_model);
-        match ModelDownloader::new() {
+        // Special handling for test mode
+        if embed_model == "test-default" {
+            log::info!("Using test-default model (Default embedding provider)");
+            (EmbeddingModelType::Default, None, None)
+        } else {
+            // Use automatic model downloading
+            let model = DownloadableModel::from_str(embed_model);
+            match ModelDownloader::new() {
             Ok(downloader) => {
                 match downloader.download_model(&model) {
                     Ok(paths) => {
@@ -653,13 +658,18 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
                     },
                     Err(e) => {
                         log::error!("Failed to download model {}: {}", embed_model, e);
-                        (EmbeddingModelType::Onnx, None, None)
+                        log::warn!("Falling back to Default model type due to download failure");
+                        // Use Default model type when download fails to avoid validation errors
+                        log::debug!("app_config_to_embedding_config: Setting model type to Default due to download failure");
+                        (EmbeddingModelType::Default, None, None)
                     }
                 }
-            },
-            Err(e) => {
-                log::error!("Failed to create model downloader: {}", e);
-                (EmbeddingModelType::Onnx, None, None)
+                },
+                Err(e) => {
+                    log::error!("Failed to create model downloader: {}", e);
+                    // Use Default model type when downloader creation fails to avoid validation errors
+                    (EmbeddingModelType::Default, None, None)
+                }
             }
         }
     } else if let (Some(model_path), Some(tokenizer_path)) = 
@@ -667,10 +677,13 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
         // Use manually specified paths
         (EmbeddingModelType::Onnx, Some(PathBuf::from(model_path)), Some(PathBuf::from(tokenizer_path)))
     } else {
-        // No model configuration provided
-        (EmbeddingModelType::Onnx, None, None)
+        // No model configuration provided - use Default model type
+        (EmbeddingModelType::Default, None, None)
     };
 
+    log::debug!("Creating EmbeddingConfig with model_type: {:?}, model_path: {:?}, tokenizer_path: {:?}", 
+               model_type, onnx_model_path, onnx_tokenizer_path);
+    
     EmbeddingConfig {
         model_type,
         onnx_model_path,

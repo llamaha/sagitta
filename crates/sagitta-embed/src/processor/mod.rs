@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub mod file_processor;
 pub mod embedding_pool;
 
+#[cfg(test)]
+mod embedding_pool_test;
+
 // Re-export main types
 pub use file_processor::DefaultFileProcessor;
 pub use embedding_pool::{EmbeddingPool, PoolStats};

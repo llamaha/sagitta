@@ -1,17 +1,15 @@
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, Read};
 use std::process::Child;
 use futures_util::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::task;
 use tokio::sync::mpsc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::llm::client::{StreamChunk, MessagePart, TokenUsage};
 use crate::utils::errors::SagittaCodeError;
 use super::error::ClaudeCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
-use super::tool_parser::parse_tool_calls_from_text;
+use serde_json::Deserializer;
 
 /// Stream implementation for Claude Code output
 pub struct ClaudeCodeStream {
@@ -28,12 +26,11 @@ impl ClaudeCodeStream {
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
             
-            if let Some(stdout) = stdout {
-                let reader = BufReader::new(stdout);
-                let mut partial_data = String::new();
+            if let Some(mut stdout) = stdout {
+                let mut buffer = [0u8; 16384]; // Larger buffer for better performance
+                let mut json_buffer = Vec::new();
                 let mut usage = TokenUsage::default();
                 let mut is_paid_usage = true;
-                let tool_emitted = Arc::new(AtomicBool::new(false));
                 
                 // Collect stderr in a shared buffer
                 let stderr_buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -44,7 +41,8 @@ impl ClaudeCodeStream {
                         let stderr_reader = BufReader::new(stderr);
                         for line in stderr_reader.lines() {
                             if let Ok(line) = line {
-                                log::error!("CLAUDE_CODE stderr: {}", line);
+                                // Only log stderr for debugging
+                                log::debug!("CLAUDE_CODE stderr: {}", line);
                                 if let Ok(mut buffer) = stderr_buffer_clone.lock() {
                                     buffer.push(line);
                                 }
@@ -53,10 +51,9 @@ impl ClaudeCodeStream {
                     });
                 }
                 
-                // Give stderr thread a moment to capture early errors
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                // Don't delay - start processing immediately
                 
-                log::info!("CLAUDE_CODE: Starting to read from stdout");
+                log::debug!("CLAUDE_CODE: Starting to read from stdout");
                 
                 // Check if process already exited
                 if let Ok(Some(status)) = child.try_wait() {
@@ -83,34 +80,37 @@ impl ClaudeCodeStream {
                     }
                 }
                 
-                let mut line_count = 0;
-                
-                // Process lines as they arrive, similar to Roo-Code's readline approach
-                for line_result in reader.lines() {
-                    match line_result {
-                        Ok(line) => {
-                            line_count += 1;
+                // Process bytes as they arrive for real-time streaming
+                loop {
+                    match stdout.read(&mut buffer) {
+                        Ok(0) => {
+                            // EOF reached
+                            log::debug!("CLAUDE_CODE: Reached end of stdout");
+                            break;
+                        }
+                        Ok(n) => {
+                            // Append new bytes to buffer
+                            json_buffer.extend_from_slice(&buffer[..n]);
+                            // log::trace!("CLAUDE_CODE: Read {} bytes, total buffer size: {}", n, json_buffer.len());
                             
-                            // Skip empty lines
-                            if line.trim().is_empty() {
-                                continue;
-                            }
+                            // Create a streaming deserializer from the buffer
+                            let deserializer = Deserializer::from_slice(&json_buffer).into_iter::<ClaudeChunk>();
+                            let mut bytes_consumed = 0;
                             
-                            log::info!("CLAUDE_CODE: Received line {}: {}", line_count, line.chars().take(100).collect::<String>());
-                            log::trace!("CLAUDE_CODE: Raw line: {}", line);
-                            
-                            // Accumulate partial JSON data between lines
-                            partial_data.push_str(&line);
-                            
-                            // Try to parse complete JSON objects
-                            let json_str = partial_data.trim();
-                            
-                            // Try to parse the JSON - if successful, clear partial data
-                            match serde_json::from_str::<ClaudeChunk>(&json_str) {
-                                Ok(chunk) => {
-                                    // Successfully parsed, clear accumulated data
-                                    partial_data.clear();
-                                    log::debug!("CLAUDE_CODE: Parsed chunk: {:?}", chunk);
+                            // Process all complete JSON objects in the buffer
+                            for (idx, result) in deserializer.enumerate() {
+                                match result {
+                                    Ok(chunk) => {
+                                        // Track how many bytes this chunk consumed by looking for newline
+                                        // JSON chunks are typically newline-delimited
+                                        bytes_consumed = json_buffer.iter().position(|&b| b == b'\n')
+                                            .map(|p| p + 1)
+                                            .unwrap_or(json_buffer.len());
+                                        
+                                        // Only log important chunks
+                                        if matches!(&chunk, ClaudeChunk::Result { .. }) {
+                                            log::debug!("CLAUDE_CODE: Received result chunk");
+                                        }
                                     
                                     match chunk {
                                         ClaudeChunk::System { subtype, api_key_source } => {
@@ -121,54 +121,40 @@ impl ClaudeCodeStream {
                                             }
                                         }
                                         ClaudeChunk::Assistant { message } => {
-                                            // Process content blocks
-                                            for content in message.content {
+                                            // Process content blocks directly
+                                            for (idx, content) in message.content.into_iter().enumerate() {
+                                                // Process content blocks without logging
                                                 match content {
                                                     ContentBlock::Text { text } => {
-                                                        // Parse tool calls from the text
-                                                        let (remaining_text, tool_calls) = parse_tool_calls_from_text(&text);
+                                                        // Send text directly without logging
                                                         
-                                                        // Send any remaining text first
-                                                        if !remaining_text.is_empty() {
-                                                            let _ = sender.send(Ok(StreamChunk {
-                                                                part: MessagePart::Text { text: remaining_text },
-                                                                is_final: false,
-                                                                finish_reason: None,
-                                                                token_usage: None,
-                                                            }));
-                                                        }
-                                                        
-                                                        // Send tool calls with enforcement
-                                                        for tool_call in tool_calls {
-                                                            // Check if we've already emitted a tool
-                                                            if !tool_emitted.load(Ordering::Relaxed) {
-                                                                // First tool - allow it
-                                                                tool_emitted.store(true, Ordering::Relaxed);
-                                                                let _ = sender.send(Ok(StreamChunk {
-                                                                    part: tool_call,
-                                                                    is_final: false,
-                                                                    finish_reason: None,
-                                                                    token_usage: None,
-                                                                }));
-                                                            } else {
-                                                                // Additional tool - log warning and skip
-                                                                if let MessagePart::ToolCall { name, .. } = &tool_call {
-                                                                    log::warn!("CLAUDE_CODE: Skipping additional tool call '{}' - only one tool per response allowed", name);
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    ContentBlock::Thinking { thinking } => {
+                                                        // Send text directly
                                                         let _ = sender.send(Ok(StreamChunk {
-                                                            part: MessagePart::Thought { text: thinking },
+                                                            part: MessagePart::Text { text },
                                                             is_final: false,
                                                             finish_reason: None,
                                                             token_usage: None,
                                                         }));
                                                     }
+                                                    ContentBlock::Thinking { thinking } => {
+                                                        log::info!("CLAUDE_CODE: Skipping Thinking block with length {}: {}", thinking.len(), if thinking.len() < 200 { &thinking } else { &thinking[..200] });
+                                                        // Skip thinking blocks - they arrive all at once and provide no UX benefit
+                                                    }
                                                     ContentBlock::RedactedThinking => {
+                                                        log::info!("CLAUDE_CODE: Skipping RedactedThinking block");
+                                                        // Skip redacted thinking blocks as well
+                                                    }
+                                                    ContentBlock::ToolUse { id, name, input } => {
+                                                        // Tools are now handled through MCP
+                                                        log::debug!("CLAUDE_CODE: Tool use '{}' should be handled via MCP", name);
+                                                        
+                                                        // Send tool call part for MCP tools
                                                         let _ = sender.send(Ok(StreamChunk {
-                                                            part: MessagePart::Thought { text: "[Redacted thinking]".to_string() },
+                                                            part: MessagePart::ToolCall {
+                                                                tool_call_id: id,
+                                                                name,
+                                                                parameters: input,
+                                                            },
                                                             is_final: false,
                                                             finish_reason: None,
                                                             token_usage: None,
@@ -182,22 +168,22 @@ impl ClaudeCodeStream {
                                             usage.completion_tokens += message.usage.output_tokens;
                                             usage.cached_tokens = message.usage.cache_read_input_tokens;
                                             
-                                            // Check if this is the final message
-                                            if message.stop_reason.is_some() {
-                                                let _ = sender.send(Ok(StreamChunk {
-                                                    part: MessagePart::Text { text: String::new() },
-                                                    is_final: true,
-                                                    finish_reason: message.stop_reason,
-                                                    token_usage: Some(usage.clone()),
-                                                }));
-                                            }
+                                            // Don't send is_final here - wait for Result chunk
+                                            // This allows tool calls to be processed as part of the same message
                                         }
-                                        ClaudeChunk::Result { result, total_cost_usd } => {
+                                        ClaudeChunk::Result { result, total_cost_usd, subtype, is_error } => {
+                                            // Check for error results
+                                            if subtype.as_deref() == Some("error_max_turns") {
+                                                log::warn!("CLAUDE_CODE: Received error_max_turns result");
+                                            }
+                                            
                                             // Extract model name if result is an object with model field
-                                            if let Some(model) = result.as_object()
-                                                .and_then(|obj| obj.get("model"))
-                                                .and_then(|v| v.as_str()) {
-                                                usage.model_name = model.to_string();
+                                            if let Some(result_value) = result {
+                                                if let Some(model) = result_value.as_object()
+                                                    .and_then(|obj| obj.get("model"))
+                                                    .and_then(|v| v.as_str()) {
+                                                    usage.model_name = model.to_string();
+                                                }
                                             }
                                             
                                             // Final usage update
@@ -215,46 +201,85 @@ impl ClaudeCodeStream {
                                                 token_usage: Some(usage.clone()),
                                             }));
                                         }
-                                    }
-                                }
-                                Err(e) => {
-                                    // Check if it looks like a complete JSON object that failed to parse
-                                    let looks_complete = json_str.trim_start().starts_with('{') && 
-                                                        json_str.trim_end().ends_with('}');
-                                    
-                                    if looks_complete {
-                                        // Complete JSON that failed to parse - this is an error
-                                        log::error!("CLAUDE_CODE: Failed to parse complete JSON: {} - Error: {}", json_str.chars().take(200).collect::<String>(), e);
-                                        
-                                        // Check for error messages
-                                        if json_str.contains("API Error") || json_str.contains("error") {
-                                            let _ = sender.send(Err(SagittaCodeError::LlmError(
-                                                format!("Claude API Error: {}", json_str)
-                                            )));
+                                        ClaudeChunk::User { message } => {
+                                            // Handle user messages
+                                            log::debug!("CLAUDE_CODE: Received user message with {} content blocks", message.content.len());
+                                            
+                                            // Process user content blocks
+                                            for content in message.content {
+                                                match content {
+                                                    super::message_converter::UserContentBlock::Text { text } => {
+                                                        log::debug!("CLAUDE_CODE: User text: {}", text);
+                                                    }
+                                                    super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
+                                                        // Tool results from MCP - store for tool preview instead of displaying inline
+                                                        log::info!("CLAUDE_CODE: Tool result for {}: {}", tool_use_id, content);
+                                                        
+                                                        // Only process tool result if it's not an error
+                                                        if is_error != Some(true) {
+                                                            // Send as tool result event instead of text to prevent inline display
+                                                            let _ = sender.send(Ok(StreamChunk {
+                                                                part: MessagePart::ToolResult { 
+                                                                    tool_call_id: tool_use_id.clone(),
+                                                                    name: "mcp_tool".to_string(),
+                                                                    result: serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content)),
+                                                                },
+                                                                is_final: false,
+                                                                finish_reason: None,
+                                                                token_usage: None,
+                                                            }));
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
-                                        
-                                        // Clear partial data to avoid carrying forward bad data
-                                        partial_data.clear();
-                                    } else {
-                                        // Partial JSON - keep accumulating
-                                        log::trace!("CLAUDE_CODE: Accumulating partial JSON data (length: {})", partial_data.len());
-                                        // partial_data already contains the accumulated data, so we don't need to do anything
+                                    }
+                                    }
+                                    Err(e) => {
+                                        if e.is_eof() {
+                                            // Need more data - this is normal for streaming
+                                            log::trace!("CLAUDE_CODE: Need more data for complete JSON object");
+                                        } else {
+                                            // Actual parse error
+                                            log::error!("CLAUDE_CODE: JSON parse error: {}", e);
+                                            // Log the problematic JSON for debugging
+                                            if let Ok(json_str) = std::str::from_utf8(&json_buffer) {
+                                                log::error!("CLAUDE_CODE: Problematic JSON (first 500 chars): {}", 
+                                                    &json_str[..json_str.len().min(500)]);
+                                            }
+                                            // Skip to next newline to recover
+                                            bytes_consumed = json_buffer.iter()
+                                                .position(|&b| b == b'\n')
+                                                .map(|p| p + 1)
+                                                .unwrap_or(json_buffer.len());
+                                        }
+                                        break; // Exit the deserialization loop
                                     }
                                 }
                             }
+                            
+                            // Remove consumed bytes from buffer
+                            if bytes_consumed > 0 {
+                                json_buffer.drain(..bytes_consumed);
+                                log::trace!("CLAUDE_CODE: Removed {} consumed bytes, {} bytes remaining", bytes_consumed, json_buffer.len());
+                            }
                         }
                         Err(e) => {
-                            log::error!("CLAUDE_CODE: Error reading line: {}", e);
+                            log::error!("CLAUDE_CODE: Error reading bytes: {}", e);
                             let _ = sender.send(Err(SagittaCodeError::LlmError(
                                 format!("Error reading claude output: {}", e)
                             )));
+                            break;
                         }
                     }
                 }
                 
-                // Handle any remaining partial data
-                if !partial_data.is_empty() {
-                    log::warn!("CLAUDE_CODE: Unprocessed partial data at end: {}", partial_data);
+                // Handle any remaining data in buffer
+                if !json_buffer.is_empty() {
+                    log::warn!("CLAUDE_CODE: {} bytes of unprocessed data at end", json_buffer.len());
+                    if let Ok(s) = std::str::from_utf8(&json_buffer) {
+                        log::warn!("CLAUDE_CODE: Unprocessed data: {}", s);
+                    }
                 }
                 
                 // Wait for process to exit

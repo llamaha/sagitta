@@ -22,13 +22,11 @@ pub mod utils;
 /// GUI components
 pub mod gui;
 
-/// Reasoning module
-pub mod reasoning;
-
-
-
 /// Tasks
 pub mod tasks;
+
+/// MCP (Model Context Protocol) server
+pub mod mcp;
 
 /// Conversation functionality 
 pub mod conversation {
@@ -52,7 +50,4 @@ pub use llm::client::{
 };
 
 // Re-export tool types for tests
-pub use tools::{Tool, ToolDefinition as ToolDefAlias, ToolResult, ToolCategory, ToolRegistry};
-
-// Re-export reasoning types for tests  
-pub use reasoning::{AgentToolExecutor, AgentEventEmitter}; 
+pub use tools::{Tool, ToolDefinition as ToolDefAlias, ToolResult, ToolCategory, ToolRegistry}; 

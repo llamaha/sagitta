@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
-use terminal_stream::events::StreamEvent;
 
 use crate::gui::repository::manager::RepositoryManager;
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
@@ -44,7 +43,6 @@ impl SyncRepositoryTool {
     async fn sync_repository_with_progress(
         &self, 
         params: &SyncRepositoryParams,
-        progress_sender: Option<mpsc::Sender<StreamEvent>>,
     ) -> Result<String, SagittaCodeError> {
         let mut repo_manager = self.repo_manager.lock().await;
         
@@ -57,56 +55,16 @@ impl SyncRepositoryTool {
             return Err(SagittaCodeError::ToolError(format!("Repository '{}' not found", params.name)));
         }
 
-        // Send progress updates if sender is available
-        if let Some(ref sender) = progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: format!("Starting sync for repository '{}'...", params.name),
-                percentage: Some(10.0),
-            }).await;
-        }
-
-        // Step 1: Fetch
-        if let Some(ref sender) = progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: "Fetching latest changes...".to_string(),
-                percentage: Some(30.0),
-            }).await;
-        }
-
-        // Step 2: Pull (if applicable)
-        if let Some(ref sender) = progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: "Pulling changes...".to_string(),
-                percentage: Some(60.0),
-            }).await;
-        }
-
-        // Step 3: Update submodules (if applicable)
-        if let Some(ref sender) = progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: "Updating submodules...".to_string(),
-                percentage: Some(80.0),
-            }).await;
-        }
-
         // Perform the actual sync
         repo_manager.sync_repository(&params.name).await
             .map_err(|e| SagittaCodeError::ToolError(format!("Failed to sync repository '{}': {}", params.name, e)))?;
-
-        // Final progress update
-        if let Some(ref sender) = progress_sender {
-            let _ = sender.send(StreamEvent::Progress {
-                message: format!("Successfully synced repository '{}'", params.name),
-                percentage: Some(100.0),
-            }).await;
-        }
         
         Ok(format!("Successfully synced repository '{}'", params.name))
     }
     
     /// Sync a repository
     async fn sync_repository(&self, params: &SyncRepositoryParams) -> Result<String, SagittaCodeError> {
-        self.sync_repository_with_progress(params, None).await
+        self.sync_repository_with_progress(params).await
     }
 }
 

@@ -1,6 +1,7 @@
 use futures_util::{Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 use log::{debug, info, trace, warn, error};
 use uuid::Uuid;
@@ -40,6 +41,9 @@ pub struct StreamingProcessor {
     
     /// Flag to track if we need to continue reasoning after tool completion in streaming mode
     continue_reasoning_after_tool: Arc<Mutex<bool>>,
+    
+    /// Track tool calls by ID for result matching
+    tool_calls: Arc<Mutex<HashMap<String, (String, String)>>>, // ID -> (name, preview)
 }
 
 impl StreamingProcessor {
@@ -61,12 +65,13 @@ impl StreamingProcessor {
             tool_executor,
             event_sender,
             continue_reasoning_after_tool,
+            tool_calls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
     /// Process a user message with streaming
     pub async fn process_message_stream(&self, message: impl Into<String>) 
-        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> 
+        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
         info!("Processing user message (stream): '{}'", message_text);
@@ -108,21 +113,18 @@ impl StreamingProcessor {
                 // Set state to responding with streaming
                 self.state_manager.set_responding(true, "Streaming response").await?;
                 
-                // Process the stream and handle tool calls
+                // Process the stream
                 let event_sender = self.event_sender.clone();
                 let history_manager = self.history.clone();
                 let state_manager = self.state_manager.clone();
-                let tool_executor = self.tool_executor.clone();
-                let continue_reasoning_flag = self.continue_reasoning_after_tool.clone();
                 
                 let message_id = assistant_message.id;
                 
-                // Transform the stream to handle tool calls and update state
+                // Transform the stream to update state
                 let mapped_stream = stream.map(move |result| {
                     let event_sender = event_sender.clone();
                     let history_manager = history_manager.clone();
                     let state_manager = state_manager.clone();
-                    let tool_executor = tool_executor.clone();
                     let message_id = message_id;
                     
                     async move {
@@ -134,6 +136,7 @@ impl StreamingProcessor {
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
                                             content: text.clone(),
                                             is_final: chunk.is_final,
+                                            is_thinking: false,
                                         });
                                         trace!("Stream: Text chunk received: '{}', final: {}", text, chunk.is_final);
                                         
@@ -158,8 +161,9 @@ impl StreamingProcessor {
                                     MessagePart::Thought { text } => {
                                         // Emit thought chunk event (different from text chunks)
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
-                                            content: format!("THINKING:{}", text),  // Prefix to distinguish thinking
+                                            content: text.clone(),
                                             is_final: chunk.is_final,
+                                            is_thinking: true,
                                         });
                                         trace!("Stream: Thought chunk received: '{}', final: {}", text, chunk.is_final);
                                         
@@ -172,59 +176,51 @@ impl StreamingProcessor {
                                         }
                                     },
                                     MessagePart::ToolCall { tool_call_id, name, parameters } => {
-                                        // Create a tool call
-                                        let tool_call = ToolCall {
-                                            id: tool_call_id.clone(),
-                                            name: name.clone(),
-                                            arguments: parameters.clone(),
-                                            result: None,
-                                            successful: false,
-                                            execution_time: None,
-                                        };
-                                        info!("Stream: LLM requested tool call. ID: {}, Name: {}, Args: {:?}", tool_call_id, name, parameters);
+                                        // For Claude CLI, tools are executed through MCP
+                                        info!("Stream: Claude CLI executed tool through MCP - ID: {}, Name: {}", tool_call_id, name);
                                         
-                                        // Emit tool call event
-                                        let _ = event_sender.send(AgentEvent::ToolCall {
-                                            tool_call: tool_call.clone(),
+                                        // Add tool execution preview as inline text content
+                                        let tool_preview = crate::gui::app::events::format_tool_arguments_for_display(
+                                            name, 
+                                            &serde_json::to_string(parameters).unwrap_or_default()
+                                        );
+                                        
+                                        // Store tool call info for result matching
+                                        if let Ok(mut tool_calls) = self.tool_calls.lock() {
+                                            tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview.clone()));
+                                        }
+                                        
+                                        let inline_text = format!("🔧 {} [View Raw Result](tool://{})\n\n", tool_preview, tool_call_id);
+                                        
+                                        // Emit as text chunk so it appears inline
+                                        let _ = event_sender.send(AgentEvent::LlmChunk {
+                                            content: inline_text,
+                                            is_final: false,
+                                            is_thinking: false,
                                         });
                                         
-                                        // Add the tool call to the message
-                                        if let Some(msg) = history_manager.get_message(message_id).await {
-                                            let mut updated = msg.clone();
-                                            updated.tool_calls.push(tool_call);
-                                            
-                                            let _ = history_manager.remove_message(message_id).await;
-                                            let _ = history_manager.add_message(updated).await;
-                                        }
-                                        
-                                        // Execute the tool asynchronously if in auto mode
-                                        if state_manager.get_agent_mode().await == AgentMode::FullyAutonomous {
-                                            let tc_id = tool_call_id.clone();
-                                            let tc_name = name.clone();
-                                            let tc_params = parameters.clone();
-                                            let tool_executor_clone = tool_executor.clone();
-                                            
-                                            // Execute the tool asynchronously without blocking the stream
-                                            tokio::spawn(async move {
-                                                match tool_executor_clone.lock().await.execute_tool_with_id(&tc_id, &tc_name, tc_params).await {
-                                                    Ok(tool_result) => {
-                                                        info!("Stream: Tool execution completed for ID: {}. Success: {}", tc_id, tool_result.is_success());
-                                                        
-                                                        // Note: The reasoning continuation should be handled by the tool event listener
-                                                        // The stream will naturally end here, and the agent should continue reasoning
-                                                        // via the tool completion event handling mechanism
-                                                    },
-                                                    Err(err) => {
-                                                        error!("Stream: Tool execution failed for ID: {}: {}", tc_id, err);
-                                                        // The error will be handled by the tool event listener
-                                                    }
-                                                }
-                                            });
-                                        }
+                                        info!("Stream: Added inline tool preview - {}", name);
                                     },
-                                    MessagePart::ToolResult { .. } => {
-                                        warn!("Stream: Received unexpected ToolResult part in stream. This should be handled via ToolExecutionEvent.");
-                                        // Tool results are typically added separately, not part of the stream
+                                    MessagePart::ToolResult { tool_call_id, name, result } => {
+                                        info!("Stream: Received tool result for ID: {}", tool_call_id);
+                                        
+                                        // Get tool name from stored tool calls or use the provided name
+                                        let tool_name = if let Ok(tool_calls) = self.tool_calls.lock() {
+                                            tool_calls.get(tool_call_id).map(|(name, _)| name.clone()).unwrap_or_else(|| name.clone())
+                                        } else {
+                                            name.clone()
+                                        };
+                                        
+                                        // Emit tool call complete event with the result
+                                        let tool_result = crate::tools::types::ToolResult::Success(result.clone());
+                                        
+                                        let _ = event_sender.send(AgentEvent::ToolCallComplete {
+                                            tool_call_id: tool_call_id.clone(),
+                                            tool_name,
+                                            result: tool_result,
+                                        });
+                                        
+                                        info!("Stream: Emitted ToolCallComplete event for ID: {}", tool_call_id);
                                     },
                                 }
                                 

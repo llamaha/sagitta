@@ -212,7 +212,7 @@ async fn test_embedding_pool_configuration() {
         assert_eq!(pool.max_batch_size(), 32);
         
         let stats = pool.pool_stats().await;
-        assert_eq!(stats.max_models, 3);
+        assert_eq!(stats.max_providers, 3);
         assert_eq!(stats.available_permits, 3);
         assert!(!stats.is_at_capacity());
         assert_eq!(stats.utilization(), 0.0);

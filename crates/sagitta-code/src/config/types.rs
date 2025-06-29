@@ -1,30 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// LLM Provider selection
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum LlmProvider {
-    OpenRouter,
-    ClaudeCode,
-}
-
-impl Default for LlmProvider {
-    fn default() -> Self {
-        LlmProvider::OpenRouter
-    }
-}
 
 /// Main configuration for Sagitta Code
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SagittaCodeConfig {
-    /// Selected LLM provider
-    #[serde(default)]
-    pub provider: LlmProvider,
-    
-    /// OpenRouter API configuration
-    #[serde(default)]
-    pub openrouter: OpenRouterConfig,
     
     /// Claude Code configuration
     #[serde(default)]
@@ -45,15 +25,11 @@ pub struct SagittaCodeConfig {
     /// Conversation management configuration
     #[serde(default)]
     pub conversation: ConversationConfig,
-
-
 }
 
 impl Default for SagittaCodeConfig {
     fn default() -> Self {
         Self {
-            provider: LlmProvider::default(),
-            openrouter: OpenRouterConfig::default(),
             claude_code: ClaudeCodeConfig::default(),
             sagitta: SagittaDbConfig::default(),
             ui: UiConfig::default(),
@@ -94,57 +70,6 @@ impl SagittaCodeConfig {
     }
 }
 
-/// Configuration for OpenRouter API
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenRouterConfig {
-    /// OpenRouter API key
-    pub api_key: Option<String>,
-    
-    /// Selected model (e.g., "openai/gpt-4", "anthropic/claude-3-5-sonnet")
-    #[serde(default = "default_openrouter_model")]
-    pub model: String,
-    
-    /// Provider preferences (optional routing configuration)
-    pub provider_preferences: Option<ProviderPreferences>,
-    
-    /// Maximum context tokens (0 = use model default)
-    #[serde(default = "default_max_context_tokens")]
-    pub max_context_tokens: usize,
-    
-    /// Maximum reasoning steps to prevent infinite loops
-    #[serde(default = "default_max_reasoning_steps")]
-    pub max_reasoning_steps: u32,
-    
-    /// Request timeout in seconds
-    #[serde(default = "default_request_timeout")]
-    pub request_timeout: u64,
-}
-
-impl Default for OpenRouterConfig {
-    fn default() -> Self {
-        Self {
-            api_key: None,
-            model: default_openrouter_model(),
-            provider_preferences: None,
-            max_context_tokens: default_max_context_tokens(),
-            max_reasoning_steps: default_max_reasoning_steps(),
-            request_timeout: default_request_timeout(),
-        }
-    }
-}
-
-/// Provider preferences for OpenRouter routing configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderPreferences {
-    /// Preferred providers in order
-    pub order: Option<Vec<String>>,
-    /// Whether to allow fallbacks
-    pub allow_fallbacks: Option<bool>,
-    /// Sort by price, throughput, or latency
-    pub sort: Option<String>,
-    /// Data collection policy
-    pub data_collection: Option<String>,
-}
 
 /// Configuration for Claude Code provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,9 +82,16 @@ pub struct ClaudeCodeConfig {
     #[serde(default = "default_claude_model")]
     pub model: String,
     
+    /// Fallback model when default is overloaded
+    pub fallback_model: Option<String>,
+    
     /// Maximum output tokens
     #[serde(default = "default_claude_max_output_tokens")]
     pub max_output_tokens: u32,
+    
+    /// Enable debug mode
+    #[serde(default)]
+    pub debug: bool,
     
     /// Enable verbose logging for debugging
     #[serde(default)]
@@ -168,6 +100,41 @@ pub struct ClaudeCodeConfig {
     /// Request timeout in seconds
     #[serde(default = "default_claude_timeout")]
     pub timeout: u64,
+    
+    /// Maximum turns for multi-turn conversations (0 = unlimited)
+    #[serde(default = "default_claude_max_turns")]
+    pub max_turns: u32,
+    
+    /// Output format: "text", "json", "stream-json"
+    #[serde(default = "default_output_format")]
+    pub output_format: String,
+    
+    /// Input format: "text", "stream-json"
+    #[serde(default = "default_input_format")]
+    pub input_format: String,
+    
+    /// Bypass all permission checks (for sandboxes)
+    #[serde(default)]
+    pub dangerously_skip_permissions: bool,
+    
+    /// Allowed tools (comma-separated list)
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    
+    /// Disallowed tools (comma-separated list)
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+    
+    /// Additional directories to allow tool access to
+    #[serde(default)]
+    pub additional_directories: Vec<PathBuf>,
+    
+    /// MCP configuration file or string
+    pub mcp_config: Option<String>,
+    
+    /// Automatically connect to IDE on startup
+    #[serde(default)]
+    pub auto_ide: bool,
 }
 
 impl Default for ClaudeCodeConfig {
@@ -175,9 +142,20 @@ impl Default for ClaudeCodeConfig {
         Self {
             claude_path: default_claude_path(),
             model: default_claude_model(),
+            fallback_model: None,
             max_output_tokens: default_claude_max_output_tokens(),
+            debug: false,
             verbose: false,
             timeout: default_claude_timeout(),
+            max_turns: default_claude_max_turns(),
+            output_format: default_output_format(),
+            input_format: default_input_format(),
+            dangerously_skip_permissions: false,
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            additional_directories: Vec::new(),
+            mcp_config: None,
+            auto_ide: false,
         }
     }
 }
@@ -303,13 +281,6 @@ pub struct ConversationConfig {
     #[serde(default)]
     pub sidebar: SidebarPersistentConfig,
     
-    /// Enable analyze_input tool for initial user input analysis
-    #[serde(default = "default_analyze_input")]
-    pub analyze_input: bool,
-    
-    /// Enable analyze_intent for LLM response intent detection
-    #[serde(default = "default_analyze_intent")]
-    pub analyze_intent: bool,
 }
 
 /// Configuration for persistent sidebar state
@@ -464,26 +435,12 @@ impl Default for ConversationConfig {
             auto_branching: false,
             default_tags: Vec::new(),
             sidebar: SidebarPersistentConfig::default(),
-            analyze_input: default_analyze_input(),
-            analyze_intent: default_analyze_intent(),
         }
     }
 }
 
 /// Configuration for project workspaces
 
-
-fn default_openrouter_model() -> String {
-    "openai/gpt-4".to_string()
-}
-
-fn default_max_context_tokens() -> usize {
-    64000 // Default to 64k tokens
-}
-
-fn default_max_reasoning_steps() -> u32 {
-    50
-}
 
 fn default_dark_mode() -> bool {
     true
@@ -516,16 +473,6 @@ fn default_auto_create() -> bool {
 fn default_auto_checkpoints() -> bool {
     true
 }
-
-fn default_analyze_input() -> bool {
-    true
-}
-
-fn default_analyze_intent() -> bool {
-    true
-}
-
-
 
 fn default_organization_mode() -> String {
     "Recency".to_string()
@@ -563,10 +510,6 @@ fn default_search_debounce_ms() -> u64 {
     300
 }
 
-fn default_request_timeout() -> u64 {
-    30
-}
-
 fn default_claude_path() -> String {
     "claude".to_string()
 }
@@ -583,7 +526,17 @@ fn default_claude_timeout() -> u64 {
     600 // 10 minutes
 }
 
-// Configuration structures will go here
+fn default_claude_max_turns() -> u32 {
+    0 // 0 means unlimited turns
+}
+
+fn default_output_format() -> String {
+    "text".to_string()
+}
+
+fn default_input_format() -> String {
+    "text".to_string()
+}
 
 #[cfg(test)]
 mod tests {

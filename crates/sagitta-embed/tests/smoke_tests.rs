@@ -178,12 +178,12 @@ async fn test_pool_stats_and_configuration() {
         let stats = pool.pool_stats().await;
         
         // Verify pool configuration
-        assert!(stats.max_models > 0, "Max models should be positive");
+        assert!(stats.max_providers > 0, "Max models should be positive");
         assert!(stats.cpu_worker_threads > 0, "CPU worker threads should be positive");
-        assert_eq!(stats.available_permits, stats.max_models, "Initially all permits should be available");
+        assert_eq!(stats.available_permits, stats.max_providers, "Initially all permits should be available");
         
         println!("✅ Pool stats test passed:");
-        println!("   - Max models: {}", stats.max_models);
+        println!("   - Max models: {}", stats.max_providers);
         println!("   - CPU worker threads: {}", stats.cpu_worker_threads);
         println!("   - Available permits: {}", stats.available_permits);
         println!("   - Utilization: {:.1}%", stats.utilization() * 100.0);
