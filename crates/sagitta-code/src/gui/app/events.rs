@@ -15,6 +15,7 @@ use super::SagittaCodeApp;
 use crate::config::types::SagittaCodeConfig;
 use sagitta_search::AppConfig;
 use crate::gui::repository::manager::RepositoryManager;
+use serde_json::{Value, Map};
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -96,7 +97,9 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     }
                 },
                 AgentEvent::ToolCall { tool_call } => {
-                    handle_tool_call(app, tool_call);
+                    // Tool calls are now handled inline in the streaming response
+                    // Just log for tracking purposes
+                    log::debug!("Tool call received (now handled inline): {}", tool_call.name);
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
                     handle_tool_call_result(app, tool_call_id, tool_name, result);
@@ -364,9 +367,10 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool) {
 /// Handle tool call events
 pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
     // Add to events panel for system tracking
+    let preview = format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default());
     app.panels.events_panel.add_event(
         SystemEventType::ToolExecution,
-        format!("Executing tool (events.rs): {}", tool_call.name)
+        format!("🔧 {}", preview)
     );
     
     // Store pending tool call in state
@@ -386,7 +390,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             
         let view_tool_call = ViewToolCall {
             name: tool_call.name.clone(),
-            arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+            arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
             result: None,
             status: MessageStatus::Streaming,
             content_position,
@@ -399,7 +403,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             let content_position = Some(last_agent_msg.content.len());
             let view_tool_call = ViewToolCall {
                 name: tool_call.name.clone(),
-                arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+                arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
                 result: None,
                 status: MessageStatus::Streaming,
                 content_position,
@@ -1948,5 +1952,126 @@ mod tests {
         // Verify messages were loaded into chat manager
         assert_eq!(app.chat_manager.get_all_messages().len(), 2);
         assert!(!app.state.conversation_data_loading);
+    }
+}
+
+/// Format tool arguments for user-friendly display
+pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> String {
+    // Try to parse as JSON first
+    let parsed: Result<Value, _> = serde_json::from_str(arguments);
+    
+    match parsed {
+        Ok(json) => {
+            // Format based on tool type
+            match tool_name {
+                name if name.contains("repository_list") || name.contains("list_repositories") => {
+                    "Listing available repositories".to_string()
+                },
+                name if name.contains("query") || name.contains("search") => {
+                    if let Some(query_text) = json.get("queryText").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else if let Some(query_text) = json.get("query").and_then(|v| v.as_str()) {
+                        format!("Searching for: \"{}\"", query_text.chars().take(50).collect::<String>())
+                    } else {
+                        "Performing search".to_string()
+                    }
+                },
+                name if name.contains("view_file") || name.contains("read_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Reading file: {}", file_path)
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Reading file: {}", file_path)
+                    } else {
+                        "Reading file".to_string()
+                    }
+                },
+                name if name.contains("edit_file") || name.contains("write_file") => {
+                    if let Some(file_path) = json.get("filePath").and_then(|v| v.as_str()) {
+                        format!("Editing file: {}", file_path)
+                    } else if let Some(file_path) = json.get("file_path").and_then(|v| v.as_str()) {
+                        format!("Editing file: {}", file_path)
+                    } else {
+                        "Editing file".to_string()
+                    }
+                },
+                name if name.contains("shell") || name.contains("execution") => {
+                    if let Some(command) = json.get("command").and_then(|v| v.as_str()) {
+                        format!("Running: {}", command.chars().take(60).collect::<String>())
+                    } else {
+                        "Executing command".to_string()
+                    }
+                },
+                name if name.contains("repository_add") || name.contains("add_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Adding repository: {}", name)
+                    } else {
+                        "Adding repository".to_string()
+                    }
+                },
+                name if name.contains("repository_sync") || name.contains("sync_repository") => {
+                    if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                        format!("Syncing repository: {}", name)
+                    } else {
+                        "Syncing repository".to_string()
+                    }
+                },
+                name if name.contains("search_file") => {
+                    if let Some(pattern) = json.get("pattern").and_then(|v| v.as_str()) {
+                        format!("Searching files for: {}", pattern)
+                    } else {
+                        "Searching files".to_string()
+                    }
+                },
+                name if name.contains("repository_map") => {
+                    if let Some(repo_name) = json.get("repositoryName").and_then(|v| v.as_str()) {
+                        format!("Mapping repository: {}", repo_name)
+                    } else {
+                        "Mapping repository structure".to_string()
+                    }
+                },
+                name if name.contains("switch_branch") => {
+                    if let Some(branch) = json.get("branchName").and_then(|v| v.as_str()) {
+                        format!("Switching to branch: {}", branch)
+                    } else {
+                        "Switching branch".to_string()
+                    }
+                },
+                _ => {
+                    // Generic formatting for unknown tools
+                    if let Some(obj) = json.as_object() {
+                        // Show key parameters
+                        let key_params: Vec<String> = obj.iter()
+                            .take(2) // Limit to first 2 parameters
+                            .map(|(k, v)| {
+                                let value_str = match v {
+                                    Value::String(s) => s.chars().take(30).collect::<String>(),
+                                    Value::Number(n) => n.to_string(),
+                                    Value::Bool(b) => b.to_string(),
+                                    _ => "...".to_string(),
+                                };
+                                format!("{}={}", k, value_str)
+                            })
+                            .collect();
+                        
+                        if key_params.is_empty() {
+                            format!("Executing {}", tool_name)
+                        } else {
+                            format!("Executing {} with {}", tool_name, key_params.join(", "))
+                        }
+                    } else {
+                        format!("Executing {}", tool_name)
+                    }
+                }
+            }
+        },
+        Err(_) => {
+            // Fallback for non-JSON arguments
+            if arguments.is_empty() {
+                format!("Executing {}", tool_name)
+            } else {
+                let preview = arguments.chars().take(50).collect::<String>();
+                format!("Executing {} with: {}", tool_name, preview)
+            }
+        }
     }
 } 

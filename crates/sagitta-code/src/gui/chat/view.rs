@@ -799,9 +799,27 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     ui.label(RichText::new(status_icon).color(status_color).size(14.0));
                     ui.add_space(4.0);
                     
-                    // Tool name
-                    ui.label(RichText::new("Tool").color(app_theme.hint_text_color()).size(11.0));
-                    ui.label(RichText::new(&tool_call.name).color(app_theme.text_color()).strong().size(12.0));
+                    // Tool execution preview
+                    ui.label(RichText::new("🔧").size(12.0));
+                    
+                    // Show formatted arguments (which includes tool name and parameters)
+                    let display_text = if !tool_call.arguments.is_empty() {
+                        &tool_call.arguments
+                    } else {
+                        &format!("Executing {}", tool_call.name)
+                    };
+                    
+                    // Truncate very long display text and add ellipsis
+                    let truncated_text = if display_text.len() > 80 {
+                        format!("{}...", &display_text[..77])
+                    } else {
+                        display_text.to_string()
+                    };
+                    
+                    ui.label(RichText::new(&truncated_text)
+                        .color(app_theme.text_color())
+                        .strong()
+                        .size(12.0));
                     
                     // Status text
                     let status_text = match &tool_call.status {
@@ -1013,27 +1031,36 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
         .show(ui, |ui| {
             ui.set_max_width(max_width - 16.0);
             
-            // Collapsible for long code
+            // Scrollable for long code
             let line_count = remaining_text.lines().count();
             if line_count > 10 {
-                egui::CollapsingHeader::new(RichText::new(format!("{} lines of code", line_count)).small())
-                    .default_open(false)
+                // Show line count indicator
+                ui.label(RichText::new(format!("{} lines of code", line_count))
+                    .small()
+                    .color(app_theme.hint_text_color()));
+                ui.add_space(2.0);
+                
+                // Use scrollable area with max height for ~10 lines
+                ScrollArea::vertical()
+                    .max_height(120.0) // Approximately 10 lines at 12px line height
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        render_syntax_highlighted_code(ui, remaining_text, &bg_color, max_width - 32.0);
+                        render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 32.0);
                     });
             } else {
-                render_syntax_highlighted_code(ui, remaining_text, &bg_color, max_width - 16.0);
+                render_syntax_highlighted_code(ui, remaining_text, language, &bg_color, max_width - 16.0);
             }
         });
 }
 
 /// Render syntax highlighted code
-fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32) {
+fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_color: &Color32, max_width: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
     let syntect_theme = &theme_set.themes["base16-ocean.dark"];
-    let syntax = syntax_set.find_syntax_by_extension("rs")
+    let syntax = syntax_set.find_syntax_by_extension(language)
+        .or_else(|| syntax_set.find_syntax_by_name(language))
         .or_else(|| syntax_set.find_syntax_by_extension("txt"))
         .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
     

@@ -102,6 +102,20 @@ impl ClaudeProcess {
             
             args.push(mcp_tools.join(","));
             log::info!("CLAUDE_CODE: Allowing MCP tools: {}", mcp_tools.join(","));
+            
+            // Disable Claude native tools that are duplicated by our MCP tools
+            args.push("--disallowedTools".to_string());
+            let disallowed_tools = vec![
+                "Read",         // We have mcp__*__view_file
+                "Edit",         // We have mcp__*__edit_file
+                "MultiEdit",    // We have mcp__*__edit_file
+                "Write",        // We have mcp__*__edit_file
+                "Glob",         // We have mcp__*__search_file_in_repository
+                "Grep",         // We have mcp__*__search_code and mcp__*__query
+                "LS",           // We have directory listing through MCP tools
+            ];
+            args.push(disallowed_tools.join(","));
+            log::info!("CLAUDE_CODE: Disallowing native tools: {}", disallowed_tools.join(","));
         }
         
         log::trace!("CLAUDE_CODE: Full args: {:?}", args);

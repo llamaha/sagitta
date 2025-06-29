@@ -172,11 +172,23 @@ impl StreamingProcessor {
                                     },
                                     MessagePart::ToolCall { tool_call_id, name, parameters } => {
                                         // For Claude CLI, tools are executed through MCP
-                                        // We don't need to do anything - just log and continue
                                         info!("Stream: Claude CLI executed tool through MCP - ID: {}, Name: {}", tool_call_id, name);
                                         
-                                        // Don't emit events, don't track tool calls, don't execute
-                                        // Claude CLI handles everything through MCP
+                                        // Add tool execution preview as inline text content
+                                        let tool_preview = crate::gui::app::events::format_tool_arguments_for_display(
+                                            name, 
+                                            &serde_json::to_string(parameters).unwrap_or_default()
+                                        );
+                                        let inline_text = format!("*🔧 {}*\n\n", tool_preview);
+                                        
+                                        // Emit as text chunk so it appears inline
+                                        let _ = event_sender.send(AgentEvent::LlmChunk {
+                                            content: inline_text,
+                                            is_final: false,
+                                            is_thinking: false,
+                                        });
+                                        
+                                        info!("Stream: Added inline tool preview - {}", name);
                                     },
                                     MessagePart::ToolResult { .. } => {
                                         warn!("Stream: Received unexpected ToolResult part in stream. This should be handled via ToolExecutionEvent.");
