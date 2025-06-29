@@ -1105,11 +1105,11 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
-                // Use the modern streaming chat view
-                let messages = app.chat_manager.get_all_messages();
+                // Use the modern streaming chat view with all items (messages + tool cards)
+                let items = app.chat_manager.get_all_items();
                 
                 // Check for tool clicks
-                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &messages, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results) {
+                if let Some((tool_name, tool_args)) = modern_chat_view_ui(ui, &items, app.state.current_theme, &mut app.state.copy_button_state, &app.state.running_tools, &mut app.state.collapsed_thinking, &app.state.tool_results) {
                     app.state.clicked_tool_info = Some((tool_name, tool_args));
                 }
             });

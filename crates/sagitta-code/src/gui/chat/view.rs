@@ -33,6 +33,7 @@ use crate::gui::theme::AppTheme;
 use crate::gui::symbols;
 use crate::gui::app::RunningToolInfo;
 use crate::agent::events::ToolRunId;
+use super::{ChatItem, ToolCard, ToolCardStatus};
 use catppuccin_egui::Theme as CatppuccinTheme;
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::cell::RefCell;
@@ -326,19 +327,19 @@ impl From<ChatMessage> for StreamingMessage {
 }
 
 pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState) {
-    // Convert legacy messages to streaming messages for modern rendering
-    let streaming_messages: Vec<StreamingMessage> = messages.iter()
-        .map(|msg| msg.clone().into())
+    // Convert legacy messages to ChatItems for modern rendering
+    let chat_items: Vec<ChatItem> = messages.iter()
+        .map(|msg| ChatItem::Message(msg.clone().into()))
         .collect();
     
     // Create empty HashMap for backward compatibility
     let empty_running_tools = HashMap::new();
     let mut empty_collapsed_thinking = HashMap::new();
     let empty_tool_results = HashMap::new();
-    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
+    modern_chat_view_ui(ui, &chat_items, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -373,7 +374,14 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                         .rounding(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
-                        let conversation_text = format_conversation_for_copying(messages);
+                        // Extract messages from ChatItems for conversation copying
+                        let messages: Vec<StreamingMessage> = items.iter()
+                            .filter_map(|item| match item {
+                                ChatItem::Message(msg) => Some(msg.clone()),
+                                ChatItem::ToolCard(_) => None, // Tool cards aren't included in conversation copy
+                            })
+                            .collect();
+                        let conversation_text = format_conversation_for_copying(&messages);
                         ui.output_mut(|o| o.copied_text = conversation_text.clone());
                         copy_state.start_copy_feedback(conversation_text);
                         ui.ctx().request_repaint(); // Request repaint for animation
@@ -394,18 +402,26 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                     
                     ui.add_space(12.0);
                     
-                    // Group consecutive messages from the same author
-                    let grouped_messages = group_consecutive_messages(messages);
-                    
-                    // Render each message group
-                    for (group_index, group) in grouped_messages.iter().enumerate() {
-                        if group_index > 0 {
-                            ui.add_space(8.0); // Reduced space between different message groups
+                    // Render each chat item (messages and tool cards)
+                    for (item_index, item) in items.iter().enumerate() {
+                        if item_index > 0 {
+                            ui.add_space(8.0); // Space between items
                         }
                         
-                        // Render the message group with adjusted width for margins
-                        if let Some(tool_info) = render_message_group(ui, group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
-                            clicked_tool = Some(tool_info);
+                        match item {
+                            ChatItem::Message(message) => {
+                                // Render individual messages
+                                let messages_group = vec![message];
+                                if let Some(tool_info) = render_message_group(ui, &messages_group, &bg_color, total_width - 32.0, app_theme, copy_state, running_tools, collapsed_thinking) {
+                                    clicked_tool = Some(tool_info);
+                                }
+                            }
+                            ChatItem::ToolCard(tool_card) => {
+                                // Render tool card
+                                if let Some(tool_info) = render_tool_card(ui, tool_card, &bg_color, total_width - 32.0, app_theme, running_tools, copy_state) {
+                                    clicked_tool = Some(tool_info);
+                                }
+                            }
                         }
                     }
                     ui.add_space(16.0);
@@ -951,6 +967,113 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
     clicked_tool_result
 }
 
+/// Render a standalone tool card
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+    let mut clicked_tool_result = None;
+    
+    // Create a frame for the tool card
+    Frame::none()
+        .fill(app_theme.code_background())
+        .rounding(Rounding::same(6))
+        .stroke(Stroke::new(1.0, app_theme.border_color()))
+        .inner_margin(12.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Tool status icon
+                let (status_icon, status_color) = match tool_card.status {
+                    ToolCardStatus::Completed { success: true } => ("✅", app_theme.success_color()),
+                    ToolCardStatus::Completed { success: false } => ("❌", app_theme.error_color()),
+                    ToolCardStatus::Failed { .. } => ("❌", app_theme.error_color()),
+                    ToolCardStatus::Running => ("🔄", app_theme.accent_color()),
+                    ToolCardStatus::Cancelled => ("⏹️", app_theme.hint_text_color()),
+                };
+                
+                ui.label(RichText::new(status_icon).color(status_color).size(16.0));
+                ui.add_space(8.0);
+                
+                // Tool name and description
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&format!("🔧 {}", tool_card.tool_name))
+                        .color(app_theme.text_color())
+                        .strong()
+                        .size(14.0));
+                    
+                    // Show progress if running
+                    if tool_card.status == ToolCardStatus::Running {
+                        if let Some(progress) = tool_card.progress {
+                            ui.add(egui::ProgressBar::new(progress)
+                                .desired_width(200.0)
+                                .desired_height(6.0)
+                                .fill(app_theme.accent_color()));
+                        } else {
+                            ui.add(egui::ProgressBar::new(0.0)
+                                .desired_width(200.0)
+                                .desired_height(6.0)
+                                .fill(app_theme.accent_color())
+                                .animate(true));
+                        }
+                    }
+                    
+                    // Show timing info
+                    if let Some(completed_at) = tool_card.completed_at {
+                        let duration = completed_at.signed_duration_since(tool_card.started_at);
+                        ui.label(RichText::new(&format!("Completed in {:.1}s", duration.num_milliseconds() as f64 / 1000.0))
+                            .color(app_theme.hint_text_color())
+                            .size(11.0));
+                    } else if tool_card.status == ToolCardStatus::Running {
+                        ui.label(RichText::new("Running...")
+                            .color(app_theme.hint_text_color())
+                            .size(11.0));
+                    }
+                });
+                
+                // Right-aligned action buttons
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    match &tool_card.status {
+                        ToolCardStatus::Completed { success: true } => {
+                            if tool_card.result.is_some() {
+                                // View details button
+                                if ui.small_button("View details").clicked() {
+                                    let result_json = tool_card.result.as_ref().unwrap();
+                                    let display_title = format!("{} - Result", tool_card.tool_name);
+                                    clicked_tool_result = Some((display_title, serde_json::to_string_pretty(result_json).unwrap_or_else(|_| result_json.to_string())));
+                                }
+                                
+                                // Copy button
+                                let copy_text = copy_state.get_button_text("Copy");
+                                let copy_color = copy_state.get_button_color(app_theme);
+                                
+                                if ui.add(egui::Button::new(copy_text)
+                                    .small()
+                                    .fill(copy_color.gamma_multiply(0.1)))
+                                    .clicked() {
+                                    let result_text = serde_json::to_string_pretty(tool_card.result.as_ref().unwrap())
+                                        .unwrap_or_else(|_| tool_card.result.as_ref().unwrap().to_string());
+                                    ui.output_mut(|o| o.copied_text = result_text.clone());
+                                    copy_state.start_copy_feedback(result_text);
+                                }
+                            }
+                        }
+                        ToolCardStatus::Running => {
+                            // Cancel button for running tools
+                            if ui.small_button("Cancel").clicked() {
+                                clicked_tool_result = Some(("__CANCEL_TOOL__".to_string(), tool_card.run_id.to_string()));
+                            }
+                        }
+                        ToolCardStatus::Failed { error } => {
+                            ui.label(RichText::new(&format!("Error: {}", error))
+                                .color(app_theme.error_color())
+                                .size(11.0));
+                        }
+                        _ => {}
+                    }
+                });
+            });
+        });
+    
+    clicked_tool_result
+}
+
 /// Render message content in a compact format
 fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     // Use message_type for summary/finalization
@@ -1056,44 +1179,64 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         return None;
     }
     
-    // Split the processed text by placeholders and render with buttons
-    ui.horizontal_wrapped(|ui| {
-        let mut remaining = processed_text.as_str();
+    // Process the text with proper markdown rendering and tool link buttons
+    let mut remaining_text = processed_text.as_str();
+    
+    for (i, (link_text, tool_call_id)) in tool_links.iter().enumerate() {
+        let placeholder = format!("__TOOL_LINK_{}__", i);
         
-        for (i, (link_text, tool_call_id)) in tool_links.iter().enumerate() {
-            let placeholder = format!("__TOOL_LINK_{}__", i);
-            
-            if let Some(split_pos) = remaining.find(&placeholder) {
-                // Render text before the placeholder
-                let before_text = &remaining[..split_pos];
-                if !before_text.is_empty() {
-                    let before_clean = before_text.replace("*", "");
-                    if before_text.contains("*") {
-                        ui.label(RichText::new(before_clean).strong().color(app_theme.text_color()));
-                    } else {
-                        ui.label(RichText::new(before_clean).color(app_theme.text_color()));
-                    }
-                }
+        if let Some(split_pos) = remaining_text.find(&placeholder) {
+            // Render text before the placeholder using CommonMark
+            let before_text = &remaining_text[..split_pos];
+            if !before_text.trim().is_empty() {
+                let original_text_color = ui.style().visuals.text_color();
+                ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
                 
-                // Render the clickable button
+                COMMONMARK_CACHE.with(|cache| {
+                    let mut cache = cache.borrow_mut();
+                    let viewer = CommonMarkViewer::new()
+                        .max_image_width(Some(max_width as usize))
+                        .default_width(Some(max_width as usize));
+                    
+                    ui.set_max_width(max_width);
+                    ui.style_mut().wrap = Some(true);
+                    viewer.show(ui, &mut *cache, before_text);
+                });
+                
+                ui.style_mut().visuals.override_text_color = None;
+            }
+            
+            // Render the clickable button
+            ui.horizontal(|ui| {
                 let button = ui.small_button(format!("📋 {}", link_text));
                 if button.clicked() {
                     clicked_tool = Some(("Tool Result".to_string(), tool_call_id.to_string()));
                 }
-                
-                // Update remaining text
-                remaining = &remaining[split_pos + placeholder.len()..];
-            }
+            });
+            
+            // Update remaining text
+            remaining_text = &remaining_text[split_pos + placeholder.len()..];
         }
+    }
+    
+    // Render any remaining text after the last placeholder using CommonMark
+    if !remaining_text.trim().is_empty() {
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
-        // Render any remaining text after the last placeholder
-        if !remaining.is_empty() {
-            let remaining_clean = remaining.replace("*", "").trim().to_string();
-            if !remaining_clean.is_empty() {
-                ui.label(RichText::new(remaining_clean).color(app_theme.text_color()));
-            }
-        }
-    });
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
+            
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, remaining_text);
+        });
+        
+        ui.style_mut().visuals.override_text_color = None;
+    }
     
     clicked_tool
 }
