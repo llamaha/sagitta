@@ -32,6 +32,7 @@ pub enum AppEvent {
         suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>,
     },
     RepositoryListUpdated(Vec<String>),
+    RefreshRepositoryList,
     CancelTool(ToolRunId),
     // Add other app-level UI events here if needed
 }
@@ -312,6 +313,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::RepositoryListUpdated(repo_list) => {
                 log::info!("Received RepositoryListUpdated event with {} repositories: {:?}", repo_list.len(), repo_list);
                 app.handle_repository_list_update(repo_list);
+            },
+            AppEvent::RefreshRepositoryList => {
+                log::debug!("Received RefreshRepositoryList event, triggering manual refresh");
+                app.trigger_repository_list_refresh();
             },
             AppEvent::CancelTool(run_id) => {
                 log::info!("Received CancelTool event for run_id: {}", run_id);
@@ -1139,11 +1144,7 @@ impl SagittaCodeApp {
         }
     }
 
-    /// Handle repository list update
-    pub fn handle_repository_list_update(&mut self, repo_list: Vec<String>) {
-        log::info!("Received repository list update with {} repositories: {:?}", repo_list.len(), repo_list);
-        self.state.update_available_repositories(repo_list);
-    }
+    // Method moved to app.rs
 }
 
 /// Handle tool run started event
@@ -1191,20 +1192,9 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
 }
 
 /// Handle tool stream event (progress updates)
-pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: terminal_stream::events::StreamEvent) {
-    match &event {
-        terminal_stream::events::StreamEvent::Progress { message, percentage } => {
-            // Update progress in running tools tracking
-            if let Some(tool_info) = app.state.running_tools.get_mut(&run_id) {
-                tool_info.progress = percentage.map(|p| p as f32 / 100.0);
-                log::debug!("Tool {} progress: {} ({}%)", run_id, message, percentage.unwrap_or(0.0));
-            }
-        },
-        _ => {
-            // Handle other stream events if needed
-            log::debug!("Tool stream event for run {}: {:?}", run_id, event);
-        }
-    }
+pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
+    // Simplified tool stream handling without terminal_stream
+    log::debug!("Tool stream event for run {}: {}", run_id, event);
 }
 
 /// Handle tool cancellation request

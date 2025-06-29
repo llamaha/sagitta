@@ -402,14 +402,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
             }
             
             // CRITICAL: Wire up terminal event sender to tool executor for streaming shell execution
-            if let Some(terminal_sender) = app.state.get_terminal_event_sender() {
-                // Set the terminal event sender on the agent's tool executor
-                // Note: This requires making the tool_executor field accessible or adding a method to Agent
-                agent.set_terminal_event_sender(terminal_sender).await;
-                log::info!("Terminal event sender connected to agent tool executor for streaming shell execution");
-            } else {
-                log::warn!("No terminal event sender available - shell execution will not stream to terminal");
-            }
+            // Terminal functionality removed
             
             // Subscribe to agent events
             let event_receiver = agent.subscribe();

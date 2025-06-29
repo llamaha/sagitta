@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
-use terminal_stream::events::StreamEvent;
 use std::sync::Arc;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
@@ -329,11 +328,10 @@ For maximum security, you can enable 'always ask' approval mode in your configur
 Required tools (like git, cargo, npm, etc.) should be installed on your system for best results.".to_string()
     }
 
-    /// Execute a command with streaming output
+    /// Execute a command with streaming output (simplified without terminal streaming)
     pub async fn execute_streaming(
         &self,
         params: &ShellExecutionParams,
-        event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
         // Log the incoming parameters for debugging
         log::debug!("ShellExecutionTool::execute_streaming - params.working_directory: {:?}", params.working_directory);
@@ -366,7 +364,7 @@ Required tools (like git, cargo, npm, etc.) should be installed on your system f
         log::info!("ShellExecutionTool::execute_streaming - Executing command '{}' in directory: {}", 
             params.command, working_dir.display());
 
-        self.executor.execute_streaming(&resolved_params, event_sender).await
+        self.executor.execute_streaming(&resolved_params).await
     }
 
     /// Validate git command context
@@ -520,13 +518,12 @@ impl StreamingShellExecutionTool {
         }
     }
     
-    /// Execute a command with streaming output to a terminal widget
+    /// Execute a command with streaming output (simplified without terminal streaming)
     pub async fn execute_streaming(
         &self,
         params: ShellExecutionParams,
-        event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
-        self.base_tool.execute_streaming(&params, event_sender).await
+        self.base_tool.execute_streaming(&params).await
     }
     
     /// Check if the execution environment is available

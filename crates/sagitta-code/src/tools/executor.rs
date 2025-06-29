@@ -12,7 +12,6 @@ use crate::tools::registry::ToolRegistry;
 use crate::tools::types::{ToolResult, ToolParameters};
 use crate::tools::shell_execution::{StreamingShellExecutionTool, ShellExecutionParams};
 use crate::utils::errors::SagittaCodeError;
-use terminal_stream::events::StreamEvent;
 
 /// Event emitted by the tool executor
 #[derive(Debug, Clone)]
@@ -66,8 +65,6 @@ pub struct ToolExecutor {
     /// The event sender
     event_sender: mpsc::Sender<ToolExecutionEvent>,
     
-    /// Terminal event sender for streaming shell execution
-    terminal_event_sender: Option<mpsc::Sender<StreamEvent>>,
 }
 
 impl ToolExecutor {
@@ -84,15 +81,9 @@ impl ToolExecutor {
             registry,
             state_manager,
             event_sender,
-            terminal_event_sender: None,
         };
         
         (executor, event_receiver)
-    }
-    
-    /// Set the terminal event sender for streaming shell execution
-    pub fn set_terminal_event_sender(&mut self, sender: mpsc::Sender<StreamEvent>) {
-        self.terminal_event_sender = Some(sender);
     }
     
     /// Execute a tool with the given parameters, using streaming if it's a shell execution
@@ -104,92 +95,11 @@ impl ToolExecutor {
         // Generate a unique ID for this tool call
         let tool_call_id = Uuid::new_v4().to_string();
         
-        // Check if this is a shell execution tool and we have terminal streaming enabled
-        if (tool_name == "shell_execution" || tool_name == "streaming_shell_execution") 
-            && self.terminal_event_sender.is_some() {
-            self.execute_streaming_shell_tool(&tool_call_id, tool_name, parameters).await
-        } else {
-            // Execute the tool normally
-            self.execute_tool_with_id(&tool_call_id, tool_name, parameters).await
-        }
+        // Terminal streaming removed - execute all tools normally
+        self.execute_tool_with_id(&tool_call_id, tool_name, parameters).await
     }
     
-    /// Execute a streaming shell command
-    async fn execute_streaming_shell_tool(
-        &self,
-        tool_call_id: &str,
-        tool_name: &str,
-        parameters: Value,
-    ) -> Result<ToolResult, SagittaCodeError> {
-        debug!("ToolExecutor: Executing streaming shell tool: '{}' with ID: '{}'", tool_name, tool_call_id);
-        
-        // Parse shell execution parameters
-        let shell_params: ShellExecutionParams = serde_json::from_value(parameters.clone())
-            .map_err(|e| SagittaCodeError::ToolError(
-                format!("Invalid shell execution parameters: {}", e)
-            ))?;
-        
-        // Get the streaming shell tool
-        let streaming_tool = match self.registry.get("streaming_shell_execution").await {
-            Some(tool) => tool,
-            None => {
-                return Err(SagittaCodeError::ToolNotFound(
-                    "streaming_shell_execution".to_string()
-                ));
-            }
-        };
-        
-        // Cast to streaming shell tool
-        let streaming_shell_tool = streaming_tool
-            .as_any()
-            .downcast_ref::<StreamingShellExecutionTool>()
-            .ok_or_else(|| SagittaCodeError::ToolError(
-                "Failed to cast to StreamingShellExecutionTool".to_string()
-            ))?;
-        
-        // Get terminal event sender
-        let terminal_sender = self.terminal_event_sender.as_ref()
-            .ok_or_else(|| SagittaCodeError::ToolError(
-                "Terminal event sender not configured".to_string()
-            ))?;
-        
-        // Send tool execution started event
-        self.event_sender.send(ToolExecutionEvent::Started {
-            tool_call_id: tool_call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            parameters,
-        }).await.map_err(|e| SagittaCodeError::Unknown(format!("Failed to send tool started event: {}", e)))?;
-        
-        // Execute with streaming
-        let result = streaming_shell_tool.execute_streaming(shell_params, terminal_sender.clone()).await;
-        
-        match result {
-            Ok(shell_result) => {
-                let tool_result = ToolResult::Success(serde_json::to_value(shell_result)?);
-                
-                // Send completion event
-                self.event_sender.send(ToolExecutionEvent::Completed {
-                    tool_call_id: tool_call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    result: tool_result.clone(),
-                }).await.map_err(|e| SagittaCodeError::Unknown(format!("Failed to send tool completed event: {}", e)))?;
-                
-                Ok(tool_result)
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                
-                // Send failure event
-                self.event_sender.send(ToolExecutionEvent::Failed {
-                    tool_call_id: tool_call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    error: error_message.clone(),
-                }).await.map_err(|e| SagittaCodeError::Unknown(format!("Failed to send tool failed event: {}", e)))?;
-                
-                Err(SagittaCodeError::ToolError(error_message))
-            }
-        }
-    }
+    // execute_streaming_shell_tool method removed
     
     /// Execute a tool with the given parameters
     pub async fn execute_tool_with_id(

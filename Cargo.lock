@@ -5381,7 +5381,6 @@ dependencies = [
  "similar",
  "syntect",
  "tempfile",
- "terminal-stream",
  "thiserror 1.0.69",
  "tiktoken-rs",
  "tokio",
@@ -6049,28 +6048,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "terminal-stream"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "crossbeam-channel",
- "eframe",
- "egui 0.31.1",
- "futures-util",
- "log",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-stream",
- "tokio-test",
- "uuid",
 ]
 
 [[package]]

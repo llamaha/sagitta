@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use terminal_stream::events::StreamEvent;
 
 use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
 use crate::tools::shell_execution::StreamingShellExecutionTool;
@@ -81,7 +80,7 @@ impl Tool for BashTool {
         self.shell_tool.execute(shell_params).await
     }
     
-    fn set_progress_sender(&mut self, sender: Option<mpsc::Sender<StreamEvent>>) {
-        self.shell_tool.set_progress_sender(sender);
+    fn set_progress_sender(&mut self, _sender: Option<String>) {
+        // Progress sender functionality removed
     }
 }

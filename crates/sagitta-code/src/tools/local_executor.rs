@@ -6,7 +6,6 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use terminal_stream::events::StreamEvent;
 use chrono::{DateTime, Utc};
 use serde_json;
 use uuid;
@@ -206,7 +205,6 @@ pub trait CommandExecutor: Send + Sync {
     async fn execute_streaming(
         &self,
         params: &ShellExecutionParams,
-        event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError>;
 }
 
@@ -477,7 +475,7 @@ impl CommandExecutor for LocalExecutor {
     async fn execute(&self, params: &ShellExecutionParams) -> Result<ShellExecutionResult, SagittaCodeError> {
         // For non-streaming execution, we'll create a channel but not use it
         // We'll modify the streaming method to handle this case gracefully
-        let (tx, mut rx) = mpsc::channel(100);
+        let (tx, mut rx) = mpsc::channel::<String>(100);
         
         // Spawn a task to consume events so the sender doesn't block
         let _consumer_task = tokio::spawn(async move {
@@ -486,13 +484,12 @@ impl CommandExecutor for LocalExecutor {
             }
         });
         
-        self.execute_streaming(params, tx).await
+        self.execute_streaming(params).await
     }
 
     async fn execute_streaming(
         &self,
         params: &ShellExecutionParams,
-        event_sender: mpsc::Sender<StreamEvent>,
     ) -> Result<ShellExecutionResult, SagittaCodeError> {
         let start_time = std::time::Instant::now();
         
@@ -521,11 +518,8 @@ impl CommandExecutor for LocalExecutor {
         // let program = &command_parts[0];
         // let args = &command_parts[1..];
 
-        // Send initial progress
-        let _ = event_sender.send(StreamEvent::Progress {
-            message: format!("Executing: {}", params.command),
-            percentage: Some(0.0),
-        }).await;
+        // Log initial progress
+        log::debug!("Executing: {}", params.command);
 
         // Create command - run through shell for proper handling of quotes, pipes, etc.
         let mut cmd = if cfg!(target_os = "windows") {
@@ -587,17 +581,11 @@ impl CommandExecutor for LocalExecutor {
                                 stdout_output.push_str(&line);
                                 stdout_output.push('\n');
                                 
-                                // Send progress update every 10 lines
+                                // Log progress every 10 lines
                                 line_count += 1;
                                 if line_count % 10 == 0 {
-                                    let _ = event_sender.send(StreamEvent::Progress {
-                                        message: format!("Processing... ({} lines)", line_count),
-                                        percentage: None,
-                                    }).await;
+                                    log::debug!("Processing... ({} lines)", line_count);
                                 }
-                                
-                                // Send stdout line
-                                let _ = event_sender.send(StreamEvent::Stdout { content: line }).await;
                             }
                             Ok(None) => {
                                 stdout_closed = true;
@@ -618,18 +606,12 @@ impl CommandExecutor for LocalExecutor {
                                     line.contains("No such file or directory")
                                 ) {
                                     error_detected = true;
-                                    let _ = event_sender.send(StreamEvent::Progress {
-                                        message: "Early error detected, terminating...".to_string(),
-                                        percentage: None,
-                                    }).await;
+                                    log::warn!("Early error detected, terminating...");
                                     
                                     // Kill the process
                                     let _ = child.kill().await;
                                     break;
                                 }
-                                
-                                // Send stderr line
-                                let _ = event_sender.send(StreamEvent::Stderr { content: line }).await;
                             }
                             Ok(None) => {
                                 stderr_closed = true;
@@ -654,10 +636,7 @@ impl CommandExecutor for LocalExecutor {
             Err(_) => {
                 // Timeout occurred
                 let _ = child.kill().await;
-                let _ = event_sender.send(StreamEvent::Progress {
-                    message: format!("Command timed out after {} seconds", self.config.timeout_seconds),
-                    percentage: Some(100.0),
-                }).await;
+                log::warn!("Command timed out after {} seconds", self.config.timeout_seconds);
                 
                 return Ok(ShellExecutionResult {
                     exit_code: 124, // Standard timeout exit code
@@ -673,11 +652,8 @@ impl CommandExecutor for LocalExecutor {
 
         let exit_code = exit_status.code().unwrap_or(-1);
 
-        // Send completion progress
-        let _ = event_sender.send(StreamEvent::Progress {
-            message: format!("Command completed with exit code {}", exit_code),
-            percentage: Some(100.0),
-        }).await;
+        // Log completion
+        log::debug!("Command completed with exit code {}", exit_code);
 
         Ok(ShellExecutionResult {
             exit_code,

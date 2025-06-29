@@ -494,6 +494,44 @@ impl SagittaCodeApp {
         
         Ok(generator)
     }
+
+    /// Handle repository list update event
+    pub fn handle_repository_list_update(&mut self, repo_list: Vec<String>) {
+        log::debug!("Updating available repositories list with {} repositories", repo_list.len());
+        self.state.available_repositories = repo_list;
+    }
+
+    /// Trigger a manual refresh of the repository list
+    pub fn trigger_repository_list_refresh(&mut self) {
+        log::debug!("Triggering manual repository list refresh");
+        
+        let repo_manager = self.repo_panel.get_repo_manager();
+        let app_event_sender = self.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            log::debug!("Starting manual repository list refresh task");
+            match repo_manager.lock().await.list_repositories().await {
+                Ok(repositories) => {
+                    let repo_names: Vec<String> = repositories
+                        .iter()
+                        .map(|repo| repo.name.clone())
+                        .collect();
+                    
+                    log::info!("Manual refresh completed: {:?}", repo_names);
+                    
+                    // Send the repository list update event
+                    if let Err(e) = app_event_sender.send(crate::gui::app::events::AppEvent::RepositoryListUpdated(repo_names)) {
+                        log::error!("Failed to send repository list update event: {}", e);
+                    } else {
+                        log::debug!("Successfully sent repository list update event from manual refresh");
+                    }
+                },
+                Err(e) => {
+                    log::error!("Failed to manually refresh repository list: {}", e);
+                }
+            }
+        });
+    }
 }
 
 // Implement Deref and DerefMut to allow direct access to state fields

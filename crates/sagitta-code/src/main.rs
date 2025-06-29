@@ -262,36 +262,6 @@ mod cli_app {
             }
         };
         
-        // Phase 1 Fix: Set up terminal streaming for shell commands
-        let (terminal_sender, mut terminal_receiver) = tokio::sync::mpsc::channel::<terminal_stream::events::StreamEvent>(100);
-        agent.set_terminal_event_sender(terminal_sender).await;
-        
-        // Start a task to handle terminal events and display them
-        let terminal_task = tokio::spawn(async move {
-            while let Some(event) = terminal_receiver.recv().await {
-                match event {
-                    terminal_stream::events::StreamEvent::Output { content, .. } => {
-                        print!("{}", content);
-                        io::stdout().flush().unwrap();
-                    },
-                    terminal_stream::events::StreamEvent::Stdout { content } => {
-                        print!("{}", content);
-                        io::stdout().flush().unwrap();
-                    },
-                    terminal_stream::events::StreamEvent::Stderr { content } => {
-                        eprint!("{}", content);
-                        io::stderr().flush().unwrap();
-                    },
-                    terminal_stream::events::StreamEvent::Exit { code } => {
-                        println!("\n[Process exited with code: {}]", code);
-                    },
-                    _ => {
-                        // Handle other event types if needed
-                        println!("[Terminal event: {:?}]", event);
-                    }
-                }
-            }
-        });
         
         // Set to autonomous mode by default for CLI
         agent.set_mode(AgentMode::ToolsWithConfirmation).await?;

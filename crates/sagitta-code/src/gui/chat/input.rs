@@ -24,12 +24,11 @@ pub fn chat_input_ui(
     is_waiting: bool,
     theme: AppTheme,
     show_hotkeys_modal: &mut bool,
-    current_agent_mode: crate::agent::state::types::AgentMode,
-    on_agent_mode_change: &mut Option<crate::agent::state::types::AgentMode>,
     // Repository context parameters
     current_repository_context: &Option<String>,
     available_repositories: &[String],
     on_repository_context_change: &mut Option<String>,
+    on_repository_refresh_requested: &mut bool,
     // Loop control parameters
     is_in_loop: bool,
     loop_break_requested: &mut bool,
@@ -87,58 +86,8 @@ pub fn chat_input_ui(
         Vec2::new(available_width, ui.available_height()),
         Layout::top_down(Align::Center),
         |ui| {
-        // Agent Mode Selector
+        // Repository context selector
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Mode:").color(hint_color).small());
-            ui.add_space(4.0);
-            
-            let mode_text = match current_agent_mode {
-                crate::agent::state::types::AgentMode::ChatOnly => "💬 Chat Only",
-                crate::agent::state::types::AgentMode::ToolsWithConfirmation => "🤝 Tools (Ask First)",
-                crate::agent::state::types::AgentMode::FullyAutonomous => "🤖 Fully Autonomous",
-            };
-            
-            let mode_color = match current_agent_mode {
-                crate::agent::state::types::AgentMode::ChatOnly => accent_color,
-                crate::agent::state::types::AgentMode::ToolsWithConfirmation => warning_color,
-                crate::agent::state::types::AgentMode::FullyAutonomous => success_color,
-            };
-            
-            egui::ComboBox::from_id_source("agent_mode_selector")
-                .selected_text(RichText::new(mode_text).color(mode_color).small())
-                .width(150.0)
-                .show_ui(ui, |ui| {
-                    ui.style_mut().wrap = Some(false);
-                    ui.set_min_width(180.0);
-                    
-                    if ui.selectable_value(
-                        &mut *on_agent_mode_change, 
-                        Some(crate::agent::state::types::AgentMode::ChatOnly),
-                        RichText::new("💬 Chat Only").color(accent_color)
-                    ).clicked() {
-                        *on_agent_mode_change = Some(crate::agent::state::types::AgentMode::ChatOnly);
-                    }
-                    
-                    if ui.selectable_value(
-                        &mut *on_agent_mode_change, 
-                        Some(crate::agent::state::types::AgentMode::ToolsWithConfirmation),
-                        RichText::new("🤝 Tools (Ask First)").color(warning_color)
-                    ).clicked() {
-                        *on_agent_mode_change = Some(crate::agent::state::types::AgentMode::ToolsWithConfirmation);
-                    }
-                    
-                    if ui.selectable_value(
-                        &mut *on_agent_mode_change, 
-                        Some(crate::agent::state::types::AgentMode::FullyAutonomous),
-                        RichText::new("🤖 Fully Autonomous").color(success_color)
-                    ).clicked() {
-                        *on_agent_mode_change = Some(crate::agent::state::types::AgentMode::FullyAutonomous);
-                    }
-                });
-            
-            ui.add_space(8.0);
-
-            // Repository context selector
             let repo_text = match current_repository_context {
                 Some(repo) => format!("📁 {}", repo),
                 None => "📁 No Repository".to_string(),
@@ -150,7 +99,7 @@ pub fn chat_input_ui(
                 hint_color
             };
 
-            egui::ComboBox::from_id_source("repository_context_selector")
+            let combo_response = egui::ComboBox::from_id_source("repository_context_selector")
                 .selected_text(RichText::new(&repo_text).color(repo_color).small())
                 .width(180.0)
                 .show_ui(ui, |ui| {
@@ -190,6 +139,11 @@ pub fn chat_input_ui(
                         }
                     }
                 });
+            
+            // Trigger repository refresh when ComboBox is opened
+            if combo_response.response.clicked() {
+                *on_repository_refresh_requested = true;
+            }
             
             // Show "Create new repository" and "Add existing" buttons when "No repository" is selected
             if current_repository_context.is_none() || current_repository_context.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
@@ -404,7 +358,7 @@ pub fn chat_input_ui(
         // Bottom controls
         ui.horizontal(|ui| {
             // Left side - keyboard shortcuts hint
-            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • ?: Help").color(hint_color));
+            ui.small(RichText::new("Enter: Send • Ctrl+Enter: New line • F1: Menu").color(hint_color));
 
             // Right side - buttons
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -573,7 +527,6 @@ mod tests {
         let mut input_buffer = String::new();
         let mut on_submit = false;
         let mut show_hotkeys_modal = false;
-        let mut on_agent_mode_change: Option<crate::agent::state::types::AgentMode> = None;
         let mut loop_break_requested = false;
         let mut loop_inject_buffer = String::new();
         let mut show_loop_inject_input = false;

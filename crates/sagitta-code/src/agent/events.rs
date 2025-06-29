@@ -222,7 +222,7 @@ pub enum AgentEvent {
     /// Streaming event from a tool run
     ToolStream {
         run_id: ToolRunId,
-        event: terminal_stream::events::StreamEvent,
+        event: String, // Simplified from StreamEvent
     },
 }
 

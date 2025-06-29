@@ -34,8 +34,6 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process app events
     app.process_app_events();
     
-    // Process terminal events
-    app.state.process_terminal_events();
     
     // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
@@ -187,8 +185,7 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         app.panels.toggle_panel(ActivePanel::ThemeCustomizer);
     }
     if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-        // Ctrl+`: Toggle terminal panel (like VS Code)
-        app.state.toggle_terminal();
+        // Ctrl+`: Terminal functionality removed
     }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
         // Ctrl+M: Toggle model selection panel
@@ -806,8 +803,8 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Ctrl + `: Toggle Terminal Panel").color(theme.text_color()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            app.state.toggle_terminal();
+                        if ui.button(egui::RichText::new("Terminal Removed").color(theme.button_text_color())).clicked() {
+                            // Terminal functionality removed
                         }
                     });
                 });
@@ -968,6 +965,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         .max_height(200.0) // Max height to prevent it from taking too much space
         .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(16.0, 12.0)))
         .show(ctx, |ui| {
+            let mut repository_refresh_requested = false;
             let input_id = chat_input_ui(
                 ui, 
                 &mut app.state.chat_input_buffer, 
@@ -975,12 +973,11 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 app.state.is_waiting_for_response,
                 app.state.current_theme,
                 &mut app.state.show_hotkeys_modal,
-                app.state.current_agent_mode,
-                &mut app.state.pending_agent_mode_change,
                 // Repository context parameters
                 &app.state.current_repository_context,
                 &app.state.available_repositories,
                 &mut app.state.pending_repository_context_change,
+                &mut repository_refresh_requested,
                 // Loop control parameters
                 app.state.is_in_loop,
                 &mut app.state.loop_break_requested,
@@ -991,18 +988,10 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.should_focus_input,
             );
             
-            // Handle agent mode changes
-            if let Some(new_mode) = app.state.pending_agent_mode_change.take() {
-                app.state.current_agent_mode = new_mode; // Update cached mode immediately
-                if let Some(agent) = &app.agent {
-                    let agent_clone = agent.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = agent_clone.set_mode(new_mode).await {
-                            log::error!("Failed to change agent mode: {}", e);
-                        } else {
-                            log::info!("Agent mode changed to: {:?}", new_mode);
-                        }
-                    });
+            // Handle repository refresh request
+            if repository_refresh_requested {
+                if let Err(e) = app.app_event_sender.send(super::events::AppEvent::RefreshRepositoryList) {
+                    log::error!("Failed to send RefreshRepositoryList event: {}", e);
                 }
             }
 
@@ -1107,31 +1096,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             }
         });
 
-    // --- Terminal Panel (Above Input) ---
-    if app.state.show_terminal {
-        TopBottomPanel::bottom("terminal_panel")
-            .resizable(true)
-            .min_height(200.0)
-            .max_height(600.0)
-            .default_height(400.0)
-            .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(8.0, 8.0)))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Terminal");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Clear").clicked() {
-                            app.state.clear_terminal();
-                        }
-                        if ui.small_button("Hide").clicked() {
-                            app.state.toggle_terminal();
-                        }
-                    });
-                });
-                ui.separator();
-                
-                app.state.terminal_widget.show(ui);
-            });
-    }
+    // Terminal functionality removed
 
     // --- Chat View Panel (Central) ---
     egui::CentralPanel::default()
@@ -1174,67 +1139,11 @@ fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &s
             (tool_args.contains("stdout") && tool_args.contains("stderr") && tool_args.contains("exit_code"));
             
         if is_terminal_output {
-            log::debug!("Handling terminal output for: {}", tool_name);
-            
-            // If terminal is already showing this tool's output, close it
-            // Otherwise, show the terminal and add the output
-            if app.state.show_terminal {
-                // Terminal is already open - just close it
-                app.state.show_terminal = false;
-            } else {
-                // Terminal is closed - open it and show the output
-                app.state.show_terminal = true;
-                
-                // Parse and add the shell output to terminal
-                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(tool_args) {
-                    if let Some(obj) = json_value.as_object() {
-                        let mut terminal_output = String::new();
-                        
-                        // Add command info if available
-                        if let Some(command) = obj.get("command").and_then(|v| v.as_str()) {
-                            terminal_output.push_str(&format!("$ {}\n", command));
-                        }
-                        
-                        // Add stdout
-                        if let Some(stdout) = obj.get("stdout").and_then(|v| v.as_str()) {
-                            if !stdout.trim().is_empty() {
-                                terminal_output.push_str(stdout);
-                                if !stdout.ends_with('\n') {
-                                    terminal_output.push('\n');
-                                }
-                            }
-                        }
-                        
-                        // Add stderr
-                        if let Some(stderr) = obj.get("stderr").and_then(|v| v.as_str()) {
-                            if !stderr.trim().is_empty() {
-                                terminal_output.push_str(&format!("stderr: {}\n", stderr));
-                            }
-                        }
-                        
-                        // Add exit code
-                        if let Some(exit_code) = obj.get("exit_code").and_then(|v| v.as_i64()) {
-                            terminal_output.push_str(&format!("Exit code: {}\n", exit_code));
-                        }
-                        
-                        // Add the output to terminal widget
-                        app.state.terminal_widget.add_output(&terminal_output);
-                    } else {
-                        // Fallback: add raw JSON to terminal
-                        app.state.terminal_widget.add_output(tool_args);
-                    }
-                } else {
-                    // Not JSON, add as plain text
-                    app.state.terminal_widget.add_output(tool_args);
-                }
-            }
+            log::debug!("Terminal output detected for: {} (terminal functionality removed)", tool_name);
+            // Terminal functionality removed - fall through to preview
         } else {
             // This is a non-shell tool result - show in preview
             log::debug!("Showing preview for non-shell tool result: {}", tool_name);
-            // Ensure terminal is closed to prevent flickering
-            if app.state.show_terminal {
-                app.state.show_terminal = false;
-            }
             
             // For "Tool Result", tool_args contains the tool call ID - look up actual result
             if tool_name == "Tool Result" {

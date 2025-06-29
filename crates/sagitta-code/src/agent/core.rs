@@ -49,7 +49,6 @@ use crate::agent::prompts::{SystemPromptProvider, claude_code::ClaudeCodeSystemP
 use crate::agent::conversation::persistence::ConversationPersistence;
 use crate::agent::conversation::search::ConversationSearchEngine;
 
-use terminal_stream::events::StreamEvent;
 
 
 /// Core agent implementation that coordinates LLM calls and tool execution
@@ -89,8 +88,6 @@ pub struct Agent {
     /// Recovery manager
     recovery_manager: Arc<RecoveryManager>,
     
-    /// Terminal event sender for streaming shell execution
-    terminal_event_sender: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<StreamEvent>>>>,
     
     /// Phase 3: Conversation context manager for intelligent flow management
     context_manager: Arc<ConversationContextManager>,
@@ -217,7 +214,6 @@ impl Agent {
             loop_break_requested: loop_break_requested_initial.clone(),
             event_handler: EventHandler::new(event_sender.clone()),
             recovery_manager: Arc::new(RecoveryManager::new(RecoveryConfig::default(), Arc::new(state_manager_instance), event_sender.clone())),
-            terminal_event_sender: Arc::new(tokio::sync::Mutex::new(None)),
             context_manager,
             streaming_processor,
         };
@@ -310,20 +306,6 @@ impl Agent {
         self.state_manager.get_agent_mode().await
     }
     
-    /// Set the terminal event sender for streaming shell execution
-    pub async fn set_terminal_event_sender(&self, sender: tokio::sync::mpsc::Sender<StreamEvent>) {
-        // Set the terminal event sender on the internal tool executor
-        self.tool_executor.lock().await.set_terminal_event_sender(sender.clone());
-        log::info!("Terminal event sender set on agent's tool executor");
-        
-        // Store the sender for use in future reasoning sessions
-        {
-            let mut terminal_sender_guard = self.terminal_event_sender.lock().await;
-            *terminal_sender_guard = Some(sender);
-        }
-        
-        log::info!("Terminal event sender configured for tool executor");
-    }
     
     /// Clear the conversation history (except system prompts)
     pub async fn clear_history(&self) -> Result<(), SagittaCodeError> {
