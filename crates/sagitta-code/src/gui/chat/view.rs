@@ -333,10 +333,11 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
     // Create empty HashMap for backward compatibility
     let empty_running_tools = HashMap::new();
     let mut empty_collapsed_thinking = HashMap::new();
-    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking);
+    let empty_tool_results = HashMap::new();
+    modern_chat_view_ui(ui, &streaming_messages, app_theme, copy_state, &empty_running_tools, &mut empty_collapsed_thinking, &empty_tool_results);
 }
 
-pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>) -> Option<(String, String)> {
+pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
     let text_color = app_theme.text_color();
@@ -409,6 +410,16 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, messages: &[StreamingMessage], app
                     ui.add_space(16.0);
                 });
         });
+    
+    // Handle tool result clicks
+    if let Some((title, tool_call_id)) = &clicked_tool {
+        if title == "Tool Result" {
+            // Look up the actual tool result
+            if let Some(result) = tool_results.get(tool_call_id) {
+                return Some((format!("Tool Result for {}", tool_call_id), result.clone()));
+            }
+        }
+    }
     
     clicked_tool
 }
@@ -635,7 +646,9 @@ fn render_single_message_content(
         if *pos > last_pos && last_pos < content.len() {
             let content_chunk = &content[last_pos..*pos.min(&content.len())];
             if !content_chunk.is_empty() {
-                render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme);
+                if let Some(tool_info) = render_text_content_compact(ui, content_chunk, &bg_color, max_width, app_theme) {
+                    clicked_tool = Some(tool_info);
+                }
             }
         }
         
@@ -653,7 +666,9 @@ fn render_single_message_content(
     if last_pos < content.len() {
         let remaining_content = &content[last_pos..];
         if !remaining_content.is_empty() {
-            render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme);
+            if let Some(tool_info) = render_text_content_compact(ui, remaining_content, &bg_color, max_width, app_theme) {
+                clicked_tool = Some(tool_info);
+            }
         }
     }
     
@@ -936,11 +951,10 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 }
 
 /// Render message content in a compact format
-fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     // Use message_type for summary/finalization
     if message.message_type == MessageType::Summary {
-        render_text_content_compact(ui, &message.content, &bg_color, max_width, app_theme);
-        return;
+        return render_text_content_compact(ui, &message.content, &bg_color, max_width, app_theme);
     }
     
     // Set up content area
@@ -948,11 +962,11 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
     ui.style_mut().wrap = Some(true);
     
     // Render content based on type
-    if message.content.contains("```") {
-        render_mixed_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme);
+    let clicked_tool = if message.content.contains("```") {
+        render_mixed_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
     } else {
-        render_text_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme);
-    }
+        render_text_content_compact(ui, &message.content, &bg_color, max_width - 20.0, app_theme)
+    };
     
     // Show streaming cursor if message is still streaming but not in thinking_is_streaming phase
     // SUPPRESS spinner for reasoning-engine summary messages
@@ -969,11 +983,86 @@ fn render_message_content_compact(ui: &mut Ui, message: &StreamingMessage, bg_co
             ui.add(egui::Spinner::new().size(12.0).color(cursor_color));
         });
     }
+    
+    clicked_tool
 }
 
 /// Render text content compactly using markdown with proper theme colors
-fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
-    // Set the text color from theme before rendering
+fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+    // Check if text contains tool:// links
+    if text.contains("tool://") {
+        render_text_with_tool_links(ui, text, bg_color, max_width, app_theme)
+    } else {
+        // Set the text color from theme before rendering
+        let original_text_color = ui.style().visuals.text_color();
+        ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
+        
+        COMMONMARK_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let viewer = CommonMarkViewer::new()
+                .max_image_width(Some(max_width as usize))
+                .default_width(Some(max_width as usize));
+            
+            ui.set_max_width(max_width);
+            ui.style_mut().wrap = Some(true);
+            viewer.show(ui, &mut *cache, text);
+        });
+        
+        // Restore original text color
+        ui.style_mut().visuals.override_text_color = None;
+        None
+    }
+}
+
+/// Render text with tool:// links as clickable buttons
+fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+    let mut clicked_tool = None;
+    
+    // Simple parsing for [text](tool://id) pattern
+    if let (Some(start_bracket), Some(end_bracket), Some(start_paren), Some(end_paren)) = (
+        text.find('['),
+        text.find(']'),
+        text.find("](tool://"),
+        text.rfind(')')
+    ) {
+        if start_bracket < end_bracket && end_bracket < start_paren && start_paren < end_paren {
+            // Extract parts
+            let before_text = &text[..start_bracket];
+            let link_text = &text[start_bracket + 1..end_bracket];
+            let tool_call_id = &text[start_paren + 9..end_paren]; // 9 = "](tool://".len()
+            let after_text = &text[end_paren + 1..];
+            
+            ui.horizontal_wrapped(|ui| {
+                // Render text before link
+                if !before_text.is_empty() {
+                    let before_clean = before_text.replace("*", "");
+                    if before_text.contains("*") {
+                        ui.label(RichText::new(before_clean).strong().color(app_theme.text_color()));
+                    } else {
+                        ui.label(RichText::new(before_clean).color(app_theme.text_color()));
+                    }
+                }
+                
+                // Render clickable button
+                let button = ui.small_button(format!("📋 {}", link_text));
+                if button.clicked() {
+                    clicked_tool = Some(("Tool Result".to_string(), tool_call_id.to_string()));
+                }
+                
+                // Render text after link
+                if !after_text.is_empty() {
+                    let after_clean = after_text.replace("*", "").trim().to_string();
+                    if !after_clean.is_empty() {
+                        ui.label(RichText::new(after_clean).color(app_theme.text_color()));
+                    }
+                }
+            });
+            
+            return clicked_tool;
+        }
+    }
+    
+    // Fallback: render normally if no tool links found
     let original_text_color = ui.style().visuals.text_color();
     ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
     
@@ -988,8 +1077,8 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         viewer.show(ui, &mut *cache, text);
     });
     
-    // Restore original text color
     ui.style_mut().visuals.override_text_color = None;
+    None
 }
 
 /// Render code block compactly
@@ -1660,7 +1749,7 @@ fn wrap_text_at_line_length(text: &str, max_line_length: usize) -> String {
 }
 
 /// Render mixed content (text + code blocks) compactly
-fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
+fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     if let Some((old_content, new_content, language)) = detect_diff_content(content) {
         // Render diff header
         ui.horizontal(|ui| {
@@ -1704,7 +1793,7 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                     });
             }
         );
-        return;
+        return None;
     }
     
     let parts: Vec<&str> = content.split("```").collect();
@@ -1748,13 +1837,16 @@ fn render_mixed_content_compact(ui: &mut Ui, content: &str, bg_color: &Color32, 
                         }
                     );
                 } else {
-                    render_text_content_compact(ui, part, &bg_color, max_width, app_theme);
+                    if let Some(tool_info) = render_text_content_compact(ui, part, &bg_color, max_width, app_theme) {
+                        return Some(tool_info);
+                    }
                 }
             }
         } else {
             render_code_block_compact(ui, part, &bg_color, max_width, app_theme);
         }
     }
+    None
 }
 
 #[cfg(test)]

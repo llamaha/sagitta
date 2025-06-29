@@ -1,6 +1,7 @@
 use futures_util::{Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio::sync::broadcast;
 use log::{debug, info, trace, warn, error};
 use uuid::Uuid;
@@ -40,6 +41,9 @@ pub struct StreamingProcessor {
     
     /// Flag to track if we need to continue reasoning after tool completion in streaming mode
     continue_reasoning_after_tool: Arc<Mutex<bool>>,
+    
+    /// Track tool calls by ID for result matching
+    tool_calls: Arc<Mutex<HashMap<String, (String, String)>>>, // ID -> (name, preview)
 }
 
 impl StreamingProcessor {
@@ -61,12 +65,13 @@ impl StreamingProcessor {
             tool_executor,
             event_sender,
             continue_reasoning_after_tool,
+            tool_calls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
     /// Process a user message with streaming
     pub async fn process_message_stream(&self, message: impl Into<String>) 
-        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send>>, SagittaCodeError> 
+        -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk, SagittaCodeError>> + Send + '_>>, SagittaCodeError> 
     {
         let message_text = message.into();
         info!("Processing user message (stream): '{}'", message_text);
@@ -179,7 +184,13 @@ impl StreamingProcessor {
                                             name, 
                                             &serde_json::to_string(parameters).unwrap_or_default()
                                         );
-                                        let inline_text = format!("*🔧 {}*\n\n", tool_preview);
+                                        
+                                        // Store tool call info for result matching
+                                        if let Ok(mut tool_calls) = self.tool_calls.lock() {
+                                            tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview.clone()));
+                                        }
+                                        
+                                        let inline_text = format!("*🔧 {} • [View Raw Result](tool://{})*\n\n", tool_preview, tool_call_id);
                                         
                                         // Emit as text chunk so it appears inline
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
@@ -190,9 +201,26 @@ impl StreamingProcessor {
                                         
                                         info!("Stream: Added inline tool preview - {}", name);
                                     },
-                                    MessagePart::ToolResult { .. } => {
-                                        warn!("Stream: Received unexpected ToolResult part in stream. This should be handled via ToolExecutionEvent.");
-                                        // Tool results are typically added separately, not part of the stream
+                                    MessagePart::ToolResult { tool_call_id, name, result } => {
+                                        info!("Stream: Received tool result for ID: {}", tool_call_id);
+                                        
+                                        // Get tool name from stored tool calls or use the provided name
+                                        let tool_name = if let Ok(tool_calls) = self.tool_calls.lock() {
+                                            tool_calls.get(tool_call_id).map(|(name, _)| name.clone()).unwrap_or_else(|| name.clone())
+                                        } else {
+                                            name.clone()
+                                        };
+                                        
+                                        // Emit tool call complete event with the result
+                                        let tool_result = crate::tools::types::ToolResult::Success(result.clone());
+                                        
+                                        let _ = event_sender.send(AgentEvent::ToolCallComplete {
+                                            tool_call_id: tool_call_id.clone(),
+                                            tool_name,
+                                            result: tool_result,
+                                        });
+                                        
+                                        info!("Stream: Emitted ToolCallComplete event for ID: {}", tool_call_id);
                                     },
                                 }
                                 

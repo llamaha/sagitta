@@ -94,6 +94,9 @@ pub struct Agent {
     
     /// Phase 3: Conversation context manager for intelligent flow management
     context_manager: Arc<ConversationContextManager>,
+    
+    /// Streaming processor for handling LLM streaming responses
+    streaming_processor: Arc<StreamingProcessor>,
 }
 
 impl Agent {
@@ -188,6 +191,18 @@ impl Agent {
 
         // Create shared loop break flag
         let loop_break_requested_initial = Arc::new(tokio::sync::Mutex::new(false));
+        
+        // Create streaming processor
+        let continue_reasoning_flag = Arc::new(Mutex::new(false));
+        let streaming_processor = Arc::new(StreamingProcessor::new(
+            llm_client.clone(),
+            tool_registry.clone(),
+            Arc::new(history_manager.clone()),
+            Arc::new(state_manager_instance.clone()),
+            Arc::new(tokio::sync::Mutex::new(tool_executor_internal.clone())),
+            event_sender.clone(),
+            continue_reasoning_flag,
+        ));
 
         let mut agent_self = Self {
             llm_client,
@@ -204,6 +219,7 @@ impl Agent {
             recovery_manager: Arc::new(RecoveryManager::new(RecoveryConfig::default(), Arc::new(state_manager_instance), event_sender.clone())),
             terminal_event_sender: Arc::new(tokio::sync::Mutex::new(None)),
             context_manager,
+            streaming_processor,
         };
         
         // Start event listeners
@@ -262,20 +278,8 @@ impl Agent {
         // Use direct LLM streaming
         info!("Using direct LLM streaming");
         
-        // Use the streaming processor for direct LLM streaming
-        let continue_reasoning_flag = Arc::new(Mutex::new(false));
-        let processor = StreamingProcessor::new(
-            self.llm_client.clone(),
-            self.tool_registry.clone(),
-            self.history.clone(),
-            self.state_manager.clone(),
-            self.tool_executor.clone(),
-            self.event_sender.clone(),
-            continue_reasoning_flag,
-        );
-        
         // Use the streaming processor which properly emits events
-        let stream = processor.process_message_stream(message_text).await?;
+        let stream = self.streaming_processor.process_message_stream(message_text).await?;
         
         // StreamChunk already has the correct structure, just return it
         Ok(Box::pin(stream))

@@ -102,7 +102,20 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     log::debug!("Tool call received (now handled inline): {}", tool_call.name);
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                    handle_tool_call_result(app, tool_call_id, tool_name, result);
+                    // Store tool result for preview display
+                    let result_string = match &result {
+                        crate::tools::types::ToolResult::Success(data) => {
+                            serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
+                        },
+                        crate::tools::types::ToolResult::Error { error } => {
+                            format!("Error: {}", error)
+                        }
+                    };
+                    
+                    // Store the result for potential preview display
+                    app.state.tool_results.insert(tool_call_id.clone(), result_string);
+                    
+                    log::info!("Tool call {} ({}) completed and result stored for preview", tool_call_id, tool_name);
                 },
                 AgentEvent::ToolCallPending { tool_call } => {
                     // Add to events panel instead of chat to save space

@@ -212,15 +212,17 @@ impl ClaudeCodeStream {
                                                         log::debug!("CLAUDE_CODE: User text: {}", text);
                                                     }
                                                     super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
-                                                        // Tool results from MCP - send them as text so the user can see them
+                                                        // Tool results from MCP - store for tool preview instead of displaying inline
                                                         log::info!("CLAUDE_CODE: Tool result for {}: {}", tool_use_id, content);
                                                         
-                                                        // Only send tool result if it's not an error
+                                                        // Only process tool result if it's not an error
                                                         if is_error != Some(true) {
-                                                            // Send tool result as a code block for better formatting
+                                                            // Send as tool result event instead of text to prevent inline display
                                                             let _ = sender.send(Ok(StreamChunk {
-                                                                part: MessagePart::Text { 
-                                                                    text: format!("\n```json\n{}\n```\n", content)
+                                                                part: MessagePart::ToolResult { 
+                                                                    tool_call_id: tool_use_id.clone(),
+                                                                    name: "mcp_tool".to_string(),
+                                                                    result: serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content)),
                                                                 },
                                                                 is_final: false,
                                                                 finish_reason: None,
