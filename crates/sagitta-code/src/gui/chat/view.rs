@@ -1159,6 +1159,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         processed_text = processed_text.replace(&caps[0], &placeholder);
     }
     
+    
     if tool_links.is_empty() {
         // No tool links, render normally with CommonMark
         let original_text_color = ui.style().visuals.text_color();
