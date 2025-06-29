@@ -190,7 +190,7 @@ impl StreamingProcessor {
                                             tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview.clone()));
                                         }
                                         
-                                        let inline_text = format!("🔧 {} - [View Raw Result](tool://{})\n\n", tool_preview, tool_call_id);
+                                        let inline_text = format!("🔧 {} [View Raw Result](tool://{})\n\n", tool_preview, tool_call_id);
                                         
                                         // Emit as text chunk so it appears inline
                                         let _ = event_sender.send(AgentEvent::LlmChunk {
