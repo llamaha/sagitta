@@ -1069,6 +1069,50 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     }
                 });
             });
+            
+            // Add inline result display for completed tools
+            if let ToolCardStatus::Completed { success: true } = &tool_card.status {
+                if let Some(result) = &tool_card.result {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    
+                    // Use ToolResultFormatter to format the result
+                    let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                    let success = matches!(tool_card.status, ToolCardStatus::Completed { success: true });
+                    let tool_result = if success {
+                        crate::tools::types::ToolResult::Success(result.clone())
+                    } else {
+                        crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                    };
+                    
+                    let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
+                    
+                    // Display the formatted result in a scrollable area with limited height
+                    egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            ui.set_max_width(max_width - 24.0);
+                            
+                            // Check if this is a shell command result for special rendering
+                            if is_shell_command_result(&tool_card.tool_name, result) {
+                                render_terminal_output(ui, result, app_theme);
+                            } else if is_code_change_result(&tool_card.tool_name, result) {
+                                render_diff_output(ui, result, app_theme);
+                            } else {
+                                // Default rendering with markdown support
+                                ui.style_mut().wrap = Some(true);
+                                
+                                // Use markdown rendering for formatted results
+                                crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                    let mut cache = cache.borrow_mut();
+                                    let viewer = egui_commonmark::CommonMarkViewer::new();
+                                    viewer.show(ui, &mut *cache, &formatted_result);
+                                });
+                            }
+                        });
+                }
+            }
         });
     
     clicked_tool_result
@@ -2623,5 +2667,101 @@ impl CopyButtonState {
             theme.input_background()
         }
     }
+}
+
+/// Check if this is a shell command result
+fn is_shell_command_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("shell") || 
+    tool_name.contains("bash") ||
+    tool_name.contains("streaming_shell_execution") ||
+    (result.get("stdout").is_some() && result.get("stderr").is_some() && result.get("exit_code").is_some())
+}
+
+/// Check if this is a code change result
+fn is_code_change_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("edit") || 
+    tool_name.contains("semantic_edit") ||
+    result.get("changes").is_some() ||
+    result.get("diff").is_some()
+}
+
+/// Render terminal output with monospace font and ANSI colors
+fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        ui.style_mut().visuals.override_text_color = Some(app_theme.success_color());
+        
+        // Terminal header
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("$ Terminal Output").strong().color(app_theme.accent_color()));
+            if let Some(exit_code) = result.get("exit_code").and_then(|v| v.as_i64()) {
+                let exit_color = if exit_code == 0 { app_theme.success_color() } else { app_theme.error_color() };
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("Exit: {}", exit_code)).color(exit_color).small());
+                });
+            }
+        });
+        
+        ui.separator();
+        
+        // Use monospace font for terminal output
+        let mut output = String::new();
+        
+        if let Some(stdout) = result.get("stdout").and_then(|v| v.as_str()) {
+            if !stdout.is_empty() {
+                output.push_str(stdout);
+            }
+        }
+        
+        if let Some(stderr) = result.get("stderr").and_then(|v| v.as_str()) {
+            if !stderr.is_empty() {
+                if !output.is_empty() {
+                    output.push_str("\n");
+                }
+                output.push_str(&format!("STDERR:\n{}", stderr));
+            }
+        }
+        
+        if output.is_empty() {
+            output = "(No output)".to_string();
+        }
+        
+        // Render with monospace font
+        ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+    });
+}
+
+/// Render diff output with syntax highlighting
+fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        // Diff header
+        ui.label(egui::RichText::new("📝 Code Changes").strong().color(app_theme.accent_color()));
+        ui.separator();
+        
+        if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("File: {}", file_path)).color(app_theme.hint_text_color()).small());
+            ui.add_space(4.0);
+        }
+        
+        // Get the diff/changes content
+        let diff_content = result.get("diff")
+            .or_else(|| result.get("changes"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("No changes available");
+        
+        // Render diff lines with appropriate colors
+        for line in diff_content.lines() {
+            let (text_color, prefix) = if line.starts_with('+') && !line.starts_with("+++") {
+                (app_theme.success_color(), "+ ")
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                (app_theme.error_color(), "- ")
+            } else if line.starts_with("@@") {
+                (app_theme.accent_color(), "")
+            } else {
+                (app_theme.text_color(), "  ")
+            };
+            
+            ui.label(egui::RichText::new(line).monospace().color(text_color));
+        }
+    });
 }
 

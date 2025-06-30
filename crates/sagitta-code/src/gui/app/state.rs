@@ -69,6 +69,7 @@ pub struct AppState {
     
     // Running tool tracking
     pub running_tools: HashMap<ToolRunId, RunningToolInfo>,
+    pub tool_call_to_run_id: HashMap<String, ToolRunId>, // Maps tool_call_id to run_id
     
     // Thinking content state
     pub collapsed_thinking: HashMap<String, bool>, // message_id -> collapsed state
@@ -140,6 +141,7 @@ impl AppState {
             
             // Running tool tracking
             running_tools: HashMap::new(),
+            tool_call_to_run_id: HashMap::new(),
             
             // Thinking content state
             collapsed_thinking: HashMap::new(),

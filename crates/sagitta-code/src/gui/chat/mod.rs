@@ -771,3 +771,15 @@ mod tests {
     }
 }
 
+/// Trait for rendering tool results in different formats
+pub trait ToolResultRenderer {
+    /// Render the tool result inline within the chat
+    fn render_inline(&self, ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: crate::gui::theme::AppTheme, max_width: f32);
+    
+    /// Get a preview of the result (for truncated display)
+    fn get_preview(&self, tool_name: &str, result: &serde_json::Value, max_lines: usize) -> String;
+}
+
+#[cfg(test)]
+mod tests;
+

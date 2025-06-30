@@ -179,27 +179,28 @@ impl StreamingProcessor {
                                         // For Claude CLI, tools are executed through MCP
                                         info!("Stream: Claude CLI executed tool through MCP - ID: {}, Name: {}", tool_call_id, name);
                                         
-                                        // Add tool execution preview as inline text content
-                                        let tool_preview = crate::gui::app::events::format_tool_arguments_for_display(
-                                            name, 
-                                            &serde_json::to_string(parameters).unwrap_or_default()
-                                        );
-                                        
                                         // Store tool call info for result matching
                                         if let Ok(mut tool_calls) = self.tool_calls.lock() {
-                                            tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview.clone()));
+                                            let tool_preview = crate::gui::app::events::format_tool_arguments_for_display(
+                                                name, 
+                                                &serde_json::to_string(parameters).unwrap_or_default()
+                                            );
+                                            tool_calls.insert(tool_call_id.clone(), (name.clone(), tool_preview));
                                         }
                                         
-                                        let inline_text = format!("🔧 {} [View Raw Result](tool://{})\n\n", tool_preview, tool_call_id);
+                                        // Emit tool call event to trigger tool card creation
+                                        let tool_call = ToolCall {
+                                            id: tool_call_id.clone(),
+                                            name: name.clone(),
+                                            arguments: parameters.clone(),
+                                            result: None,
+                                            successful: false,
+                                            execution_time: None,
+                                        };
                                         
-                                        // Emit as text chunk so it appears inline
-                                        let _ = event_sender.send(AgentEvent::LlmChunk {
-                                            content: inline_text,
-                                            is_final: false,
-                                            is_thinking: false,
-                                        });
+                                        let _ = event_sender.send(AgentEvent::ToolCall { tool_call });
                                         
-                                        info!("Stream: Added inline tool preview - {}", name);
+                                        info!("Stream: Emitted ToolCall event for {}", name);
                                     },
                                     MessagePart::ToolResult { tool_call_id, name, result } => {
                                         info!("Stream: Received tool result for ID: {}", tool_call_id);

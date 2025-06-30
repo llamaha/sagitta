@@ -35,7 +35,7 @@ use crate::tools::WorkingDirectoryManager;
 mod panels;
 use super::conversation;
 pub mod events;
-mod tool_formatting;
+pub mod tool_formatting;
 mod state;
 mod rendering;
 mod initialization;
