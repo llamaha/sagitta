@@ -212,8 +212,21 @@ impl StreamingProcessor {
                                             name.clone()
                                         };
                                         
-                                        // Emit tool call complete event with the result
-                                        let tool_result = crate::tools::types::ToolResult::Success(result.clone());
+                                        // Check if the result indicates an error
+                                        let tool_result = if let Some(obj) = result.as_object() {
+                                            if obj.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                                // Extract error message
+                                                let error_msg = obj.get("error")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("Tool execution failed")
+                                                    .to_string();
+                                                crate::tools::types::ToolResult::Error { error: error_msg }
+                                            } else {
+                                                crate::tools::types::ToolResult::Success(result.clone())
+                                            }
+                                        } else {
+                                            crate::tools::types::ToolResult::Success(result.clone())
+                                        };
                                         
                                         let _ = event_sender.send(AgentEvent::ToolCallComplete {
                                             tool_call_id: tool_call_id.clone(),

@@ -14,10 +14,19 @@ impl ToolResultFormatter {
     pub fn format_tool_result_for_preview(&self, tool_name: &str, result: &crate::tools::types::ToolResult) -> String {
         match result {
             crate::tools::types::ToolResult::Success(value) => {
+                // Check if this is actually an error wrapped as success (from MCP)
+                if let Some(obj) = value.as_object() {
+                    if obj.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        let error_msg = obj.get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Tool execution failed");
+                        return format!("❌ **ERROR**\n\n{}", error_msg);
+                    }
+                }
                 self.format_successful_tool_result(tool_name, value)
             },
             crate::tools::types::ToolResult::Error { error } => {
-                format!("ERROR\n\n{}", error)
+                format!("❌ **ERROR**\n\n{}", error)
             }
         }
     }

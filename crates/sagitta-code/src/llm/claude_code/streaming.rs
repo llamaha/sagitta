@@ -213,22 +213,30 @@ impl ClaudeCodeStream {
                                                     }
                                                     super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
                                                         // Tool results from MCP - store for tool preview instead of displaying inline
-                                                        log::info!("CLAUDE_CODE: Tool result for {}: {}", tool_use_id, content);
+                                                        log::info!("CLAUDE_CODE: Tool result for {} (is_error: {:?}): {}", tool_use_id, is_error, content);
                                                         
-                                                        // Only process tool result if it's not an error
-                                                        if is_error != Some(true) {
-                                                            // Send as tool result event instead of text to prevent inline display
-                                                            let _ = sender.send(Ok(StreamChunk {
-                                                                part: MessagePart::ToolResult { 
-                                                                    tool_call_id: tool_use_id.clone(),
-                                                                    name: "mcp_tool".to_string(),
-                                                                    result: serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content)),
-                                                                },
-                                                                is_final: false,
-                                                                finish_reason: None,
-                                                                token_usage: None,
-                                                            }));
-                                                        }
+                                                        // Send tool result regardless of error status
+                                                        let result_value = if is_error == Some(true) {
+                                                            // Wrap error content in an error object
+                                                            serde_json::json!({
+                                                                "error": content,
+                                                                "is_error": true
+                                                            })
+                                                        } else {
+                                                            // Parse normal result
+                                                            serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content))
+                                                        };
+                                                        
+                                                        let _ = sender.send(Ok(StreamChunk {
+                                                            part: MessagePart::ToolResult { 
+                                                                tool_call_id: tool_use_id.clone(),
+                                                                name: "mcp_tool".to_string(),
+                                                                result: result_value,
+                                                            },
+                                                            is_final: false,
+                                                            finish_reason: None,
+                                                            token_usage: None,
+                                                        }));
                                                     }
                                                 }
                                             }
