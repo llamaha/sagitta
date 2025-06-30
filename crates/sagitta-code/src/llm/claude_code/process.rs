@@ -106,10 +106,13 @@ impl ClaudeProcess {
             // Disable Claude native tools that are duplicated by our MCP tools
             args.push("--disallowedTools".to_string());
             let disallowed_tools = vec![
-                "Read",         // We have mcp__*__view_file
-                // "Edit",         // We have mcp__*__edit_file
-                // "MultiEdit",    // We have mcp__*__edit_file
-                // "Write",        // We have mcp__*__edit_file
+                "TodoRead",     // We have mcp__sagitta-mcp-stdio__todo_read
+                "TodoWrite",    // We have mcp__sagitta-mcp-stdio__todo_write
+                "Edit",         // We have mcp__sagitta-mcp-stdio__edit_file
+                "MultiEdit",    // We have mcp__sagitta-mcp-stdio__multi_edit_file
+                "Write",        // We have mcp__sagitta-mcp-stdio__write_file
+                "Read",         // We have mcp__sagitta-mcp-stdio__read_file and mcp__*__view_file
+                "Bash",         // We have mcp__sagitta-mcp-stdio__shell_execute
                 "Glob",         // We have mcp__*__search_file_in_repository
                 "Grep",         // We have mcp__*__search_code and mcp__*__query
                 "LS",           // We have directory listing through MCP tools

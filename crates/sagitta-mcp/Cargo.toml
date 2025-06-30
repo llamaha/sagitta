@@ -48,6 +48,7 @@ tower-http = { version = "0.5.2", features = ["trace", "cors"] }
 axum-limit = "0.1.0-alpha.2"
 axum-server = { version = "0.6.0", features = ["tls-rustls"] }
 walkdir = "2.4"
+similar = "2.4"
 
 # Add other necessary dependencies here
 
