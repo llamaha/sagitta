@@ -1,13 +1,48 @@
 // Panel management for the Sagitta Code application
 
 use std::sync::Arc;
-use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, Button, Vec2, Rounding};
+use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, Button, Vec2, Rounding, TextFormat, TextStyle};
 use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::analytics::AnalyticsReport;
 use std::path::PathBuf;
+use syntect::{
+    highlighting::{ThemeSet, Style as SyntectStyle},
+    parsing::SyntaxSet,
+    easy::HighlightLines,
+    util::LinesWithEndings,
+};
+use std::sync::OnceLock;
+use std::path::Path;
+
+static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
+
+fn get_syntax_set() -> &'static SyntaxSet {
+    SYNTAX_SET.get_or_init(|| SyntaxSet::load_defaults_newlines())
+}
+
+fn get_theme_set() -> &'static ThemeSet {
+    THEME_SET.get_or_init(|| ThemeSet::load_defaults())
+}
+
+/// Get file extension from path
+fn get_file_extension(file_path: &str) -> Option<&str> {
+    Path::new(file_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+}
+
+/// Convert syntect style to egui color
+fn syntect_style_to_color(style: &SyntectStyle) -> Color32 {
+    Color32::from_rgb(
+        style.foreground.r, 
+        style.foreground.g, 
+        style.foreground.b
+    )
+}
 
 /// Panel type enum for tracking which panel is currently open
 #[derive(Debug, Clone, PartialEq)]
@@ -76,10 +111,160 @@ impl PreviewPanel {
                     ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.label(&self.content);
+                            // Check if this is a file read tool result
+                            if self.title.contains("Read") || self.title.contains("read_file") || self.title.contains("view_file") {
+                                // Try to extract file path from the formatted content
+                                let file_path = self.extract_file_path_from_content();
+                                
+                                if let Some(path) = file_path {
+                                    // Apply syntax highlighting
+                                    self.render_with_syntax_highlighting(ui, &path, theme);
+                                } else {
+                                    // Fallback to plain rendering
+                                    self.render_formatted_content(ui, theme);
+                                }
+                            } else {
+                                // Not a file read result, use formatted rendering
+                                self.render_formatted_content(ui, theme);
+                            }
                         });
                 });
             });
+    }
+    
+    /// Extract file path from the formatted content
+    fn extract_file_path_from_content(&self) -> Option<String> {
+        // Look for **File:** pattern in the formatted content
+        if let Some(file_line_start) = self.content.find("**File:** ") {
+            let start = file_line_start + 10; // Length of "**File:** "
+            if let Some(end) = self.content[start..].find('\n') {
+                return Some(self.content[start..start + end].to_string());
+            }
+        }
+        None
+    }
+    
+    /// Extract the actual file content from the formatted output
+    fn extract_file_content(&self) -> Option<String> {
+        // Look for the content between ``` (with optional language) and \n```
+        if let Some(code_block_start) = self.content.find("```") {
+            // Find the end of the first line after ```
+            let first_line_end = self.content[code_block_start..].find('\n')?;
+            let content_start = code_block_start + first_line_end + 1;
+            
+            // Find the closing ```
+            if let Some(content_end) = self.content[content_start..].rfind("\n```") {
+                return Some(self.content[content_start..content_start + content_end].to_string());
+            }
+        }
+        None
+    }
+    
+    /// Render formatted content (for non-file content or fallback)
+    fn render_formatted_content(&self, ui: &mut egui::Ui, theme: AppTheme) {
+        // Use monospace font for better readability
+        let font_id = egui::FontId::monospace(12.0);
+        ui.label(egui::RichText::new(&self.content).font(font_id));
+    }
+    
+    /// Render content with syntax highlighting based on file extension
+    fn render_with_syntax_highlighting(&self, ui: &mut egui::Ui, file_path: &str, theme: AppTheme) {
+        // Extract the actual file content from the formatted output
+        let content_to_highlight = self.extract_file_content()
+            .unwrap_or_else(|| self.content.clone());
+        
+        let syntax_set = get_syntax_set();
+        let theme_set = get_theme_set();
+        
+        // Get the appropriate syntect theme based on app theme
+        let syntect_theme = match theme {
+            AppTheme::Dark | AppTheme::Custom => theme_set.themes.get("base16-ocean.dark"),
+            AppTheme::Light => theme_set.themes.get("base16-ocean.light"),
+        }.unwrap_or(&theme_set.themes["base16-ocean.dark"]);
+        
+        // Get file extension
+        let extension = get_file_extension(file_path);
+        
+        // Find appropriate syntax with fallbacks for languages not in syntect
+        let syntax = extension
+            .and_then(|ext| {
+                match ext {
+                    // TypeScript/JSX fallback to JavaScript
+                    "ts" | "tsx" => syntax_set.find_syntax_by_extension("js")
+                        .or_else(|| syntax_set.find_syntax_by_name("JavaScript")),
+                    "jsx" => syntax_set.find_syntax_by_extension("js")
+                        .or_else(|| syntax_set.find_syntax_by_name("JavaScript")),
+                    // Handle TOML fallback
+                    "toml" => syntax_set.find_syntax_by_extension("toml")
+                        .or_else(|| syntax_set.find_syntax_by_extension("ini"))
+                        .or_else(|| Some(syntax_set.find_syntax_plain_text())),
+                    // Golang
+                    "go" => syntax_set.find_syntax_by_extension("go")
+                        .or_else(|| syntax_set.find_syntax_by_name("Go")),
+                    // HTML
+                    "html" | "htm" => syntax_set.find_syntax_by_extension("html")
+                        .or_else(|| syntax_set.find_syntax_by_name("HTML")),
+                    // YAML
+                    "yaml" | "yml" => syntax_set.find_syntax_by_extension("yaml")
+                        .or_else(|| syntax_set.find_syntax_by_name("YAML")),
+                    // Python
+                    "py" | "pyw" => syntax_set.find_syntax_by_extension("py")
+                        .or_else(|| syntax_set.find_syntax_by_name("Python")),
+                    // Ruby
+                    "rb" | "rake" | "gemspec" => syntax_set.find_syntax_by_extension("rb")
+                        .or_else(|| syntax_set.find_syntax_by_name("Ruby")),
+                    // Rust
+                    "rs" => syntax_set.find_syntax_by_extension("rs")
+                        .or_else(|| syntax_set.find_syntax_by_name("Rust")),
+                    // Markdown
+                    "md" | "markdown" => syntax_set.find_syntax_by_extension("md")
+                        .or_else(|| syntax_set.find_syntax_by_name("Markdown")),
+                    // JSON
+                    "json" => syntax_set.find_syntax_by_extension("json")
+                        .or_else(|| syntax_set.find_syntax_by_name("JSON")),
+                    // Default case
+                    _ => syntax_set.find_syntax_by_extension(ext),
+                }
+            })
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
+        
+        let mut highlighter = HighlightLines::new(syntax, syntect_theme);
+        
+        // Use a monospace font for code
+        let font_id = egui::FontId::monospace(12.0);
+        
+        // Show file path header
+        ui.label(egui::RichText::new(&format!("File: {}", file_path))
+            .font(font_id.clone())
+            .color(theme.accent_color()));
+        ui.separator();
+        
+        // Process each line
+        for line in LinesWithEndings::from(&content_to_highlight) {
+            if let Ok(ranges) = highlighter.highlight_line(line, syntax_set) {
+                ui.horizontal(|ui| {
+                    let mut job = egui::text::LayoutJob::default();
+                    
+                    for (style, text) in ranges {
+                        let color = syntect_style_to_color(&style);
+                        job.append(
+                            text,
+                            0.0,
+                            TextFormat {
+                                font_id: font_id.clone(),
+                                color,
+                                ..Default::default()
+                            }
+                        );
+                    }
+                    
+                    ui.label(job);
+                });
+            } else {
+                // Fallback to plain text if highlighting fails
+                ui.label(egui::RichText::new(line).font(font_id.clone()));
+            }
+        }
     }
 }
 
@@ -1661,5 +1846,75 @@ impl ModelSelectionPanel {
         }
         
         model_changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_extract_file_path_from_content() {
+        let mut panel = PreviewPanel::new();
+        
+        // Test case with file path
+        panel.content = "FILE: File Content\n\n**File:** /home/user/test.rs\n\n**Content:**\n```\nfn main() {}\n```".to_string();
+        assert_eq!(panel.extract_file_path_from_content(), Some("/home/user/test.rs".to_string()));
+        
+        // Test case without file path
+        panel.content = "Some other content without file path".to_string();
+        assert_eq!(panel.extract_file_path_from_content(), None);
+        
+        // Test case with file path at different position
+        panel.content = "Some header\n**File:** /path/to/file.ts\nMore content".to_string();
+        assert_eq!(panel.extract_file_path_from_content(), Some("/path/to/file.ts".to_string()));
+    }
+    
+    #[test]
+    fn test_extract_file_content() {
+        let mut panel = PreviewPanel::new();
+        
+        // Test case with code block
+        panel.content = "FILE: File Content\n\n**File:** /test.rs\n\n**Content:**\n```\nfn main() {\n    println!(\"Hello\");\n}\n```\n".to_string();
+        assert_eq!(
+            panel.extract_file_content(),
+            Some("fn main() {\n    println!(\"Hello\");\n}".to_string())
+        );
+        
+        // Test case without code block
+        panel.content = "No code block here".to_string();
+        assert_eq!(panel.extract_file_content(), None);
+        
+        // Test case with empty code block
+        panel.content = "```\n```".to_string();
+        // Since there's no newline before the closing ```, rfind won't find "\n```"
+        assert_eq!(panel.extract_file_content(), None);
+    }
+    
+    #[test]
+    fn test_file_extension_detection() {
+        assert_eq!(get_file_extension("/path/to/file.rs"), Some("rs"));
+        assert_eq!(get_file_extension("/path/to/file.ts"), Some("ts"));
+        assert_eq!(get_file_extension("/path/to/file.tsx"), Some("tsx"));
+        assert_eq!(get_file_extension("/path/to/file.json"), Some("json"));
+        assert_eq!(get_file_extension("/path/to/file.md"), Some("md"));
+        assert_eq!(get_file_extension("/path/to/file"), None);
+        assert_eq!(get_file_extension("/path/to/.gitignore"), None); // .gitignore has no extension
+    }
+    
+    #[test]
+    fn test_syntax_highlighting_support() {
+        let syntax_set = get_syntax_set();
+        
+        // Test that we have syntax support for common languages
+        assert!(syntax_set.find_syntax_by_extension("rs").is_some(), "Rust syntax should be supported");
+        assert!(syntax_set.find_syntax_by_extension("js").is_some(), "JavaScript syntax should be supported");
+        assert!(syntax_set.find_syntax_by_extension("json").is_some(), "JSON syntax should be supported");
+        assert!(syntax_set.find_syntax_by_extension("md").is_some(), "Markdown syntax should be supported");
+        
+        // TypeScript might not be directly supported, but should fall back to JavaScript
+        let ts_syntax = syntax_set.find_syntax_by_extension("ts")
+            .or_else(|| syntax_set.find_syntax_by_extension("js"));
+        assert!(ts_syntax.is_some(), "TypeScript should fall back to JavaScript syntax");
     }
 }

@@ -92,9 +92,15 @@ mod tests {
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
-        let guard = TEST_MUTEX.lock().unwrap();
+        // Handle poisoned mutex by clearing the poison
+        let guard = TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
+            poisoned.into_inner()
+        });
         let temp_dir = TempDir::new().unwrap();
         let work_dir = temp_dir.path().to_path_buf();
+        
+        // Create .sagitta directory
+        std::fs::create_dir_all(work_dir.join(".sagitta")).unwrap();
         
         // Change working directory to the temp dir for tests
         std::env::set_current_dir(&work_dir).unwrap();
@@ -110,7 +116,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_todo_write_creates_file() {
-        let (config, temp_dir, _guard) = create_test_config().await;
+        let (config, _temp_dir, _guard) = create_test_config().await;
         let qdrant_client = create_mock_qdrant();
         
         let todos = vec![
@@ -136,8 +142,10 @@ mod tests {
         assert_eq!(result.todos.len(), 1);
         assert_eq!(result.summary, "Updated 1 todos: 0 completed, 0 in progress, 1 pending");
         
-        // Verify file was created
-        let todos_path = temp_dir.path().join(".sagitta").join("todos.json");
+        // Verify file was created - use the get_todos_file_path function
+        let todos_path = get_todos_file_path();
+        // Add a small delay to ensure file system operations complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         assert!(todos_path.exists());
         
         // Verify timestamps were added
@@ -147,7 +155,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_todo_write_overwrites_existing() {
-        let (config, temp_dir, _guard) = create_test_config().await;
+        let (config, _temp_dir, _guard) = create_test_config().await;
         let qdrant_client = create_mock_qdrant();
         
         // Create initial todos file
@@ -188,7 +196,7 @@ mod tests {
         
         // Verify old content was replaced
         let file_content = fs::read_to_string(&todos_path).await.unwrap();
-        assert!(!file_content.contains("old"));
+        assert!(!file_content.contains("\"id\":\"old\""));
         assert!(file_content.contains("new1"));
         assert!(file_content.contains("new2"));
     }

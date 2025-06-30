@@ -54,6 +54,8 @@ impl ToolResultFormatter {
     
     /// Format successful tool results based on tool type
     fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
+        log::debug!("Formatting tool result for: {}", tool_name);
+        
         // Handle both native tools and MCP tools
         match tool_name {
             "web_search" | "WebSearch" => self.format_web_search_result(value),
@@ -209,8 +211,11 @@ impl ToolResultFormatter {
         let mut result = String::new();
         result.push_str("FILE: File Content\n\n");
         
+        let mut file_path_for_lang = None;
+        
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
             result.push_str(&format!("**File:** {}\n\n", file_path));
+            file_path_for_lang = Some(file_path);
         }
         
         if let Some(repo_name) = value.get("repository_name").and_then(|v| v.as_str()) {
@@ -229,7 +234,49 @@ impl ToolResultFormatter {
         
         if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
             result.push_str("**Content:**\n");
-            result.push_str("```\n");
+            
+            // Detect language from file extension for syntax highlighting
+            let language = file_path_for_lang
+                .and_then(|path| std::path::Path::new(path).extension())
+                .and_then(|ext| ext.to_str())
+                .map(|ext| {
+                    // Map common extensions to their language identifiers
+                    match ext {
+                        "ts" | "tsx" => "typescript",
+                        "js" | "jsx" => "javascript",
+                        "rs" => "rust",
+                        "py" => "python",
+                        "rb" => "ruby",
+                        "go" => "go",
+                        "java" => "java",
+                        "cpp" | "cc" | "cxx" => "cpp",
+                        "c" => "c",
+                        "h" | "hpp" => "cpp",
+                        "cs" => "csharp",
+                        "php" => "php",
+                        "swift" => "swift",
+                        "kt" => "kotlin",
+                        "scala" => "scala",
+                        "r" => "r",
+                        "sh" | "bash" => "bash",
+                        "yaml" | "yml" => "yaml",
+                        "json" => "json",
+                        "xml" => "xml",
+                        "html" | "htm" => "html",
+                        "css" => "css",
+                        "scss" | "sass" => "scss",
+                        "sql" => "sql",
+                        "md" | "markdown" => "markdown",
+                        "toml" => "toml",
+                        "ini" => "ini",
+                        "dockerfile" => "dockerfile",
+                        "makefile" => "makefile",
+                        _ => ext // Use the extension as-is for other cases
+                    }
+                })
+                .unwrap_or("");
+            
+            result.push_str(&format!("```{}\n", language));
             result.push_str(content);
             result.push_str("\n```\n");
         }
@@ -263,7 +310,49 @@ impl ToolResultFormatter {
                     
                     if let Some(snippet) = search_result.get("snippet").and_then(|v| v.as_str()) {
                         result.push_str("   Preview:\n");
-                        result.push_str("   ```\n");
+                        
+                        // Detect language from file path for syntax highlighting
+                        let language = search_result.get("file_path")
+                            .and_then(|v| v.as_str())
+                            .and_then(|path| std::path::Path::new(path).extension())
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| {
+                                match ext {
+                                    "ts" | "tsx" => "typescript",
+                                    "js" | "jsx" => "javascript",
+                                    "rs" => "rust",
+                                    "py" => "python",
+                                    "rb" => "ruby",
+                                    "go" => "go",
+                                    "java" => "java",
+                                    "cpp" | "cc" | "cxx" => "cpp",
+                                    "c" => "c",
+                                    "h" | "hpp" => "cpp",
+                                    "cs" => "csharp",
+                                    "php" => "php",
+                                    "swift" => "swift",
+                                    "kt" => "kotlin",
+                                    "scala" => "scala",
+                                    "r" => "r",
+                                    "sh" | "bash" => "bash",
+                                    "yaml" | "yml" => "yaml",
+                                    "json" => "json",
+                                    "xml" => "xml",
+                                    "html" | "htm" => "html",
+                                    "css" => "css",
+                                    "scss" | "sass" => "scss",
+                                    "sql" => "sql",
+                                    "md" | "markdown" => "markdown",
+                                    "toml" => "toml",
+                                    "ini" => "ini",
+                                    "dockerfile" => "dockerfile",
+                                    "makefile" => "makefile",
+                                    _ => ext
+                                }
+                            })
+                            .unwrap_or("");
+                        
+                        result.push_str(&format!("   ```{}\n", language));
                         // Limit snippet length
                         let limited_snippet = if snippet.len() > 200 {
                             format!("{}...", &snippet[..200])
@@ -492,8 +581,12 @@ impl ToolResultFormatter {
     fn format_mcp_file_view_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
         
+        let mut file_path_for_lang = None;
+        
         if let Some(file_path) = value.get("relativePath").and_then(|v| v.as_str()) {
             result.push_str(&format!("📄 **{}**\n\n", file_path));
+            file_path_for_lang = Some(file_path);
+            log::debug!("MCP file view: Found relativePath: {}", file_path);
         }
         
         // Show the actual file content
@@ -502,31 +595,55 @@ impl ToolResultFormatter {
                 result.push_str("*Empty file*\n");
             } else {
                 // Detect language from file extension for syntax highlighting
-                let lang = if let Some(path) = value.get("relativePath").and_then(|v| v.as_str()) {
-                    match path.split('.').last() {
-                        Some("rs") => "rust",
-                        Some("js") => "javascript",
-                        Some("ts") => "typescript",
-                        Some("py") => "python",
-                        Some("go") => "go",
-                        Some("java") => "java",
-                        Some("cpp") | Some("cc") | Some("cxx") => "cpp",
-                        Some("c") | Some("h") => "c",
-                        Some("toml") => "toml",
-                        Some("json") => "json",
-                        Some("yaml") | Some("yml") => "yaml",
-                        Some("md") => "markdown",
-                        _ => ""
-                    }
-                } else {
-                    ""
-                };
+                let extension = file_path_for_lang
+                    .and_then(|path| std::path::Path::new(path).extension())
+                    .and_then(|ext| ext.to_str());
                 
-                if !lang.is_empty() {
-                    result.push_str(&format!("```{}\n{}\n```\n", lang, content));
-                } else {
-                    result.push_str(&format!("```\n{}\n```\n", content));
-                }
+                log::debug!("MCP file view: Detected extension: {:?}", extension);
+                
+                let language = extension
+                    .map(|ext| {
+                        // Map common extensions to their language identifiers
+                        let lang = match ext {
+                            // Try using shorter identifiers that might be more compatible
+                            "ts" | "tsx" => "ts",  // Try 'ts' instead of 'typescript'
+                            "js" | "jsx" => "js",  // Try 'js' instead of 'javascript'
+                            "rs" => "rust",  // Keep rust as-is since it works
+                            "py" => "python",
+                            "rb" => "ruby",
+                            "go" => "go",
+                            "java" => "java",
+                            "cpp" | "cc" | "cxx" => "cpp",
+                            "c" => "c",
+                            "h" | "hpp" => "cpp",
+                            "cs" => "csharp",
+                            "php" => "php",
+                            "swift" => "swift",
+                            "kt" => "kotlin",
+                            "scala" => "scala",
+                            "r" => "r",
+                            "sh" | "bash" => "bash",
+                            "yaml" | "yml" => "yaml",
+                            "json" => "json",
+                            "xml" => "xml",
+                            "html" | "htm" => "html",
+                            "css" => "css",
+                            "scss" | "sass" => "scss",
+                            "sql" => "sql",
+                            "md" | "markdown" => "md",  // Try 'md' instead of 'markdown'
+                            "toml" => "toml",
+                            "ini" => "ini",
+                            "dockerfile" => "dockerfile",
+                            "makefile" => "makefile",
+                            _ => ext // Use the extension as-is for other cases
+                        };
+                        log::debug!("MCP file view: Mapped {} to language: {}", ext, lang);
+                        lang
+                    })
+                    .unwrap_or("");
+                
+                log::debug!("MCP file view: Using language identifier: '{}'", language);
+                result.push_str(&format!("```{}\n{}\n```\n", language, content));
             }
         }
         
@@ -557,7 +674,48 @@ impl ToolResultFormatter {
                 }
                 
                 if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("```\n{}\n```\n", content.trim()));
+                    // Detect language from file path for syntax highlighting
+                    let language = item.get("file_path")
+                        .and_then(|v| v.as_str())
+                        .and_then(|path| std::path::Path::new(path).extension())
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| {
+                            match ext {
+                                "ts" | "tsx" => "typescript",
+                                "js" | "jsx" => "javascript",
+                                "rs" => "rust",
+                                "py" => "python",
+                                "rb" => "ruby",
+                                "go" => "go",
+                                "java" => "java",
+                                "cpp" | "cc" | "cxx" => "cpp",
+                                "c" => "c",
+                                "h" | "hpp" => "cpp",
+                                "cs" => "csharp",
+                                "php" => "php",
+                                "swift" => "swift",
+                                "kt" => "kotlin",
+                                "scala" => "scala",
+                                "r" => "r",
+                                "sh" | "bash" => "bash",
+                                "yaml" | "yml" => "yaml",
+                                "json" => "json",
+                                "xml" => "xml",
+                                "html" | "htm" => "html",
+                                "css" => "css",
+                                "scss" | "sass" => "scss",
+                                "sql" => "sql",
+                                "md" | "markdown" => "markdown",
+                                "toml" => "toml",
+                                "ini" => "ini",
+                                "dockerfile" => "dockerfile",
+                                "makefile" => "makefile",
+                                _ => ext
+                            }
+                        })
+                        .unwrap_or("");
+                    
+                    result.push_str(&format!("```{}\n{}\n```\n", language, content.trim()));
                 }
             }
         } else {
@@ -852,8 +1010,11 @@ impl ToolResultFormatter {
     fn format_mcp_read_file_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
         
+        let mut file_path_for_lang = None;
+        
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
             result.push_str(&format!("📄 **File:** `{}`\n", file_path));
+            file_path_for_lang = Some(file_path);
         }
         
         if let Some(line_count) = value.get("line_count").and_then(|v| v.as_u64()) {
@@ -874,7 +1035,48 @@ impl ToolResultFormatter {
             result.push_str(&format!("**Range:** Lines {}-{}\n", start, end));
         }
         
-        result.push_str("\n```\n");
+        // Detect language from file extension for syntax highlighting
+        let language = file_path_for_lang
+            .and_then(|path| std::path::Path::new(path).extension())
+            .and_then(|ext| ext.to_str())
+            .map(|ext| {
+                // Map common extensions to their language identifiers
+                match ext {
+                    "ts" | "tsx" => "typescript",
+                    "js" | "jsx" => "javascript",
+                    "rs" => "rust",
+                    "py" => "python",
+                    "rb" => "ruby",
+                    "go" => "go",
+                    "java" => "java",
+                    "cpp" | "cc" | "cxx" => "cpp",
+                    "c" => "c",
+                    "h" | "hpp" => "cpp",
+                    "cs" => "csharp",
+                    "php" => "php",
+                    "swift" => "swift",
+                    "kt" => "kotlin",
+                    "scala" => "scala",
+                    "r" => "r",
+                    "sh" | "bash" => "bash",
+                    "yaml" | "yml" => "yaml",
+                    "json" => "json",
+                    "xml" => "xml",
+                    "html" | "htm" => "html",
+                    "css" => "css",
+                    "scss" | "sass" => "scss",
+                    "sql" => "sql",
+                    "md" | "markdown" => "markdown",
+                    "toml" => "toml",
+                    "ini" => "ini",
+                    "dockerfile" => "dockerfile",
+                    "makefile" => "makefile",
+                    _ => ext // Use the extension as-is for other cases
+                }
+            })
+            .unwrap_or("");
+        
+        result.push_str(&format!("\n```{}\n", language));
         if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
             result.push_str(content);
         }
@@ -999,7 +1201,9 @@ mod tests {
         };
         
         let formatted = formatter.format_tool_result_for_preview("test_tool", &result);
-        assert!(formatted.contains("ERROR"));
+        assert!(formatted.contains("❌"));
+        assert!(formatted.contains("Tool Execution Failed"));
+        assert!(formatted.contains("Error:"));
         assert!(formatted.contains("Something went wrong"));
     }
 

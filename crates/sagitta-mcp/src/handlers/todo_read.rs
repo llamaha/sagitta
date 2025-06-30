@@ -82,7 +82,10 @@ mod tests {
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
-        let guard = TEST_MUTEX.lock().unwrap();
+        // Handle poisoned mutex by clearing the poison
+        let guard = TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
+            poisoned.into_inner()
+        });
         let temp_dir = TempDir::new().unwrap();
         let work_dir = temp_dir.path().to_path_buf();
         
@@ -154,6 +157,10 @@ mod tests {
         
         // Write test todos to file - use the path function since we've changed directory
         let todos_path = get_todos_file_path();
+        // Ensure parent directory exists
+        if let Some(parent) = todos_path.parent() {
+            fs::create_dir_all(parent).await.unwrap();
+        }
         fs::write(&todos_path, serde_json::to_string(&test_todos).unwrap()).await.unwrap();
         
         let result = handle_todo_read(
@@ -174,6 +181,10 @@ mod tests {
         
         // Write corrupted JSON to file - use the path function since we've changed directory
         let todos_path = get_todos_file_path();
+        // Ensure parent directory exists
+        if let Some(parent) = todos_path.parent() {
+            fs::create_dir_all(parent).await.unwrap();
+        }
         fs::write(&todos_path, "{ invalid json }").await.unwrap();
         
         let result = handle_todo_read(
