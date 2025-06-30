@@ -208,6 +208,7 @@ pub enum MessageType {
 
 #[derive(Debug, Clone)]
 pub struct ToolCall {
+    pub id: String,
     pub name: String,
     pub arguments: String,
     pub result: Option<String>,
@@ -942,48 +943,48 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     ui.label(RichText::new(status_icon).color(status_color).size(14.0));
                     ui.add_space(4.0);
                     
-                    // Tool execution preview
-                    ui.label(RichText::new("🔧").size(12.0));
+                    // Tool name and parameters
+                    let friendly_name = get_human_friendly_tool_name(&tool_call.name);
                     
-                    // Show formatted arguments (which includes tool name and parameters)
-                    let display_text = if !tool_call.arguments.is_empty() {
-                        &tool_call.arguments
-                    } else {
-                        &format!("Executing {}", tool_call.name)
-                    };
+                    // Build display text with tool name and key parameters
+                    let mut display_parts = vec![format!("🔧 {}", friendly_name)];
                     
-                    // Truncate very long display text and add ellipsis
-                    let truncated_text = if display_text.len() > 80 {
-                        format!("{}...", &display_text[..77])
-                    } else {
-                        display_text.to_string()
-                    };
+                    // Parse and format parameters
+                    if !tool_call.arguments.is_empty() {
+                        if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                            let params = format_tool_parameters(&tool_call.name, &args_value);
+                            if !params.is_empty() {
+                                let param_text: Vec<String> = params.iter()
+                                    .take(2) // Show only first 2 params
+                                    .map(|(key, value)| {
+                                        let truncated_value = if value.len() > 20 {
+                                            format!("{}...", &value[..17])
+                                        } else {
+                                            value.clone()
+                                        };
+                                        format!("{}: {}", key, truncated_value)
+                                    })
+                                    .collect();
+                                
+                                if !param_text.is_empty() {
+                                    display_parts.push(format!("({})", param_text.join(", ")));
+                                }
+                            }
+                        }
+                    }
                     
-                    ui.label(RichText::new(&truncated_text)
+                    ui.label(RichText::new(display_parts.join(" "))
                         .color(app_theme.text_color())
                         .strong()
                         .size(12.0));
                     
                     // Status text
                     let status_text = match &tool_call.status {
-                        MessageStatus::Complete => {
-                            // Extract execution time from result if available
-                            let execution_time = if let Some(result) = &tool_call.result {
-                                extract_execution_time(result).unwrap_or(0)
-                            } else {
-                                0
-                            };
-                            
-                            if execution_time > 0 {
-                                format!("completed in {}ms", execution_time)
-                            } else {
-                                "completed".to_string()
-                            }
-                        },
-                        MessageStatus::Error(e) => format!("failed: {}", e),
+                        MessageStatus::Complete => "completed".to_string(),
                         MessageStatus::Streaming => "running...".to_string(),
+                        MessageStatus::Error(err) => format!("failed: {}", err),
                         MessageStatus::Sending => "starting...".to_string(),
-                        _ => "".to_string(),
+                        _ => String::new()
                     };
                     
                     if !status_text.is_empty() {
@@ -1059,6 +1060,52 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         }
                     });
                 });
+                
+                // Add inline result display for completed tools
+                if tool_call.status == MessageStatus::Complete && tool_call.result.is_some() {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    
+                    let result_str = tool_call.result.as_ref().unwrap();
+                    
+                    // Parse the result as JSON
+                    if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
+                        // Use ToolResultFormatter to format the result
+                        let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                        let tool_result = crate::tools::types::ToolResult::Success(result_json.clone());
+                        let formatted_result = formatter.format_tool_result_for_preview(&tool_call.name, &tool_result);
+                        
+                        // Display the formatted result in a scrollable area with limited height
+                        egui::ScrollArea::vertical()
+                            .max_height(200.0)
+                            .id_source(format!("tool_result_{}", tool_call.id))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_max_width(max_width - 24.0);
+                                
+                                // Check if this is a shell command result for special rendering
+                                if is_shell_command_result(&tool_call.name, &result_json) {
+                                    render_terminal_output(ui, &result_json, app_theme);
+                                } else if is_code_change_result(&tool_call.name, &result_json) {
+                                    render_diff_output(ui, &result_json, app_theme);
+                                } else {
+                                    // Default rendering with markdown support
+                                    ui.style_mut().wrap = Some(true);
+                                    
+                                    // Use markdown rendering for formatted results
+                                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                        let mut cache = cache.borrow_mut();
+                                        let viewer = egui_commonmark::CommonMarkViewer::new();
+                                        viewer.show(ui, &mut *cache, &formatted_result);
+                                    });
+                                }
+                            });
+                    } else {
+                        // Fallback: display raw result if JSON parsing fails
+                        ui.code(result_str);
+                    }
+                }
             });
     
     clicked_tool_result

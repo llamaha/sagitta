@@ -104,33 +104,79 @@ impl StreamingChatManager {
     
     /// Add a tool call to the current streaming message
     pub fn add_tool_to_message(&self, message_id: &str, tool_name: String, tool_id: String, arguments: serde_json::Value) {
-        let mut active_streams = self.active_streams.lock().unwrap();
-        if let Some(message) = active_streams.get_mut(message_id) {
-            let tool_call = view::ToolCall {
-                name: tool_name,
-                arguments: serde_json::to_string(&arguments).unwrap_or_default(),
-                result: None,
-                status: view::MessageStatus::Streaming,
-                content_position: Some(message.content.len()),
-            };
-            message.tool_calls.push(tool_call);
+        // Try active streams first
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            if let Some(message) = active_streams.get_mut(message_id) {
+                let tool_call = view::ToolCall {
+                    id: tool_id,
+                    name: tool_name,
+                    arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                    result: None,
+                    status: view::MessageStatus::Streaming,
+                    content_position: Some(message.content.len()),
+                };
+                message.tool_calls.push(tool_call);
+                return;
+            }
+        }
+        
+        // If not in active streams, try completed messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut().rev() {
+            if let ChatItem::Message(message) = item {
+                if message.id == message_id {
+                    let tool_call = view::ToolCall {
+                        id: tool_id,
+                        name: tool_name,
+                        arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                        result: None,
+                        status: view::MessageStatus::Streaming,
+                        content_position: Some(message.content.len()),
+                    };
+                    message.tool_calls.push(tool_call);
+                    break;
+                }
+            }
         }
     }
     
     /// Update tool result in a message
     pub fn update_tool_result_in_message(&self, message_id: &str, tool_id: &str, result: serde_json::Value, success: bool) {
-        let mut active_streams = self.active_streams.lock().unwrap();
-        if let Some(message) = active_streams.get_mut(message_id) {
-            // Find the tool by ID (we'll need to store the ID in ToolCall)
-            for tool_call in &mut message.tool_calls {
-                if tool_call.arguments.contains(tool_id) {
-                    tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
-                    tool_call.status = if success {
-                        view::MessageStatus::Complete
-                    } else {
-                        view::MessageStatus::Error("Tool execution failed".to_string())
-                    };
-                    break;
+        // Try active streams first
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            if let Some(message) = active_streams.get_mut(message_id) {
+                for tool_call in &mut message.tool_calls {
+                    if tool_call.id == tool_id {
+                        tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
+                        tool_call.status = if success {
+                            view::MessageStatus::Complete
+                        } else {
+                            view::MessageStatus::Error("Tool execution failed".to_string())
+                        };
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // If not in active streams, try completed messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut() {
+            if let ChatItem::Message(message) = item {
+                if message.id == message_id {
+                    for tool_call in &mut message.tool_calls {
+                        if tool_call.id == tool_id {
+                            tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
+                            tool_call.status = if success {
+                                view::MessageStatus::Complete
+                            } else {
+                                view::MessageStatus::Error("Tool execution failed".to_string())
+                            };
+                            return;
+                        }
+                    }
                 }
             }
         }

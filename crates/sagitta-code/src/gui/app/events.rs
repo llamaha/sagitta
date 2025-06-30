@@ -100,20 +100,27 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                 AgentEvent::ToolCall { tool_call } => {
                     log::debug!("Tool call received: {} (id: {})", tool_call.name, tool_call.id);
                     
-                    // Add the tool to the current streaming message instead of creating a separate card
-                    if let Some(current_message_id) = &app.state.current_response_id {
-                        app.chat_manager.add_tool_to_message(
-                            current_message_id,
-                            tool_call.name.clone(),
-                            tool_call.id.clone(),
-                            tool_call.arguments.clone()
-                        );
-                        
-                        // Store the tool call ID for later result updates
-                        app.state.active_tool_calls.insert(tool_call.id.clone(), current_message_id.clone());
+                    // If no current response ID, start a new agent response
+                    let message_id = if let Some(current_message_id) = &app.state.current_response_id {
+                        current_message_id.clone()
                     } else {
-                        log::warn!("Received tool call but no active streaming message");
-                    }
+                        log::debug!("No active streaming message, starting new agent response for tool call");
+                        let new_id = app.chat_manager.start_agent_response();
+                        app.state.current_response_id = Some(new_id.clone());
+                        app.state.is_streaming_response = true;
+                        new_id
+                    };
+                    
+                    // Add the tool to the streaming message
+                    app.chat_manager.add_tool_to_message(
+                        &message_id,
+                        tool_call.name.clone(),
+                        tool_call.id.clone(),
+                        tool_call.arguments.clone()
+                    );
+                    
+                    // Store the tool call ID for later result updates
+                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id);
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
                     log::info!("Tool call {} ({}) completed", tool_call_id, tool_name);
@@ -430,6 +437,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             .map(|m| m.content.len());
             
         let view_tool_call = ViewToolCall {
+            id: tool_call.id.clone(),
             name: tool_call.name.clone(),
             arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
             result: None,
@@ -443,6 +451,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
         if let Some(last_agent_msg) = all_messages.iter().rev().find(|m| m.author == MessageAuthor::Agent) {
             let content_position = Some(last_agent_msg.content.len());
             let view_tool_call = ViewToolCall {
+                id: tool_call.id.clone(),
                 name: tool_call.name.clone(),
                 arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
                 result: None,
