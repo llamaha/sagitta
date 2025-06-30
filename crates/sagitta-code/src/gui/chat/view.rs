@@ -1102,72 +1102,62 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                 ui.label(RichText::new(status_icon).color(status_color).size(16.0));
                 ui.add_space(8.0);
                 
-                // Tool name and description
-                ui.vertical(|ui| {
-                    let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
-                    ui.label(RichText::new(&format!("🔧 {}", friendly_name))
-                        .color(app_theme.text_color())
-                        .strong()
-                        .size(14.0));
+                // Tool name, parameters, and timing - all on one line
+                let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                
+                // Build compact display text
+                let mut display_parts = vec![format!("🔧 {}", friendly_name)];
+                
+                // Add key parameters inline
+                let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+                if !params.is_empty() {
+                    let param_text: Vec<String> = params.iter()
+                        .take(2) // Show only first 2 params to save space
+                        .map(|(key, value)| {
+                            let truncated_value = if value.len() > 30 {
+                                format!("{}...", &value[..27])
+                            } else {
+                                value.clone()
+                            };
+                            format!("{}: {}", key, truncated_value)
+                        })
+                        .collect();
                     
-                    // Show parameters
-                    let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
-                    if !params.is_empty() {
-                        ui.add_space(4.0);
-                        ui.horizontal_wrapped(|ui| {
-                            for (i, (key, value)) in params.iter().enumerate() {
-                                if i > 0 {
-                                    ui.label(RichText::new(" • ")
-                                        .color(app_theme.hint_text_color())
-                                        .size(11.0));
-                                }
-                                ui.label(RichText::new(&format!("{}: ", key))
-                                    .color(app_theme.hint_text_color())
-                                    .size(11.0));
-                                
-                                // Truncate long values more intelligently
-                                let display_value = if value.len() > 100 {
-                                    format!("{}...", &value[..97])
-                                } else {
-                                    value.clone()
-                                };
-                                
-                                ui.label(RichText::new(&display_value)
-                                    .color(app_theme.text_color())
-                                    .size(11.0)
-                                    .italics());
-                            }
-                        });
+                    if !param_text.is_empty() {
+                        display_parts.push(format!("({})", param_text.join(", ")));
                     }
-                    
-                    // Show progress if running
-                    if tool_card.status == ToolCardStatus::Running {
-                        if let Some(progress) = tool_card.progress {
-                            ui.add(egui::ProgressBar::new(progress)
-                                .desired_width(200.0)
-                                .desired_height(6.0)
-                                .fill(app_theme.accent_color()));
-                        } else {
-                            ui.add(egui::ProgressBar::new(0.0)
-                                .desired_width(200.0)
-                                .desired_height(6.0)
-                                .fill(app_theme.accent_color())
-                                .animate(true));
-                        }
+                }
+                
+                // Add timing info
+                if let Some(completed_at) = tool_card.completed_at {
+                    let duration = completed_at.signed_duration_since(tool_card.started_at);
+                    display_parts.push(format!("- {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
+                } else if tool_card.status == ToolCardStatus::Running {
+                    display_parts.push("- Running...".to_string());
+                }
+                
+                // Display all on one line
+                ui.label(RichText::new(display_parts.join(" "))
+                    .color(app_theme.text_color())
+                    .strong()
+                    .size(13.0));
+                
+                // Show progress bar if running (in the remaining space)
+                if tool_card.status == ToolCardStatus::Running {
+                    ui.add_space(8.0);
+                    if let Some(progress) = tool_card.progress {
+                        ui.add(egui::ProgressBar::new(progress)
+                            .desired_width(100.0)
+                            .desired_height(4.0)
+                            .fill(app_theme.accent_color()));
+                    } else {
+                        ui.add(egui::ProgressBar::new(0.0)
+                            .desired_width(100.0)
+                            .desired_height(4.0)
+                            .fill(app_theme.accent_color())
+                            .animate(true));
                     }
-                    
-                    // Show timing info
-                    if let Some(completed_at) = tool_card.completed_at {
-                        let duration = completed_at.signed_duration_since(tool_card.started_at);
-                        ui.label(RichText::new(&format!("Completed in {:.1}s", duration.num_milliseconds() as f64 / 1000.0))
-                            .color(app_theme.hint_text_color())
-                            .size(11.0));
-                    } else if tool_card.status == ToolCardStatus::Running {
-                        ui.label(RichText::new("Running...")
-                            .color(app_theme.hint_text_color())
-                            .size(11.0));
-                    }
-                });
+                }
                 
                 // Right-aligned action buttons
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

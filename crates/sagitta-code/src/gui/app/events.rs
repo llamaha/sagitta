@@ -98,53 +98,48 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     }
                 },
                 AgentEvent::ToolCall { tool_call } => {
-                    // Tool calls are now handled inline in the streaming response
-                    // Just log for tracking purposes
-                    log::debug!("Tool call received (now handled inline): {}", tool_call.name);
+                    log::debug!("Tool call received: {} (id: {})", tool_call.name, tool_call.id);
                     
-                    // Create a tool card for better visibility
-                    let run_id: ToolRunId = Uuid::new_v4();
-                    app.chat_manager.insert_tool_card_after_last_user_msg(
-                        run_id,
-                        tool_call.name.clone(),
-                        serde_json::json!({
-                            "arguments": tool_call.arguments
-                        })
-                    );
-                    
-                    // Store the mapping from tool_call_id to run_id for later updates
-                    app.state.tool_call_to_run_id.insert(tool_call.id.clone(), run_id);
+                    // Add the tool to the current streaming message instead of creating a separate card
+                    if let Some(current_message_id) = &app.state.current_response_id {
+                        app.chat_manager.add_tool_to_message(
+                            current_message_id,
+                            tool_call.name.clone(),
+                            tool_call.id.clone(),
+                            tool_call.arguments.clone()
+                        );
+                        
+                        // Store the tool call ID for later result updates
+                        app.state.active_tool_calls.insert(tool_call.id.clone(), current_message_id.clone());
+                    } else {
+                        log::warn!("Received tool call but no active streaming message");
+                    }
                 },
                 AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                    // Store tool result for preview display
-                    let result_string = match &result {
-                        crate::tools::types::ToolResult::Success(data) => {
-                            serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
-                        },
-                        crate::tools::types::ToolResult::Error { error } => {
-                            format!("Error: {}", error)
-                        }
-                    };
+                    log::info!("Tool call {} ({}) completed", tool_call_id, tool_name);
                     
-                    // Store the result for potential preview display
-                    app.state.tool_results.insert(tool_call_id.clone(), result_string);
-                    
-                    // Update the tool card if we have a mapping
-                    if let Some(run_id) = app.state.tool_call_to_run_id.get(&tool_call_id) {
+                    // Update the tool result in the message
+                    if let Some(message_id) = app.state.active_tool_calls.get(&tool_call_id) {
                         let success = matches!(result, crate::tools::types::ToolResult::Success(_));
                         let result_json = match &result {
-                            crate::tools::types::ToolResult::Success(data) => Some(data.clone()),
-                            crate::tools::types::ToolResult::Error { error } => Some(serde_json::json!({
+                            crate::tools::types::ToolResult::Success(data) => data.clone(),
+                            crate::tools::types::ToolResult::Error { error } => serde_json::json!({
                                 "error": error
-                            })),
+                            }),
                         };
-                        app.chat_manager.complete_tool_card(*run_id, success, result_json);
                         
-                        // Remove from running tools
-                        app.state.running_tools.remove(run_id);
+                        app.chat_manager.update_tool_result_in_message(
+                            message_id,
+                            &tool_call_id,
+                            result_json,
+                            success
+                        );
+                        
+                        // Clean up
+                        app.state.active_tool_calls.remove(&tool_call_id);
+                    } else {
+                        log::warn!("Received tool result for unknown tool call: {}", tool_call_id);
                     }
-                    
-                    log::info!("Tool call {} ({}) completed and result stored for preview", tool_call_id, tool_name);
                 },
                 AgentEvent::ToolCallPending { tool_call } => {
                     // Add to events panel instead of chat to save space
