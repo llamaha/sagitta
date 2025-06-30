@@ -10,7 +10,6 @@ use sagitta_code::tools::types::{Tool, ToolResult};
 use sagitta_code::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
 use sagitta_code::gui::repository::types::SimpleSyncStatus;
 use sagitta_search::AppConfig as SagittaAppConfig;
-use terminal_stream::events::StreamEvent;
 
 /// Test that add_existing_repository automatically triggers sync and shows progress in UI
 #[tokio::test]
@@ -76,9 +75,12 @@ async fn test_add_repo_auto_sync_with_ui_progress() {
     assert!(status.output_lines.last().unwrap().contains("Sync completed successfully"));
 }
 
-/// Test that sync progress is properly reported to chat UI via StreamEvent
+/// Test that sync progress is properly reported to chat UI
 #[tokio::test]
+#[ignore = "StreamEvent functionality has been removed"]
 async fn test_sync_progress_stream_events() {
+    // This test has been disabled because StreamEvent functionality has been removed
+    /*
     // Create channel for stream events
     let (tx, mut rx) = mpsc::channel::<StreamEvent>(100);
     
@@ -183,11 +185,15 @@ async fn test_sync_progress_stream_events() {
                    "Expected Qdrant initialization error, got: {}", error);
         }
     }
+    */
 }
 
-/// Test that sync can be cancelled via StreamEvent
+/// Test that sync can be cancelled
 #[tokio::test]
+#[ignore = "StreamEvent functionality has been removed"]
 async fn test_sync_cancellation() {
+    // This test has been disabled because StreamEvent functionality has been removed
+    /*
     // Create channel for stream events
     let (tx, mut rx) = mpsc::channel::<StreamEvent>(100);
     
@@ -259,4 +265,5 @@ async fn test_sync_cancellation() {
     
     // Note: The actual cancellation implementation will be added to the sync logic
     // For now, we just verify the test structure works
+    */
 } 

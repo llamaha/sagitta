@@ -373,7 +373,6 @@ mod cli_app {
 // MCP server mode
 mod mcp_app {
     use super::*;
-    use sagitta_code::mcp::{McpServer, EnhancedMcpServer};
     use sagitta_code::llm::claude_code::mcp_integration::run_internal_mcp_server;
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
@@ -401,8 +400,8 @@ mod mcp_app {
                 }
             };
             
-            // Create and run regular MCP server
-            let server = McpServer::new(sagitta_app_config).await
+            // Create and run sagitta-mcp server directly
+            let server = sagitta_mcp::server::Server::new(sagitta_app_config).await
                 .context("Failed to create MCP server")?;
             
             server.run().await

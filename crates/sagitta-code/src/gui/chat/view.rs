@@ -49,6 +49,123 @@ use egui_notify::Toasts;
 #[cfg(feature = "gui")]
 use egui_modal::Modal;
 
+/// Convert raw tool names (including MCP format) to human-friendly display names
+fn get_human_friendly_tool_name(raw_name: &str) -> String {
+    match raw_name {
+        // MCP tool patterns
+        name if name.contains("__query") => "Semantic Code Search".to_string(),
+        name if name.contains("__repository_view_file") => "View Repository File".to_string(),
+        name if name.contains("__repository_search_file") => "Search Repository Files".to_string(),
+        name if name.contains("__repository_list_branches") => "List Repository Branches".to_string(),
+        name if name.contains("__repository_list") => "List Repositories".to_string(),
+        name if name.contains("__repository_map") => "Map Repository Structure".to_string(),
+        name if name.contains("__repository_add") => "Add Repository".to_string(),
+        name if name.contains("__repository_remove") => "Remove Repository".to_string(),
+        name if name.contains("__repository_sync") => "Sync Repository".to_string(),
+        name if name.contains("__repository_switch_branch") => "Switch Repository Branch".to_string(),
+        name if name.contains("__ping") => "Ping".to_string(),
+        
+        // Native Claude tools
+        "Read" => "Read File".to_string(),
+        "Write" => "Write File".to_string(),
+        "Edit" => "Edit File".to_string(),
+        "MultiEdit" => "Multi Edit File".to_string(),
+        "Bash" => "Run Command".to_string(),
+        "WebSearch" => "Search Web".to_string(),
+        "WebFetch" => "Fetch Web Content".to_string(),
+        "TodoRead" => "Read Todo List".to_string(),
+        "TodoWrite" => "Update Todo List".to_string(),
+        "NotebookRead" => "Read Notebook".to_string(),
+        "NotebookEdit" => "Edit Notebook".to_string(),
+        "Task" => "Task Agent".to_string(),
+        "Glob" => "Find Files".to_string(),
+        "Grep" => "Search In Files".to_string(),
+        "LS" => "List Directory".to_string(),
+        "exit_plan_mode" => "Exit Plan Mode".to_string(),
+        
+        _ => {
+            // For unknown MCP tools, try to extract and format the operation name
+            if raw_name.starts_with("mcp__") {
+                if let Some(op) = raw_name.split("__").last() {
+                    // Convert snake_case to Title Case
+                    op.split('_')
+                        .map(|word| {
+                            let mut chars = word.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else {
+                    raw_name.to_string()
+                }
+            } else {
+                raw_name.to_string()
+            }
+        }
+    }
+}
+
+/// Format tool parameters for display in the UI
+fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    
+    if let Some(obj) = args.as_object() {
+        // Special handling for common tools
+        match tool_name {
+            name if name.contains("__query") => {
+                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                    params.push(("Query".to_string(), query.to_string()));
+                }
+                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                    params.push(("Repository".to_string(), repo.to_string()));
+                }
+                if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64()) {
+                    params.push(("Limit".to_string(), limit.to_string()));
+                }
+            },
+            "Read" | "Write" | "Edit" => {
+                if let Some(path) = obj.get("file_path").and_then(|v| v.as_str()) {
+                    params.push(("File".to_string(), path.to_string()));
+                }
+            },
+            "Bash" => {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    params.push(("Command".to_string(), cmd.to_string()));
+                }
+            },
+            _ => {
+                // Generic parameter formatting
+                for (key, value) in obj {
+                    let formatted_key = key.split('_')
+                        .map(|w| {
+                            let mut c = w.chars();
+                            match c.next() {
+                                None => String::new(),
+                                Some(first) => first.to_uppercase().collect::<String>() + c.as_str()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    
+                    let formatted_value = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        _ => value.to_string(),
+                    };
+                    
+                    params.push((formatted_key, formatted_value));
+                }
+            }
+        }
+    }
+    
+    params
+}
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
@@ -91,6 +208,7 @@ pub enum MessageType {
 
 #[derive(Debug, Clone)]
 pub struct ToolCall {
+    pub id: String,
     pub name: String,
     pub arguments: String,
     pub result: Option<String>,
@@ -374,14 +492,8 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                         .rounding(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
-                        // Extract messages from ChatItems for conversation copying
-                        let messages: Vec<StreamingMessage> = items.iter()
-                            .filter_map(|item| match item {
-                                ChatItem::Message(msg) => Some(msg.clone()),
-                                ChatItem::ToolCard(_) => None, // Tool cards aren't included in conversation copy
-                            })
-                            .collect();
-                        let conversation_text = format_conversation_for_copying(&messages);
+                        // Extract messages and tool cards from ChatItems for conversation copying
+                        let conversation_text = format_conversation_with_tools_for_copying(items);
                         ui.output_mut(|o| o.copied_text = conversation_text.clone());
                         copy_state.start_copy_feedback(conversation_text);
                         ui.ctx().request_repaint(); // Request repaint for animation
@@ -811,75 +923,54 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
 /// Render a single tool call as a compact, clickable card
 fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
-        // Create a frame for the tool card
-        Frame::none()
-            .fill(app_theme.code_background())
-            .rounding(Rounding::same(4))
-            .stroke(Stroke::new(1.0, app_theme.border_color()))
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Tool status icon
-                    let (status_icon, status_color) = match tool_call.status {
-                        MessageStatus::Complete => ("✅", app_theme.success_color()),
-                        MessageStatus::Error(_) => ("❌", app_theme.error_color()),
-                        MessageStatus::Streaming => ("🔄", app_theme.accent_color()),
-                        MessageStatus::Sending => ("⏳", app_theme.hint_text_color()),
-                        _ => ("🔧", app_theme.hint_text_color()),
-                    };
-                    
-                    ui.label(RichText::new(status_icon).color(status_color).size(14.0));
-                    ui.add_space(4.0);
-                    
-                    // Tool execution preview
-                    ui.label(RichText::new("🔧").size(12.0));
-                    
-                    // Show formatted arguments (which includes tool name and parameters)
-                    let display_text = if !tool_call.arguments.is_empty() {
-                        &tool_call.arguments
-                    } else {
-                        &format!("Executing {}", tool_call.name)
-                    };
-                    
-                    // Truncate very long display text and add ellipsis
-                    let truncated_text = if display_text.len() > 80 {
-                        format!("{}...", &display_text[..77])
-                    } else {
-                        display_text.to_string()
-                    };
-                    
-                    ui.label(RichText::new(&truncated_text)
-                        .color(app_theme.text_color())
-                        .strong()
-                        .size(12.0));
-                    
-                    // Status text
-                    let status_text = match &tool_call.status {
-                        MessageStatus::Complete => {
-                            // Extract execution time from result if available
-                            let execution_time = if let Some(result) = &tool_call.result {
-                                extract_execution_time(result).unwrap_or(0)
-                            } else {
-                                0
-                            };
-                            
-                            if execution_time > 0 {
-                                format!("completed in {}ms", execution_time)
-                            } else {
-                                "completed".to_string()
-                            }
-                        },
-                        MessageStatus::Error(e) => format!("failed: {}", e),
-                        MessageStatus::Streaming => "running...".to_string(),
-                        MessageStatus::Sending => "starting...".to_string(),
-                        _ => "".to_string(),
-                    };
-                    
-                    if !status_text.is_empty() {
-                        ui.add_space(8.0);
-                        ui.label(RichText::new(status_text).color(app_theme.hint_text_color()).size(11.0));
+    
+    // Limit tool card width to 90% of max_width
+    let tool_card_width = max_width * 0.9;
+    
+    // Create a vertical layout with the constrained width
+    ui.vertical(|ui| {
+        ui.set_max_width(tool_card_width);
+        
+        // Build the header text
+        let friendly_name = get_human_friendly_tool_name(&tool_call.name);
+        let status_icon = match tool_call.status {
+            MessageStatus::Complete => "✅",
+            MessageStatus::Error(_) => "❌",
+            MessageStatus::Streaming => "🔄",
+            MessageStatus::Sending => "⏳",
+            _ => "🔧",
+        };
+        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        
+        // Create parameter tooltip text
+        let mut tooltip_text = String::new();
+        if !tool_call.arguments.is_empty() {
+            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                let params = format_tool_parameters(&tool_call.name, &args_value);
+                if !params.is_empty() {
+                    tooltip_text.push_str("Parameters:\n");
+                    for (key, value) in params.iter() {
+                        tooltip_text.push_str(&format!("  {}: {}\n", key, value));
                     }
-                    
+                }
+            }
+        }
+        
+        // Add status to tooltip
+        match &tool_call.status {
+            MessageStatus::Complete => tooltip_text.push_str("\nStatus: Completed"),
+            MessageStatus::Streaming => tooltip_text.push_str("\nStatus: Running..."),
+            MessageStatus::Error(err) => tooltip_text.push_str(&format!("\nStatus: Failed - {}", err)),
+            MessageStatus::Sending => tooltip_text.push_str("\nStatus: Starting..."),
+            _ => {}
+        }
+        
+        // Use CollapsingHeader for the tool card
+        let id = egui::Id::new(&tool_call.id);
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+            .id_salt(id)
+            .default_open(false) // Default to collapsed
+            .show(ui, |ui| {
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
                         // Try to find running tool info to get actual progress
@@ -888,16 +979,16 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             .and_then(|info| info.progress)
                             .unwrap_or(0.0);
                         
-                        ui.add_space(8.0);
                         ui.add(egui::ProgressBar::new(progress)
-                            .desired_width(100.0)
+                            .desired_width(tool_card_width - 20.0)
                             .desired_height(4.0)
                             .fill(app_theme.accent_color())
                             .animate(progress == 0.0)); // Only animate if we don't have actual progress
+                        ui.add_space(4.0);
                     }
                     
-                    // Right-aligned action buttons
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Action buttons
+                    ui.horizontal(|ui| {
                         if tool_call.result.is_some() {
                             // View details button for completed tools
                             log::trace!("Rendering view details button for tool: {}", tool_call.name);
@@ -947,8 +1038,59 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             }
                         }
                     });
-                });
+                    
+                    // Add inline result display for completed tools
+                if tool_call.status == MessageStatus::Complete && tool_call.result.is_some() {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    
+                    let result_str = tool_call.result.as_ref().unwrap();
+                    
+                    // Parse the result as JSON
+                    if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
+                        // Use ToolResultFormatter to format the result
+                        let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                        let tool_result = crate::tools::types::ToolResult::Success(result_json.clone());
+                        let formatted_result = formatter.format_tool_result_for_preview(&tool_call.name, &tool_result);
+                        
+                        // Display the formatted result in a scrollable area with limited height
+                        egui::ScrollArea::vertical()
+                            .max_height(400.0)
+                            .id_source(format!("tool_result_{}", tool_call.id))
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.set_max_width(tool_card_width - 24.0);
+                                
+                                // Check if this is a shell command result for special rendering
+                                if is_shell_command_result(&tool_call.name, &result_json) {
+                                    render_terminal_output(ui, &result_json, app_theme);
+                                } else if is_code_change_result(&tool_call.name, &result_json) {
+                                    render_diff_output(ui, &result_json, app_theme);
+                                } else {
+                                    // Default rendering with markdown support
+                                    ui.style_mut().wrap = Some(true);
+                                    
+                                    // Use markdown rendering for formatted results
+                                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                        let mut cache = cache.borrow_mut();
+                                        let viewer = egui_commonmark::CommonMarkViewer::new();
+                                        viewer.show(ui, &mut *cache, &formatted_result);
+                                    });
+                                }
+                            });
+                    } else {
+                        // Fallback: display raw result if JSON parsing fails
+                        ui.code(result_str);
+                    }
+                }
             });
+        
+        // Add tooltip to the header if we have parameter info
+        if !tooltip_text.is_empty() {
+            collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
+        }
+    });
     
     clicked_tool_result
 }
@@ -971,71 +1113,73 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
-    // Create a frame for the tool card
-    Frame::none()
-        .fill(app_theme.code_background())
-        .rounding(Rounding::same(6))
-        .stroke(Stroke::new(1.0, app_theme.border_color()))
-        .inner_margin(12.0)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Tool status icon
-                let (status_icon, status_color) = match tool_card.status {
-                    ToolCardStatus::Completed { success: true } => ("✅", app_theme.success_color()),
-                    ToolCardStatus::Completed { success: false } => ("❌", app_theme.error_color()),
-                    ToolCardStatus::Failed { .. } => ("❌", app_theme.error_color()),
-                    ToolCardStatus::Running => ("🔄", app_theme.accent_color()),
-                    ToolCardStatus::Cancelled => ("⏹️", app_theme.hint_text_color()),
-                };
-                
-                ui.label(RichText::new(status_icon).color(status_color).size(16.0));
-                ui.add_space(8.0);
-                
-                // Tool name and description
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&format!("🔧 {}", tool_card.tool_name))
-                        .color(app_theme.text_color())
-                        .strong()
-                        .size(14.0));
-                    
-                    // Show progress if running
+    // Limit tool card width to 90% of max_width
+    let tool_card_width = max_width * 0.9;
+    
+    // Create a vertical layout with the constrained width
+    ui.vertical(|ui| {
+        ui.set_max_width(tool_card_width);
+        
+        // Build the header text
+        let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+        let status_icon = match tool_card.status {
+            ToolCardStatus::Completed { success: true } => "✅",
+            ToolCardStatus::Completed { success: false } => "❌",
+            ToolCardStatus::Failed { .. } => "❌",
+            ToolCardStatus::Running => "🔄",
+            ToolCardStatus::Cancelled => "⏹️",
+        };
+        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        
+        // Create parameter tooltip text
+        let mut tooltip_text = String::new();
+        let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+        if !params.is_empty() {
+            tooltip_text.push_str("Parameters:\n");
+            for (key, value) in params.iter() {
+                tooltip_text.push_str(&format!("  {}: {}\n", key, value));
+            }
+        }
+        
+        // Add timing info to tooltip
+        if let Some(completed_at) = tool_card.completed_at {
+            let duration = completed_at.signed_duration_since(tool_card.started_at);
+            tooltip_text.push_str(&format!("\nDuration: {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
+        }
+        
+        // Use CollapsingHeader for the tool card (but default to open for standalone cards)
+        let id = egui::Id::new(&tool_card.run_id);
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+            .id_salt(id)
+            .default_open(true) // Default to open for standalone tool cards
+            .show(ui, |ui| {
+                    // Show progress bar if running
                     if tool_card.status == ToolCardStatus::Running {
                         if let Some(progress) = tool_card.progress {
                             ui.add(egui::ProgressBar::new(progress)
-                                .desired_width(200.0)
-                                .desired_height(6.0)
+                                .desired_width(tool_card_width - 20.0)
+                                .desired_height(4.0)
                                 .fill(app_theme.accent_color()));
                         } else {
                             ui.add(egui::ProgressBar::new(0.0)
-                                .desired_width(200.0)
-                                .desired_height(6.0)
+                                .desired_width(tool_card_width - 20.0)
+                                .desired_height(4.0)
                                 .fill(app_theme.accent_color())
                                 .animate(true));
                         }
+                        ui.add_space(4.0);
                     }
                     
-                    // Show timing info
-                    if let Some(completed_at) = tool_card.completed_at {
-                        let duration = completed_at.signed_duration_since(tool_card.started_at);
-                        ui.label(RichText::new(&format!("Completed in {:.1}s", duration.num_milliseconds() as f64 / 1000.0))
-                            .color(app_theme.hint_text_color())
-                            .size(11.0));
-                    } else if tool_card.status == ToolCardStatus::Running {
-                        ui.label(RichText::new("Running...")
-                            .color(app_theme.hint_text_color())
-                            .size(11.0));
-                    }
-                });
-                
-                // Right-aligned action buttons
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    match &tool_card.status {
-                        ToolCardStatus::Completed { success: true } => {
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        match &tool_card.status {
+                            ToolCardStatus::Completed { success: true } => {
                             if tool_card.result.is_some() {
                                 // View details button
                                 if ui.small_button("View details").clicked() {
                                     let result_json = tool_card.result.as_ref().unwrap();
-                                    let display_title = format!("{} - Result", tool_card.tool_name);
+                                    let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                                    let display_title = format!("{} - Result", friendly_name);
                                     clicked_tool_result = Some((display_title, serde_json::to_string_pretty(result_json).unwrap_or_else(|_| result_json.to_string())));
                                 }
                                 
@@ -1068,8 +1212,59 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         _ => {}
                     }
                 });
-            });
+            
+            // Add inline result display for completed tools
+            if let ToolCardStatus::Completed { success: true } = &tool_card.status {
+                if let Some(result) = &tool_card.result {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    
+                    // Use ToolResultFormatter to format the result
+                    let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                    let success = matches!(tool_card.status, ToolCardStatus::Completed { success: true });
+                    let tool_result = if success {
+                        crate::tools::types::ToolResult::Success(result.clone())
+                    } else {
+                        crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                    };
+                    
+                    let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
+                    
+                    // Display the formatted result in a scrollable area with limited height
+                    egui::ScrollArea::vertical()
+                        .max_height(400.0)
+                        .id_source(format!("tool_result_{}", tool_card.run_id))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(tool_card_width - 24.0);
+                            
+                            // Check if this is a shell command result for special rendering
+                            if is_shell_command_result(&tool_card.tool_name, result) {
+                                render_terminal_output(ui, result, app_theme);
+                            } else if is_code_change_result(&tool_card.tool_name, result) {
+                                render_diff_output(ui, result, app_theme);
+                            } else {
+                                // Default rendering with markdown support
+                                ui.style_mut().wrap = Some(true);
+                                
+                                // Use markdown rendering for formatted results
+                                crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                    let mut cache = cache.borrow_mut();
+                                    let viewer = egui_commonmark::CommonMarkViewer::new();
+                                    viewer.show(ui, &mut *cache, &formatted_result);
+                                });
+                            }
+                        });
+                }
+            }
         });
+        
+        // Add tooltip to the header if we have parameter info
+        if !tooltip_text.is_empty() {
+            collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
+        }
+    });
     
     clicked_tool_result
 }
@@ -2238,6 +2433,7 @@ index 1234567..abcdefg 100644
     fn test_tool_call_structure() {
         // Test that ToolCall structure works correctly
         let tool_call = ToolCall {
+            id: "test_tool_call_1".to_string(),
             name: "shell_execution".to_string(),
             arguments: r#"{"command": "cargo new fibonacci_calculator"}"#.to_string(),
             result: Some(r#"{
@@ -2360,6 +2556,7 @@ index 1234567..abcdefg 100644
         
         // Add tool call inline within the agent message
         agent_msg_1.tool_calls.push(ToolCall {
+            id: "test_tool_call_2".to_string(),
             name: "add_repository".to_string(),
             arguments: r#"{"name": "test_repo"}"#.to_string(),
             result: Some(r#"{"status": "added", "message": "Repository added successfully"}"#.to_string()),
@@ -2410,6 +2607,7 @@ index 1234567..abcdefg 100644
         
         // Add tool call inline within the agent message
         agent_msg.tool_calls.push(ToolCall {
+            id: "test_tool_call_3".to_string(),
             name: "edit_file".to_string(),
             arguments: r#"{"target_file": "test.rs", "content": "test content"}"#.to_string(),
             result: Some(r#"{"status": "success", "file_path": "test.rs", "lines_added": 25}"#.to_string()),
@@ -2477,6 +2675,7 @@ index 1234567..abcdefg 100644
         
         // Add a tool call
         agent_msg.tool_calls.push(ToolCall {
+            id: "test_tool_call_4".to_string(),
             name: "analyze_project".to_string(),
             arguments: r#"{"path": "./src"}"#.to_string(),
             result: Some(r#"{"files": ["main.rs", "lib.rs"], "language": "rust"}"#.to_string()),
@@ -2505,6 +2704,98 @@ index 1234567..abcdefg 100644
 }
 
 /// Format entire conversation for copying/sharing
+/// Format conversation including tool cards for clipboard copying
+fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
+    let mut conversation = Vec::new();
+    
+    for item in items {
+        match item {
+            ChatItem::Message(message) => {
+                let author_name = match message.author {
+                    MessageAuthor::User => "You",
+                    MessageAuthor::Agent => "Sagitta Code",
+                    MessageAuthor::System => "System",
+                    MessageAuthor::Tool => "Tool",
+                };
+                
+                let timestamp = message.format_time();
+                
+                // Add message header
+                conversation.push(format!("{} {}", author_name, timestamp));
+                conversation.push("".to_string()); // Empty line
+                
+                // Add thinking content if present
+                if let Some(thinking) = message.get_thinking_content() {
+                    if !thinking.is_empty() {
+                        conversation.push(format!("💭 {}", thinking));
+                        conversation.push("".to_string());
+                    }
+                }
+                
+                // Add main content
+                if !message.content.is_empty() {
+                    conversation.push(message.content.clone());
+                }
+                
+                conversation.push("".to_string()); // Empty line between items
+            },
+            ChatItem::ToolCard(tool_card) => {
+                // Format tool card for copying
+                let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                let status_icon = match &tool_card.status {
+                    ToolCardStatus::Completed { success: true } => "✅",
+                    ToolCardStatus::Failed { .. } => "❌",
+                    ToolCardStatus::Running => "🔄",
+                    ToolCardStatus::Cancelled => "⏹️",
+                    _ => "🔧",
+                };
+                
+                conversation.push(format!("{} {} {}", status_icon, friendly_name, ""));
+                
+                // Add parameters
+                let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+                if !params.is_empty() {
+                    conversation.push("Parameters:".to_string());
+                    for (key, value) in params {
+                        conversation.push(format!("  {}: {}", key, value));
+                    }
+                }
+                
+                // Add result if available
+                if let Some(result) = &tool_card.result {
+                    conversation.push("".to_string());
+                    conversation.push("Result:".to_string());
+                    
+                    // Format the result using ToolResultFormatter
+                    let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                    let tool_result = match &tool_card.status {
+                        ToolCardStatus::Completed { success: true } => {
+                            crate::tools::types::ToolResult::Success(result.clone())
+                        },
+                        _ => {
+                            crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                        }
+                    };
+                    
+                    let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
+                    for line in formatted_result.lines() {
+                        conversation.push(format!("  {}", line));
+                    }
+                }
+                
+                conversation.push("".to_string()); // Empty line between items
+            }
+        }
+    }
+    
+    // Remove trailing empty lines
+    while conversation.last() == Some(&String::new()) {
+        conversation.pop();
+    }
+    
+    conversation.join("\n")
+}
+
 fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
     let mut conversation = Vec::new();
     
@@ -2623,5 +2914,101 @@ impl CopyButtonState {
             theme.input_background()
         }
     }
+}
+
+/// Check if this is a shell command result
+fn is_shell_command_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("shell") || 
+    tool_name.contains("bash") ||
+    tool_name.contains("streaming_shell_execution") ||
+    (result.get("stdout").is_some() && result.get("stderr").is_some() && result.get("exit_code").is_some())
+}
+
+/// Check if this is a code change result
+fn is_code_change_result(tool_name: &str, result: &serde_json::Value) -> bool {
+    tool_name.contains("edit") || 
+    tool_name.contains("semantic_edit") ||
+    result.get("changes").is_some() ||
+    result.get("diff").is_some()
+}
+
+/// Render terminal output with monospace font and ANSI colors
+fn render_terminal_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        ui.style_mut().visuals.override_text_color = Some(app_theme.success_color());
+        
+        // Terminal header
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("$ Terminal Output").strong().color(app_theme.accent_color()));
+            if let Some(exit_code) = result.get("exit_code").and_then(|v| v.as_i64()) {
+                let exit_color = if exit_code == 0 { app_theme.success_color() } else { app_theme.error_color() };
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("Exit: {}", exit_code)).color(exit_color).small());
+                });
+            }
+        });
+        
+        ui.separator();
+        
+        // Use monospace font for terminal output
+        let mut output = String::new();
+        
+        if let Some(stdout) = result.get("stdout").and_then(|v| v.as_str()) {
+            if !stdout.is_empty() {
+                output.push_str(stdout);
+            }
+        }
+        
+        if let Some(stderr) = result.get("stderr").and_then(|v| v.as_str()) {
+            if !stderr.is_empty() {
+                if !output.is_empty() {
+                    output.push_str("\n");
+                }
+                output.push_str(&format!("STDERR:\n{}", stderr));
+            }
+        }
+        
+        if output.is_empty() {
+            output = "(No output)".to_string();
+        }
+        
+        // Render with monospace font
+        ui.label(egui::RichText::new(output).monospace().color(app_theme.text_color()));
+    });
+}
+
+/// Render diff output with syntax highlighting
+fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: AppTheme) {
+    ui.group(|ui| {
+        // Diff header
+        ui.label(egui::RichText::new("📝 Code Changes").strong().color(app_theme.accent_color()));
+        ui.separator();
+        
+        if let Some(file_path) = result.get("file_path").and_then(|v| v.as_str()) {
+            ui.label(egui::RichText::new(format!("File: {}", file_path)).color(app_theme.hint_text_color()).small());
+            ui.add_space(4.0);
+        }
+        
+        // Get the diff/changes content
+        let diff_content = result.get("diff")
+            .or_else(|| result.get("changes"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("No changes available");
+        
+        // Render diff lines with appropriate colors
+        for line in diff_content.lines() {
+            let (text_color, prefix) = if line.starts_with('+') && !line.starts_with("+++") {
+                (app_theme.success_color(), "+ ")
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                (app_theme.error_color(), "- ")
+            } else if line.starts_with("@@") {
+                (app_theme.accent_color(), "")
+            } else {
+                (app_theme.text_color(), "  ")
+            };
+            
+            ui.label(egui::RichText::new(line).monospace().color(text_color));
+        }
+    });
 }
 

@@ -81,7 +81,7 @@ fn test_mcp_internal_server_starts() {
     
     let result = &response["result"];
     assert_eq!(result["protocolVersion"], "2024-11-05");
-    assert_eq!(result["serverInfo"]["name"], "sagitta-mcp-enhanced");
+    assert_eq!(result["serverInfo"]["name"], "sagitta-mcp");
     
     // Clean up
     let _ = child.kill();
@@ -144,7 +144,8 @@ fn test_mcp_tools_list() {
     
     // These should exist based on the mcp_app initialization
     assert!(tool_names.iter().any(|n| n.contains("list")), "Should have list tool");
-    assert!(tool_names.iter().any(|n| n.contains("shell") || n.contains("execution")), "Should have shell tool");
+    // The MCP server provides repository management tools, not shell execution
+    assert!(tool_names.iter().any(|n| n.contains("repository")), "Should have repository management tools");
     
     let _ = child.kill();
 }

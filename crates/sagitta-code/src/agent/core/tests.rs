@@ -103,6 +103,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LlmClient for MockLlmClient {
+        fn client_type(&self) -> &str {
+            "mock"
+        }
+        
         async fn generate(
             &self,
             _messages: &[Message],

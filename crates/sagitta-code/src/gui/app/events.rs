@@ -98,25 +98,55 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     }
                 },
                 AgentEvent::ToolCall { tool_call } => {
-                    // Tool calls are now handled inline in the streaming response
-                    // Just log for tracking purposes
-                    log::debug!("Tool call received (now handled inline): {}", tool_call.name);
-                },
-                AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
-                    // Store tool result for preview display
-                    let result_string = match &result {
-                        crate::tools::types::ToolResult::Success(data) => {
-                            serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
-                        },
-                        crate::tools::types::ToolResult::Error { error } => {
-                            format!("Error: {}", error)
-                        }
+                    log::debug!("Tool call received: {} (id: {})", tool_call.name, tool_call.id);
+                    
+                    // If no current response ID, start a new agent response
+                    let message_id = if let Some(current_message_id) = &app.state.current_response_id {
+                        current_message_id.clone()
+                    } else {
+                        log::debug!("No active streaming message, starting new agent response for tool call");
+                        let new_id = app.chat_manager.start_agent_response();
+                        app.state.current_response_id = Some(new_id.clone());
+                        app.state.is_streaming_response = true;
+                        new_id
                     };
                     
-                    // Store the result for potential preview display
-                    app.state.tool_results.insert(tool_call_id.clone(), result_string);
+                    // Add the tool to the streaming message
+                    app.chat_manager.add_tool_to_message(
+                        &message_id,
+                        tool_call.name.clone(),
+                        tool_call.id.clone(),
+                        tool_call.arguments.clone()
+                    );
                     
-                    log::info!("Tool call {} ({}) completed and result stored for preview", tool_call_id, tool_name);
+                    // Store the tool call ID for later result updates
+                    app.state.active_tool_calls.insert(tool_call.id.clone(), message_id);
+                },
+                AgentEvent::ToolCallComplete { tool_call_id, tool_name, result } => {
+                    log::info!("Tool call {} ({}) completed", tool_call_id, tool_name);
+                    
+                    // Update the tool result in the message
+                    if let Some(message_id) = app.state.active_tool_calls.get(&tool_call_id) {
+                        let success = matches!(result, crate::tools::types::ToolResult::Success(_));
+                        let result_json = match &result {
+                            crate::tools::types::ToolResult::Success(data) => data.clone(),
+                            crate::tools::types::ToolResult::Error { error } => serde_json::json!({
+                                "error": error
+                            }),
+                        };
+                        
+                        app.chat_manager.update_tool_result_in_message(
+                            message_id,
+                            &tool_call_id,
+                            result_json,
+                            success
+                        );
+                        
+                        // Clean up
+                        app.state.active_tool_calls.remove(&tool_call_id);
+                    } else {
+                        log::warn!("Received tool result for unknown tool call: {}", tool_call_id);
+                    }
                 },
                 AgentEvent::ToolCallPending { tool_call } => {
                     // Add to events panel instead of chat to save space
@@ -407,6 +437,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
             .map(|m| m.content.len());
             
         let view_tool_call = ViewToolCall {
+            id: tool_call.id.clone(),
             name: tool_call.name.clone(),
             arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
             result: None,
@@ -420,6 +451,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
         if let Some(last_agent_msg) = all_messages.iter().rev().find(|m| m.author == MessageAuthor::Agent) {
             let content_position = Some(last_agent_msg.content.len());
             let view_tool_call = ViewToolCall {
+                id: tool_call.id.clone(),
                 name: tool_call.name.clone(),
                 arguments: format_tool_arguments_for_display(&tool_call.name, &serde_json::to_string(&tool_call.arguments).unwrap_or_default()),
                 result: None,
@@ -1289,6 +1321,7 @@ mod tests {
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
+            AppEvent::RefreshRepositoryList => assert!(true),
         }
         
         // Test the other variant too
@@ -1301,6 +1334,7 @@ mod tests {
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
+            AppEvent::RefreshRepositoryList => assert!(true),
         }
     }
 
@@ -1370,7 +1404,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test starting a new response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false);
         
         // Should create a new streaming message
         assert!(app.state.current_response_id.is_some());
@@ -1390,11 +1424,11 @@ mod tests {
         let mut app = create_test_app();
         
         // Start a response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false);
         let response_id = app.state.current_response_id.clone();
         
         // Continue the response
-        handle_llm_chunk(&mut app, " world".to_string(), false, None);
+        handle_llm_chunk(&mut app, " world".to_string(), false);
         
         // Should still be the same response
         assert_eq!(app.state.current_response_id, response_id);
@@ -1412,7 +1446,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Start and complete a response
-        handle_llm_chunk(&mut app, "Complete response".to_string(), true, None);
+        handle_llm_chunk(&mut app, "Complete response".to_string(), true);
         
         // Should complete the response
         assert!(app.state.current_response_id.is_none());
@@ -1430,7 +1464,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach the tool call to
-        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true, None);
+        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true);
         
         let args = serde_json::json!({"query": "rust programming"});
         let tool_call = create_test_tool_call("web_search", args);
@@ -1574,13 +1608,13 @@ mod tests {
         // Simulate a complete workflow: user input -> llm chunks -> tool call -> result
         
         // 1. Start with LLM chunk
-        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false, None);
+        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false);
         assert!(app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages.len(), 1);
         
         // 2. Complete LLM chunk
-        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true, None);
+        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true);
         assert!(!app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages[0].content, "I'll search for information about Rust programming.");
@@ -1612,7 +1646,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test empty content
-        handle_llm_chunk(&mut app, "".to_string(), false, None);
+        handle_llm_chunk(&mut app, "".to_string(), false);
         
         // Should still create a message entry but with empty content
         let messages = app.chat_manager.get_all_messages();
@@ -1625,7 +1659,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach tool calls to
-        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true, None);
+        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true);
         
         // Add multiple tool calls
         let args1 = serde_json::json!({"query": "rust"});
@@ -1788,7 +1822,7 @@ mod tests {
         app.state.current_conversation_id = Some(conversation_id);
         
         // Simulate final LLM chunk which should trigger analysis
-        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true, None);
+        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true);
         
         // Verify that the conversation ID is set for analysis
         assert_eq!(app.state.current_conversation_id, Some(conversation_id));

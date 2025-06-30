@@ -102,6 +102,86 @@ impl StreamingChatManager {
         }
     }
     
+    /// Add a tool call to the current streaming message
+    pub fn add_tool_to_message(&self, message_id: &str, tool_name: String, tool_id: String, arguments: serde_json::Value) {
+        // Try active streams first
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            if let Some(message) = active_streams.get_mut(message_id) {
+                let tool_call = view::ToolCall {
+                    id: tool_id,
+                    name: tool_name,
+                    arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                    result: None,
+                    status: view::MessageStatus::Streaming,
+                    content_position: Some(message.content.len()),
+                };
+                message.tool_calls.push(tool_call);
+                return;
+            }
+        }
+        
+        // If not in active streams, try completed messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut().rev() {
+            if let ChatItem::Message(message) = item {
+                if message.id == message_id {
+                    let tool_call = view::ToolCall {
+                        id: tool_id,
+                        name: tool_name,
+                        arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                        result: None,
+                        status: view::MessageStatus::Streaming,
+                        content_position: Some(message.content.len()),
+                    };
+                    message.tool_calls.push(tool_call);
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Update tool result in a message
+    pub fn update_tool_result_in_message(&self, message_id: &str, tool_id: &str, result: serde_json::Value, success: bool) {
+        // Try active streams first
+        {
+            let mut active_streams = self.active_streams.lock().unwrap();
+            if let Some(message) = active_streams.get_mut(message_id) {
+                for tool_call in &mut message.tool_calls {
+                    if tool_call.id == tool_id {
+                        tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
+                        tool_call.status = if success {
+                            view::MessageStatus::Complete
+                        } else {
+                            view::MessageStatus::Error("Tool execution failed".to_string())
+                        };
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // If not in active streams, try completed messages
+        let mut messages = self.messages.lock().unwrap();
+        for item in messages.iter_mut() {
+            if let ChatItem::Message(message) = item {
+                if message.id == message_id {
+                    for tool_call in &mut message.tool_calls {
+                        if tool_call.id == tool_id {
+                            tool_call.result = Some(serde_json::to_string_pretty(&result).unwrap_or_default());
+                            tool_call.status = if success {
+                                view::MessageStatus::Complete
+                            } else {
+                                view::MessageStatus::Error("Tool execution failed".to_string())
+                            };
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     /// Append content to a streaming message
     pub fn append_content(&self, message_id: &str, chunk: String) {
         // Only log when streaming debug is enabled or for substantial chunks
@@ -532,6 +612,7 @@ mod tests {
         
         // Add a tool call (should be inline within the agent message)
         let tool_call = ToolCall {
+            id: "test_tool_call_5".to_string(),
             name: "web_search".to_string(),
             arguments: r#"{"query": "help assistance"}"#.to_string(),
             result: Some("Found relevant help resources".to_string()),
@@ -769,5 +850,14 @@ mod tests {
         assert!(messages[3].timestamp > messages[1].timestamp, 
                 "Sagitta Code's second response should have a later timestamp than the first");
     }
+}
+
+/// Trait for rendering tool results in different formats
+pub trait ToolResultRenderer {
+    /// Render the tool result inline within the chat
+    fn render_inline(&self, ui: &mut egui::Ui, tool_name: &str, result: &serde_json::Value, app_theme: crate::gui::theme::AppTheme, max_width: f32);
+    
+    /// Get a preview of the result (for truncated display)
+    fn get_preview(&self, tool_name: &str, result: &serde_json::Value, max_lines: usize) -> String;
 }
 

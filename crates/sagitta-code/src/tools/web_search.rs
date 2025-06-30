@@ -500,6 +500,10 @@ mod tests {
     
     #[async_trait]
     impl LlmClient for TestLlmClient {
+        fn client_type(&self) -> &str {
+            "test"
+        }
+        
         async fn generate(&self, _messages: &[Message], _tools: &[LlmToolDefinition]) -> Result<LlmResponse, SagittaCodeError> {
             Ok(LlmResponse {
                 message: Message {
