@@ -37,6 +37,8 @@ pub fn chat_input_ui(
     loop_inject_message: &mut Option<String>,
     // Focus management
     should_focus_input: &mut bool,
+    // Token usage
+    current_token_usage: &Option<crate::llm::client::TokenUsage>,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -161,9 +163,54 @@ pub fn chat_input_ui(
                 }
             }
             
+            // Show token usage and character count if available
+            if let Some(token_usage) = current_token_usage {
+                ui.add_space(16.0);
+                
+                // Calculate percentage if we have a model context window size
+                let context_window = match token_usage.model_name.as_str() {
+                    model if model.contains("claude-3-5-sonnet") => 200000,
+                    model if model.contains("claude-3-5-haiku") => 200000,
+                    model if model.contains("claude-3-opus") => 200000,
+                    model if model.contains("claude-3-sonnet") => 200000,
+                    model if model.contains("claude-3-haiku") => 200000,
+                    model if model.contains("gpt-4o") => 128000,
+                    model if model.contains("gpt-4-turbo") => 128000,
+                    model if model.contains("gpt-4") => 8192,
+                    model if model.contains("gpt-3.5-turbo") => 16385,
+                    _ => 100000, // Default context window
+                };
+                
+                let percentage = (token_usage.total_tokens as f32 / context_window as f32 * 100.0).min(100.0);
+                let color = if percentage > 90.0 {
+                    theme.error_color()
+                } else if percentage > 75.0 {
+                    theme.warning_color()
+                } else {
+                    hint_color
+                };
+                
+                ui.label(RichText::new(format!("📊 {:.1}%", percentage))
+                    .color(color)
+                    .small());
+                
+                ui.separator();
+                
+                ui.label(RichText::new(format!("{} tokens", token_usage.total_tokens))
+                    .color(hint_color)
+                    .small());
+                
+                if let Some(cached) = token_usage.cached_tokens {
+                    ui.separator();
+                    ui.label(RichText::new(format!("💾 {} cached", cached))
+                        .color(success_color)
+                        .small());
+                }
+            }
+            
             // Removed help text for cleaner UI
             
-            // Add Message Sagitta Code and help button on the same line (right side)
+            // Add character count and help button on the same line (right side)
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Simple help button with tooltip
                 let help_label = RichText::new("?")
@@ -178,7 +225,15 @@ pub fn chat_input_ui(
                 }
                 
                 ui.add_space(8.0);
-                ui.small(RichText::new("Message Sagitta Code").color(hint_color));
+                
+                // Show character count on the right
+                let char_count = input_buffer.chars().count();
+                let char_color = if char_count > 2000 {
+                    error_color
+                } else {
+                    hint_color
+                };
+                ui.small(RichText::new(format!("{} chars", char_count)).color(char_color));
             });
         });
         
@@ -212,17 +267,6 @@ pub fn chat_input_ui(
                 ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
                 ui.spinner();
             }
-            
-            // Show character count on the right
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let char_count = input_buffer.chars().count();
-                let color = if char_count > 2000 {
-                    error_color
-                } else {
-                    hint_color
-                };
-                ui.small(RichText::new(format!("{} chars", char_count)).color(color));
-            });
         });
         
         // Loop injection input (shown when requested)

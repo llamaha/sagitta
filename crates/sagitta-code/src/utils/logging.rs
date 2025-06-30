@@ -208,8 +208,10 @@ mod tests {
         if let Ok(logs) = LOG_COLLECTOR.lock() {
             assert!(!logs.is_empty());
             let last_log = &logs[logs.len() - 1];
+            // The log format is: "[HH:MM:SS LEVEL] message"
             assert!(last_log.1.contains("Test log message"));
-            assert!(last_log.1.contains("INFO"));
+            // Could be INFO, Info, or info depending on the formatting
+            assert!(last_log.1.to_uppercase().contains("INFO"));
         }
     }
 

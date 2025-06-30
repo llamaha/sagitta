@@ -6,10 +6,18 @@ use crate::mcp::{
         RepositoryMapParams, ToolAnnotations, ToolDefinition,
         RepositorySearchFileParams, RepositoryViewFileParams,
         RepositorySwitchBranchParams, RepositoryListBranchesParams,
+        TodoReadParams, TodoWriteParams,
+        EditFileParams, MultiEditFileParams,
+        ShellExecuteParams,
+        ReadFileParams, WriteFileParams,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
-use crate::handlers::{ping::handle_ping, query::handle_query, repository::*, repository_map::handle_repository_map}; // Import actual handlers
+use crate::handlers::{ping::handle_ping, query::handle_query, repository::*, repository_map::handle_repository_map, 
+                      todo_read::handle_todo_read, todo_write::handle_todo_write,
+                      edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
+                      shell_execute::handle_shell_execute,
+                      read_file::handle_read_file, write_file::handle_write_file}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -107,6 +115,55 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "repository_list_branches" => {
             let list_branches_params: RepositoryListBranchesParams = deserialize_value(arguments, tool_name)?;
              match handle_repository_list_branches(list_branches_params, config, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "todo_read" => {
+            let todo_read_params: TodoReadParams = deserialize_value(arguments, tool_name)?;
+            match handle_todo_read(todo_read_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "todo_write" => {
+            let todo_write_params: TodoWriteParams = deserialize_value(arguments, tool_name)?;
+            match handle_todo_write(todo_write_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "edit_file" => {
+            let edit_params: EditFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_edit_file(edit_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "multi_edit_file" => {
+            let multi_edit_params: MultiEditFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_multi_edit_file(multi_edit_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "shell_execute" => {
+            let shell_params: ShellExecuteParams = deserialize_value(arguments, tool_name)?;
+            match handle_shell_execute(shell_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "read_file" => {
+            let read_params: ReadFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_read_file(read_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "write_file" => {
+            let write_params: WriteFileParams = deserialize_value(arguments, tool_name)?;
+            match handle_write_file(write_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -371,6 +428,193 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 read_only_hint: Some(true),
                 destructive_hint: Some(false),
                 idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Todo Read ---
+        ToolDefinition {
+            name: "todo_read".to_string(),
+            description: Some("Reads the current todo list with detailed status information.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Read Todo List".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Todo Write ---
+        ToolDefinition {
+            name: "todo_write".to_string(),
+            description: Some("Updates the todo list with structured todo items.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Complete list of todos to write (replaces existing todos)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Unique identifier for the todo" },
+                                "content": { "type": "string", "description": "The content/description of the todo" },
+                                "status": { 
+                                    "type": "string", 
+                                    "enum": ["pending", "in_progress", "completed"],
+                                    "description": "Current status of the todo" 
+                                },
+                                "priority": { 
+                                    "type": "string", 
+                                    "enum": ["low", "medium", "high"],
+                                    "description": "Priority level" 
+                                },
+                                "created_at": { "type": "string", "description": "Optional RFC3339 timestamp when created" },
+                                "updated_at": { "type": "string", "description": "Optional RFC3339 timestamp when last updated" }
+                            },
+                            "required": ["id", "content", "status", "priority"]
+                        }
+                    }
+                },
+                "required": ["todos"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Write Todo List".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Edit File ---
+        ToolDefinition {
+            name: "edit_file".to_string(),
+            description: Some("Performs exact string replacements in files with diff output.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "The absolute path to the file to edit" },
+                    "old_string": { "type": "string", "description": "The text to search for and replace" },
+                    "new_string": { "type": "string", "description": "The text to replace it with" },
+                    "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
+                },
+                "required": ["file_path", "old_string", "new_string"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Edit File".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Multi Edit File ---
+        ToolDefinition {
+            name: "multi_edit_file".to_string(),
+            description: Some("Performs multiple sequential edits to a single file with diff output.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "The absolute path to the file to edit" },
+                    "edits": {
+                        "type": "array",
+                        "description": "Array of edit operations to perform sequentially",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": { "type": "string", "description": "The text to search for and replace" },
+                                "new_string": { "type": "string", "description": "The text to replace it with" },
+                                "replace_all": { "type": "boolean", "description": "Replace all occurrences (default: false)" }
+                            },
+                            "required": ["old_string", "new_string"]
+                        }
+                    }
+                },
+                "required": ["file_path", "edits"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Multi Edit File".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Shell Execute ---
+        ToolDefinition {
+            name: "shell_execute".to_string(),
+            description: Some("Executes shell commands with cross-platform support (Windows/Linux/macOS).".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The command to execute" },
+                    "working_directory": { "type": "string", "description": "Optional working directory (defaults to current directory)" },
+                    "timeout_ms": { "type": "integer", "description": "Optional timeout in milliseconds (default: 30000ms)" },
+                    "env": { 
+                        "type": "object",
+                        "description": "Optional environment variables",
+                        "additionalProperties": { "type": "string" }
+                    }
+                },
+                "required": ["command"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Execute Shell Command".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(true),
+                idempotent_hint: Some(false),
+                open_world_hint: Some(true),
+            }),
+        },
+        
+        // --- Read File ---
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: Some("Reads file contents with optional line range support.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "The absolute path to the file to read" },
+                    "start_line": { "type": "integer", "description": "Optional start line (1-based, inclusive)" },
+                    "end_line": { "type": "integer", "description": "Optional end line (1-based, inclusive)" }
+                },
+                "required": ["file_path"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Read File".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Write File ---
+        ToolDefinition {
+            name: "write_file".to_string(),
+            description: Some("Writes content to a file with optional parent directory creation.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "description": "The absolute path to the file to write" },
+                    "content": { "type": "string", "description": "The content to write to the file" },
+                    "create_parents": { "type": "boolean", "description": "Create parent directories if they don't exist (default: true)" }
+                },
+                "required": ["file_path", "content"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Write File".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(false),
                 open_world_hint: Some(false),
             }),
         },

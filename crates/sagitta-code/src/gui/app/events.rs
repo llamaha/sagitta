@@ -92,10 +92,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     app.state.is_waiting_for_response = false;
                 },
                 AgentEvent::LlmChunk { content, is_final, is_thinking } => {
-                    // Ignore thinking chunks since we don't display them anymore
-                    if !is_thinking {
-                        handle_llm_chunk(app, content, is_final);
-                    }
+                    handle_llm_chunk(app, content, is_final, is_thinking);
                 },
                 AgentEvent::ToolCall { tool_call } => {
                     log::debug!("Tool call received: {} (id: {})", tool_call.name, tool_call.id);
@@ -178,6 +175,10 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                 AgentEvent::ConversationStatusChanged(status) => {
                     log::info!("SagittaCodeApp: Received ConversationStatusChanged event: {:?}", status);
                     // Potentially refresh UI elements that depend on conversation status here
+                },
+                AgentEvent::TokenUsageUpdate { usage } => {
+                    log::debug!("SagittaCodeApp: Token usage update - total: {}", usage.total_tokens);
+                    app.state.current_token_usage = Some(usage);
                 },
                 AgentEvent::Error(err_msg) => {
                     // Display error in a more prominent way, e.g., a toast or modal
@@ -372,7 +373,7 @@ pub fn make_chat_message_from_agent_message(agent_msg: &AgentMessage) -> ChatMes
 }
 
 /// Handle LLM chunk events from the agent
-fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool) {
+fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool, is_thinking: bool) {
     let actual_content = content;
     
     let current_response_id = app.state.current_response_id.clone();
@@ -380,7 +381,11 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool) {
     match current_response_id {
         Some(current_id) => {
             // We have an ongoing response, append to it
-            app.chat_manager.append_content(&current_id, actual_content);
+            if is_thinking {
+                app.chat_manager.append_thinking_content(&current_id, actual_content);
+            } else {
+                app.chat_manager.append_content(&current_id, actual_content);
+            }
             
             if is_final {
                 app.chat_manager.finish_streaming(&current_id);
@@ -400,7 +405,11 @@ fn handle_llm_chunk(app: &mut SagittaCodeApp, content: String, is_final: bool) {
             app.state.current_response_id = Some(response_id.clone());
             app.state.is_streaming_response = true;
             
-            app.chat_manager.append_content(&response_id, actual_content.clone());
+            if is_thinking {
+                app.chat_manager.append_thinking_content(&response_id, actual_content.clone());
+            } else {
+                app.chat_manager.append_content(&response_id, actual_content.clone());
+            }
             
             if is_final {
                 app.chat_manager.finish_streaming(&response_id);
@@ -1072,10 +1081,7 @@ impl SagittaCodeApp {
         // Process the event through the existing handler
         match event {
             AgentEvent::LlmChunk { content, is_final, is_thinking } => {
-                // Ignore thinking chunks since we don't display them anymore
-                if !is_thinking {
-                    handle_llm_chunk(self, content, is_final);
-                }
+                handle_llm_chunk(self, content, is_final, is_thinking);
             },
             AgentEvent::ToolCall { tool_call } => {
                 handle_tool_call(self, tool_call);
@@ -1404,7 +1410,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test starting a new response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false, false);
         
         // Should create a new streaming message
         assert!(app.state.current_response_id.is_some());
@@ -1424,11 +1430,11 @@ mod tests {
         let mut app = create_test_app();
         
         // Start a response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false, false);
         let response_id = app.state.current_response_id.clone();
         
         // Continue the response
-        handle_llm_chunk(&mut app, " world".to_string(), false);
+        handle_llm_chunk(&mut app, " world".to_string(), false, false);
         
         // Should still be the same response
         assert_eq!(app.state.current_response_id, response_id);
@@ -1446,7 +1452,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Start and complete a response
-        handle_llm_chunk(&mut app, "Complete response".to_string(), true);
+        handle_llm_chunk(&mut app, "Complete response".to_string(), true, false);
         
         // Should complete the response
         assert!(app.state.current_response_id.is_none());
@@ -1464,7 +1470,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach the tool call to
-        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true);
+        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true, false);
         
         let args = serde_json::json!({"query": "rust programming"});
         let tool_call = create_test_tool_call("web_search", args);
@@ -1608,13 +1614,13 @@ mod tests {
         // Simulate a complete workflow: user input -> llm chunks -> tool call -> result
         
         // 1. Start with LLM chunk
-        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false);
+        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false, false);
         assert!(app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages.len(), 1);
         
         // 2. Complete LLM chunk
-        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true);
+        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true, false);
         assert!(!app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages[0].content, "I'll search for information about Rust programming.");
@@ -1646,7 +1652,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test empty content
-        handle_llm_chunk(&mut app, "".to_string(), false);
+        handle_llm_chunk(&mut app, "".to_string(), false, false);
         
         // Should still create a message entry but with empty content
         let messages = app.chat_manager.get_all_messages();
@@ -1659,7 +1665,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach tool calls to
-        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true);
+        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true, false);
         
         // Add multiple tool calls
         let args1 = serde_json::json!({"query": "rust"});
@@ -1822,7 +1828,7 @@ mod tests {
         app.state.current_conversation_id = Some(conversation_id);
         
         // Simulate final LLM chunk which should trigger analysis
-        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true);
+        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true, false);
         
         // Verify that the conversation ID is set for analysis
         assert_eq!(app.state.current_conversation_id, Some(conversation_id));

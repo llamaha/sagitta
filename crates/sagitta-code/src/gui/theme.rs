@@ -96,6 +96,12 @@ pub struct CustomThemeColors {
     #[serde(with = "color32_serde")]
     pub button_disabled_text_color: Color32,
     
+    // Font sizes
+    pub base_font_size: f32,
+    pub header_font_size: f32,
+    pub code_font_size: f32,
+    pub small_font_size: f32,
+    
     // Author colors
     #[serde(with = "color32_serde")]
     pub user_color: Color32,
@@ -158,6 +164,12 @@ impl Default for CustomThemeColors {
             button_disabled_color: Color32::from_rgb(60, 60, 60),
             button_text_color: Color32::WHITE,
             button_disabled_text_color: Color32::from_rgb(180, 180, 180),
+            
+            // Font sizes
+            base_font_size: 14.0,
+            header_font_size: 16.0,
+            code_font_size: 13.0,
+            small_font_size: 11.0,
             
             // Author colors
             user_color: Color32::from_rgb(255, 255, 255),
@@ -246,6 +258,30 @@ impl AppTheme {
     /// Apply the theme to the egui context
     pub fn apply_to_context(&self, ctx: &egui::Context) {
         ctx.set_visuals(self.to_egui_visuals());
+        
+        // Apply font sizes
+        let mut style = (*ctx.style()).clone();
+        
+        // Get font sizes based on theme
+        let (base_size, header_size, code_size, small_size) = match self {
+            AppTheme::Custom => {
+                let custom = get_custom_theme_colors();
+                (custom.base_font_size, custom.header_font_size, custom.code_font_size, custom.small_font_size)
+            },
+            _ => (14.0, 16.0, 13.0, 11.0), // Default sizes for built-in themes
+        };
+        
+        // Apply font sizes to text styles
+        use egui::{TextStyle, FontId, FontFamily};
+        style.text_styles = [
+            (TextStyle::Small, FontId::new(small_size, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(base_size, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(base_size, FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(header_size, FontFamily::Proportional)),
+            (TextStyle::Monospace, FontId::new(code_size, FontFamily::Monospace)),
+        ].iter().cloned().collect();
+        
+        ctx.set_style(style);
     }
 
     /// Get background color for panels
@@ -591,6 +627,38 @@ impl AppTheme {
                 get_custom_theme_colors().agent_color.b(),
                 20
             ),
+        }
+    }
+    
+    /// Get base font size
+    pub fn base_font_size(&self) -> f32 {
+        match self {
+            AppTheme::Custom => get_custom_theme_colors().base_font_size,
+            _ => 14.0,
+        }
+    }
+    
+    /// Get header font size
+    pub fn header_font_size(&self) -> f32 {
+        match self {
+            AppTheme::Custom => get_custom_theme_colors().header_font_size,
+            _ => 16.0,
+        }
+    }
+    
+    /// Get code font size
+    pub fn code_font_size(&self) -> f32 {
+        match self {
+            AppTheme::Custom => get_custom_theme_colors().code_font_size,
+            _ => 13.0,
+        }
+    }
+    
+    /// Get small font size
+    pub fn small_font_size(&self) -> f32 {
+        match self {
+            AppTheme::Custom => get_custom_theme_colors().small_font_size,
+            _ => 11.0,
         }
     }
 }

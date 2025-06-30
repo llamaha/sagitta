@@ -581,4 +581,243 @@ pub struct RepositoryListBranchesResult {
     pub branches: Vec<String>,
     /// Current active branch
     pub current_branch: String,
+}
+
+// Todo management types
+
+/// A single todo item
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TodoItem {
+    /// Unique identifier for the todo
+    pub id: String,
+    /// The content/description of the todo
+    pub content: String,
+    /// Current status of the todo
+    pub status: TodoStatus,
+    /// Priority level
+    pub priority: TodoPriority,
+    /// Optional timestamp when created
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// Optional timestamp when last updated
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// Todo status enum
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// Todo priority enum
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoPriority {
+    Low,
+    Medium,
+    High,
+}
+
+/// Parameters for todo_read - empty since it takes no parameters
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct TodoReadParams {}
+
+/// Result of todo_read
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TodoReadResult {
+    /// List of all todos
+    pub todos: Vec<TodoItem>,
+    /// Summary of todo statuses
+    pub summary: String,
+}
+
+/// Parameters for todo_write
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TodoWriteParams {
+    /// The complete list of todos to write (replaces existing todos)
+    pub todos: Vec<TodoItem>,
+}
+
+/// Result of todo_write
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TodoWriteResult {
+    /// The updated list of todos
+    pub todos: Vec<TodoItem>,
+    /// Summary of the update
+    pub summary: String,
+}
+
+// File editing types
+
+/// Parameters for edit_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EditFileParams {
+    /// The absolute path to the file to edit
+    pub file_path: String,
+    /// The text to search for and replace
+    pub old_string: String,
+    /// The text to replace it with
+    pub new_string: String,
+    /// Replace all occurrences (default: false)
+    #[serde(default)]
+    pub replace_all: bool,
+}
+
+/// Result of edit_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EditFileResult {
+    /// The file path that was edited
+    pub file_path: String,
+    /// The original content (limited to relevant context)
+    pub old_content: String,
+    /// The new content (limited to relevant context)
+    pub new_content: String,
+    /// Unified diff showing the changes
+    pub diff: String,
+    /// Summary of changes made
+    pub changes_summary: String,
+}
+
+/// A single edit operation for multi_edit_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EditOperation {
+    /// The text to search for and replace
+    pub old_string: String,
+    /// The text to replace it with
+    pub new_string: String,
+    /// Replace all occurrences (default: false)
+    #[serde(default)]
+    pub replace_all: bool,
+}
+
+/// Parameters for multi_edit_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MultiEditFileParams {
+    /// The absolute path to the file to edit
+    pub file_path: String,
+    /// Array of edit operations to perform sequentially
+    pub edits: Vec<EditOperation>,
+}
+
+/// Result of multi_edit_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MultiEditFileResult {
+    /// The file path that was edited
+    pub file_path: String,
+    /// The original content before any edits
+    pub original_content: String,
+    /// The final content after all edits
+    pub final_content: String,
+    /// Unified diff showing all changes
+    pub diff: String,
+    /// Number of edits applied successfully
+    pub edits_applied: usize,
+    /// Summary of all changes made
+    pub changes_summary: String,
+}
+
+// Shell execution types
+
+/// Parameters for shell_execute
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ShellExecuteParams {
+    /// The command to execute
+    pub command: String,
+    /// Optional working directory (defaults to current directory)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    /// Optional timeout in milliseconds (default: 30000ms)
+    #[serde(default = "default_shell_timeout")]
+    pub timeout_ms: u64,
+    /// Optional environment variables
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+}
+
+fn default_shell_timeout() -> u64 {
+    30000 // 30 seconds default
+}
+
+/// Result of shell_execute
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ShellExecuteResult {
+    /// The command that was executed
+    pub command: String,
+    /// Exit code of the process
+    pub exit_code: i32,
+    /// Standard output
+    pub stdout: String,
+    /// Standard error
+    pub stderr: String,
+    /// Execution time in milliseconds
+    pub execution_time_ms: u64,
+    /// Whether the command timed out
+    pub timed_out: bool,
+}
+
+// File operation types
+
+/// Parameters for read_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ReadFileParams {
+    /// The absolute path to the file to read
+    pub file_path: String,
+    /// Optional start line (1-based, inclusive)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<usize>,
+    /// Optional end line (1-based, inclusive)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+}
+
+/// Result of read_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ReadFileResult {
+    /// The file path that was read
+    pub file_path: String,
+    /// The content of the file (or requested portion)
+    pub content: String,
+    /// Total number of lines in the file
+    pub line_count: usize,
+    /// File size in bytes
+    pub file_size: u64,
+    /// Start line that was read (if specified)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<usize>,
+    /// End line that was read (if specified)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+}
+
+/// Parameters for write_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WriteFileParams {
+    /// The absolute path to the file to write
+    pub file_path: String,
+    /// The content to write to the file
+    pub content: String,
+    /// Create parent directories if they don't exist (default: true)
+    #[serde(default = "default_create_parents")]
+    pub create_parents: bool,
+}
+
+fn default_create_parents() -> bool {
+    true
+}
+
+/// Result of write_file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WriteFileResult {
+    /// The file path that was written
+    pub file_path: String,
+    /// The content that was written (truncated if too large)
+    pub content: String,
+    /// Number of bytes written
+    pub bytes_written: u64,
+    /// Whether this was a new file creation
+    pub created: bool,
 } 

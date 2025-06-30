@@ -121,6 +121,11 @@ impl ClaudeCodeStream {
                                             }
                                         }
                                         ClaudeChunk::Assistant { message } => {
+                                            // Check if we have any non-empty text content
+                                            let has_text_content = message.content.iter().any(|content| {
+                                                matches!(content, ContentBlock::Text { text } if !text.trim().is_empty())
+                                            });
+                                            
                                             // Process content blocks directly
                                             for (idx, content) in message.content.into_iter().enumerate() {
                                                 // Process content blocks without logging
@@ -137,8 +142,18 @@ impl ClaudeCodeStream {
                                                         }));
                                                     }
                                                     ContentBlock::Thinking { thinking } => {
-                                                        log::info!("CLAUDE_CODE: Skipping Thinking block with length {}: {}", thinking.len(), if thinking.len() < 200 { &thinking } else { &thinking[..200] });
-                                                        // Skip thinking blocks - they arrive all at once and provide no UX benefit
+                                                        // Only send thinking if there's no text content and thinking is not empty
+                                                        if !has_text_content && !thinking.trim().is_empty() {
+                                                            log::info!("CLAUDE_CODE: Sending Thinking block as main content (length: {})", thinking.len());
+                                                            let _ = sender.send(Ok(StreamChunk {
+                                                                part: MessagePart::Thought { text: thinking },
+                                                                is_final: false,
+                                                                finish_reason: None,
+                                                                token_usage: None,
+                                                            }));
+                                                        } else {
+                                                            log::info!("CLAUDE_CODE: Skipping Thinking block (has_text: {}, length: {})", has_text_content, thinking.len());
+                                                        }
                                                     }
                                                     ContentBlock::RedactedThinking => {
                                                         log::info!("CLAUDE_CODE: Skipping RedactedThinking block");
@@ -213,22 +228,30 @@ impl ClaudeCodeStream {
                                                     }
                                                     super::message_converter::UserContentBlock::ToolResult { content, tool_use_id, is_error } => {
                                                         // Tool results from MCP - store for tool preview instead of displaying inline
-                                                        log::info!("CLAUDE_CODE: Tool result for {}: {}", tool_use_id, content);
+                                                        log::info!("CLAUDE_CODE: Tool result for {} (is_error: {:?}): {}", tool_use_id, is_error, content);
                                                         
-                                                        // Only process tool result if it's not an error
-                                                        if is_error != Some(true) {
-                                                            // Send as tool result event instead of text to prevent inline display
-                                                            let _ = sender.send(Ok(StreamChunk {
-                                                                part: MessagePart::ToolResult { 
-                                                                    tool_call_id: tool_use_id.clone(),
-                                                                    name: "mcp_tool".to_string(),
-                                                                    result: serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content)),
-                                                                },
-                                                                is_final: false,
-                                                                finish_reason: None,
-                                                                token_usage: None,
-                                                            }));
-                                                        }
+                                                        // Send tool result regardless of error status
+                                                        let result_value = if is_error == Some(true) {
+                                                            // Wrap error content in an error object
+                                                            serde_json::json!({
+                                                                "error": content,
+                                                                "is_error": true
+                                                            })
+                                                        } else {
+                                                            // Parse normal result
+                                                            serde_json::from_str(&content).unwrap_or(serde_json::Value::String(content))
+                                                        };
+                                                        
+                                                        let _ = sender.send(Ok(StreamChunk {
+                                                            part: MessagePart::ToolResult { 
+                                                                tool_call_id: tool_use_id.clone(),
+                                                                name: "mcp_tool".to_string(),
+                                                                result: result_value,
+                                                            },
+                                                            is_final: false,
+                                                            finish_reason: None,
+                                                            token_usage: None,
+                                                        }));
                                                     }
                                                 }
                                             }

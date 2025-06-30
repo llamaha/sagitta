@@ -14,16 +14,48 @@ impl ToolResultFormatter {
     pub fn format_tool_result_for_preview(&self, tool_name: &str, result: &crate::tools::types::ToolResult) -> String {
         match result {
             crate::tools::types::ToolResult::Success(value) => {
+                // Check if this is actually an error wrapped as success (from MCP)
+                if let Some(obj) = value.as_object() {
+                    if obj.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        let error_msg = obj.get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Tool execution failed");
+                        return format!("❌ **ERROR**\n\n{}", error_msg);
+                    }
+                }
                 self.format_successful_tool_result(tool_name, value)
             },
             crate::tools::types::ToolResult::Error { error } => {
-                format!("ERROR\n\n{}", error)
+                // Format error with better structure
+                let mut result = String::new();
+                result.push_str("❌ **Tool Execution Failed**\n\n");
+                
+                // Try to parse error as JSON for better formatting
+                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(error) {
+                    if let Some(message) = error_json.get("message").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("**Error:** {}\n", message));
+                    } else {
+                        result.push_str(&format!("**Error:** {}\n", error));
+                    }
+                    
+                    // Add any additional error details
+                    if let Some(code) = error_json.get("code") {
+                        result.push_str(&format!("\n**Error Code:** {}", code));
+                    }
+                } else {
+                    // Plain text error
+                    result.push_str(&format!("**Error:** {}", error));
+                }
+                
+                result
             }
         }
     }
     
     /// Format successful tool results based on tool type
     fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
+        log::debug!("Formatting tool result for: {}", tool_name);
+        
         // Handle both native tools and MCP tools
         match tool_name {
             "web_search" | "WebSearch" => self.format_web_search_result(value),
@@ -35,6 +67,14 @@ impl ToolResultFormatter {
             "edit" | "semantic_edit" | "validate" | "Edit" | "MultiEdit" => self.format_edit_result(value),
             "Bash" => self.format_bash_result(value),
             "TodoWrite" => self.format_todo_result(value),
+            "Task" => self.format_task_agent_result(value),
+            name if name.contains("__todo_read") => self.format_mcp_todo_read_result(value),
+            name if name.contains("__todo_write") => self.format_mcp_todo_write_result(value),
+            name if name.contains("__edit_file") => self.format_mcp_edit_file_result(value),
+            name if name.contains("__multi_edit_file") => self.format_mcp_multi_edit_file_result(value),
+            name if name.contains("__shell_execute") => self.format_mcp_shell_execute_result(value),
+            name if name.contains("__read_file") => self.format_mcp_read_file_result(value),
+            name if name.contains("__write_file") => self.format_mcp_write_file_result(value),
             name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
             name if name.contains("__query") => self.format_mcp_search_result(value),
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
@@ -171,8 +211,11 @@ impl ToolResultFormatter {
         let mut result = String::new();
         result.push_str("FILE: File Content\n\n");
         
+        let mut file_path_for_lang = None;
+        
         if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
             result.push_str(&format!("**File:** {}\n\n", file_path));
+            file_path_for_lang = Some(file_path);
         }
         
         if let Some(repo_name) = value.get("repository_name").and_then(|v| v.as_str()) {
@@ -191,7 +234,49 @@ impl ToolResultFormatter {
         
         if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
             result.push_str("**Content:**\n");
-            result.push_str("```\n");
+            
+            // Detect language from file extension for syntax highlighting
+            let language = file_path_for_lang
+                .and_then(|path| std::path::Path::new(path).extension())
+                .and_then(|ext| ext.to_str())
+                .map(|ext| {
+                    // Map common extensions to their language identifiers
+                    match ext {
+                        "ts" | "tsx" => "typescript",
+                        "js" | "jsx" => "javascript",
+                        "rs" => "rust",
+                        "py" => "python",
+                        "rb" => "ruby",
+                        "go" => "go",
+                        "java" => "java",
+                        "cpp" | "cc" | "cxx" => "cpp",
+                        "c" => "c",
+                        "h" | "hpp" => "cpp",
+                        "cs" => "csharp",
+                        "php" => "php",
+                        "swift" => "swift",
+                        "kt" => "kotlin",
+                        "scala" => "scala",
+                        "r" => "r",
+                        "sh" | "bash" => "bash",
+                        "yaml" | "yml" => "yaml",
+                        "json" => "json",
+                        "xml" => "xml",
+                        "html" | "htm" => "html",
+                        "css" => "css",
+                        "scss" | "sass" => "scss",
+                        "sql" => "sql",
+                        "md" | "markdown" => "markdown",
+                        "toml" => "toml",
+                        "ini" => "ini",
+                        "dockerfile" => "dockerfile",
+                        "makefile" => "makefile",
+                        _ => ext // Use the extension as-is for other cases
+                    }
+                })
+                .unwrap_or("");
+            
+            result.push_str(&format!("```{}\n", language));
             result.push_str(content);
             result.push_str("\n```\n");
         }
@@ -225,7 +310,49 @@ impl ToolResultFormatter {
                     
                     if let Some(snippet) = search_result.get("snippet").and_then(|v| v.as_str()) {
                         result.push_str("   Preview:\n");
-                        result.push_str("   ```\n");
+                        
+                        // Detect language from file path for syntax highlighting
+                        let language = search_result.get("file_path")
+                            .and_then(|v| v.as_str())
+                            .and_then(|path| std::path::Path::new(path).extension())
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| {
+                                match ext {
+                                    "ts" | "tsx" => "typescript",
+                                    "js" | "jsx" => "javascript",
+                                    "rs" => "rust",
+                                    "py" => "python",
+                                    "rb" => "ruby",
+                                    "go" => "go",
+                                    "java" => "java",
+                                    "cpp" | "cc" | "cxx" => "cpp",
+                                    "c" => "c",
+                                    "h" | "hpp" => "cpp",
+                                    "cs" => "csharp",
+                                    "php" => "php",
+                                    "swift" => "swift",
+                                    "kt" => "kotlin",
+                                    "scala" => "scala",
+                                    "r" => "r",
+                                    "sh" | "bash" => "bash",
+                                    "yaml" | "yml" => "yaml",
+                                    "json" => "json",
+                                    "xml" => "xml",
+                                    "html" | "htm" => "html",
+                                    "css" => "css",
+                                    "scss" | "sass" => "scss",
+                                    "sql" => "sql",
+                                    "md" | "markdown" => "markdown",
+                                    "toml" => "toml",
+                                    "ini" => "ini",
+                                    "dockerfile" => "dockerfile",
+                                    "makefile" => "makefile",
+                                    _ => ext
+                                }
+                            })
+                            .unwrap_or("");
+                        
+                        result.push_str(&format!("   ```{}\n", language));
                         // Limit snippet length
                         let limited_snippet = if snippet.len() > 200 {
                             format!("{}...", &snippet[..200])
@@ -454,8 +581,12 @@ impl ToolResultFormatter {
     fn format_mcp_file_view_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
         
+        let mut file_path_for_lang = None;
+        
         if let Some(file_path) = value.get("relativePath").and_then(|v| v.as_str()) {
             result.push_str(&format!("📄 **{}**\n\n", file_path));
+            file_path_for_lang = Some(file_path);
+            log::debug!("MCP file view: Found relativePath: {}", file_path);
         }
         
         // Show the actual file content
@@ -464,31 +595,55 @@ impl ToolResultFormatter {
                 result.push_str("*Empty file*\n");
             } else {
                 // Detect language from file extension for syntax highlighting
-                let lang = if let Some(path) = value.get("relativePath").and_then(|v| v.as_str()) {
-                    match path.split('.').last() {
-                        Some("rs") => "rust",
-                        Some("js") => "javascript",
-                        Some("ts") => "typescript",
-                        Some("py") => "python",
-                        Some("go") => "go",
-                        Some("java") => "java",
-                        Some("cpp") | Some("cc") | Some("cxx") => "cpp",
-                        Some("c") | Some("h") => "c",
-                        Some("toml") => "toml",
-                        Some("json") => "json",
-                        Some("yaml") | Some("yml") => "yaml",
-                        Some("md") => "markdown",
-                        _ => ""
-                    }
-                } else {
-                    ""
-                };
+                let extension = file_path_for_lang
+                    .and_then(|path| std::path::Path::new(path).extension())
+                    .and_then(|ext| ext.to_str());
                 
-                if !lang.is_empty() {
-                    result.push_str(&format!("```{}\n{}\n```\n", lang, content));
-                } else {
-                    result.push_str(&format!("```\n{}\n```\n", content));
-                }
+                log::debug!("MCP file view: Detected extension: {:?}", extension);
+                
+                let language = extension
+                    .map(|ext| {
+                        // Map common extensions to their language identifiers
+                        let lang = match ext {
+                            // Try using shorter identifiers that might be more compatible
+                            "ts" | "tsx" => "ts",  // Try 'ts' instead of 'typescript'
+                            "js" | "jsx" => "js",  // Try 'js' instead of 'javascript'
+                            "rs" => "rust",  // Keep rust as-is since it works
+                            "py" => "python",
+                            "rb" => "ruby",
+                            "go" => "go",
+                            "java" => "java",
+                            "cpp" | "cc" | "cxx" => "cpp",
+                            "c" => "c",
+                            "h" | "hpp" => "cpp",
+                            "cs" => "csharp",
+                            "php" => "php",
+                            "swift" => "swift",
+                            "kt" => "kotlin",
+                            "scala" => "scala",
+                            "r" => "r",
+                            "sh" | "bash" => "bash",
+                            "yaml" | "yml" => "yaml",
+                            "json" => "json",
+                            "xml" => "xml",
+                            "html" | "htm" => "html",
+                            "css" => "css",
+                            "scss" | "sass" => "scss",
+                            "sql" => "sql",
+                            "md" | "markdown" => "md",  // Try 'md' instead of 'markdown'
+                            "toml" => "toml",
+                            "ini" => "ini",
+                            "dockerfile" => "dockerfile",
+                            "makefile" => "makefile",
+                            _ => ext // Use the extension as-is for other cases
+                        };
+                        log::debug!("MCP file view: Mapped {} to language: {}", ext, lang);
+                        lang
+                    })
+                    .unwrap_or("");
+                
+                log::debug!("MCP file view: Using language identifier: '{}'", language);
+                result.push_str(&format!("```{}\n{}\n```\n", language, content));
             }
         }
         
@@ -519,7 +674,48 @@ impl ToolResultFormatter {
                 }
                 
                 if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
-                    result.push_str(&format!("```\n{}\n```\n", content.trim()));
+                    // Detect language from file path for syntax highlighting
+                    let language = item.get("file_path")
+                        .and_then(|v| v.as_str())
+                        .and_then(|path| std::path::Path::new(path).extension())
+                        .and_then(|ext| ext.to_str())
+                        .map(|ext| {
+                            match ext {
+                                "ts" | "tsx" => "typescript",
+                                "js" | "jsx" => "javascript",
+                                "rs" => "rust",
+                                "py" => "python",
+                                "rb" => "ruby",
+                                "go" => "go",
+                                "java" => "java",
+                                "cpp" | "cc" | "cxx" => "cpp",
+                                "c" => "c",
+                                "h" | "hpp" => "cpp",
+                                "cs" => "csharp",
+                                "php" => "php",
+                                "swift" => "swift",
+                                "kt" => "kotlin",
+                                "scala" => "scala",
+                                "r" => "r",
+                                "sh" | "bash" => "bash",
+                                "yaml" | "yml" => "yaml",
+                                "json" => "json",
+                                "xml" => "xml",
+                                "html" | "htm" => "html",
+                                "css" => "css",
+                                "scss" | "sass" => "scss",
+                                "sql" => "sql",
+                                "md" | "markdown" => "markdown",
+                                "toml" => "toml",
+                                "ini" => "ini",
+                                "dockerfile" => "dockerfile",
+                                "makefile" => "makefile",
+                                _ => ext
+                            }
+                        })
+                        .unwrap_or("");
+                    
+                    result.push_str(&format!("```{}\n{}\n```\n", language, content.trim()));
                 }
             }
         } else {
@@ -670,6 +866,245 @@ impl ToolResultFormatter {
         result
     }
     
+    /// Format Task agent results properly handling newlines
+    fn format_task_agent_result(&self, value: &serde_json::Value) -> String {
+        // If the value is a string (common for Task agent output), unescape it
+        if let Some(str_value) = value.as_str() {
+            // Replace escaped newlines with actual newlines
+            return str_value
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+        }
+        
+        // If it's an object with a result field
+        if let Some(result_str) = value.get("result").and_then(|v| v.as_str()) {
+            return result_str
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+        }
+        
+        // Fallback to generic formatting
+        self.format_generic_result(value)
+    }
+    
+    /// Format MCP todo_read results
+    fn format_mcp_todo_read_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        // Add summary if available
+        if let Some(summary) = value.get("summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📋 **{}**\n\n", summary));
+        }
+        
+        // Format todos
+        if let Some(todos) = value.get("todos").and_then(|v| v.as_array()) {
+            for todo in todos {
+                if let Some(content) = todo.get("content").and_then(|v| v.as_str()) {
+                    let status = todo.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                    let priority = todo.get("priority").and_then(|v| v.as_str()).unwrap_or("medium");
+                    
+                    let status_icon = match status {
+                        "completed" => "✅",
+                        "in_progress" => "🔄",
+                        _ => "⬜"
+                    };
+                    
+                    let priority_indicator = match priority {
+                        "high" => "🔴",
+                        "low" => "🟢",
+                        _ => "🟡"
+                    };
+                    
+                    result.push_str(&format!("{} {} {}\n", status_icon, priority_indicator, content));
+                }
+            }
+        }
+        
+        result
+    }
+    
+    /// Format MCP todo_write results
+    fn format_mcp_todo_write_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        result.push_str("✅ **Todo List Updated**\n\n");
+        
+        if let Some(summary) = value.get("summary").and_then(|v| v.as_str()) {
+            result.push_str(summary);
+        }
+        
+        result
+    }
+    
+    /// Format MCP edit_file results
+    fn format_mcp_edit_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📝 **Edited:** `{}`\n\n", file_path));
+        }
+        
+        if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("{}\n\n", summary));
+        }
+        
+        // The diff will be shown in the special diff rendering
+        if value.get("diff").is_some() {
+            result.push_str("*Diff view available in the details*");
+        }
+        
+        result
+    }
+    
+    /// Format MCP multi_edit_file results
+    fn format_mcp_multi_edit_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📝 **Multi-edited:** `{}`\n\n", file_path));
+        }
+        
+        if let Some(edits_applied) = value.get("edits_applied").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("Applied {} edits\n", edits_applied));
+        }
+        
+        if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("{}\n\n", summary));
+        }
+        
+        // The diff will be shown in the special diff rendering
+        if value.get("diff").is_some() {
+            result.push_str("*Diff view available in the details*");
+        }
+        
+        result
+    }
+    
+    /// Format MCP shell_execute results
+    fn format_mcp_shell_execute_result(&self, value: &serde_json::Value) -> String {
+        // This will be handled by the terminal output renderer
+        // Just provide a summary here
+        let mut result = String::new();
+        
+        if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
+            result.push_str(&format!("🖥️ **Command:** `{}`\n", command));
+        }
+        
+        if let Some(exit_code) = value.get("exit_code").and_then(|v| v.as_i64()) {
+            let status = if exit_code == 0 { "✅ Success" } else { "❌ Failed" };
+            result.push_str(&format!("**Status:** {} (exit code: {})\n", status, exit_code));
+        }
+        
+        if let Some(timed_out) = value.get("timed_out").and_then(|v| v.as_bool()) {
+            if timed_out {
+                result.push_str("⏱️ **Command timed out**\n");
+            }
+        }
+        
+        result.push_str("\n*Terminal output available in the details*");
+        result
+    }
+    
+    /// Format MCP read_file results
+    fn format_mcp_read_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        let mut file_path_for_lang = None;
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📄 **File:** `{}`\n", file_path));
+            file_path_for_lang = Some(file_path);
+        }
+        
+        if let Some(line_count) = value.get("line_count").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("**Lines:** {}", line_count));
+        }
+        
+        if let Some(file_size) = value.get("file_size").and_then(|v| v.as_u64()) {
+            result.push_str(&format!(" | **Size:** {} bytes\n", file_size));
+        } else {
+            result.push_str("\n");
+        }
+        
+        // Check if we're reading a specific range
+        if let (Some(start), Some(end)) = (
+            value.get("start_line").and_then(|v| v.as_u64()),
+            value.get("end_line").and_then(|v| v.as_u64())
+        ) {
+            result.push_str(&format!("**Range:** Lines {}-{}\n", start, end));
+        }
+        
+        // Detect language from file extension for syntax highlighting
+        let language = file_path_for_lang
+            .and_then(|path| std::path::Path::new(path).extension())
+            .and_then(|ext| ext.to_str())
+            .map(|ext| {
+                // Map common extensions to their language identifiers
+                match ext {
+                    "ts" | "tsx" => "typescript",
+                    "js" | "jsx" => "javascript",
+                    "rs" => "rust",
+                    "py" => "python",
+                    "rb" => "ruby",
+                    "go" => "go",
+                    "java" => "java",
+                    "cpp" | "cc" | "cxx" => "cpp",
+                    "c" => "c",
+                    "h" | "hpp" => "cpp",
+                    "cs" => "csharp",
+                    "php" => "php",
+                    "swift" => "swift",
+                    "kt" => "kotlin",
+                    "scala" => "scala",
+                    "r" => "r",
+                    "sh" | "bash" => "bash",
+                    "yaml" | "yml" => "yaml",
+                    "json" => "json",
+                    "xml" => "xml",
+                    "html" | "htm" => "html",
+                    "css" => "css",
+                    "scss" | "sass" => "scss",
+                    "sql" => "sql",
+                    "md" | "markdown" => "markdown",
+                    "toml" => "toml",
+                    "ini" => "ini",
+                    "dockerfile" => "dockerfile",
+                    "makefile" => "makefile",
+                    _ => ext // Use the extension as-is for other cases
+                }
+            })
+            .unwrap_or("");
+        
+        result.push_str(&format!("\n```{}\n", language));
+        if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            result.push_str(content);
+        }
+        result.push_str("\n```");
+        
+        result
+    }
+    
+    /// Format MCP write_file results
+    fn format_mcp_write_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            let action = if value.get("created").and_then(|v| v.as_bool()).unwrap_or(false) {
+                "✨ **Created:**"
+            } else {
+                "💾 **Updated:**"
+            };
+            result.push_str(&format!("{} `{}`\n", action, file_path));
+        }
+        
+        if let Some(bytes) = value.get("bytes_written").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("**Bytes written:** {}\n", bytes));
+        }
+        
+        result
+    }
+    
     fn format_generic_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
         result.push_str("RESULT: Tool Result\n\n");
@@ -766,7 +1201,9 @@ mod tests {
         };
         
         let formatted = formatter.format_tool_result_for_preview("test_tool", &result);
-        assert!(formatted.contains("ERROR"));
+        assert!(formatted.contains("❌"));
+        assert!(formatted.contains("Tool Execution Failed"));
+        assert!(formatted.contains("Error:"));
         assert!(formatted.contains("Something went wrong"));
     }
 

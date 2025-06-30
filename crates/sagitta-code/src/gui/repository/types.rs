@@ -397,7 +397,6 @@ pub struct RepoPanelState {
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
-    pub enabled_as_dependencies: std::collections::HashSet<String>, // Repositories enabled as LLM context dependencies
 }
 
 impl RepoPanelState {
@@ -1405,62 +1404,5 @@ mod tests {
         assert_eq!(cloned.branch, form.branch);
         assert_eq!(cloned.target_ref, form.target_ref);
         assert!(cloned.result_receiver.is_none()); // Receiver can't be cloned
-    }
-
-    #[test]
-    fn test_enabled_dependencies_management() {
-        // Test that enabled_as_dependencies field works correctly
-        let mut state = RepoPanelState::default();
-        
-        // Initially should be empty
-        assert!(state.enabled_as_dependencies.is_empty());
-        
-        // Add some repositories to test with
-        state.repositories = vec![
-            RepoInfo {
-                name: "repo1".to_string(),
-                remote: None,
-                branch: None,
-                local_path: None,
-                is_syncing: false,
-            },
-            RepoInfo {
-                name: "repo2".to_string(),
-                remote: None,
-                branch: None,
-                local_path: None,
-                is_syncing: false,
-            },
-            RepoInfo {
-                name: "repo3".to_string(),
-                remote: None,
-                branch: None,
-                local_path: None,
-                is_syncing: false,
-            },
-        ];
-        
-        // Enable repo1 as dependency
-        state.enabled_as_dependencies.insert("repo1".to_string());
-        assert!(state.enabled_as_dependencies.contains("repo1"));
-        assert!(!state.enabled_as_dependencies.contains("repo2"));
-        assert_eq!(state.enabled_as_dependencies.len(), 1);
-        
-        // Enable repo2 as dependency
-        state.enabled_as_dependencies.insert("repo2".to_string());
-        assert!(state.enabled_as_dependencies.contains("repo1"));
-        assert!(state.enabled_as_dependencies.contains("repo2"));
-        assert_eq!(state.enabled_as_dependencies.len(), 2);
-        
-        // Disable repo1
-        state.enabled_as_dependencies.remove("repo1");
-        assert!(!state.enabled_as_dependencies.contains("repo1"));
-        assert!(state.enabled_as_dependencies.contains("repo2"));
-        assert_eq!(state.enabled_as_dependencies.len(), 1);
-        
-        // Test that enabled dependencies can be converted to Vec
-        let deps_vec: Vec<String> = state.enabled_as_dependencies.iter().cloned().collect();
-        assert_eq!(deps_vec.len(), 1);
-        assert!(deps_vec.contains(&"repo2".to_string()));
     }
 } 

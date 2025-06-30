@@ -115,6 +115,12 @@ impl ThemeCustomizer {
                     diff_removed_bg: Color32::from_rgb(255, 200, 200), // Light red background
                     diff_added_text: Color32::from_rgb(0, 100, 0),     // Dark green text
                     diff_removed_text: Color32::from_rgb(100, 0, 0),   // Dark red text
+                    
+                    // Font sizes
+                    base_font_size: 14.0,
+                    header_font_size: 16.0,
+                    code_font_size: 13.0,
+                    small_font_size: 11.0,
                 };
             },
             AppTheme::Custom => {
@@ -244,6 +250,9 @@ impl ThemeCustomizer {
                                 ui.add_space(8.0);
                             }
                             
+                            if self.render_font_sizes(ui) {
+                                theme_changed = true;
+                            }
                             if self.render_background_colors(ui) {
                                 theme_changed = true;
                             }
@@ -807,6 +816,52 @@ impl ThemeCustomizer {
     }
     
     /// Render background color controls
+    fn render_font_sizes(&mut self, ui: &mut Ui) -> bool {
+        let mut changed = false;
+        
+        ui.heading("📏 Font Sizes");
+        ui.add_space(8.0);
+        
+        egui::Grid::new("font_sizes_grid")
+            .num_columns(2)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                ui.label("Base Font Size:");
+                if ui.add(egui::Slider::new(&mut self.colors.base_font_size, 10.0..=20.0).suffix(" px")).changed() {
+                    changed = true;
+                }
+                ui.end_row();
+                
+                ui.label("Header Font Size:");
+                if ui.add(egui::Slider::new(&mut self.colors.header_font_size, 12.0..=24.0).suffix(" px")).changed() {
+                    changed = true;
+                }
+                ui.end_row();
+                
+                ui.label("Code Font Size:");
+                if ui.add(egui::Slider::new(&mut self.colors.code_font_size, 10.0..=18.0).suffix(" px")).changed() {
+                    changed = true;
+                }
+                ui.end_row();
+                
+                ui.label("Small Font Size:");
+                if ui.add(egui::Slider::new(&mut self.colors.small_font_size, 9.0..=14.0).suffix(" px")).changed() {
+                    changed = true;
+                }
+                ui.end_row();
+            });
+        
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(8.0);
+        
+        if self.preview_enabled && changed {
+            self.apply_colors();
+        }
+        
+        changed
+    }
+    
     fn render_background_colors(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
         

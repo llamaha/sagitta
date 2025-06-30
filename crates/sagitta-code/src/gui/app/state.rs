@@ -75,6 +75,9 @@ pub struct AppState {
     // Thinking content state
     pub collapsed_thinking: HashMap<String, bool>, // message_id -> collapsed state
     
+    // Token usage tracking
+    pub current_token_usage: Option<crate::llm::client::TokenUsage>,
+    
     // Sidebar state
     pub sidebar_action: Option<SidebarAction>,
     pub editing_conversation_id: Option<Uuid>,
@@ -147,6 +150,9 @@ impl AppState {
             
             // Thinking content state
             collapsed_thinking: HashMap::new(),
+            
+            // Token usage tracking
+            current_token_usage: None,
             
             // Sidebar state
             sidebar_action: None,

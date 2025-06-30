@@ -1039,8 +1039,8 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         }
                     });
                     
-                    // Add inline result display for completed tools
-                if tool_call.status == MessageStatus::Complete && tool_call.result.is_some() {
+                    // Add inline result display for completed or error tools
+                if (matches!(tool_call.status, MessageStatus::Complete | MessageStatus::Error(_))) && tool_call.result.is_some() {
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(4.0);
@@ -1051,21 +1051,35 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     if let Ok(result_json) = serde_json::from_str::<serde_json::Value>(result_str) {
                         // Use ToolResultFormatter to format the result
                         let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
-                        let tool_result = crate::tools::types::ToolResult::Success(result_json.clone());
+                        
+                        // Create appropriate ToolResult based on status
+                        let tool_result = if matches!(tool_call.status, MessageStatus::Error(_)) {
+                            // For error status, wrap in Error variant
+                            if let Some(error_msg) = result_json.get("error").and_then(|v| v.as_str()) {
+                                crate::tools::types::ToolResult::Error { error: error_msg.to_string() }
+                            } else if let Some(error_msg) = result_json.as_str() {
+                                crate::tools::types::ToolResult::Error { error: error_msg.to_string() }
+                            } else {
+                                crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                            }
+                        } else {
+                            crate::tools::types::ToolResult::Success(result_json.clone())
+                        };
                         let formatted_result = formatter.format_tool_result_for_preview(&tool_call.name, &tool_result);
                         
                         // Display the formatted result in a scrollable area with limited height
                         egui::ScrollArea::vertical()
                             .max_height(400.0)
+                            .min_scrolled_height(400.0)  // Ensure minimum height of 400px
                             .id_source(format!("tool_result_{}", tool_call.id))
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.set_max_width(tool_card_width - 24.0);
                                 
-                                // Check if this is a shell command result for special rendering
-                                if is_shell_command_result(&tool_call.name, &result_json) {
+                                // Check if this is a shell command result for special rendering (skip for errors)
+                                if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
                                     render_terminal_output(ui, &result_json, app_theme);
-                                } else if is_code_change_result(&tool_call.name, &result_json) {
+                                } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
                                     render_diff_output(ui, &result_json, app_theme);
                                 } else {
                                     // Default rendering with markdown support
@@ -1234,6 +1248,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     // Display the formatted result in a scrollable area with limited height
                     egui::ScrollArea::vertical()
                         .max_height(400.0)
+                        .min_scrolled_height(400.0)  // Ensure minimum height of 400px
                         .id_source(format!("tool_result_{}", tool_card.run_id))
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
