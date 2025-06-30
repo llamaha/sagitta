@@ -84,73 +84,11 @@ mod tests {
         mcp.stop().await;
     }
     
-    #[tokio::test]
-    async fn test_mcp_server_exposes_tools() {
-        // This test verifies that when we run the enhanced MCP server,
-        // it properly exposes all tools from the registry
-        
-        let tool_registry = Arc::new(ToolRegistry::new());
-        tool_registry.register(Arc::new(MockTool { name: "list_files".to_string() })).await.unwrap();
-        tool_registry.register(Arc::new(MockTool { name: "read_file".to_string() })).await.unwrap();
-        tool_registry.register(Arc::new(MockTool { name: "shell_exec".to_string() })).await.unwrap();
-        
-        // Create the enhanced MCP server
-        let server = crate::mcp::enhanced_server::EnhancedMcpServer::new(tool_registry.clone());
-        
-        // Test the tools/list handler
-        let list_request = crate::mcp::types::MCPRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "tools/list".to_string(),
-            params: None,
-            id: Some(json!("1")),
-        };
-        
-        let result = server.handle_request(list_request).await.unwrap();
-        assert!(result.is_some());
-        
-        let tools_result: Value = result.unwrap();
-        let tools = tools_result["tools"].as_array().unwrap();
-        
-        // Verify all our tools are listed
-        assert_eq!(tools.len(), 3);
-        
-        let tool_names: Vec<&str> = tools.iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        
-        assert!(tool_names.contains(&"list_files"));
-        assert!(tool_names.contains(&"read_file"));
-        assert!(tool_names.contains(&"shell_exec"));
-    }
+    // Test removed: MCP server functionality is now provided by sagitta-mcp crate
+    // #[tokio::test]
+    // async fn test_mcp_server_exposes_tools() {
     
-    #[tokio::test]
-    async fn test_mcp_tool_execution() {
-        // Test that tools can be executed through the MCP server
-        
-        let tool_registry = Arc::new(ToolRegistry::new());
-        tool_registry.register(Arc::new(MockTool { name: "echo_tool".to_string() })).await.unwrap();
-        
-        let server = crate::mcp::enhanced_server::EnhancedMcpServer::new(tool_registry);
-        
-        // Test tool execution
-        let call_request = crate::mcp::types::MCPRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "tools/call".to_string(),
-            params: Some(json!({
-                "name": "echo_tool",
-                "arguments": {}
-            })),
-            id: Some(json!("2")),
-        };
-        
-        let result = server.handle_request(call_request).await.unwrap();
-        assert!(result.is_some());
-        
-        let call_result: Value = result.unwrap();
-        let content = &call_result["content"][0];
-        
-        assert_eq!(content["content_type"].as_str().unwrap(), "text");
-        let text = content["text"].as_str().unwrap();
-        assert!(text.contains("echo_tool executed"));
-    }
+    // Test removed: MCP tool execution is now tested in sagitta-mcp crate
+    // #[tokio::test]
+    // async fn test_mcp_tool_execution() {
 }
