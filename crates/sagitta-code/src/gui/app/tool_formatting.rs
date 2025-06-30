@@ -39,6 +39,7 @@ impl ToolResultFormatter {
             name if name.contains("__query") => self.format_mcp_search_result(value),
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
             name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
+            name if name.contains("__repository_search_file") => self.format_mcp_file_search_result(value),
             _ => {
                 // Fallback: try to extract key information from any JSON
                 self.format_generic_result(value)
@@ -567,6 +568,33 @@ impl ToolResultFormatter {
             }
         } else {
             result.push_str("No repositories found.\n");
+        }
+        
+        result
+    }
+    
+    /// Format MCP file search results
+    fn format_mcp_file_search_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        // Extract the matchingFiles array
+        if let Some(files) = value.get("matchingFiles").and_then(|v| v.as_array()) {
+            result.push_str(&format!("📁 **Found {} matching files:**\n\n", files.len()));
+            
+            // Format as a nicely indented JSON array
+            result.push_str("```json\n[\n");
+            for (i, file) in files.iter().enumerate() {
+                if let Some(file_path) = file.as_str() {
+                    result.push_str(&format!("  \"{}\"", file_path));
+                    if i < files.len() - 1 {
+                        result.push_str(",");
+                    }
+                    result.push_str("\n");
+                }
+            }
+            result.push_str("]\n```\n");
+        } else {
+            result.push_str("No matching files found.\n");
         }
         
         result
