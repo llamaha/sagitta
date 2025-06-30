@@ -26,7 +26,28 @@ impl ToolResultFormatter {
                 self.format_successful_tool_result(tool_name, value)
             },
             crate::tools::types::ToolResult::Error { error } => {
-                format!("❌ **ERROR**\n\n{}", error)
+                // Format error with better structure
+                let mut result = String::new();
+                result.push_str("❌ **Tool Execution Failed**\n\n");
+                
+                // Try to parse error as JSON for better formatting
+                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(error) {
+                    if let Some(message) = error_json.get("message").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("**Error:** {}\n", message));
+                    } else {
+                        result.push_str(&format!("**Error:** {}\n", error));
+                    }
+                    
+                    // Add any additional error details
+                    if let Some(code) = error_json.get("code") {
+                        result.push_str(&format!("\n**Error Code:** {}", code));
+                    }
+                } else {
+                    // Plain text error
+                    result.push_str(&format!("**Error:** {}", error));
+                }
+                
+                result
             }
         }
     }
