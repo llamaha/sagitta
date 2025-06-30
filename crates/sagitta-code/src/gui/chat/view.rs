@@ -923,6 +923,14 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
 /// Render a single tool call as a compact, clickable card
 fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
+    
+    // Limit tool card width to 90% of max_width
+    let tool_card_width = max_width * 0.9;
+    
+    // Create a vertical layout with the constrained width
+    ui.vertical(|ui| {
+        ui.set_max_width(tool_card_width);
+        
         // Create a frame for the tool card
         Frame::none()
             .fill(app_theme.code_background())
@@ -1082,7 +1090,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             .id_source(format!("tool_result_{}", tool_call.id))
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                ui.set_max_width(max_width - 24.0);
+                                ui.set_max_width(tool_card_width - 24.0);
                                 
                                 // Check if this is a shell command result for special rendering
                                 if is_shell_command_result(&tool_call.name, &result_json) {
@@ -1107,6 +1115,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     }
                 }
             });
+    });
     
     clicked_tool_result
 }
@@ -1129,13 +1138,20 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
-    // Create a frame for the tool card
-    Frame::none()
-        .fill(app_theme.code_background())
-        .rounding(Rounding::same(6))
-        .stroke(Stroke::new(1.0, app_theme.border_color()))
-        .inner_margin(12.0)
-        .show(ui, |ui| {
+    // Limit tool card width to 90% of max_width
+    let tool_card_width = max_width * 0.9;
+    
+    // Create a vertical layout with the constrained width
+    ui.vertical(|ui| {
+        ui.set_max_width(tool_card_width);
+        
+        // Create a frame for the tool card
+        Frame::none()
+            .fill(app_theme.code_background())
+            .rounding(Rounding::same(6))
+            .stroke(Stroke::new(1.0, app_theme.border_color()))
+            .inner_margin(12.0)
+            .show(ui, |ui| {
             ui.horizontal(|ui| {
                 // Tool status icon
                 let (status_icon, status_color) = match tool_card.status {
@@ -1274,7 +1290,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         .id_source(format!("tool_result_{}", tool_card.run_id))
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.set_max_width(max_width - 24.0);
+                            ui.set_max_width(tool_card_width - 24.0);
                             
                             // Check if this is a shell command result for special rendering
                             if is_shell_command_result(&tool_card.tool_name, result) {
@@ -1296,6 +1312,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                 }
             }
         });
+    });
     
     clicked_tool_result
 }
