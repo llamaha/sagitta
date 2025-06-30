@@ -35,6 +35,14 @@ impl ToolResultFormatter {
             "edit" | "semantic_edit" | "validate" | "Edit" | "MultiEdit" => self.format_edit_result(value),
             "Bash" => self.format_bash_result(value),
             "TodoWrite" => self.format_todo_result(value),
+            "Task" => self.format_task_agent_result(value),
+            name if name.contains("__todo_read") => self.format_mcp_todo_read_result(value),
+            name if name.contains("__todo_write") => self.format_mcp_todo_write_result(value),
+            name if name.contains("__edit_file") => self.format_mcp_edit_file_result(value),
+            name if name.contains("__multi_edit_file") => self.format_mcp_multi_edit_file_result(value),
+            name if name.contains("__shell_execute") => self.format_mcp_shell_execute_result(value),
+            name if name.contains("__read_file") => self.format_mcp_read_file_result(value),
+            name if name.contains("__write_file") => self.format_mcp_write_file_result(value),
             name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
             name if name.contains("__query") => self.format_mcp_search_result(value),
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
@@ -665,6 +673,201 @@ impl ToolResultFormatter {
                     result.push_str(&format!("{} {} {}\n", status_icon, priority_icon, content));
                 }
             }
+        }
+        
+        result
+    }
+    
+    /// Format Task agent results properly handling newlines
+    fn format_task_agent_result(&self, value: &serde_json::Value) -> String {
+        // If the value is a string (common for Task agent output), unescape it
+        if let Some(str_value) = value.as_str() {
+            // Replace escaped newlines with actual newlines
+            return str_value
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+        }
+        
+        // If it's an object with a result field
+        if let Some(result_str) = value.get("result").and_then(|v| v.as_str()) {
+            return result_str
+                .replace("\\n", "\n")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+        }
+        
+        // Fallback to generic formatting
+        self.format_generic_result(value)
+    }
+    
+    /// Format MCP todo_read results
+    fn format_mcp_todo_read_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        // Add summary if available
+        if let Some(summary) = value.get("summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📋 **{}**\n\n", summary));
+        }
+        
+        // Format todos
+        if let Some(todos) = value.get("todos").and_then(|v| v.as_array()) {
+            for todo in todos {
+                if let Some(content) = todo.get("content").and_then(|v| v.as_str()) {
+                    let status = todo.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                    let priority = todo.get("priority").and_then(|v| v.as_str()).unwrap_or("medium");
+                    
+                    let status_icon = match status {
+                        "completed" => "✅",
+                        "in_progress" => "🔄",
+                        _ => "⬜"
+                    };
+                    
+                    let priority_indicator = match priority {
+                        "high" => "🔴",
+                        "low" => "🟢",
+                        _ => "🟡"
+                    };
+                    
+                    result.push_str(&format!("{} {} {}\n", status_icon, priority_indicator, content));
+                }
+            }
+        }
+        
+        result
+    }
+    
+    /// Format MCP todo_write results
+    fn format_mcp_todo_write_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        result.push_str("✅ **Todo List Updated**\n\n");
+        
+        if let Some(summary) = value.get("summary").and_then(|v| v.as_str()) {
+            result.push_str(summary);
+        }
+        
+        result
+    }
+    
+    /// Format MCP edit_file results
+    fn format_mcp_edit_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📝 **Edited:** `{}`\n\n", file_path));
+        }
+        
+        if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("{}\n\n", summary));
+        }
+        
+        // The diff will be shown in the special diff rendering
+        if value.get("diff").is_some() {
+            result.push_str("*Diff view available in the details*");
+        }
+        
+        result
+    }
+    
+    /// Format MCP multi_edit_file results
+    fn format_mcp_multi_edit_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📝 **Multi-edited:** `{}`\n\n", file_path));
+        }
+        
+        if let Some(edits_applied) = value.get("edits_applied").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("Applied {} edits\n", edits_applied));
+        }
+        
+        if let Some(summary) = value.get("changes_summary").and_then(|v| v.as_str()) {
+            result.push_str(&format!("{}\n\n", summary));
+        }
+        
+        // The diff will be shown in the special diff rendering
+        if value.get("diff").is_some() {
+            result.push_str("*Diff view available in the details*");
+        }
+        
+        result
+    }
+    
+    /// Format MCP shell_execute results
+    fn format_mcp_shell_execute_result(&self, value: &serde_json::Value) -> String {
+        // This will be handled by the terminal output renderer
+        // Just provide a summary here
+        let mut result = String::new();
+        
+        if let Some(command) = value.get("command").and_then(|v| v.as_str()) {
+            result.push_str(&format!("🖥️ **Command:** `{}`\n", command));
+        }
+        
+        if let Some(exit_code) = value.get("exit_code").and_then(|v| v.as_i64()) {
+            let status = if exit_code == 0 { "✅ Success" } else { "❌ Failed" };
+            result.push_str(&format!("**Status:** {} (exit code: {})\n", status, exit_code));
+        }
+        
+        if let Some(timed_out) = value.get("timed_out").and_then(|v| v.as_bool()) {
+            if timed_out {
+                result.push_str("⏱️ **Command timed out**\n");
+            }
+        }
+        
+        result.push_str("\n*Terminal output available in the details*");
+        result
+    }
+    
+    /// Format MCP read_file results
+    fn format_mcp_read_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📄 **File:** `{}`\n", file_path));
+        }
+        
+        if let Some(line_count) = value.get("line_count").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("**Lines:** {}", line_count));
+        }
+        
+        if let Some(file_size) = value.get("file_size").and_then(|v| v.as_u64()) {
+            result.push_str(&format!(" | **Size:** {} bytes\n", file_size));
+        } else {
+            result.push_str("\n");
+        }
+        
+        // Check if we're reading a specific range
+        if let (Some(start), Some(end)) = (
+            value.get("start_line").and_then(|v| v.as_u64()),
+            value.get("end_line").and_then(|v| v.as_u64())
+        ) {
+            result.push_str(&format!("**Range:** Lines {}-{}\n", start, end));
+        }
+        
+        result.push_str("\n```\n");
+        if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            result.push_str(content);
+        }
+        result.push_str("\n```");
+        
+        result
+    }
+    
+    /// Format MCP write_file results
+    fn format_mcp_write_file_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("file_path").and_then(|v| v.as_str()) {
+            let action = if value.get("created").and_then(|v| v.as_bool()).unwrap_or(false) {
+                "✨ **Created:**"
+            } else {
+                "💾 **Updated:**"
+            };
+            result.push_str(&format!("{} `{}`\n", action, file_path));
+        }
+        
+        if let Some(bytes) = value.get("bytes_written").and_then(|v| v.as_u64()) {
+            result.push_str(&format!("**Bytes written:** {}\n", bytes));
         }
         
         result
