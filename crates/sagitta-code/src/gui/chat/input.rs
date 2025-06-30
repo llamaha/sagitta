@@ -163,7 +163,7 @@ pub fn chat_input_ui(
                 }
             }
             
-            // Show token usage if available
+            // Show token usage and character count if available
             if let Some(token_usage) = current_token_usage {
                 ui.add_space(16.0);
                 
@@ -210,7 +210,7 @@ pub fn chat_input_ui(
             
             // Removed help text for cleaner UI
             
-            // Add Message Sagitta Code and help button on the same line (right side)
+            // Add character count and help button on the same line (right side)
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Simple help button with tooltip
                 let help_label = RichText::new("?")
@@ -225,7 +225,15 @@ pub fn chat_input_ui(
                 }
                 
                 ui.add_space(8.0);
-                ui.small(RichText::new("Message Sagitta Code").color(hint_color));
+                
+                // Show character count on the right
+                let char_count = input_buffer.chars().count();
+                let char_color = if char_count > 2000 {
+                    error_color
+                } else {
+                    hint_color
+                };
+                ui.small(RichText::new(format!("{} chars", char_count)).color(char_color));
             });
         });
         
@@ -259,17 +267,6 @@ pub fn chat_input_ui(
                 ui.small(RichText::new("Sagitta Code is thinking...").color(hint_color));
                 ui.spinner();
             }
-            
-            // Show character count on the right
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let char_count = input_buffer.chars().count();
-                let color = if char_count > 2000 {
-                    error_color
-                } else {
-                    hint_color
-                };
-                ui.small(RichText::new(format!("{} chars", char_count)).color(color));
-            });
         });
         
         // Loop injection input (shown when requested)
