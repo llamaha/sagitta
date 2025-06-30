@@ -24,14 +24,21 @@ impl ToolResultFormatter {
     
     /// Format successful tool results based on tool type
     fn format_successful_tool_result(&self, tool_name: &str, value: &serde_json::Value) -> String {
+        // Handle both native tools and MCP tools
         match tool_name {
-            "web_search" => self.format_web_search_result(value),
-            "view_file" | "read_file" => self.format_file_result(value),
+            "web_search" | "WebSearch" => self.format_web_search_result(value),
+            "view_file" | "read_file" | "Read" => self.format_file_result(value),
             "code_search" => self.format_code_search_result(value),
             "list_repositories" => self.format_repository_list_result(value),
             "add_existing_repository" | "sync_repository" | "remove_repository" => self.format_repository_operation_result(value),
             "search_file_in_repository" => self.format_file_search_result(value),
-            "edit" | "semantic_edit" | "validate" => self.format_edit_result(value),
+            "edit" | "semantic_edit" | "validate" | "Edit" | "MultiEdit" => self.format_edit_result(value),
+            "Bash" => self.format_bash_result(value),
+            "TodoWrite" => self.format_todo_result(value),
+            name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
+            name if name.contains("__query") => self.format_mcp_search_result(value),
+            name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
+            name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
             _ => {
                 // Fallback: try to extract key information from any JSON
                 self.format_generic_result(value)
@@ -442,9 +449,201 @@ impl ToolResultFormatter {
     }
     
     /// Format generic tool results
+    /// Format MCP file view results
+    fn format_mcp_file_view_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(file_path) = value.get("relativePath").and_then(|v| v.as_str()) {
+            result.push_str(&format!("📄 **{}**\n\n", file_path));
+        }
+        
+        // Show the actual file content
+        if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            if content.is_empty() {
+                result.push_str("*Empty file*\n");
+            } else {
+                // Detect language from file extension for syntax highlighting
+                let lang = if let Some(path) = value.get("relativePath").and_then(|v| v.as_str()) {
+                    match path.split('.').last() {
+                        Some("rs") => "rust",
+                        Some("js") => "javascript",
+                        Some("ts") => "typescript",
+                        Some("py") => "python",
+                        Some("go") => "go",
+                        Some("java") => "java",
+                        Some("cpp") | Some("cc") | Some("cxx") => "cpp",
+                        Some("c") | Some("h") => "c",
+                        Some("toml") => "toml",
+                        Some("json") => "json",
+                        Some("yaml") | Some("yml") => "yaml",
+                        Some("md") => "markdown",
+                        _ => ""
+                    }
+                } else {
+                    ""
+                };
+                
+                if !lang.is_empty() {
+                    result.push_str(&format!("```{}\n{}\n```\n", lang, content));
+                } else {
+                    result.push_str(&format!("```\n{}\n```\n", content));
+                }
+            }
+        }
+        
+        result
+    }
+    
+    /// Format MCP search results
+    fn format_mcp_search_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(results) = value.get("results").and_then(|v| v.as_array()) {
+            result.push_str(&format!("🔍 **Found {} results**\n\n", results.len()));
+            
+            for (i, item) in results.iter().enumerate() {
+                if i > 0 {
+                    result.push_str("\n---\n\n");
+                }
+                
+                // Extract file path and other details
+                if let Some(file_path) = item.get("file_path").and_then(|v| v.as_str()) {
+                    result.push_str(&format!("**{}**", file_path));
+                    
+                    if let Some(line) = item.get("line_number").and_then(|v| v.as_i64()) {
+                        result.push_str(&format!(":{}", line));
+                    }
+                    
+                    result.push_str("\n");
+                }
+                
+                if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
+                    result.push_str(&format!("```\n{}\n```\n", content.trim()));
+                }
+            }
+        } else {
+            result.push_str("No results found.\n");
+        }
+        
+        result
+    }
+    
+    /// Format MCP repository map results
+    fn format_mcp_repo_map_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(map_content) = value.get("mapContent").and_then(|v| v.as_str()) {
+            result.push_str(map_content);
+        } else if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+            result.push_str(content);
+        } else {
+            result.push_str("No map content available.\n");
+        }
+        
+        result
+    }
+    
+    /// Format MCP repository list results
+    fn format_mcp_repo_list_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(repos) = value.get("repositories").and_then(|v| v.as_array()) {
+            result.push_str(&format!("📚 **{} repositories**\n\n", repos.len()));
+            
+            for repo in repos {
+                if let Some(name) = repo.get("name").and_then(|v| v.as_str()) {
+                    result.push_str(&format!("• **{}**", name));
+                    
+                    if let Some(branch) = repo.get("activeBranch").and_then(|v| v.as_str()) {
+                        result.push_str(&format!(" ({})", branch));
+                    }
+                    
+                    result.push_str("\n");
+                    
+                    if let Some(path) = repo.get("path").and_then(|v| v.as_str()) {
+                        result.push_str(&format!("  📁 {}\n", path));
+                    }
+                }
+            }
+        } else {
+            result.push_str("No repositories found.\n");
+        }
+        
+        result
+    }
+    
+    /// Format bash command results
+    fn format_bash_result(&self, value: &serde_json::Value) -> String {
+        let mut result = String::new();
+        
+        if let Some(stdout) = value.get("stdout").and_then(|v| v.as_str()) {
+            if !stdout.is_empty() {
+                result.push_str(&format!("```\n{}\n```\n", stdout));
+            }
+        }
+        
+        if let Some(stderr) = value.get("stderr").and_then(|v| v.as_str()) {
+            if !stderr.is_empty() {
+                result.push_str(&format!("\n**Error output:**\n```\n{}\n```\n", stderr));
+            }
+        }
+        
+        if let Some(exit_code) = value.get("exit_code").and_then(|v| v.as_i64()) {
+            if exit_code != 0 {
+                result.push_str(&format!("\n**Exit code:** {}\n", exit_code));
+            }
+        }
+        
+        if result.is_empty() {
+            result.push_str("*Command completed successfully*\n");
+        }
+        
+        result
+    }
+    
+    /// Format todo list updates
+    fn format_todo_result(&self, value: &serde_json::Value) -> String {
+        // Try to parse the result string if it's a simple message
+        if let Some(message) = value.as_str() {
+            if message.contains("modified successfully") {
+                return "✅ Todo list updated".to_string();
+            }
+            return message.to_string();
+        }
+        
+        // Otherwise show what changed
+        let mut result = String::new();
+        result.push_str("✅ **Todo List Updated**\n\n");
+        
+        // Try to extract todo items if available
+        if let Some(todos) = value.get("todos").and_then(|v| v.as_array()) {
+            for todo in todos {
+                if let Some(content) = todo.get("content").and_then(|v| v.as_str()) {
+                    let status = todo.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                    let priority = todo.get("priority").and_then(|v| v.as_str()).unwrap_or("medium");
+                    
+                    let status_icon = match status {
+                        "completed" => "✅",
+                        "in_progress" => "🔄",
+                        _ => "⬜"
+                    };
+                    
+                    let priority_icon = match priority {
+                        "high" => "🔴",
+                        "low" => "🟢",
+                        _ => "🟡"
+                    };
+                    
+                    result.push_str(&format!("{} {} {}\n", status_icon, priority_icon, content));
+                }
+            }
+        }
+        
+        result
+    }
+    
     fn format_generic_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
-        result.push_str("RESULT: Tool Result\n\n");
         
         // Try to extract meaningful information from the JSON
         if let Some(obj) = value.as_object() {

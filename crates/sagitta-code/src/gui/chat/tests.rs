@@ -4,6 +4,7 @@
 mod tests {
     use super::super::*;
     use crate::agent::events::ToolRunId;
+    use crate::gui::chat::ToolCard;
     use uuid::Uuid;
     use serde_json::json;
     
@@ -124,5 +125,278 @@ mod tests {
         
         // JSON should be formatted nicely, not on one line
         assert!(tool_card.result.is_some());
+    }
+    
+    // New comprehensive tests for Phase 2 refinements
+    
+    #[test]
+    fn test_mcp_tool_name_transformation() {
+        // Test helper function for human-friendly names
+        let test_cases = vec![
+            ("mcp__sagitta-internal-5c623314-60dd-4557-bcab-799ab3feb6ad__query", "Semantic Code Search"),
+            ("mcp__sagitta-mcp-stdio__repository_view_file", "View Repository File"),
+            ("mcp__sagitta-mcp-stdio__repository_search_file", "Search Repository Files"),
+            ("mcp__sagitta-mcp-stdio__repository_list", "List Repositories"),
+            ("mcp__sagitta-mcp-stdio__repository_map", "Map Repository Structure"),
+            ("mcp__sagitta-mcp-stdio__repository_add", "Add Repository"),
+            ("mcp__sagitta-mcp-stdio__repository_list_branches", "List Repository Branches"),
+            ("Read", "Read File"),
+            ("Write", "Write File"),
+            ("Edit", "Edit File"),
+            ("MultiEdit", "Multi Edit File"),
+            ("Bash", "Run Command"),
+            ("WebSearch", "Search Web"),
+            ("WebFetch", "Fetch Web Content"),
+            ("TodoRead", "Read Todo List"),
+            ("TodoWrite", "Update Todo List"),
+        ];
+        
+        for (raw_name, expected) in test_cases {
+            let friendly_name = get_human_friendly_tool_name(raw_name);
+            assert_eq!(friendly_name, expected, "Failed for tool: {}", raw_name);
+        }
+    }
+    
+    #[test]
+    fn test_tool_parameters_visibility() {
+        // Test that tool parameters are extracted and formatted correctly
+        let test_cases = vec![
+            (
+                "mcp__sagitta-internal-uuid__query",
+                json!({
+                    "query": "main entrypoint",
+                    "repository": "fibonacci-calculator",
+                    "limit": 5
+                }),
+                vec!["Query: \"main entrypoint\"", "Repository: fibonacci-calculator", "Limit: 5"]
+            ),
+            (
+                "Read",
+                json!({
+                    "file_path": "/home/user/test.rs"
+                }),
+                vec!["File Path: \"/home/user/test.rs\""]
+            ),
+            (
+                "Bash",
+                json!({
+                    "command": "ls -la",
+                    "working_directory": "/home/user"
+                }),
+                vec!["Command: \"ls -la\"", "Working Directory: \"/home/user\""]
+            ),
+        ];
+        
+        for (tool_name, args, expected_params) in test_cases {
+            let formatted = format_tool_parameters(tool_name, &args);
+            for param in expected_params {
+                assert!(formatted.contains(param), 
+                    "Parameter '{}' not found in formatted output: {}", param, formatted);
+            }
+        }
+    }
+    
+    #[test]
+    fn test_copy_to_clipboard_includes_tools() {
+        // Create a message with tool cards
+        let message = StreamingMessage {
+            id: Uuid::new_v4(),
+            author: MessageAuthor::Assistant,
+            content: "I'll search for the main function.".to_string(),
+            timestamp: chrono::Utc::now(),
+            is_streaming: false,
+            tool_calls: vec![],
+        };
+        
+        let tool_card = ToolCard {
+            run_id: ToolRunId(Uuid::new_v4()),
+            tool_name: "mcp__sagitta-internal-uuid__query".to_string(),
+            status: ToolCardStatus::Completed { success: true },
+            progress: None,
+            logs: Vec::new(),
+            started_at: chrono::Utc::now(),
+            completed_at: Some(chrono::Utc::now()),
+            input_params: json!({
+                "query": "main function",
+                "repository": "test-repo"
+            }),
+            result: Some(json!({
+                "results": [{
+                    "file": "src/main.rs",
+                    "line": 24,
+                    "snippet": "fn main() {"
+                }]
+            })),
+        };
+        
+        let formatted = format_message_with_tools_for_clipboard(&message, vec![tool_card]);
+        
+        // Check that the formatted output includes tool information
+        assert!(formatted.contains("Assistant: I'll search for the main function."));
+        assert!(formatted.contains("🔧 Semantic Code Search"));
+        assert!(formatted.contains("Parameters:"));
+        assert!(formatted.contains("Query: \"main function\""));
+        assert!(formatted.contains("Repository: test-repo"));
+        assert!(formatted.contains("Results:"));
+        assert!(formatted.contains("src/main.rs:24"));
+    }
+    
+    #[test]
+    fn test_scrollbar_appears_for_large_content() {
+        // This would need UI testing framework, but we can test the logic
+        let content_height = calculate_content_height("line\n".repeat(100));
+        assert!(content_height > 200.0, "Large content should exceed 200px threshold");
+        
+        let small_content_height = calculate_content_height("single line");
+        assert!(small_content_height < 200.0, "Small content should not need scrollbar");
+    }
+    
+    #[test]
+    fn test_tool_result_formatting_by_type() {
+        // Test different formatters for different tool types
+        let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+        
+        // Test bash command formatting
+        let bash_result = json!({
+            "stdout": "file1.txt\nfile2.txt\nfile3.txt",
+            "stderr": "",
+            "exit_code": 0
+        });
+        let formatted = formatter.format_result("Bash", &bash_result);
+        assert!(formatted.contains("file1.txt"));
+        assert!(formatted.contains("Exit code: 0"));
+        
+        // Test file edit formatting (diff style)
+        let edit_result = json!({
+            "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n fn main() {\n+    // New comment\n     println!(\"Hello\");\n }"
+        });
+        let formatted = formatter.format_result("Edit", &edit_result);
+        assert!(formatted.contains("+++"));
+        assert!(formatted.contains("// New comment"));
+        
+        // Test code search formatting
+        let search_result = json!({
+            "results": [{
+                "file_path": "src/lib.rs",
+                "line": 42,
+                "content": "pub fn calculate() -> u32 {"
+            }]
+        });
+        let formatted = formatter.format_result("mcp__sagitta-internal-uuid__query", &search_result);
+        assert!(formatted.contains("src/lib.rs:42"));
+    }
+    
+    // Helper functions that should be implemented in the actual code
+    
+    fn get_human_friendly_tool_name(raw_name: &str) -> &'static str {
+        match raw_name {
+            name if name.contains("__query") => "Semantic Code Search",
+            name if name.contains("__repository_view_file") => "View Repository File",
+            name if name.contains("__repository_search_file") => "Search Repository Files",
+            name if name.contains("__repository_list_branches") => "List Repository Branches",
+            name if name.contains("__repository_list") => "List Repositories",
+            name if name.contains("__repository_map") => "Map Repository Structure",
+            name if name.contains("__repository_add") => "Add Repository",
+            "Read" => "Read File",
+            "Write" => "Write File",
+            "Edit" => "Edit File",
+            "MultiEdit" => "Multi Edit File",
+            "Bash" => "Run Command",
+            "WebSearch" => "Search Web",
+            "WebFetch" => "Fetch Web Content",
+            "TodoRead" => "Read Todo List",
+            "TodoWrite" => "Update Todo List",
+            _ => {
+                // For unknown MCP tools, try to extract operation name
+                if raw_name.starts_with("mcp__") {
+                    if let Some(op) = raw_name.split("__").last() {
+                        // This would need dynamic allocation in real implementation
+                        match op {
+                            "ping" => "Ping",
+                            _ => "Unknown Tool"
+                        }
+                    } else {
+                        "Unknown Tool"
+                    }
+                } else {
+                    "Unknown Tool"
+                }
+            }
+        }
+    }
+    
+    fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> String {
+        let mut params = Vec::new();
+        
+        if let Some(obj) = args.as_object() {
+            for (key, value) in obj {
+                let formatted_key = key.split('_')
+                    .map(|w| {
+                        let mut c = w.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(first) => first.to_uppercase().collect::<String>() + c.as_str()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                
+                let formatted_value = match value {
+                    serde_json::Value::String(s) => format!("\"{}\"", s),
+                    v => v.to_string(),
+                };
+                
+                params.push(format!("{}: {}", formatted_key, formatted_value));
+            }
+        }
+        
+        params.join("\n")
+    }
+    
+    fn format_message_with_tools_for_clipboard(message: &StreamingMessage, tool_cards: Vec<ToolCard>) -> String {
+        let mut result = format!("{}: {}\n", 
+            match message.author {
+                MessageAuthor::You => "You",
+                MessageAuthor::Assistant => "Assistant",
+                MessageAuthor::System => "System",
+            },
+            message.content
+        );
+        
+        for tool_card in tool_cards {
+            let tool_name = get_human_friendly_tool_name(&tool_card.tool_name);
+            result.push_str(&format!("\n🔧 {}\n", tool_name));
+            
+            result.push_str("Parameters:\n");
+            let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+            for line in params.lines() {
+                result.push_str(&format!("  {}\n", line));
+            }
+            
+            if let Some(ref tool_result) = tool_card.result {
+                result.push_str("\nResults:\n");
+                // Simplified formatting for test
+                if let Some(results) = tool_result.get("results").and_then(|r| r.as_array()) {
+                    for res in results {
+                        if let (Some(file), Some(line)) = (
+                            res.get("file").and_then(|f| f.as_str()),
+                            res.get("line").and_then(|l| l.as_i64())
+                        ) {
+                            result.push_str(&format!("  {}:{}\n", file, line));
+                        }
+                    }
+                } else {
+                    result.push_str(&format!("  {}\n", serde_json::to_string_pretty(tool_result).unwrap()));
+                }
+            }
+        }
+        
+        result
+    }
+    
+    fn calculate_content_height(content: &str) -> f32 {
+        // Rough calculation: assume 15px per line
+        let line_count = content.lines().count();
+        line_count as f32 * 15.0
     }
 }

@@ -49,6 +49,123 @@ use egui_notify::Toasts;
 #[cfg(feature = "gui")]
 use egui_modal::Modal;
 
+/// Convert raw tool names (including MCP format) to human-friendly display names
+fn get_human_friendly_tool_name(raw_name: &str) -> String {
+    match raw_name {
+        // MCP tool patterns
+        name if name.contains("__query") => "Semantic Code Search".to_string(),
+        name if name.contains("__repository_view_file") => "View Repository File".to_string(),
+        name if name.contains("__repository_search_file") => "Search Repository Files".to_string(),
+        name if name.contains("__repository_list_branches") => "List Repository Branches".to_string(),
+        name if name.contains("__repository_list") => "List Repositories".to_string(),
+        name if name.contains("__repository_map") => "Map Repository Structure".to_string(),
+        name if name.contains("__repository_add") => "Add Repository".to_string(),
+        name if name.contains("__repository_remove") => "Remove Repository".to_string(),
+        name if name.contains("__repository_sync") => "Sync Repository".to_string(),
+        name if name.contains("__repository_switch_branch") => "Switch Repository Branch".to_string(),
+        name if name.contains("__ping") => "Ping".to_string(),
+        
+        // Native Claude tools
+        "Read" => "Read File".to_string(),
+        "Write" => "Write File".to_string(),
+        "Edit" => "Edit File".to_string(),
+        "MultiEdit" => "Multi Edit File".to_string(),
+        "Bash" => "Run Command".to_string(),
+        "WebSearch" => "Search Web".to_string(),
+        "WebFetch" => "Fetch Web Content".to_string(),
+        "TodoRead" => "Read Todo List".to_string(),
+        "TodoWrite" => "Update Todo List".to_string(),
+        "NotebookRead" => "Read Notebook".to_string(),
+        "NotebookEdit" => "Edit Notebook".to_string(),
+        "Task" => "Task Agent".to_string(),
+        "Glob" => "Find Files".to_string(),
+        "Grep" => "Search In Files".to_string(),
+        "LS" => "List Directory".to_string(),
+        "exit_plan_mode" => "Exit Plan Mode".to_string(),
+        
+        _ => {
+            // For unknown MCP tools, try to extract and format the operation name
+            if raw_name.starts_with("mcp__") {
+                if let Some(op) = raw_name.split("__").last() {
+                    // Convert snake_case to Title Case
+                    op.split('_')
+                        .map(|word| {
+                            let mut chars = word.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else {
+                    raw_name.to_string()
+                }
+            } else {
+                raw_name.to_string()
+            }
+        }
+    }
+}
+
+/// Format tool parameters for display in the UI
+fn format_tool_parameters(tool_name: &str, args: &serde_json::Value) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    
+    if let Some(obj) = args.as_object() {
+        // Special handling for common tools
+        match tool_name {
+            name if name.contains("__query") => {
+                if let Some(query) = obj.get("query").and_then(|v| v.as_str()) {
+                    params.push(("Query".to_string(), query.to_string()));
+                }
+                if let Some(repo) = obj.get("repository").and_then(|v| v.as_str()) {
+                    params.push(("Repository".to_string(), repo.to_string()));
+                }
+                if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64()) {
+                    params.push(("Limit".to_string(), limit.to_string()));
+                }
+            },
+            "Read" | "Write" | "Edit" => {
+                if let Some(path) = obj.get("file_path").and_then(|v| v.as_str()) {
+                    params.push(("File".to_string(), path.to_string()));
+                }
+            },
+            "Bash" => {
+                if let Some(cmd) = obj.get("command").and_then(|v| v.as_str()) {
+                    params.push(("Command".to_string(), cmd.to_string()));
+                }
+            },
+            _ => {
+                // Generic parameter formatting
+                for (key, value) in obj {
+                    let formatted_key = key.split('_')
+                        .map(|w| {
+                            let mut c = w.chars();
+                            match c.next() {
+                                None => String::new(),
+                                Some(first) => first.to_uppercase().collect::<String>() + c.as_str()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    
+                    let formatted_value = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        _ => value.to_string(),
+                    };
+                    
+                    params.push((formatted_key, formatted_value));
+                }
+            }
+        }
+    }
+    
+    params
+}
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
@@ -374,14 +491,8 @@ pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: App
                         .rounding(CornerRadius::same(6));
                     
                     if ui.add(copy_all_button).on_hover_text("Copy entire conversation for sharing").clicked() {
-                        // Extract messages from ChatItems for conversation copying
-                        let messages: Vec<StreamingMessage> = items.iter()
-                            .filter_map(|item| match item {
-                                ChatItem::Message(msg) => Some(msg.clone()),
-                                ChatItem::ToolCard(_) => None, // Tool cards aren't included in conversation copy
-                            })
-                            .collect();
-                        let conversation_text = format_conversation_for_copying(&messages);
+                        // Extract messages and tool cards from ChatItems for conversation copying
+                        let conversation_text = format_conversation_with_tools_for_copying(items);
                         ui.output_mut(|o| o.copied_text = conversation_text.clone());
                         copy_state.start_copy_feedback(conversation_text);
                         ui.ctx().request_repaint(); // Request repaint for animation
@@ -993,10 +1104,41 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                 
                 // Tool name and description
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&format!("🔧 {}", tool_card.tool_name))
+                    let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                    ui.label(RichText::new(&format!("🔧 {}", friendly_name))
                         .color(app_theme.text_color())
                         .strong()
                         .size(14.0));
+                    
+                    // Show parameters
+                    let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+                    if !params.is_empty() {
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for (i, (key, value)) in params.iter().enumerate() {
+                                if i > 0 {
+                                    ui.label(RichText::new(" • ")
+                                        .color(app_theme.hint_text_color())
+                                        .size(11.0));
+                                }
+                                ui.label(RichText::new(&format!("{}: ", key))
+                                    .color(app_theme.hint_text_color())
+                                    .size(11.0));
+                                
+                                // Truncate long values more intelligently
+                                let display_value = if value.len() > 100 {
+                                    format!("{}...", &value[..97])
+                                } else {
+                                    value.clone()
+                                };
+                                
+                                ui.label(RichText::new(&display_value)
+                                    .color(app_theme.text_color())
+                                    .size(11.0)
+                                    .italics());
+                            }
+                        });
+                    }
                     
                     // Show progress if running
                     if tool_card.status == ToolCardStatus::Running {
@@ -1035,7 +1177,8 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                                 // View details button
                                 if ui.small_button("View details").clicked() {
                                     let result_json = tool_card.result.as_ref().unwrap();
-                                    let display_title = format!("{} - Result", tool_card.tool_name);
+                                    let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                                    let display_title = format!("{} - Result", friendly_name);
                                     clicked_tool_result = Some((display_title, serde_json::to_string_pretty(result_json).unwrap_or_else(|_| result_json.to_string())));
                                 }
                                 
@@ -1091,6 +1234,8 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     // Display the formatted result in a scrollable area with limited height
                     egui::ScrollArea::vertical()
                         .max_height(200.0)
+                        .id_source(format!("tool_result_{}", tool_card.run_id))
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.set_max_width(max_width - 24.0);
                             
@@ -2549,6 +2694,98 @@ index 1234567..abcdefg 100644
 }
 
 /// Format entire conversation for copying/sharing
+/// Format conversation including tool cards for clipboard copying
+fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
+    let mut conversation = Vec::new();
+    
+    for item in items {
+        match item {
+            ChatItem::Message(message) => {
+                let author_name = match message.author {
+                    MessageAuthor::User => "You",
+                    MessageAuthor::Agent => "Sagitta Code",
+                    MessageAuthor::System => "System",
+                    MessageAuthor::Tool => "Tool",
+                };
+                
+                let timestamp = message.format_time();
+                
+                // Add message header
+                conversation.push(format!("{} {}", author_name, timestamp));
+                conversation.push("".to_string()); // Empty line
+                
+                // Add thinking content if present
+                if let Some(thinking) = message.get_thinking_content() {
+                    if !thinking.is_empty() {
+                        conversation.push(format!("💭 {}", thinking));
+                        conversation.push("".to_string());
+                    }
+                }
+                
+                // Add main content
+                if !message.content.is_empty() {
+                    conversation.push(message.content.clone());
+                }
+                
+                conversation.push("".to_string()); // Empty line between items
+            },
+            ChatItem::ToolCard(tool_card) => {
+                // Format tool card for copying
+                let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+                let status_icon = match &tool_card.status {
+                    ToolCardStatus::Completed { success: true } => "✅",
+                    ToolCardStatus::Failed { .. } => "❌",
+                    ToolCardStatus::Running => "🔄",
+                    ToolCardStatus::Cancelled => "⏹️",
+                    _ => "🔧",
+                };
+                
+                conversation.push(format!("{} {} {}", status_icon, friendly_name, ""));
+                
+                // Add parameters
+                let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+                if !params.is_empty() {
+                    conversation.push("Parameters:".to_string());
+                    for (key, value) in params {
+                        conversation.push(format!("  {}: {}", key, value));
+                    }
+                }
+                
+                // Add result if available
+                if let Some(result) = &tool_card.result {
+                    conversation.push("".to_string());
+                    conversation.push("Result:".to_string());
+                    
+                    // Format the result using ToolResultFormatter
+                    let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
+                    let tool_result = match &tool_card.status {
+                        ToolCardStatus::Completed { success: true } => {
+                            crate::tools::types::ToolResult::Success(result.clone())
+                        },
+                        _ => {
+                            crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                        }
+                    };
+                    
+                    let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
+                    for line in formatted_result.lines() {
+                        conversation.push(format!("  {}", line));
+                    }
+                }
+                
+                conversation.push("".to_string()); // Empty line between items
+            }
+        }
+    }
+    
+    // Remove trailing empty lines
+    while conversation.last() == Some(&String::new()) {
+        conversation.pop();
+    }
+    
+    conversation.join("\n")
+}
+
 fn format_conversation_for_copying(messages: &[StreamingMessage]) -> String {
     let mut conversation = Vec::new();
     
