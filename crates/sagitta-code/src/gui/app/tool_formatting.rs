@@ -672,6 +672,7 @@ impl ToolResultFormatter {
     
     fn format_generic_result(&self, value: &serde_json::Value) -> String {
         let mut result = String::new();
+        result.push_str("RESULT: Tool Result\n\n");
         
         // Try to extract meaningful information from the JSON
         if let Some(obj) = value.as_object() {

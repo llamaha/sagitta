@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_scrollbar_appears_for_large_content() {
         // This would need UI testing framework, but we can test the logic
-        let content_height = calculate_content_height("line\n".repeat(100));
+        let content_height = calculate_content_height(&"line\n".repeat(100));
         assert!(content_height > 200.0, "Large content should exceed 200px threshold");
         
         let small_content_height = calculate_content_height("single line");
@@ -262,7 +262,7 @@ mod tests {
             "stderr": "",
             "exit_code": 0
         });
-        let formatted = formatter.format_result("Bash", &bash_result);
+        let formatted = formatter.format_successful_tool_result("Bash", &bash_result);
         assert!(formatted.contains("file1.txt"));
         assert!(formatted.contains("Exit code: 0"));
         
@@ -270,7 +270,7 @@ mod tests {
         let edit_result = json!({
             "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n fn main() {\n+    // New comment\n     println!(\"Hello\");\n }"
         });
-        let formatted = formatter.format_result("Edit", &edit_result);
+        let formatted = formatter.format_successful_tool_result("Edit", &edit_result);
         assert!(formatted.contains("+++"));
         assert!(formatted.contains("// New comment"));
         
@@ -282,7 +282,7 @@ mod tests {
                 "content": "pub fn calculate() -> u32 {"
             }]
         });
-        let formatted = formatter.format_result("mcp__sagitta-internal-uuid__query", &search_result);
+        let formatted = formatter.format_successful_tool_result("mcp__sagitta-internal-uuid__query", &search_result);
         assert!(formatted.contains("src/lib.rs:42"));
     }
     
@@ -356,9 +356,10 @@ mod tests {
     fn format_message_with_tools_for_clipboard(message: &StreamingMessage, tool_cards: Vec<ToolCard>) -> String {
         let mut result = format!("{}: {}\n", 
             match message.author {
-                MessageAuthor::You => "You",
-                MessageAuthor::Assistant => "Assistant",
+                MessageAuthor::User => "User",
+                MessageAuthor::Agent => "Agent",
                 MessageAuthor::System => "System",
+                MessageAuthor::Tool => "Tool",
             },
             message.content
         );

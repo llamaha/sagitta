@@ -2433,6 +2433,7 @@ index 1234567..abcdefg 100644
     fn test_tool_call_structure() {
         // Test that ToolCall structure works correctly
         let tool_call = ToolCall {
+            id: "test_tool_call_1".to_string(),
             name: "shell_execution".to_string(),
             arguments: r#"{"command": "cargo new fibonacci_calculator"}"#.to_string(),
             result: Some(r#"{
@@ -2555,6 +2556,7 @@ index 1234567..abcdefg 100644
         
         // Add tool call inline within the agent message
         agent_msg_1.tool_calls.push(ToolCall {
+            id: "test_tool_call_2".to_string(),
             name: "add_repository".to_string(),
             arguments: r#"{"name": "test_repo"}"#.to_string(),
             result: Some(r#"{"status": "added", "message": "Repository added successfully"}"#.to_string()),
@@ -2605,6 +2607,7 @@ index 1234567..abcdefg 100644
         
         // Add tool call inline within the agent message
         agent_msg.tool_calls.push(ToolCall {
+            id: "test_tool_call_3".to_string(),
             name: "edit_file".to_string(),
             arguments: r#"{"target_file": "test.rs", "content": "test content"}"#.to_string(),
             result: Some(r#"{"status": "success", "file_path": "test.rs", "lines_added": 25}"#.to_string()),
@@ -2672,6 +2675,7 @@ index 1234567..abcdefg 100644
         
         // Add a tool call
         agent_msg.tool_calls.push(ToolCall {
+            id: "test_tool_call_4".to_string(),
             name: "analyze_project".to_string(),
             arguments: r#"{"path": "./src"}"#.to_string(),
             result: Some(r#"{"files": ["main.rs", "lib.rs"], "language": "rust"}"#.to_string()),

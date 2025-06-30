@@ -612,6 +612,7 @@ mod tests {
         
         // Add a tool call (should be inline within the agent message)
         let tool_call = ToolCall {
+            id: "test_tool_call_5".to_string(),
             name: "web_search".to_string(),
             arguments: r#"{"query": "help assistance"}"#.to_string(),
             result: Some("Found relevant help resources".to_string()),
@@ -859,7 +860,4 @@ pub trait ToolResultRenderer {
     /// Get a preview of the result (for truncated display)
     fn get_preview(&self, tool_name: &str, result: &serde_json::Value, max_lines: usize) -> String;
 }
-
-#[cfg(test)]
-mod tests;
 

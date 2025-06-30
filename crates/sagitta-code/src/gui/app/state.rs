@@ -343,10 +343,8 @@ mod tests {
         assert!(state.loop_inject_buffer.is_empty());
         assert!(!state.show_loop_inject_input);
         
-        // Test terminal state
-        assert!(state.terminal_event_sender.is_some());
-        assert!(state.terminal_event_receiver.is_some());
-        assert!(!state.show_terminal);
+        // Terminal state fields have been removed
+        // These tests are no longer applicable
 
 
     }
@@ -711,15 +709,16 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "TerminalConfig and BufferConfig have been removed"]
     fn test_terminal_configuration_prevents_flickering() {
         // Test that terminal is configured with increased line limits to prevent flickering
         let state = AppState::new();
         
-        // Verify terminal widget was created (we can't directly access its config,
-        // but we can verify the state was initialized)
-        assert!(state.terminal_event_sender.is_some());
-        assert!(state.terminal_event_receiver.is_some());
+        // Terminal widget fields have been removed
+        // These assertions are no longer applicable
         
+        // The test below is disabled because TerminalConfig and BufferConfig have been removed
+        /*
         // Test the configuration we would use
         let test_config = TerminalConfig::default()
             .with_max_lines(50000).unwrap()
@@ -739,5 +738,6 @@ mod tests {
         
         // Ensure lines_to_keep is significantly higher than the old 5000 line flickering point
         assert!(test_config.buffer.lines_to_keep > 5000 * 5); // At least 5x the old limit
+        */
     }
 } 

@@ -1321,6 +1321,7 @@ mod tests {
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
+            AppEvent::RefreshRepositoryList => assert!(true),
         }
         
         // Test the other variant too
@@ -1333,6 +1334,7 @@ mod tests {
             AppEvent::BranchSuggestionsReady { .. } => assert!(true),
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
+            AppEvent::RefreshRepositoryList => assert!(true),
         }
     }
 
@@ -1402,7 +1404,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test starting a new response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false);
         
         // Should create a new streaming message
         assert!(app.state.current_response_id.is_some());
@@ -1422,11 +1424,11 @@ mod tests {
         let mut app = create_test_app();
         
         // Start a response
-        handle_llm_chunk(&mut app, "Hello".to_string(), false, None);
+        handle_llm_chunk(&mut app, "Hello".to_string(), false);
         let response_id = app.state.current_response_id.clone();
         
         // Continue the response
-        handle_llm_chunk(&mut app, " world".to_string(), false, None);
+        handle_llm_chunk(&mut app, " world".to_string(), false);
         
         // Should still be the same response
         assert_eq!(app.state.current_response_id, response_id);
@@ -1444,7 +1446,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Start and complete a response
-        handle_llm_chunk(&mut app, "Complete response".to_string(), true, None);
+        handle_llm_chunk(&mut app, "Complete response".to_string(), true);
         
         // Should complete the response
         assert!(app.state.current_response_id.is_none());
@@ -1462,7 +1464,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach the tool call to
-        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true, None);
+        handle_llm_chunk(&mut app, "I'll help you search".to_string(), true);
         
         let args = serde_json::json!({"query": "rust programming"});
         let tool_call = create_test_tool_call("web_search", args);
@@ -1606,13 +1608,13 @@ mod tests {
         // Simulate a complete workflow: user input -> llm chunks -> tool call -> result
         
         // 1. Start with LLM chunk
-        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false, None);
+        handle_llm_chunk(&mut app, "I'll search for information".to_string(), false);
         assert!(app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages.len(), 1);
         
         // 2. Complete LLM chunk
-        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true, None);
+        handle_llm_chunk(&mut app, " about Rust programming.".to_string(), true);
         assert!(!app.state.is_streaming_response);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages[0].content, "I'll search for information about Rust programming.");
@@ -1644,7 +1646,7 @@ mod tests {
         let mut app = create_test_app();
         
         // Test empty content
-        handle_llm_chunk(&mut app, "".to_string(), false, None);
+        handle_llm_chunk(&mut app, "".to_string(), false);
         
         // Should still create a message entry but with empty content
         let messages = app.chat_manager.get_all_messages();
@@ -1657,7 +1659,7 @@ mod tests {
         let mut app = create_test_app();
         
         // First create an agent message to attach tool calls to
-        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true, None);
+        handle_llm_chunk(&mut app, "I'll help with multiple searches".to_string(), true);
         
         // Add multiple tool calls
         let args1 = serde_json::json!({"query": "rust"});
@@ -1820,7 +1822,7 @@ mod tests {
         app.state.current_conversation_id = Some(conversation_id);
         
         // Simulate final LLM chunk which should trigger analysis
-        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true, None);
+        handle_llm_chunk(&mut app, "The solution is working successfully!".to_string(), true);
         
         // Verify that the conversation ID is set for analysis
         assert_eq!(app.state.current_conversation_id, Some(conversation_id));
