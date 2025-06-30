@@ -931,75 +931,46 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
     ui.vertical(|ui| {
         ui.set_max_width(tool_card_width);
         
-        // Create a frame for the tool card
-        Frame::none()
-            .fill(app_theme.code_background())
-            .rounding(Rounding::same(4))
-            .stroke(Stroke::new(1.0, app_theme.border_color()))
-            .inner_margin(8.0)
+        // Build the header text
+        let friendly_name = get_human_friendly_tool_name(&tool_call.name);
+        let status_icon = match tool_call.status {
+            MessageStatus::Complete => "✅",
+            MessageStatus::Error(_) => "❌",
+            MessageStatus::Streaming => "🔄",
+            MessageStatus::Sending => "⏳",
+            _ => "🔧",
+        };
+        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        
+        // Create parameter tooltip text
+        let mut tooltip_text = String::new();
+        if !tool_call.arguments.is_empty() {
+            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                let params = format_tool_parameters(&tool_call.name, &args_value);
+                if !params.is_empty() {
+                    tooltip_text.push_str("Parameters:\n");
+                    for (key, value) in params.iter() {
+                        tooltip_text.push_str(&format!("  {}: {}\n", key, value));
+                    }
+                }
+            }
+        }
+        
+        // Add status to tooltip
+        match &tool_call.status {
+            MessageStatus::Complete => tooltip_text.push_str("\nStatus: Completed"),
+            MessageStatus::Streaming => tooltip_text.push_str("\nStatus: Running..."),
+            MessageStatus::Error(err) => tooltip_text.push_str(&format!("\nStatus: Failed - {}", err)),
+            MessageStatus::Sending => tooltip_text.push_str("\nStatus: Starting..."),
+            _ => {}
+        }
+        
+        // Use CollapsingHeader for the tool card
+        let id = egui::Id::new(&tool_call.id);
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+            .id_salt(id)
+            .default_open(false) // Default to collapsed
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    // Tool status icon
-                    let (status_icon, status_color) = match tool_call.status {
-                        MessageStatus::Complete => ("✅", app_theme.success_color()),
-                        MessageStatus::Error(_) => ("❌", app_theme.error_color()),
-                        MessageStatus::Streaming => ("🔄", app_theme.accent_color()),
-                        MessageStatus::Sending => ("⏳", app_theme.hint_text_color()),
-                        _ => ("🔧", app_theme.hint_text_color()),
-                    };
-                    
-                    ui.label(RichText::new(status_icon).color(status_color).size(14.0));
-                    ui.add_space(4.0);
-                    
-                    // Tool name and parameters
-                    let friendly_name = get_human_friendly_tool_name(&tool_call.name);
-                    
-                    // Build display text with tool name and key parameters
-                    let mut display_parts = vec![format!("🔧 {}", friendly_name)];
-                    
-                    // Parse and format parameters
-                    if !tool_call.arguments.is_empty() {
-                        if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
-                            let params = format_tool_parameters(&tool_call.name, &args_value);
-                            if !params.is_empty() {
-                                let param_text: Vec<String> = params.iter()
-                                    .take(2) // Show only first 2 params
-                                    .map(|(key, value)| {
-                                        let truncated_value = if value.len() > 20 {
-                                            format!("{}...", &value[..17])
-                                        } else {
-                                            value.clone()
-                                        };
-                                        format!("{}: {}", key, truncated_value)
-                                    })
-                                    .collect();
-                                
-                                if !param_text.is_empty() {
-                                    display_parts.push(format!("({})", param_text.join(", ")));
-                                }
-                            }
-                        }
-                    }
-                    
-                    ui.label(RichText::new(display_parts.join(" "))
-                        .color(app_theme.text_color())
-                        .strong()
-                        .size(12.0));
-                    
-                    // Status text
-                    let status_text = match &tool_call.status {
-                        MessageStatus::Complete => "completed".to_string(),
-                        MessageStatus::Streaming => "running...".to_string(),
-                        MessageStatus::Error(err) => format!("failed: {}", err),
-                        MessageStatus::Sending => "starting...".to_string(),
-                        _ => String::new()
-                    };
-                    
-                    if !status_text.is_empty() {
-                        ui.add_space(8.0);
-                        ui.label(RichText::new(status_text).color(app_theme.hint_text_color()).size(11.0));
-                    }
-                    
                     // Add progress bar for running tools
                     if tool_call.status == MessageStatus::Streaming {
                         // Try to find running tool info to get actual progress
@@ -1008,16 +979,16 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             .and_then(|info| info.progress)
                             .unwrap_or(0.0);
                         
-                        ui.add_space(8.0);
                         ui.add(egui::ProgressBar::new(progress)
-                            .desired_width(100.0)
+                            .desired_width(tool_card_width - 20.0)
                             .desired_height(4.0)
                             .fill(app_theme.accent_color())
                             .animate(progress == 0.0)); // Only animate if we don't have actual progress
+                        ui.add_space(4.0);
                     }
                     
-                    // Right-aligned action buttons
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Action buttons
+                    ui.horizontal(|ui| {
                         if tool_call.result.is_some() {
                             // View details button for completed tools
                             log::trace!("Rendering view details button for tool: {}", tool_call.name);
@@ -1067,9 +1038,8 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                             }
                         }
                     });
-                });
-                
-                // Add inline result display for completed tools
+                    
+                    // Add inline result display for completed tools
                 if tool_call.status == MessageStatus::Complete && tool_call.result.is_some() {
                     ui.add_space(8.0);
                     ui.separator();
@@ -1115,6 +1085,11 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                     }
                 }
             });
+        
+        // Add tooltip to the header if we have parameter info
+        if !tooltip_text.is_empty() {
+            collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
+        }
     });
     
     clicked_tool_result
@@ -1145,87 +1120,60 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
     ui.vertical(|ui| {
         ui.set_max_width(tool_card_width);
         
-        // Create a frame for the tool card
-        Frame::none()
-            .fill(app_theme.code_background())
-            .rounding(Rounding::same(6))
-            .stroke(Stroke::new(1.0, app_theme.border_color()))
-            .inner_margin(12.0)
+        // Build the header text
+        let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
+        let status_icon = match tool_card.status {
+            ToolCardStatus::Completed { success: true } => "✅",
+            ToolCardStatus::Completed { success: false } => "❌",
+            ToolCardStatus::Failed { .. } => "❌",
+            ToolCardStatus::Running => "🔄",
+            ToolCardStatus::Cancelled => "⏹️",
+        };
+        let header_text = format!("{} 🔧 {}", status_icon, friendly_name);
+        
+        // Create parameter tooltip text
+        let mut tooltip_text = String::new();
+        let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
+        if !params.is_empty() {
+            tooltip_text.push_str("Parameters:\n");
+            for (key, value) in params.iter() {
+                tooltip_text.push_str(&format!("  {}: {}\n", key, value));
+            }
+        }
+        
+        // Add timing info to tooltip
+        if let Some(completed_at) = tool_card.completed_at {
+            let duration = completed_at.signed_duration_since(tool_card.started_at);
+            tooltip_text.push_str(&format!("\nDuration: {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
+        }
+        
+        // Use CollapsingHeader for the tool card (but default to open for standalone cards)
+        let id = egui::Id::new(&tool_card.run_id);
+        let mut collapsing_response = egui::CollapsingHeader::new(header_text)
+            .id_salt(id)
+            .default_open(true) // Default to open for standalone tool cards
             .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Tool status icon
-                let (status_icon, status_color) = match tool_card.status {
-                    ToolCardStatus::Completed { success: true } => ("✅", app_theme.success_color()),
-                    ToolCardStatus::Completed { success: false } => ("❌", app_theme.error_color()),
-                    ToolCardStatus::Failed { .. } => ("❌", app_theme.error_color()),
-                    ToolCardStatus::Running => ("🔄", app_theme.accent_color()),
-                    ToolCardStatus::Cancelled => ("⏹️", app_theme.hint_text_color()),
-                };
-                
-                ui.label(RichText::new(status_icon).color(status_color).size(16.0));
-                ui.add_space(8.0);
-                
-                // Tool name, parameters, and timing - all on one line
-                let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
-                
-                // Build compact display text
-                let mut display_parts = vec![format!("🔧 {}", friendly_name)];
-                
-                // Add key parameters inline
-                let params = format_tool_parameters(&tool_card.tool_name, &tool_card.input_params);
-                if !params.is_empty() {
-                    let param_text: Vec<String> = params.iter()
-                        .take(2) // Show only first 2 params to save space
-                        .map(|(key, value)| {
-                            let truncated_value = if value.len() > 30 {
-                                format!("{}...", &value[..27])
-                            } else {
-                                value.clone()
-                            };
-                            format!("{}: {}", key, truncated_value)
-                        })
-                        .collect();
+                    // Show progress bar if running
+                    if tool_card.status == ToolCardStatus::Running {
+                        if let Some(progress) = tool_card.progress {
+                            ui.add(egui::ProgressBar::new(progress)
+                                .desired_width(tool_card_width - 20.0)
+                                .desired_height(4.0)
+                                .fill(app_theme.accent_color()));
+                        } else {
+                            ui.add(egui::ProgressBar::new(0.0)
+                                .desired_width(tool_card_width - 20.0)
+                                .desired_height(4.0)
+                                .fill(app_theme.accent_color())
+                                .animate(true));
+                        }
+                        ui.add_space(4.0);
+                    }
                     
-                    if !param_text.is_empty() {
-                        display_parts.push(format!("({})", param_text.join(", ")));
-                    }
-                }
-                
-                // Add timing info
-                if let Some(completed_at) = tool_card.completed_at {
-                    let duration = completed_at.signed_duration_since(tool_card.started_at);
-                    display_parts.push(format!("- {:.1}s", duration.num_milliseconds() as f64 / 1000.0));
-                } else if tool_card.status == ToolCardStatus::Running {
-                    display_parts.push("- Running...".to_string());
-                }
-                
-                // Display all on one line
-                ui.label(RichText::new(display_parts.join(" "))
-                    .color(app_theme.text_color())
-                    .strong()
-                    .size(13.0));
-                
-                // Show progress bar if running (in the remaining space)
-                if tool_card.status == ToolCardStatus::Running {
-                    ui.add_space(8.0);
-                    if let Some(progress) = tool_card.progress {
-                        ui.add(egui::ProgressBar::new(progress)
-                            .desired_width(100.0)
-                            .desired_height(4.0)
-                            .fill(app_theme.accent_color()));
-                    } else {
-                        ui.add(egui::ProgressBar::new(0.0)
-                            .desired_width(100.0)
-                            .desired_height(4.0)
-                            .fill(app_theme.accent_color())
-                            .animate(true));
-                    }
-                }
-                
-                // Right-aligned action buttons
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    match &tool_card.status {
-                        ToolCardStatus::Completed { success: true } => {
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        match &tool_card.status {
+                            ToolCardStatus::Completed { success: true } => {
                             if tool_card.result.is_some() {
                                 // View details button
                                 if ui.small_button("View details").clicked() {
@@ -1264,7 +1212,6 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         _ => {}
                     }
                 });
-            });
             
             // Add inline result display for completed tools
             if let ToolCardStatus::Completed { success: true } = &tool_card.status {
@@ -1312,6 +1259,11 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                 }
             }
         });
+        
+        // Add tooltip to the header if we have parameter info
+        if !tooltip_text.is_empty() {
+            collapsing_response.header_response = collapsing_response.header_response.on_hover_text(tooltip_text);
+        }
     });
     
     clicked_tool_result
