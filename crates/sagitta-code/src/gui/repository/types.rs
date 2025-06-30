@@ -397,7 +397,6 @@ pub struct RepoPanelState {
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
-    pub enabled_as_dependencies: std::collections::HashSet<String>, // Repositories enabled as LLM context dependencies
 }
 
 impl RepoPanelState {

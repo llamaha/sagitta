@@ -320,13 +320,6 @@ impl RepoPanel {
         }
     }
     
-    /// Get the list of enabled repository dependencies
-    pub fn get_enabled_dependencies(&self) -> Vec<String> {
-        match self.state.try_lock() {
-            Ok(state) => state.enabled_as_dependencies.iter().cloned().collect(),
-            Err(_) => Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -397,27 +390,4 @@ mod tests {
         // For now, just verify no panic occurs
     }
 
-    #[tokio::test]
-    async fn test_repo_panel_get_enabled_dependencies() {
-        let repo_manager = create_test_repo_manager();
-        let config = create_test_config();
-        let panel = RepoPanel::new(repo_manager, config, None);
-        
-        // Initially should have no enabled dependencies
-        let deps = panel.get_enabled_dependencies();
-        assert!(deps.is_empty());
-        
-        // Add some enabled dependencies to the state
-        {
-            let mut state = panel.state.lock().await;
-            state.enabled_as_dependencies.insert("test-repo-1".to_string());
-            state.enabled_as_dependencies.insert("test-repo-2".to_string());
-        }
-        
-        // Should now return the enabled dependencies
-        let deps = panel.get_enabled_dependencies();
-        assert_eq!(deps.len(), 2);
-        assert!(deps.contains(&"test-repo-1".to_string()));
-        assert!(deps.contains(&"test-repo-2".to_string()));
-    }
 } 

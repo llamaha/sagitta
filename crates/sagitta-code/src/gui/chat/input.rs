@@ -37,6 +37,8 @@ pub fn chat_input_ui(
     loop_inject_message: &mut Option<String>,
     // Focus management
     should_focus_input: &mut bool,
+    // Token usage
+    current_token_usage: &Option<crate::llm::client::TokenUsage>,
 ) -> Option<egui::Id> {
     // Handle key events before the text edit widget to manually process Ctrl+Enter
     let mut new_line_added = false;
@@ -158,6 +160,51 @@ pub fn chat_input_ui(
                     // Set a flag to open the repository panel with Add tab
                     // This will be handled by the main app
                     *on_repository_context_change = Some("__ADD_EXISTING_REPOSITORY__".to_string());
+                }
+            }
+            
+            // Show token usage if available
+            if let Some(token_usage) = current_token_usage {
+                ui.add_space(16.0);
+                
+                // Calculate percentage if we have a model context window size
+                let context_window = match token_usage.model_name.as_str() {
+                    model if model.contains("claude-3-5-sonnet") => 200000,
+                    model if model.contains("claude-3-5-haiku") => 200000,
+                    model if model.contains("claude-3-opus") => 200000,
+                    model if model.contains("claude-3-sonnet") => 200000,
+                    model if model.contains("claude-3-haiku") => 200000,
+                    model if model.contains("gpt-4o") => 128000,
+                    model if model.contains("gpt-4-turbo") => 128000,
+                    model if model.contains("gpt-4") => 8192,
+                    model if model.contains("gpt-3.5-turbo") => 16385,
+                    _ => 100000, // Default context window
+                };
+                
+                let percentage = (token_usage.total_tokens as f32 / context_window as f32 * 100.0).min(100.0);
+                let color = if percentage > 90.0 {
+                    theme.error_color()
+                } else if percentage > 75.0 {
+                    theme.warning_color()
+                } else {
+                    hint_color
+                };
+                
+                ui.label(RichText::new(format!("📊 {:.1}%", percentage))
+                    .color(color)
+                    .small());
+                
+                ui.separator();
+                
+                ui.label(RichText::new(format!("{} tokens", token_usage.total_tokens))
+                    .color(hint_color)
+                    .small());
+                
+                if let Some(cached) = token_usage.cached_tokens {
+                    ui.separator();
+                    ui.label(RichText::new(format!("💾 {} cached", cached))
+                        .color(success_color)
+                        .small());
                 }
             }
             

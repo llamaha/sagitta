@@ -32,6 +32,12 @@ pub enum AgentEvent {
         is_thinking: bool,
     },
     
+    /// Token usage update from LLM
+    TokenUsageUpdate {
+        /// The token usage information
+        usage: crate::llm::client::TokenUsage,
+    },
+    
     /// A tool call from the LLM
     ToolCall {
         /// The tool call being executed

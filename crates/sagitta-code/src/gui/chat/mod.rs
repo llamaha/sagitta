@@ -219,6 +219,25 @@ impl StreamingChatManager {
         }
     }
     
+    /// Append thinking content that should be displayed as main content when no regular text is present
+    pub fn append_thinking_content(&self, message_id: &str, chunk: String) {
+        let mut active_streams = self.active_streams.lock().unwrap();
+        if let Some(message) = active_streams.get_mut(message_id) {
+            // Set the message as thinking mode if no content exists yet
+            if message.content.is_empty() && !message.is_thinking() {
+                message.set_thinking(chunk.clone());
+            } else if message.is_thinking() {
+                // If already in thinking mode, append to thinking content
+                if let Some(ref mut thinking) = message.thinking_content {
+                    thinking.push_str(&chunk);
+                }
+            } else {
+                // Otherwise append as regular content
+                message.append_content(&chunk);
+            }
+        }
+    }
+    
     /// Start streaming thinking for a message
     pub fn start_thinking_stream(&self, message_id: &str) {
         let mut active_streams = self.active_streams.lock().unwrap();

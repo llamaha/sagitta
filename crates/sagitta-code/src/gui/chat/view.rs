@@ -1070,6 +1070,7 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         // Display the formatted result in a scrollable area with limited height
                         egui::ScrollArea::vertical()
                             .max_height(400.0)
+                            .min_scrolled_height(400.0)  // Ensure minimum height of 400px
                             .id_source(format!("tool_result_{}", tool_call.id))
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
@@ -1247,6 +1248,7 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     // Display the formatted result in a scrollable area with limited height
                     egui::ScrollArea::vertical()
                         .max_height(400.0)
+                        .min_scrolled_height(400.0)  // Ensure minimum height of 400px
                         .id_source(format!("tool_result_{}", tool_card.run_id))
                         .auto_shrink([false, false])
                         .show(ui, |ui| {

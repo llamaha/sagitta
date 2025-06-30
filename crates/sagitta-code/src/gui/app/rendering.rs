@@ -332,22 +332,6 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
                     context_aware_message.push_str(&format!("[System: Current repository context is '{}'. When the user refers to 'this repository' or asks for operations without specifying a repository, use '{}']\n\n", repo_context, repo_context));
                 }
                 
-                // Add dependency repositories context if any are enabled
-                let enabled_dependencies = app.repo_panel.get_enabled_dependencies();
-                if !enabled_dependencies.is_empty() {
-                    if enabled_dependencies.len() == 1 {
-                        context_aware_message.push_str(&format!(
-                            "[System: The repository '{}' is enabled as a dependency. You can use the repository tools to understand this dependency's requirements]\n\n", 
-                            enabled_dependencies[0]
-                        ));
-                    } else {
-                        let deps_list = enabled_dependencies.join("', '");
-                        context_aware_message.push_str(&format!(
-                            "[System: The following repositories are enabled as dependencies: '{}'. You can use the repository tools to understand these dependencies' requirements]\n\n", 
-                            deps_list
-                        ));
-                    }
-                }
                 
                 // Append the actual user message
                 context_aware_message.push_str(&user_message);
@@ -986,6 +970,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &mut app.state.loop_inject_message,
                 // Focus management
                 &mut app.state.should_focus_input,
+                // Token usage
+                &app.state.current_token_usage,
             );
             
             // Handle repository refresh request

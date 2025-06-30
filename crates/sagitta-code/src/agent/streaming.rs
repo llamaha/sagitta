@@ -130,6 +130,14 @@ impl StreamingProcessor {
                     async move {
                         match result {
                             Ok(chunk) => {
+                                // Check for token usage
+                                if let Some(token_usage) = &chunk.token_usage {
+                                    let _ = event_sender.send(AgentEvent::TokenUsageUpdate {
+                                        usage: token_usage.clone(),
+                                    });
+                                    trace!("Stream: Token usage update - total: {}", token_usage.total_tokens);
+                                }
+                                
                                 match &chunk.part {
                                     MessagePart::Text { text } => {
                                         // Emit text chunk event
