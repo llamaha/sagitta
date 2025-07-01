@@ -22,7 +22,8 @@ The server loads its configuration (Qdrant URL, repository paths, model settings
 *   **`repository/remove`**: Removes repository configuration and attempts data cleanup.
     *   *Params*: `name` (string, required).
 *   **`query`**: Performs semantic search.
-    *   *Params*: `repository_name` (string, required), `query_text` (string, required), `limit` (integer, optional), `branch_name` (string, optional - ignored if repo uses `target_ref`).
+    *   *Params*: `repository_name` (string, required), `query_text` (string, required), `limit` (integer, optional), `branch_name` (string, optional - ignored if repo uses `target_ref`), `elementType` (string, optional), `lang` (string, optional), `showCode` (boolean, optional - defaults to false).
+    *   *Note*: By default, only file paths, line numbers, scores, and a one-line preview are returned to minimize output size. Set `showCode: true` to include full code content.
 *   **`tools/list`**: Lists all available tools (methods) the server offers.
     *   *Params*: None.
 

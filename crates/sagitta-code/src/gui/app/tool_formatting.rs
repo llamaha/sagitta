@@ -76,7 +76,10 @@ impl ToolResultFormatter {
             name if name.contains("__read_file") => self.format_mcp_read_file_result(value),
             name if name.contains("__write_file") => self.format_mcp_write_file_result(value),
             name if name.contains("__repository_view_file") => self.format_mcp_file_view_result(value),
-            name if name.contains("__query") => self.format_mcp_search_result(value),
+            name if name.contains("__query") => {
+                // Show raw JSON with syntax highlighting for Semantic Code Search
+                format!("```json\n{}\n```", serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()))
+            },
             name if name.contains("__repository_map") => self.format_mcp_repo_map_result(value),
             name if name.contains("__repository_list") => self.format_mcp_repo_list_result(value),
             name if name.contains("__repository_search_file") => self.format_mcp_file_search_result(value),
@@ -662,20 +665,34 @@ impl ToolResultFormatter {
                     result.push_str("\n---\n\n");
                 }
                 
-                // Extract file path and other details
-                if let Some(file_path) = item.get("file_path").and_then(|v| v.as_str()) {
+                // Extract file path and line range - fields are in camelCase
+                if let Some(file_path) = item.get("filePath").and_then(|v| v.as_str()) {
                     result.push_str(&format!("**{}**", file_path));
                     
-                    if let Some(line) = item.get("line_number").and_then(|v| v.as_i64()) {
-                        result.push_str(&format!(":{}", line));
+                    // Show line range
+                    let start_line = item.get("startLine").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let end_line = item.get("endLine").and_then(|v| v.as_i64()).unwrap_or(start_line);
+                    
+                    if start_line > 0 {
+                        if end_line > start_line {
+                            result.push_str(&format!(":{}-{}", start_line, end_line));
+                        } else {
+                            result.push_str(&format!(":{}", start_line));
+                        }
+                    }
+                    
+                    // Show score if available
+                    if let Some(score) = item.get("score").and_then(|v| v.as_f64()) {
+                        result.push_str(&format!(" (score: {:.2})", score));
                     }
                     
                     result.push_str("\n");
                 }
                 
-                if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
+                // Show preview if available
+                if let Some(preview) = item.get("preview").and_then(|v| v.as_str()) {
                     // Detect language from file path for syntax highlighting
-                    let language = item.get("file_path")
+                    let language = item.get("filePath")
                         .and_then(|v| v.as_str())
                         .and_then(|path| std::path::Path::new(path).extension())
                         .and_then(|ext| ext.to_str())
@@ -715,7 +732,29 @@ impl ToolResultFormatter {
                         })
                         .unwrap_or("");
                     
-                    result.push_str(&format!("```{}\n{}\n```\n", language, content.trim()));
+                    result.push_str(&format!("```{}\n{}\n```\n", language, preview));
+                } else if let Some(content) = item.get("content").and_then(|v| v.as_str()) {
+                    // Fall back to full content if available
+                    if content != "[Content not included]" {
+                        let language = item.get("filePath")
+                            .and_then(|v| v.as_str())
+                            .and_then(|path| std::path::Path::new(path).extension())
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| {
+                                match ext {
+                                    "ts" | "tsx" => "typescript",
+                                    "js" | "jsx" => "javascript",
+                                    "rs" => "rust",
+                                    "py" => "python",
+                                    "rb" => "ruby",
+                                    "go" => "go",
+                                    _ => ext
+                                }
+                            })
+                            .unwrap_or("");
+                        
+                        result.push_str(&format!("```{}\n{}\n```\n", language, content.trim()));
+                    }
                 }
             }
         } else {

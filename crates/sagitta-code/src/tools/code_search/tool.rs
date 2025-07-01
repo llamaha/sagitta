@@ -48,7 +48,7 @@ impl Tool for CodeSearchTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "search_code".to_string(),
-            description: "Search for code in repositories using semantic search. IMPORTANT: Always specify element_type, language, and limit parameters to get accurate results and prevent context overflow.".to_string(),
+            description: "Search for code in repositories using semantic search. Returns file paths, line numbers, scores, and a one-line preview. Be specific with element_type and language when possible for better accuracy.".to_string(),
             parameters: json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -64,15 +64,15 @@ impl Tool for CodeSearchTool {
                     },
                     "limit": {
                         "type": ["integer", "null"],
-                        "description": "Maximum number of results to return. ALWAYS specify this parameter (recommended: 5-10) to prevent context overflow"
+                        "description": "Maximum number of results to return (recommended: 5-10)"
                     },
                     "element_type": {
                         "type": ["string", "null"],
-                        "description": "STRONGLY RECOMMENDED: Filter by code element type. Valid values: function, method, struct, class, enum, interface, trait, module, const, constant, type (for Go). If omitted, may return too many irrelevant results"
+                        "description": "Filter by code element type (e.g., function, method, struct, class, enum, interface, trait, module, const). Improves accuracy"
                     },
                     "language": {
                         "type": ["string", "null"],
-                        "description": "STRONGLY RECOMMENDED: Filter by programming language (e.g., rust, python, javascript, typescript, go, ruby). Improves search accuracy significantly"
+                        "description": "Filter by programming language (e.g., rust, python, javascript, typescript, go, ruby). Improves accuracy"
                     }
                 }
             }),

@@ -10,7 +10,7 @@ use serde_json;
 use chrono::Utc;
 
 /// Get the path to the todos JSON file
-fn get_todos_file_path() -> std::path::PathBuf {
+pub(crate) fn get_todos_file_path() -> std::path::PathBuf {
     // Store in .sagitta directory in the current working directory
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     workspace_root.join(".sagitta").join("todos.json")
@@ -86,14 +86,11 @@ mod tests {
     use super::*;
     use crate::mcp::types::TodoPriority;
     use tempfile::TempDir;
-    use std::sync::Mutex;
-    
-    // Use a mutex to ensure tests don't run concurrently since they change the current directory
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    use crate::handlers::test_utils::TODO_TEST_MUTEX;
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
         // Handle poisoned mutex by clearing the poison
-        let guard = TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
+        let guard = TODO_TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
             poisoned.into_inner()
         });
         let temp_dir = TempDir::new().unwrap();
@@ -145,8 +142,9 @@ mod tests {
         // Verify file was created - use the get_todos_file_path function
         let todos_path = get_todos_file_path();
         // Add a small delay to ensure file system operations complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert!(todos_path.exists());
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        
+        assert!(todos_path.exists(), "Todos file should exist at {:?}", todos_path);
         
         // Verify timestamps were added
         assert!(result.todos[0].created_at.is_some());
