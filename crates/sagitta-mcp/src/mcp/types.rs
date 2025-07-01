@@ -335,6 +335,10 @@ pub struct QueryParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "lang")] // Match CLI argument
     pub lang: Option<String>,
+    /// Optional: Include code content in results (default: false). Use only for smaller repositories due to output size limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "showCode")]
+    pub show_code: Option<bool>,
 }
 
 fn default_limit() -> u64 {
@@ -354,7 +358,10 @@ pub struct SearchResultItem {
     pub start_line: usize,
     pub end_line: usize,
     pub score: f32,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]

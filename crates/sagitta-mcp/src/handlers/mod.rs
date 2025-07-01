@@ -15,4 +15,7 @@ pub mod shell_execute;
 pub mod read_file;
 pub mod write_file;
 
+#[cfg(test)]
+pub mod test_utils;
+
 // Re-export handlers for easier access if needed, or server.rs can qualify directly 

@@ -9,12 +9,8 @@ use tokio::fs;
 use std::path::Path;
 use serde_json;
 
-/// Get the path to the todos JSON file
-fn get_todos_file_path() -> std::path::PathBuf {
-    // Store in .sagitta directory in the current working directory
-    let workspace_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    workspace_root.join(".sagitta").join("todos.json")
-}
+// Import the shared function from todo_write module
+use super::todo_write::get_todos_file_path;
 
 /// Handler for reading todos
 pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
@@ -76,14 +72,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use std::path::PathBuf;
-    use std::sync::Mutex;
-    
-    // Use a mutex to ensure tests don't run concurrently since they change the current directory
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    use crate::handlers::test_utils::TODO_TEST_MUTEX;
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
         // Handle poisoned mutex by clearing the poison
-        let guard = TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
+        let guard = TODO_TEST_MUTEX.lock().unwrap_or_else(|poisoned| {
             poisoned.into_inner()
         });
         let temp_dir = TempDir::new().unwrap();
@@ -110,6 +103,10 @@ mod tests {
     async fn test_todo_read_empty_list() {
         let (config, _temp_dir, _guard) = create_test_config().await;
         let qdrant_client = create_mock_qdrant();
+        
+        // Clean up any existing todos file from other tests
+        let todos_path = get_todos_file_path();
+        let _ = tokio::fs::remove_file(&todos_path).await; // Ignore errors if file doesn't exist
         
         let result = handle_todo_read(
             TodoReadParams {},

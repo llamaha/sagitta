@@ -91,25 +91,26 @@ impl ClaudeCodeStream {
                         Ok(n) => {
                             // Append new bytes to buffer
                             json_buffer.extend_from_slice(&buffer[..n]);
-                            // log::trace!("CLAUDE_CODE: Read {} bytes, total buffer size: {}", n, json_buffer.len());
+                            log::debug!("CLAUDE_CODE: Read {} bytes, total buffer size: {}", n, json_buffer.len());
                             
                             // Create a streaming deserializer from the buffer
-                            let deserializer = Deserializer::from_slice(&json_buffer).into_iter::<ClaudeChunk>();
-                            let mut bytes_consumed = 0;
+                            let mut stream = Deserializer::from_slice(&json_buffer).into_iter::<ClaudeChunk>();
+                            let mut last_valid_offset = 0;
                             
                             // Process all complete JSON objects in the buffer
-                            for (idx, result) in deserializer.enumerate() {
-                                match result {
-                                    Ok(chunk) => {
-                                        // Track how many bytes this chunk consumed by looking for newline
-                                        // JSON chunks are typically newline-delimited
-                                        bytes_consumed = json_buffer.iter().position(|&b| b == b'\n')
-                                            .map(|p| p + 1)
-                                            .unwrap_or(json_buffer.len());
+                            loop {
+                                match stream.next() {
+                                    Some(Ok(chunk)) => {
+                                        // Use the deserializer's byte offset to track consumption
+                                        last_valid_offset = stream.byte_offset();
                                         
-                                        // Only log important chunks
-                                        if matches!(&chunk, ClaudeChunk::Result { .. }) {
-                                            log::debug!("CLAUDE_CODE: Received result chunk");
+                                        // Log all chunk types for debugging
+                                        match &chunk {
+                                            ClaudeChunk::Result { .. } => log::info!("CLAUDE_CODE: Received result chunk at offset {}", last_valid_offset),
+                                            ClaudeChunk::Assistant { .. } => log::info!("CLAUDE_CODE: Received assistant chunk at offset {}", last_valid_offset),
+                                            ClaudeChunk::User { .. } => log::info!("CLAUDE_CODE: Received user chunk at offset {}", last_valid_offset),
+                                            ClaudeChunk::System { .. } => log::debug!("CLAUDE_CODE: Received system chunk at offset {}", last_valid_offset),
+                                            _ => {}
                                         }
                                     
                                     match chunk {
@@ -258,33 +259,36 @@ impl ClaudeCodeStream {
                                         }
                                     }
                                     }
-                                    Err(e) => {
-                                        if e.is_eof() {
-                                            // Need more data - this is normal for streaming
-                                            log::trace!("CLAUDE_CODE: Need more data for complete JSON object");
-                                        } else {
-                                            // Actual parse error
-                                            log::error!("CLAUDE_CODE: JSON parse error: {}", e);
-                                            // Log the problematic JSON for debugging
-                                            if let Ok(json_str) = std::str::from_utf8(&json_buffer) {
-                                                log::error!("CLAUDE_CODE: Problematic JSON (first 500 chars): {}", 
-                                                    &json_str[..json_str.len().min(500)]);
-                                            }
-                                            // Skip to next newline to recover
-                                            bytes_consumed = json_buffer.iter()
-                                                .position(|&b| b == b'\n')
-                                                .map(|p| p + 1)
-                                                .unwrap_or(json_buffer.len());
+                                    Some(Err(e)) if e.is_eof() => {
+                                        // Need more data - this is normal for streaming
+                                        log::trace!("CLAUDE_CODE: Need more data for complete JSON object at byte {}", stream.byte_offset());
+                                        break;
+                                    }
+                                    Some(Err(e)) => {
+                                        // Actual parse error
+                                        log::error!("CLAUDE_CODE: JSON parse error at byte {}: {}", stream.byte_offset(), e);
+                                        // Log the problematic JSON for debugging
+                                        if let Ok(json_str) = std::str::from_utf8(&json_buffer[stream.byte_offset()..]) {
+                                            log::error!("CLAUDE_CODE: Problematic JSON (first 100 chars): {}", 
+                                                &json_str[..json_str.len().min(100)]);
                                         }
-                                        break; // Exit the deserialization loop
+                                        // Skip past the error position
+                                        last_valid_offset = stream.byte_offset() + 1;
+                                        break;
+                                    }
+                                    None => {
+                                        // No more JSON objects
+                                        break;
                                     }
                                 }
                             }
                             
                             // Remove consumed bytes from buffer
-                            if bytes_consumed > 0 {
-                                json_buffer.drain(..bytes_consumed);
-                                log::trace!("CLAUDE_CODE: Removed {} consumed bytes, {} bytes remaining", bytes_consumed, json_buffer.len());
+                            if last_valid_offset > 0 {
+                                json_buffer.drain(..last_valid_offset);
+                                log::info!("CLAUDE_CODE: Drained {} bytes, {} bytes remaining in buffer", last_valid_offset, json_buffer.len());
+                            } else {
+                                log::debug!("CLAUDE_CODE: No bytes to drain, buffer size: {}", json_buffer.len());
                             }
                         }
                         Err(e) => {

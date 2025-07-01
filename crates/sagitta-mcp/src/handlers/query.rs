@@ -201,10 +201,29 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             .and_then(|k| if let Kind::IntegerValue(i) = k { usize::try_from(*i).ok() } else { None })
             .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing or invalid end_line in payload"); 0usize });
 
-        let content = payload.get(FIELD_CHUNK_CONTENT)
+        // Always get the chunk content to extract preview
+        let chunk_content = payload.get(FIELD_CHUNK_CONTENT)
             .and_then(|v| v.kind.as_ref())
             .and_then(|k| if let Kind::StringValue(s) = k { Some(s.clone()) } else { None })
             .unwrap_or_else(|| { warn!(point_id=?scored_point.id, "Missing or invalid content in payload"); "<content missing>".to_string() });
+
+        // Extract first line for preview (truncate at 120 chars if too long)
+        let preview = chunk_content.lines()
+            .next()
+            .map(|line| {
+                if line.len() > 120 {
+                    format!("{}...", &line[..117])
+                } else {
+                    line.to_string()
+                }
+            });
+
+        let content = if params.show_code.unwrap_or(false) {
+            // Only include full content if show_code is explicitly true
+            Some(chunk_content)
+        } else {
+            None
+        };
 
         results.push(SearchResultItem {
             file_path,
@@ -212,6 +231,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             end_line: end_line + 1,
             score: scored_point.score,
             content,
+            preview,
         });
     }
 
@@ -333,8 +353,29 @@ mod tests {
             unimplemented!("MockQdrantClient query_points not implemented for tests")
         }
 
-        async fn query(&self, _request: QueryPoints) -> Result<QueryResponse, SagittaError> {
-            unimplemented!("MockQdrantClient query not implemented for tests")
+        async fn query(&self, request: QueryPoints) -> Result<QueryResponse, SagittaError> {
+            // Verify that the query is being performed on the expected collection name
+            assert_eq!(
+                request.collection_name, 
+                self.expected_collection_name,
+                "Query handler used wrong collection name. Expected '{}', got '{}'",
+                self.expected_collection_name,
+                request.collection_name
+            );
+
+            if self.should_fail {
+                return Err(SagittaError::Other(format!(
+                    "Collection `{}` doesn't exist!",
+                    request.collection_name
+                )));
+            }
+
+            // Return a minimal successful response
+            Ok(QueryResponse {
+                result: vec![],
+                time: 0.001,
+                usage: None,
+            })
         }
 
         async fn list_collections(&self) -> Result<Vec<String>, SagittaError> {
@@ -343,59 +384,23 @@ mod tests {
     }
 
     fn create_test_config(repo_config: RepositoryConfig) -> Arc<RwLock<AppConfig>> {
-        use tempfile::tempdir;
-        use std::fs;
-        use serde_json::json;
-        use std::path::PathBuf;
-        
-        let temp_dir = tempdir().expect("Failed to create temp dir for test");
-        let temp_dir_path_str = temp_dir.path().to_string_lossy().into_owned();
-        let model_path = PathBuf::from(&temp_dir_path_str).join("model.onnx");
-        let tokenizer_path = PathBuf::from(&temp_dir_path_str).join("tokenizer.json");
-
-        // Create dummy ONNX model file
-        fs::write(&model_path, "dummy model content").expect("Failed to write dummy model file");
-        
-        // Create a minimal, structurally valid tokenizer.json
-        let min_tokenizer_content = json!({
-          "version": "1.0",
-          "truncation": null,
-          "padding": null,
-          "added_tokens": [],
-          "normalizer": null,
-          "pre_tokenizer": null,
-          "post_processor": null,
-          "decoder": null,
-          "model": {
-            "type": "WordPiece",
-            "unk_token": "[UNK]",
-            "continuing_subword_prefix": "##",
-            "max_input_chars_per_word": 100,
-            "vocab": {
-              "[UNK]": 0,
-              "[CLS]": 1,
-              "[SEP]": 2
-            }
-          }
-        });
-        fs::write(&tokenizer_path, min_tokenizer_content.to_string()).expect("Failed to write dummy tokenizer file");
+        use sagitta_search::config::EmbeddingEngineConfig;
         
         let config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),
-            onnx_model_path: Some(model_path.to_string_lossy().into_owned()),
-            onnx_tokenizer_path: Some(tokenizer_path.to_string_lossy().into_owned()),
+            onnx_model_path: None,
+            onnx_tokenizer_path: None,
+            embed_model: Some("default".to_string()), // Use default embedding provider
             repositories: vec![repo_config],
             performance: PerformanceConfig {
                 collection_name_prefix: "test_prefix_".to_string(),
                 vector_dimension: 384,
                 ..PerformanceConfig::default()
             },
+            embedding: EmbeddingEngineConfig::default(),
             tenant_id: Some("test_tenant".to_string()),
             ..AppConfig::default()
         };
-        
-        // Keep temp_dir alive by leaking it (this is just for tests)
-        std::mem::forget(temp_dir);
         
         Arc::new(RwLock::new(config))
     }
@@ -461,8 +466,8 @@ mod tests {
         println!("  Branch-aware format: {}", branch_aware_collection_name);
     }
 
-    /// Test that query fails with collection not found error when using legacy naming
-    /// (This simulates the bug that was fixed)
+    /// Test that query uses branch-aware collection naming
+    /// (This verifies that the bug fix is working correctly)
     #[tokio::test]
     async fn test_collection_naming_mismatch_causes_failure() {
         let tenant_id = "test_tenant_456";
@@ -473,13 +478,13 @@ mod tests {
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
-        // Calculate what the legacy collection name would be (the wrong one)
-        let legacy_collection_name = get_collection_name(tenant_id, repo_name, &config_guard);
+        // Calculate the correct branch-aware collection name
+        let branch_aware_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
         
         drop(config_guard);
         
-        // Create mock client that expects the legacy collection name and will fail
-        let mock_client = Arc::new(MockQdrantClient::new(legacy_collection_name).with_failure());
+        // Create mock client that expects the branch-aware collection name
+        let mock_client = Arc::new(MockQdrantClient::new(branch_aware_collection_name).with_failure());
         
         let query_params = QueryParams {
             repository_name: repo_name.to_string(),
@@ -488,16 +493,16 @@ mod tests {
             branch_name: Some(branch_name.to_string()),
             element_type: None,
             lang: None,
+            show_code: None,
         };
         
         let auth_user = Some(create_auth_user(tenant_id));
         
-        // This should fail because we're trying to mock the old buggy behavior
+        // This should fail because the mock client is configured to fail
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
         
-        // The test will fail at the assertion in MockQdrantClient::search_points
-        // because the query handler is now correctly using branch-aware naming
-        // but the mock is expecting legacy naming
+        // The mock client will verify that the handler is using the correct branch-aware collection name
+        // and then return an error (simulating collection not found)
         assert!(result.is_err(), "Query should fail when collection doesn't exist");
     }
 
@@ -547,6 +552,7 @@ mod tests {
             branch_name: None, // Don't specify branch, and repo has no active branch
             element_type: None,
             lang: None,
+            show_code: None,
         };
         
         let auth_user = Some(create_auth_user(tenant_id));
@@ -558,6 +564,287 @@ mod tests {
         if let Err(error) = result {
             assert_eq!(error.code, crate::mcp::error_codes::INVALID_QUERY_PARAMS);
             assert!(error.message.contains("Cannot determine branch"));
+        }
+    }
+
+    /// Test that query handler excludes content by default when show_code is not specified
+    #[tokio::test]
+    async fn test_query_excludes_content_by_default() {
+        let tenant_id = "test_tenant_show_code_default";
+        let repo_name = "test_repo";
+        let branch_name = "main";
+        
+        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let config = create_test_config(repo_config);
+        let config_guard = config.read().await;
+        
+        // Expected collection name for mock client
+        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        drop(config_guard);
+        
+        // Create mock client that returns search results
+        let mock_client = Arc::new(MockQdrantClientWithResults::new(expected_collection_name));
+        
+        let query_params = QueryParams {
+            repository_name: repo_name.to_string(),
+            query_text: "test query".to_string(),
+            limit: 10,
+            branch_name: Some(branch_name.to_string()),
+            element_type: None,
+            lang: None,
+            show_code: None, // Not specified - should default to false
+        };
+        
+        let auth_user = Some(create_auth_user(tenant_id));
+        
+        let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
+        
+        if let Err(ref e) = result {
+            eprintln!("Query failed with error: {:?}", e);
+        }
+        assert!(result.is_ok(), "Query should succeed");
+        let query_result = result.unwrap();
+        assert!(!query_result.results.is_empty(), "Should have results");
+        
+        // Verify that content is not included but preview is
+        for item in &query_result.results {
+            assert!(item.content.is_none(), "Content should not be included by default");
+            assert!(item.preview.is_some(), "Preview should be included");
+            assert!(!item.file_path.is_empty(), "File path should be present");
+            assert!(item.start_line > 0, "Start line should be present");
+            assert!(item.end_line > 0, "End line should be present");
+            assert!(item.score > 0.0, "Score should be present");
+            
+            // Verify preview is first line
+            if let Some(preview) = &item.preview {
+                assert!(preview.contains("fn test_function"), "Preview should contain first line of content");
+            }
+        }
+    }
+
+    /// Test that query handler excludes content when show_code is explicitly false
+    #[tokio::test]
+    async fn test_query_excludes_content_when_show_code_false() {
+        let tenant_id = "test_tenant_show_code_false";
+        let repo_name = "test_repo";
+        let branch_name = "main";
+        
+        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let config = create_test_config(repo_config);
+        let config_guard = config.read().await;
+        
+        // Expected collection name for mock client
+        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        drop(config_guard);
+        
+        // Create mock client that returns search results
+        let mock_client = Arc::new(MockQdrantClientWithResults::new(expected_collection_name));
+        
+        let query_params = QueryParams {
+            repository_name: repo_name.to_string(),
+            query_text: "test query".to_string(),
+            limit: 10,
+            branch_name: Some(branch_name.to_string()),
+            element_type: None,
+            lang: None,
+            show_code: Some(false), // Explicitly false
+        };
+        
+        let auth_user = Some(create_auth_user(tenant_id));
+        
+        let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
+        
+        if let Err(ref e) = result {
+            eprintln!("Query failed with error: {:?}", e);
+        }
+        assert!(result.is_ok(), "Query should succeed");
+        let query_result = result.unwrap();
+        assert!(!query_result.results.is_empty(), "Should have results");
+        
+        // Verify that content is not included but preview is
+        for item in &query_result.results {
+            assert!(item.content.is_none(), "Content should not be included when show_code is false");
+            assert!(item.preview.is_some(), "Preview should be included when show_code is false");
+        }
+    }
+
+    /// Test that query handler includes content when show_code is true
+    #[tokio::test]
+    async fn test_query_includes_content_when_show_code_true() {
+        let tenant_id = "test_tenant_show_code_true";
+        let repo_name = "test_repo";
+        let branch_name = "main";
+        
+        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let config = create_test_config(repo_config);
+        let config_guard = config.read().await;
+        
+        // Expected collection name for mock client
+        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        drop(config_guard);
+        
+        // Create mock client that returns search results
+        let mock_client = Arc::new(MockQdrantClientWithResults::new(expected_collection_name));
+        
+        let query_params = QueryParams {
+            repository_name: repo_name.to_string(),
+            query_text: "test query".to_string(),
+            limit: 10,
+            branch_name: Some(branch_name.to_string()),
+            element_type: None,
+            lang: None,
+            show_code: Some(true), // Explicitly true
+        };
+        
+        let auth_user = Some(create_auth_user(tenant_id));
+        
+        let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
+        
+        if let Err(ref e) = result {
+            eprintln!("Query failed with error: {:?}", e);
+        }
+        assert!(result.is_ok(), "Query should succeed");
+        let query_result = result.unwrap();
+        assert!(!query_result.results.is_empty(), "Should have results");
+        
+        // Verify that content is included along with preview
+        for item in &query_result.results {
+            assert!(item.content.is_some(), "Content should be included when show_code is true");
+            assert!(!item.content.as_ref().unwrap().is_empty(), "Content should not be empty");
+            assert!(item.preview.is_some(), "Preview should also be included when show_code is true");
+        }
+    }
+
+    /// Mock Qdrant client that returns actual search results for testing show_code functionality
+    #[derive(Clone, Debug)]
+    struct MockQdrantClientWithResults {
+        expected_collection_name: String,
+    }
+
+    impl MockQdrantClientWithResults {
+        fn new(expected_collection_name: String) -> Self {
+            Self {
+                expected_collection_name,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl QdrantClientTrait for MockQdrantClientWithResults {
+        async fn health_check(&self) -> Result<HealthCheckReply, SagittaError> {
+            Ok(HealthCheckReply { title: "mock".to_string(), version: "mock".to_string(), commit: None })
+        }
+
+        async fn search_points(&self, request: SearchPoints) -> Result<SearchResponse, SagittaError> {
+            use qdrant_client::qdrant::{Value, ScoredPoint, PointId};
+            use std::collections::HashMap;
+            
+            // Verify correct collection name
+            assert_eq!(
+                request.collection_name, 
+                self.expected_collection_name,
+                "Query handler used wrong collection name"
+            );
+
+            // Create mock search results with all required fields
+            let mut payload = HashMap::new();
+            payload.insert(FIELD_FILE_PATH.to_string(), Value::from("src/test_file.rs"));
+            payload.insert(FIELD_START_LINE.to_string(), Value::from(10i64));
+            payload.insert(FIELD_END_LINE.to_string(), Value::from(20i64));
+            payload.insert(FIELD_CHUNK_CONTENT.to_string(), Value::from("fn test_function() {\n    println!(\"Test content\");\n}"));
+            
+            let scored_point = ScoredPoint {
+                id: Some(PointId { point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Num(1)) }),
+                payload,
+                score: 0.95,
+                version: 0,
+                vectors: None,
+                shard_key: None,
+                order_value: None,
+            };
+
+            Ok(SearchResponse {
+                result: vec![scored_point],
+                time: 0.001,
+                usage: None,
+            })
+        }
+
+        // All other methods are unimplemented for this test
+        async fn delete_collection(&self, _collection_name: String) -> Result<bool, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults delete_collection not implemented")
+        }
+
+        async fn get_collection_info(&self, _collection_name: String) -> Result<CollectionInfo, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults get_collection_info not implemented")
+        }
+
+        async fn count(&self, _request: CountPoints) -> Result<CountResponse, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults count not implemented")
+        }
+
+        async fn collection_exists(&self, _collection_name: String) -> Result<bool, SagittaError> {
+            Ok(true)
+        }
+
+        async fn delete_points_blocking(&self, _collection_name: &str, _points_selector: &PointsSelector) -> Result<(), SagittaError> {
+            unimplemented!("MockQdrantClientWithResults delete_points_blocking not implemented")
+        }
+
+        async fn scroll(&self, _request: ScrollPoints) -> Result<ScrollResponse, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults scroll not implemented")
+        }
+
+        async fn upsert_points(&self, _request: UpsertPoints) -> Result<PointsOperationResponse, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults upsert_points not implemented")
+        }
+
+        async fn create_collection(&self, _collection_name: &str, _vector_dimension: u64) -> Result<bool, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults create_collection not implemented")
+        }
+
+        async fn create_collection_detailed(&self, _request: CreateCollection) -> Result<bool, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults create_collection_detailed not implemented")
+        }
+
+        async fn delete_points(&self, _request: DeletePoints) -> Result<PointsOperationResponse, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults delete_points not implemented")
+        }
+
+        async fn query_points(&self, _request: QueryPoints) -> Result<QueryResponse, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults query_points not implemented")
+        }
+
+        async fn query(&self, _request: QueryPoints) -> Result<QueryResponse, SagittaError> {
+            use qdrant_client::qdrant::{Value, ScoredPoint, PointId};
+            use std::collections::HashMap;
+            
+            // Return the same mock result as search_points
+            let mut payload = HashMap::new();
+            payload.insert(FIELD_FILE_PATH.to_string(), Value::from("src/test_file.rs"));
+            payload.insert(FIELD_START_LINE.to_string(), Value::from(10i64));
+            payload.insert(FIELD_END_LINE.to_string(), Value::from(20i64));
+            payload.insert(FIELD_CHUNK_CONTENT.to_string(), Value::from("fn test_function() {\n    println!(\"Test content\");\n}"));
+            
+            let scored_point = ScoredPoint {
+                id: Some(PointId { point_id_options: Some(qdrant_client::qdrant::point_id::PointIdOptions::Num(1)) }),
+                payload,
+                score: 0.95,
+                version: 0,
+                vectors: None,
+                shard_key: None,
+                order_value: None,
+            };
+
+            Ok(QueryResponse {
+                result: vec![scored_point],
+                time: 0.001,
+                usage: None,
+            })
+        }
+
+        async fn list_collections(&self) -> Result<Vec<String>, SagittaError> {
+            unimplemented!("MockQdrantClientWithResults list_collections not implemented")
         }
     }
 } 

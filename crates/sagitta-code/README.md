@@ -71,6 +71,13 @@ Installation is currently a manual process, with future improvements to the inst
 - **Theme Customizer**: Customize UI colors and appearance
 - **Model Selection**: Quick model switching (OpenRouter only)
 
+## Code Search
+
+The semantic code search tool returns minimal output by default:
+- File paths, line numbers, scores, and a one-line preview
+- Full code content is not included to prevent context overflow
+- Use `repository_view_file` tool to view specific code sections
+
 ## Configuration
 
 ### Core Configuration (`~/.config/sagitta/config.toml`)

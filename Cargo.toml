@@ -7,6 +7,6 @@ members = [
     "crates/sagitta-embed",
     "crates/repo-mapper",
     "crates/git-manager",
-    "crates/code-parsers"
+    "crates/code-parsers",
 ]
 resolver = "2" 
