@@ -10,6 +10,8 @@ use uuid::Uuid;
 use crate::agent::conversation::types::{Conversation, ConversationBranch, BranchStatus};
 use crate::agent::message::types::AgentMessage;
 use crate::llm::client::Role;
+use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use std::sync::Arc;
 
 /// Context-aware conversation branching manager
 pub struct ConversationBranchingManager {
@@ -21,6 +23,9 @@ pub struct ConversationBranchingManager {
     
     /// Branch point detection engine
     branch_detector: BranchPointDetector,
+    
+    /// Fast model provider for enhanced branch analysis
+    fast_model_provider: Option<Arc<dyn FastModelOperations>>,
 }
 
 /// Configuration for conversation branching
@@ -243,6 +248,7 @@ impl ConversationBranchingManager {
             config,
             success_predictor: BranchSuccessPredictor::new(PredictionConfig::default()),
             branch_detector: BranchPointDetector::default(),
+            fast_model_provider: None,
         }
     }
     
@@ -251,8 +257,14 @@ impl ConversationBranchingManager {
         Self::new(BranchingConfig::default())
     }
     
+    /// Set the fast model provider for enhanced analysis
+    pub fn with_fast_model_provider(mut self, provider: Arc<dyn FastModelOperations>) -> Self {
+        self.fast_model_provider = Some(provider);
+        self
+    }
+    
     /// Analyze conversation for potential branch points
-    pub fn analyze_branch_opportunities(&self, conversation: &Conversation) -> Result<Vec<BranchSuggestion>> {
+    pub async fn analyze_branch_opportunities(&self, conversation: &Conversation) -> Result<Vec<BranchSuggestion>> {
         if !self.config.enable_auto_detection {
             return Ok(Vec::new());
         }
@@ -261,6 +273,65 @@ impl ConversationBranchingManager {
             return Ok(Vec::new());
         }
         
+        let mut suggestions = Vec::new();
+        
+        // Try to use fast model first if available
+        if let Some(ref fast_model) = self.fast_model_provider {
+            match fast_model.suggest_branch_points(conversation).await {
+                Ok(fast_suggestions) => {
+                    // Convert fast model suggestions to BranchSuggestion
+                    for (msg_index, reason_str, confidence) in fast_suggestions {
+                        if msg_index < conversation.messages.len() {
+                            let message = &conversation.messages[msg_index];
+                            let reason = self.parse_branch_reason(&reason_str);
+                            
+                            let suggestion = BranchSuggestion {
+                                message_id: message.id,
+                                confidence,
+                                reason: reason.clone(),
+                                suggested_title: self.generate_branch_title(&reason, &[reason_str.clone()]),
+                                success_probability: Some(self.success_predictor.predict_success(
+                                    message,
+                                    &conversation.messages.iter().collect::<Vec<_>>(),
+                                    &reason
+                                )?),
+                                context: BranchContext {
+                                    relevant_messages: vec![message.id],
+                                    trigger_keywords: vec![reason_str],
+                                    conversation_state: self.analyze_conversation_state(&conversation.messages.iter().collect::<Vec<_>>()),
+                                    project_context: conversation.project_context.as_ref().map(|pc| pc.name.clone()),
+                                    mentioned_tools: self.extract_mentioned_tools(&message.content),
+                                },
+                            };
+                            
+                            if suggestion.confidence >= self.config.auto_branch_threshold {
+                                suggestions.push(suggestion);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Fast model branch suggestion failed: {}, falling back to rule-based", e);
+                    // Fall back to rule-based analysis
+                    return self.analyze_branch_opportunities_rule_based(conversation);
+                }
+            }
+        } else {
+            // Use rule-based analysis
+            return self.analyze_branch_opportunities_rule_based(conversation);
+        }
+        
+        // Sort by confidence (highest first)
+        suggestions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Limit to max active branches
+        suggestions.truncate(self.config.max_active_branches);
+        
+        Ok(suggestions)
+    }
+    
+    /// Rule-based branch opportunity analysis (fallback)
+    fn analyze_branch_opportunities_rule_based(&self, conversation: &Conversation) -> Result<Vec<BranchSuggestion>> {
         let mut suggestions = Vec::new();
         
         // Analyze recent messages for branch opportunities
@@ -281,6 +352,20 @@ impl ConversationBranchingManager {
         suggestions.truncate(self.config.max_active_branches);
         
         Ok(suggestions)
+    }
+    
+    /// Parse branch reason from string
+    fn parse_branch_reason(&self, reason_str: &str) -> BranchReason {
+        match reason_str.to_lowercase().as_str() {
+            "multiple_solutions" => BranchReason::MultipleSolutions,
+            "error_recovery" => BranchReason::ErrorRecovery,
+            "user_uncertainty" => BranchReason::UserUncertainty,
+            "complex_problem" => BranchReason::ComplexProblem,
+            "alternative_approach" => BranchReason::AlternativeApproach,
+            "experimental_approach" => BranchReason::ExperimentalApproach,
+            "user_requested" => BranchReason::UserRequested,
+            _ => BranchReason::AlternativeApproach,
+        }
     }
     
     /// Get recent messages within the context window
@@ -602,8 +687,8 @@ mod tests {
         assert_eq!(manager.config.max_active_branches, 5);
     }
 
-    #[test]
-    fn test_branch_suggestion_confidence() {
+    #[tokio::test]
+    async fn test_branch_suggestion_confidence() {
         // Create manager with lower threshold for testing
         let mut config = BranchingConfig::default();
         config.auto_branch_threshold = 0.3; // Lower threshold for testing
@@ -616,7 +701,7 @@ mod tests {
         conversation.add_message(AgentMessage::assistant("Let me help you explore alternatives"));
         conversation.add_message(AgentMessage::user("What if we try a different method? This error is confusing"));
         
-        let suggestions = manager.analyze_branch_opportunities(&conversation).unwrap();
+        let suggestions = manager.analyze_branch_opportunities(&conversation).await.unwrap();
         
         // Should have at least one suggestion due to uncertainty keywords
         assert!(!suggestions.is_empty(), "Expected at least one branching suggestion");

@@ -461,8 +461,6 @@ impl ConversationStarter {
             });
         }
         
-        // TODO: Add workspace context when workspace management is integrated
-        // For now, we'll skip workspace suggestions
         
         // Sort by relevance
         self.suggested_context.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));

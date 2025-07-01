@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use crate::agent::message::types::AgentMessage;
 use crate::llm::client::{LlmClient, Role};
+use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::config::types::SagittaCodeConfig;
 use sagitta_embed::EmbeddingPool;
 
 /// Configuration for title generation
@@ -37,6 +39,7 @@ impl Default for TitleGeneratorConfig {
 pub struct TitleGenerator {
     config: TitleGeneratorConfig,
     llm_client: Option<Arc<dyn LlmClient>>,
+    fast_model_provider: Option<Arc<dyn FastModelOperations>>,
     embedding_pool: Option<Arc<EmbeddingPool>>,
     should_fail: bool, // For testing failure scenarios
 }
@@ -47,6 +50,7 @@ impl TitleGenerator {
         Self {
             config,
             llm_client: None,
+            fast_model_provider: None,
             embedding_pool: None,
             should_fail: false,
         }
@@ -55,6 +59,12 @@ impl TitleGenerator {
     /// Set the LLM client for title generation
     pub fn with_llm_client(mut self, client: Arc<dyn LlmClient>) -> Self {
         self.llm_client = Some(client);
+        self
+    }
+    
+    /// Set the fast model provider for title generation
+    pub fn with_fast_model_provider(mut self, provider: Arc<dyn FastModelOperations>) -> Self {
+        self.fast_model_provider = Some(provider);
         self
     }
     
@@ -69,6 +79,7 @@ impl TitleGenerator {
         Self {
             config: TitleGeneratorConfig::default(),
             llm_client: None,
+            fast_model_provider: None,
             embedding_pool: None,
             should_fail: true,
         }
@@ -86,7 +97,23 @@ impl TitleGenerator {
             return Ok(self.generate_fallback_title());
         }
         
-        // Try LLM generation first
+        // Try fast model first if available
+        if let Some(ref fast_provider) = self.fast_model_provider {
+            match fast_provider.generate_title(messages).await {
+                Ok(title) => {
+                    let truncated = self.truncate_title(title);
+                    if !truncated.is_empty() {
+                        log::debug!("Title generated using fast model");
+                        return Ok(truncated);
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Fast model title generation failed: {}, falling back", e);
+                }
+            }
+        }
+        
+        // Try regular LLM generation if fast model not available or failed
         if let Some(ref llm_client) = self.llm_client {
             match self.generate_with_llm(messages, llm_client).await {
                 Ok(title) => {
@@ -108,7 +135,9 @@ impl TitleGenerator {
     /// Generate title using LLM
     async fn generate_with_llm(&self, messages: &[AgentMessage], llm_client: &Arc<dyn LlmClient>) -> Result<String> {
         // Take first few messages for context (limit to avoid token limits)
+        // Filter out system messages - we only want User and Assistant messages for title generation
         let context_messages: Vec<_> = messages.iter()
+            .filter(|msg| matches!(msg.role, Role::User | Role::Assistant))
             .take(5)
             .map(|msg| format!("{}: {}", 
                 match msg.role {
@@ -120,6 +149,11 @@ impl TitleGenerator {
                 msg.content.chars().take(200).collect::<String>()
             ))
             .collect();
+        
+        // Ensure we have actual conversation content (not just system messages)
+        if context_messages.is_empty() {
+            return Err(anyhow::anyhow!("No user or assistant messages found for title generation"));
+        }
         
         let context = context_messages.join("\n");
         
@@ -167,11 +201,24 @@ impl TitleGenerator {
         // Get the first user message for context
         let first_user_message = messages.iter()
             .find(|msg| msg.role == Role::User)
-            .map(|msg| &msg.content)
-            .unwrap_or(&messages[0].content);
+            .map(|msg| &msg.content);
+        
+        // If no user message found, fallback to first non-system message
+        let content = if let Some(user_content) = first_user_message {
+            user_content
+        } else {
+            // Find first non-system message
+            match messages.iter().find(|msg| !matches!(msg.role, Role::System)) {
+                Some(msg) => &msg.content,
+                None => {
+                    // No non-system messages, use fallback
+                    return Ok(self.generate_fallback_title());
+                }
+            }
+        };
         
         // Extract key topics using simple keyword matching
-        let content_lower = first_user_message.to_lowercase();
+        let content_lower = content.to_lowercase();
         
         let title = if content_lower.contains("rust") || content_lower.contains("cargo") {
             if content_lower.contains("error") || content_lower.contains("panic") {
@@ -218,7 +265,7 @@ impl TitleGenerator {
         } else if content_lower.contains("how") && content_lower.contains("?") {
             // Extract the "how to" part
             if let Some(start) = content_lower.find("how") {
-                let question_part = &first_user_message[start..];
+                let question_part = &content[start..];
                 let words: Vec<&str> = question_part.split_whitespace().take(4).collect();
                 format!("{}", words.join(" "))
             } else {
@@ -234,7 +281,7 @@ impl TitleGenerator {
             "Timing Question".to_string()
         } else {
             // Use first few words of the message, but make it more title-like
-            let words: Vec<&str> = first_user_message.split_whitespace().take(4).collect();
+            let words: Vec<&str> = content.split_whitespace().take(4).collect();
             if words.is_empty() {
                 return Ok(self.generate_fallback_title());
             }
@@ -323,6 +370,64 @@ mod tests {
         assert!(truncated.ends_with("..."));
     }
     
+    #[tokio::test]
+    async fn test_system_message_filtering() {
+        let generator = TitleGenerator::new(TitleGeneratorConfig::default());
+        
+        let messages = vec![
+            AgentMessage {
+                id: Uuid::new_v4(),
+                role: Role::System,
+                content: "[ System: Current repository context is 'test-repo' ]".to_string(),
+                is_streaming: false,
+                timestamp: Utc::now(),
+                metadata: Default::default(),
+                tool_calls: vec![],
+            },
+            AgentMessage {
+                id: Uuid::new_v4(),
+                role: Role::User,
+                content: "How do I implement error handling?".to_string(),
+                is_streaming: false,
+                timestamp: Utc::now(),
+                metadata: Default::default(),
+                tool_calls: vec![],
+            },
+        ];
+        
+        let title = generator.generate_title(&messages).await.unwrap();
+        
+        // Title should not contain system message content
+        assert!(!title.to_lowercase().contains("system"));
+        assert!(!title.to_lowercase().contains("repository"));
+        assert!(!title.to_lowercase().contains("test-repo"));
+        
+        // Title should be based on user message
+        assert!(title.contains("Error Handling") || title.contains("error") || title.contains("implement"));
+    }
+    
+    #[tokio::test]
+    async fn test_only_system_messages_fallback() {
+        let generator = TitleGenerator::new(TitleGeneratorConfig::default());
+        
+        let messages = vec![
+            AgentMessage {
+                id: Uuid::new_v4(),
+                role: Role::System,
+                content: "System message only".to_string(),
+                is_streaming: false,
+                timestamp: Utc::now(),
+                metadata: Default::default(),
+                tool_calls: vec![],
+            },
+        ];
+        
+        let title = generator.generate_title(&messages).await.unwrap();
+        
+        // Should fall back to default title
+        assert!(title.starts_with("Conversation"));
+    }
+
     #[tokio::test]
     async fn test_failing_generator() {
         let generator = TitleGenerator::failing();

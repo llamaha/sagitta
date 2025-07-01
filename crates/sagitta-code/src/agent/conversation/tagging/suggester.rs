@@ -1,10 +1,12 @@
 use super::{TagSuggestion, TagSource, SuggestionConfidence};
 use crate::agent::conversation::types::{Conversation, ConversationSummary, ProjectContext, ProjectType};
 use crate::agent::message::types::AgentMessage;
+use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
 use sagitta_embed::{EmbeddingPool, EmbeddingConfig, Result as EmbedResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
@@ -50,6 +52,7 @@ pub struct TagCorpusEntry {
 pub struct TagSuggester {
     config: TagSuggesterConfig,
     embedding_pool: Option<EmbeddingPool>,
+    fast_model_provider: Option<Arc<dyn FastModelOperations>>,
     tag_corpus: HashMap<String, TagCorpusEntry>,
     conversation_embeddings: HashMap<Uuid, Vec<f32>>,
 }
@@ -60,6 +63,7 @@ impl TagSuggester {
         Self {
             config,
             embedding_pool: None,
+            fast_model_provider: None,
             tag_corpus: HashMap::new(),
             conversation_embeddings: HashMap::new(),
         }
@@ -68,6 +72,12 @@ impl TagSuggester {
     /// Initialize with embedding pool for semantic analysis
     pub fn with_embedding_pool(mut self, embedding_pool: EmbeddingPool) -> Self {
         self.embedding_pool = Some(embedding_pool);
+        self
+    }
+    
+    /// Set the fast model provider for tag generation
+    pub fn with_fast_model_provider(mut self, provider: Arc<dyn FastModelOperations>) -> Self {
+        self.fast_model_provider = Some(provider);
         self
     }
 
@@ -83,6 +93,7 @@ impl TagSuggester {
         Ok(Self {
             config,
             embedding_pool: Some(embedding_pool),
+            fast_model_provider: None,
             tag_corpus: HashMap::new(),
             conversation_embeddings: HashMap::new(),
         })
@@ -92,9 +103,31 @@ impl TagSuggester {
     pub async fn suggest_tags(&self, conversation: &Conversation) -> Result<Vec<TagSuggestion>, Box<dyn std::error::Error>> {
         let mut suggestions = Vec::new();
 
-        // Generate embedding-based suggestions
-        if let Some(embedding_suggestions) = self.suggest_from_embeddings(conversation).await? {
-            suggestions.extend(embedding_suggestions);
+        // Try fast model first if available
+        if let Some(ref fast_provider) = self.fast_model_provider {
+            match fast_provider.suggest_tags(conversation).await {
+                Ok(fast_tags) => {
+                    for (tag, confidence) in fast_tags {
+                        suggestions.push(TagSuggestion::new(
+                            tag,
+                            confidence,
+                            "Suggested by fast model".to_string(),
+                            TagSource::Rule { rule_name: "fast_model".to_string() },
+                        ));
+                    }
+                    log::debug!("Got {} tag suggestions from fast model", suggestions.len());
+                }
+                Err(e) => {
+                    log::debug!("Fast model tag suggestion failed: {}, falling back", e);
+                }
+            }
+        }
+
+        // Generate embedding-based suggestions if fast model not available or as supplement
+        if suggestions.is_empty() {
+            if let Some(embedding_suggestions) = self.suggest_from_embeddings(conversation).await? {
+                suggestions.extend(embedding_suggestions);
+            }
         }
 
         // Generate content-based suggestions

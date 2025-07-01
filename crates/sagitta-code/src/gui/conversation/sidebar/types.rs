@@ -216,6 +216,9 @@ pub struct SidebarConfig {
     /// Whether to show conversation previews
     pub show_previews: bool,
     
+    /// Whether to show conversation tags
+    pub show_tags: bool,
+    
     /// Whether to show conversation statistics
     pub show_statistics: bool,
     
@@ -272,6 +275,7 @@ impl Default for SidebarConfig {
         Self {
             max_conversations_per_group: 50,
             show_previews: true,
+            show_tags: true,
             show_statistics: true,
             auto_expand_active: true,
             show_empty_groups: false,

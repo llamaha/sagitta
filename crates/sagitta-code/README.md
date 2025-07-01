@@ -71,6 +71,22 @@ Installation is currently a manual process, with future improvements to the inst
 - **Theme Customizer**: Customize UI colors and appearance
 - **Model Selection**: Quick model switching (OpenRouter only)
 
+## Fast Model for Conversation Features
+
+Sagitta Code now supports using a fast model (like Claude Haiku) for conversation management tasks:
+
+- **Automatic Title Generation**: Generates descriptive titles after 2 messages
+- **Smart Tag Suggestions**: Suggests relevant tags based on conversation content
+- **Status Management**: Evaluates conversation status (Active, Completed, etc.)
+- **Background Processing**: Non-blocking updates while you continue chatting
+
+### Configuration
+
+In Settings → Claude Code → Conversation Features:
+- Enable/disable fast model usage
+- Select which model to use (defaults to Claude Haiku)
+- All features fall back to rule-based methods if fast model is unavailable
+
 ## Code Search
 
 The semantic code search tool returns minimal output by default:

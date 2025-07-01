@@ -281,6 +281,14 @@ pub struct ConversationConfig {
     #[serde(default)]
     pub sidebar: SidebarPersistentConfig,
     
+    /// Fast model for conversation features (titles, tags, etc.)
+    #[serde(default = "default_fast_model")]
+    pub fast_model: String,
+    
+    /// Enable fast model for conversation features
+    #[serde(default = "default_enable_fast_model")]
+    pub enable_fast_model: bool,
+    
 }
 
 /// Configuration for persistent sidebar state
@@ -435,6 +443,8 @@ impl Default for ConversationConfig {
             auto_branching: false,
             default_tags: Vec::new(),
             sidebar: SidebarPersistentConfig::default(),
+            fast_model: default_fast_model(),
+            enable_fast_model: default_enable_fast_model(),
         }
     }
 }
@@ -536,6 +546,14 @@ fn default_output_format() -> String {
 
 fn default_input_format() -> String {
     "text".to_string()
+}
+
+fn default_fast_model() -> String {
+    "claude-haiku-20250102".to_string()
+}
+
+fn default_enable_fast_model() -> bool {
+    true
 }
 
 #[cfg(test)]

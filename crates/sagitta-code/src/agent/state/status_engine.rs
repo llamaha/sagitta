@@ -9,6 +9,7 @@ use crate::agent::conversation::manager::ConversationManager;
 use crate::agent::conversation::types::Conversation;
 use crate::agent::state::types::ConversationStatus;
 use crate::agent::events::AgentEvent;
+use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
 
 /// Configuration for the status engine
 #[derive(Debug, Clone)]
@@ -31,7 +32,7 @@ impl Default for StatusEngineConfig {
         Self {
             inactivity_threshold_minutes: 30,
             archive_threshold_days: 90,
-            check_interval_seconds: 60, // Check every minute
+            check_interval_seconds: 1800, // Check every 30 minutes
             respect_manual_overrides: true,
         }
     }
@@ -43,6 +44,7 @@ pub struct ConversationStatusEngine {
     conversation_manager: Arc<dyn ConversationManager>,
     event_sender: Option<mpsc::UnboundedSender<AgentEvent>>,
     manual_overrides: Arc<RwLock<std::collections::HashSet<Uuid>>>,
+    fast_model_provider: Option<Arc<dyn FastModelOperations>>,
 }
 
 impl ConversationStatusEngine {
@@ -56,12 +58,19 @@ impl ConversationStatusEngine {
             conversation_manager,
             event_sender: None,
             manual_overrides: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            fast_model_provider: None,
         }
     }
     
     /// Set the event sender for publishing status change events
     pub fn with_event_sender(mut self, sender: mpsc::UnboundedSender<AgentEvent>) -> Self {
         self.event_sender = Some(sender);
+        self
+    }
+    
+    /// Set the fast model provider for status evaluation
+    pub fn with_fast_model_provider(mut self, provider: Arc<dyn FastModelOperations>) -> Self {
+        self.fast_model_provider = Some(provider);
         self
     }
     
