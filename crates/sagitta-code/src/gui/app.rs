@@ -275,13 +275,36 @@ impl SagittaCodeApp {
         self.conversation_service = Some(service_arc.clone());
         
         // Initialize title updater with the conversation service
-        // For now, use rule-based title generation (no LLM client)
-        self.title_updater = Some(Arc::new(
-            conversation_title_updater::ConversationTitleUpdater::new(
-                service_arc,
-                None, // No LLM client for now
-            )
-        ));
+        // Create fast model provider if enabled
+        let fast_model_provider = {
+            let config_guard = self.config.lock().await;
+            if config_guard.conversation.enable_fast_model {
+                let mut provider = crate::llm::fast_model::FastModelProvider::new(config_guard.clone());
+                match provider.initialize().await {
+                    Ok(_) => {
+                        log::info!("Fast model provider initialized for title updater");
+                        Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        };
+        
+        let mut title_updater = conversation_title_updater::ConversationTitleUpdater::new(
+            service_arc,
+            None, // No LLM client needed, we use fast model
+        );
+        
+        if let Some(provider) = fast_model_provider {
+            title_updater = title_updater.with_fast_model_provider(provider);
+        }
+        
+        self.title_updater = Some(Arc::new(title_updater));
         
         // Initial refresh of conversation data
         self.refresh_conversation_clusters().await?;
@@ -341,13 +364,36 @@ impl SagittaCodeApp {
         self.conversation_service = Some(service_arc.clone());
         
         // Initialize title updater with the conversation service
-        // For now, use rule-based title generation (no LLM client)
-        self.title_updater = Some(Arc::new(
-            conversation_title_updater::ConversationTitleUpdater::new(
-                service_arc,
-                None, // No LLM client for now
-            )
-        ));
+        // Create fast model provider if enabled
+        let fast_model_provider = {
+            let config_guard = self.config.lock().await;
+            if config_guard.conversation.enable_fast_model {
+                let mut provider = crate::llm::fast_model::FastModelProvider::new(config_guard.clone());
+                match provider.initialize().await {
+                    Ok(_) => {
+                        log::info!("Fast model provider initialized for title updater");
+                        Some(Arc::new(provider) as Arc<dyn crate::llm::fast_model::FastModelOperations>)
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to initialize fast model provider: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        };
+        
+        let mut title_updater = conversation_title_updater::ConversationTitleUpdater::new(
+            service_arc,
+            None, // No LLM client needed, we use fast model
+        );
+        
+        if let Some(provider) = fast_model_provider {
+            title_updater = title_updater.with_fast_model_provider(provider);
+        }
+        
+        self.title_updater = Some(Arc::new(title_updater));
         
         // Initial refresh of conversation data
         self.refresh_conversation_clusters().await?;

@@ -54,6 +54,9 @@ pub struct SettingsPanel {
     pub claude_code_additional_directories: String, // Comma-separated list of paths
     pub claude_code_auto_ide: bool,
     
+    // Conversation features - Fast model
+    pub conversation_fast_model: String,
+    pub conversation_enable_fast_model: bool,
 }
 
 impl SettingsPanel {
@@ -97,6 +100,10 @@ impl SettingsPanel {
                 .collect::<Vec<_>>()
                 .join(","),
             claude_code_auto_ide: initial_sagitta_code_config.claude_code.auto_ide,
+            
+            // Conversation features - Fast model
+            conversation_fast_model: initial_sagitta_code_config.conversation.fast_model.clone(),
+            conversation_enable_fast_model: initial_sagitta_code_config.conversation.enable_fast_model,
         }
     }
     
@@ -286,6 +293,39 @@ impl SettingsPanel {
                                         ui.checkbox(&mut self.claude_code_auto_ide, "Automatically connect to IDE on startup");
                                         ui.end_row();
                                     });
+                            });
+                            
+                            // Conversation Features Settings
+                            ui.collapsing("Conversation Features", |ui| {
+                                ui.label("Configure fast model for conversation management features like title generation, tagging, and status updates.");
+                                ui.add_space(4.0);
+                                
+                                Grid::new("conversation_features_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Enable Fast Model:");
+                                        ui.checkbox(&mut self.conversation_enable_fast_model, "Use fast model for conversation features")
+                                            .on_hover_text("When enabled, uses a faster model (e.g., Claude Haiku) for conversation management tasks");
+                                        ui.end_row();
+                                        
+                                        ui.label("Fast Model:");
+                                        egui::ComboBox::from_id_salt("conversation_fast_model_combo")
+                                            .selected_text(&self.conversation_fast_model)
+                                            .show_ui(ui, |ui| {
+                                                // Show models suitable for fast operations
+                                                for model in CLAUDE_CODE_MODELS {
+                                                    if model.id.contains("haiku") || model.id.contains("sonnet") {
+                                                        ui.selectable_value(&mut self.conversation_fast_model, model.id.to_string(), model.name);
+                                                    }
+                                                }
+                                            });
+                                        ui.end_row();
+                                    });
+                                    
+                                ui.add_space(4.0);
+                                ui.label("🚀 Fast model is used for: title generation, tag suggestions, status updates, and checkpoint/branch suggestions.")
+                                    .on_hover_text("These features will run in the background without blocking the main conversation");
                             });
                             
                             ui.add_space(8.0);
@@ -568,8 +608,12 @@ impl SettingsPanel {
         // MCP config is now handled internally
         updated_config.claude_code.auto_ide = self.claude_code_auto_ide;
         
+        // Update conversation features
+        updated_config.conversation.fast_model = self.conversation_fast_model.clone();
+        updated_config.conversation.enable_fast_model = self.conversation_enable_fast_model;
+        
         // Preserve all other fields
-        // and all other config sections (sagitta, ui, logging, conversation) from the original
+        // and all other config sections (sagitta, ui, logging) from the original
         
         updated_config
     }

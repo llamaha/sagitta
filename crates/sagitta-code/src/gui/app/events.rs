@@ -34,6 +34,10 @@ pub enum AppEvent {
     RepositoryListUpdated(Vec<String>),
     RefreshRepositoryList,
     CancelTool(ToolRunId),
+    RenameConversation {
+        conversation_id: uuid::Uuid,
+        new_title: String,
+    },
     // Add other app-level UI events here if needed
 }
 
@@ -176,6 +180,22 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     log::info!("SagittaCodeApp: Received ConversationStatusChanged event: {:?}", status);
                     // Potentially refresh UI elements that depend on conversation status here
                 },
+                AgentEvent::ConversationCompleted { conversation_id } => {
+                    log::info!("SagittaCodeApp: Received ConversationCompleted event for conversation: {}", conversation_id);
+                    
+                    // Update conversation title when conversation is completed
+                    if let Some(title_updater) = &app.title_updater {
+                        let title_updater_clone = title_updater.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = title_updater_clone.maybe_update_title(conversation_id).await {
+                                log::error!("Failed to update conversation title: {}", e);
+                            }
+                        });
+                    }
+                    
+                    // Refresh conversation list to update status
+                    app.refresh_conversation_data();
+                },
                 AgentEvent::TokenUsageUpdate { usage } => {
                     log::debug!("SagittaCodeApp: Token usage update - total: {}", usage.total_tokens);
                     app.state.current_token_usage = Some(usage);
@@ -314,16 +334,7 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
                 
-                // Update conversation title after response is complete
-                if let (Some(conversation_id), Some(title_updater)) = 
-                    (app.state.current_conversation_id, &app.title_updater) {
-                    let title_updater_clone = title_updater.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = title_updater_clone.maybe_update_title(conversation_id).await {
-                            log::error!("Failed to update conversation title: {}", e);
-                        }
-                    });
-                }
+                // Don't update title after every response - wait for conversation completion
             }
             AppEvent::RefreshConversationList => {
                 log::info!("SagittaCodeApp: Received RefreshConversationList event. Forcing refresh.");
@@ -352,6 +363,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::CancelTool(run_id) => {
                 log::info!("Received CancelTool event for run_id: {}", run_id);
                 handle_tool_cancellation(app, run_id);
+            },
+            AppEvent::RenameConversation { conversation_id, new_title } => {
+                log::info!("Received RenameConversation event for conversation {} with new title: {}", conversation_id, new_title);
+                handle_rename_conversation(app, conversation_id, new_title);
             },
         }
     }
@@ -945,29 +960,71 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
             if let Ok(Some(conversation)) = service_clone.get_conversation(conversation_id).await {
                 log::info!("Analyzing conversation '{}' for suggestions", conversation.title);
                 
-                // For now, we'll do basic analysis based on message content
-                // TODO: Integrate with ConversationCheckpointManager and ConversationBranchingManager
+                // Use the BranchingManager with fast model support for better suggestions
+                let mut branch_suggestions = Vec::new();
+                let mut checkpoint_suggestions = Vec::new();
                 
+                // Create a branching manager
+                let mut branching_manager = crate::agent::conversation::branching::ConversationBranchingManager::with_default_config();
+                
+                // Try to use fast model if enabled
+                // Note: We can't access config from ConversationService directly
+                // For now, we'll skip fast model configuration here
+                // This would need to be passed from the app initialization
+                log::debug!("Fast model configuration for branch suggestions would need to be passed from app initialization");
+                
+                // Analyze for branch opportunities
+                match branching_manager.analyze_branch_opportunities(&conversation).await {
+                    Ok(suggestions) => {
+                        branch_suggestions = suggestions;
+                        log::info!("Found {} branch suggestions using BranchingManager", branch_suggestions.len());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to analyze branch opportunities: {}", e);
+                        // Fall back to simple detection
+                        let recent_messages: Vec<_> = conversation.messages.iter()
+                            .rev()
+                            .take(5)
+                            .collect();
+                        
+                        for message in &recent_messages {
+                            let content = message.content.to_lowercase();
+                            
+                            // Simple branch detection fallback
+                            if content.contains("alternative") || content.contains("option") ||
+                               content.contains("different approach") || content.contains("try") {
+                                
+                                let branch = crate::agent::conversation::branching::BranchSuggestion {
+                                    message_id: message.id,
+                                    confidence: 0.6,
+                                    reason: crate::agent::conversation::branching::BranchReason::AlternativeApproach,
+                                    suggested_title: "Alternative Approach".to_string(),
+                                    success_probability: Some(0.5),
+                                    context: crate::agent::conversation::branching::BranchContext {
+                                        relevant_messages: vec![message.id],
+                                        trigger_keywords: vec!["alternative".to_string()],
+                                        conversation_state: crate::agent::conversation::branching::ConversationState::SolutionDevelopment,
+                                        project_context: None,
+                                        mentioned_tools: vec![],
+                                    },
+                                };
+                                branch_suggestions.push(branch);
+                            }
+                        }
+                    }
+                }
+                
+                // Simple checkpoint detection (TODO: Integrate CheckpointManager)
                 let recent_messages: Vec<_> = conversation.messages.iter()
                     .rev()
                     .take(5)
                     .collect();
                 
-                log::debug!("Analyzing {} recent messages for suggestions", recent_messages.len());
-                
-                let mut checkpoint_suggestions = Vec::new();
-                let mut branch_suggestions = Vec::new();
-                
                 for message in &recent_messages {
                     let content = message.content.to_lowercase();
-                    log::debug!("Analyzing message content: '{}'", content);
                     
-                    // Simple checkpoint detection
                     if content.contains("success") || content.contains("complete") || 
-                       content.contains("working") || content.contains("done") ||
-                       content.contains("milestone") || content.contains("achievement") {
-                        
-                        log::debug!("Found checkpoint trigger in message: {}", message.id);
+                       content.contains("working") || content.contains("done") {
                         
                         let checkpoint = crate::agent::conversation::checkpoints::CheckpointSuggestion {
                             message_id: message.id,
@@ -977,12 +1034,11 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                                 if content.contains("success") { "Successful Solution" }
                                 else if content.contains("complete") { "Task Completed" }
                                 else if content.contains("working") { "Working Solution" }
-                                else if content.contains("milestone") { "Milestone Reached" }
-                                else { "Achievement Unlocked" }
+                                else { "Achievement" }
                             ),
                             context: crate::agent::conversation::checkpoints::CheckpointContext {
                                 relevant_messages: vec![message.id],
-                                trigger_keywords: vec!["success".to_string(), "complete".to_string()],
+                                trigger_keywords: vec!["success".to_string()],
                                 conversation_phase: crate::agent::conversation::checkpoints::ConversationPhase::Implementation,
                                 modified_files: vec![],
                                 executed_tools: vec![],
@@ -991,41 +1047,6 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                             restoration_value: 0.9,
                         };
                         checkpoint_suggestions.push(checkpoint);
-                    }
-                    
-                    // Simple branch detection
-                    if content.contains("alternative") || content.contains("option") ||
-                       content.contains("different approach") || content.contains("try") ||
-                       content.contains("maybe") || content.contains("could") {
-                        
-                        log::debug!("Found branch trigger in message: {}", message.id);
-                        
-                        let branch = crate::agent::conversation::branching::BranchSuggestion {
-                            message_id: message.id,
-                            confidence: 0.7,
-                            reason: if content.contains("alternative") || content.contains("different approach") {
-                                crate::agent::conversation::branching::BranchReason::AlternativeApproach
-                            } else if content.contains("option") {
-                                crate::agent::conversation::branching::BranchReason::MultipleSolutions
-                            } else {
-                                crate::agent::conversation::branching::BranchReason::UserUncertainty
-                            },
-                            suggested_title: format!("Branch: {}", 
-                                if content.contains("alternative") { "Alternative Approach" }
-                                else if content.contains("option") { "Explore Options" }
-                                else if content.contains("different approach") { "Different Strategy" }
-                                else { "Try Something Else" }
-                            ),
-                            success_probability: Some(0.6),
-                            context: crate::agent::conversation::branching::BranchContext {
-                                relevant_messages: vec![message.id],
-                                trigger_keywords: vec!["alternative".to_string(), "option".to_string()],
-                                conversation_state: crate::agent::conversation::branching::ConversationState::SolutionDevelopment,
-                                project_context: None,
-                                mentioned_tools: vec![],
-                            },
-                        };
-                        branch_suggestions.push(branch);
                     }
                 }
                 
@@ -1256,6 +1277,48 @@ pub fn handle_tool_cancellation(app: &mut SagittaCodeApp, run_id: ToolRunId) {
     // UI will update on next frame automatically
 }
 
+/// Handle conversation rename request
+pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid, new_title: String) {
+    // Update the conversation title in the service
+    if let Some(service) = &app.conversation_service {
+        let service_clone = service.clone();
+        let app_event_sender = app.app_event_sender.clone();
+        let new_title_clone = new_title.clone();
+        
+        tokio::spawn(async move {
+            match service_clone.rename_conversation(conversation_id, new_title_clone.clone()).await {
+                Ok(_) => {
+                    log::info!("Successfully renamed conversation {} to '{}'", conversation_id, new_title_clone);
+                    
+                    // Trigger a refresh of the conversation list to update UI
+                    if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
+                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to rename conversation {}: {}", conversation_id, e);
+                }
+            }
+        });
+    } else {
+        log::warn!("No conversation service available to rename conversation");
+        
+        // Fallback: update the title in the local conversation list
+        for conv in &mut app.state.conversation_list {
+            if conv.id == conversation_id {
+                conv.title = new_title.clone();
+                log::info!("Updated conversation title locally (fallback): {} -> '{}'", conversation_id, new_title);
+                break;
+            }
+        }
+    }
+    
+    // Update current conversation title if it's the active one
+    if app.state.current_conversation_id == Some(conversation_id) {
+        app.state.current_conversation_title = Some(new_title);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1328,6 +1391,7 @@ mod tests {
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
             AppEvent::RefreshRepositoryList => assert!(true),
+            AppEvent::RenameConversation { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -1341,6 +1405,7 @@ mod tests {
             AppEvent::RepositoryListUpdated(_) => assert!(true),
             AppEvent::CancelTool(_) => assert!(true),
             AppEvent::RefreshRepositoryList => assert!(true),
+            AppEvent::RenameConversation { .. } => assert!(true),
         }
     }
 

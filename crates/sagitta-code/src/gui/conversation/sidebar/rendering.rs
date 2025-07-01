@@ -39,11 +39,11 @@ impl ConversationSidebar {
         let is_small_screen = self.config.responsive.enabled && 
             screen_size.x <= self.config.responsive.small_screen_breakpoint;
         
-        // Responsive width constraints
+        // Responsive width constraints - made wider to show more information
         let (default_width, min_width, max_width) = if is_small_screen {
-            (240.0, 180.0, 320.0)
+            (280.0, 220.0, 380.0)
         } else {
-            (280.0, 200.0, 400.0)
+            (360.0, 280.0, 500.0)
         };
 
         egui::SidePanel::left("conversation_sidebar")
@@ -79,7 +79,7 @@ impl ConversationSidebar {
                             return;
                         }
 
-                        log::debug!("Sidebar: Organizing {} conversations", app_state.conversation_list.len());
+                        log::trace!("Sidebar: Organizing {} conversations", app_state.conversation_list.len());
                         match self.organize_conversations(
                             &app_state.conversation_list,
                             Some(&self.clusters),
@@ -95,9 +95,9 @@ impl ConversationSidebar {
                                     }
                                 }
                                 
-                                log::info!("Sidebar: Rendering {} conversation groups", organized_data.groups.len());
+                                log::trace!("Sidebar: Rendering {} conversation groups", organized_data.groups.len());
                                 for (index, group) in organized_data.groups.iter().enumerate() {
-                                    log::debug!("Sidebar: Rendering group {} with {} conversations", group.name, group.conversations.len());
+                                    log::trace!("Sidebar: Rendering group {} with {} conversations", group.name, group.conversations.len());
                                     self.render_conversation_group(ui, group, app_state, theme);
                                     
                                     if index < organized_data.groups.len() - 1 {
@@ -302,7 +302,7 @@ impl ConversationSidebar {
             // Default: only expand "today"
             group.id == "today"
         };
-        log::debug!("Sidebar: Group {} expanded state: {} (id: {})", 
+        log::trace!("Sidebar: Group {} expanded state: {} (id: {})", 
             group.name, is_expanded, group.id);
         
         ui.horizontal(|ui| {
@@ -317,7 +317,7 @@ impl ConversationSidebar {
         
         if is_expanded {
             ui.indent(&group.id, |ui| {
-                log::debug!("Sidebar: Rendering {} conversations in expanded group {}", group.conversations.len(), group.name);
+                log::trace!("Sidebar: Rendering {} conversations in expanded group {}", group.conversations.len(), group.name);
                 for item in &group.conversations {
                     self.render_conversation_item(ui, item, app_state, theme);
                 }
@@ -400,6 +400,26 @@ impl ConversationSidebar {
                     ui.label(RichText::new(preview).small().color(theme.muted_text_color()));
                 }
             }
+            
+            // Display tags if present
+            if !item.summary.tags.is_empty() && self.config.show_tags {
+                ui.horizontal_wrapped(|ui| {
+                    for tag in &item.summary.tags {
+                        // Create a small frame for each tag
+                        let tag_frame = Frame {
+                            inner_margin: Margin { left: 4, right: 4, top: 1, bottom: 1 },
+                            corner_radius: egui::Rounding::same(3),
+                            fill: theme.accent_color().gamma_multiply(0.2),
+                            stroke: egui::Stroke::NONE,
+                            ..Default::default()
+                        };
+                        
+                        tag_frame.show(ui, |ui| {
+                            ui.label(RichText::new(tag).small().color(theme.accent_color()));
+                        });
+                    }
+                });
+            }
         });
         
         // Make the group interactive and handle clicks
@@ -470,17 +490,15 @@ impl ConversationSidebar {
                     // TODO: Implement delete confirmation dialog
                 }
                 SidebarAction::RenameConversation(id, new_name) => {
-                    // TODO: Implement rename conversation event
-                    // For now, just update the title directly
-                    for conv in &mut app_state.conversation_list {
-                        if conv.id == id {
-                            conv.title = new_name;
-                            break;
-                        }
+                    // Use the proper event system to rename conversation
+                    if let Err(e) = app_event_sender.send(AppEvent::RenameConversation {
+                        conversation_id: id,
+                        new_title: new_name,
+                    }) {
+                        log::error!("Failed to send RenameConversation event: {}", e);
                     }
                 }
                 SidebarAction::SetWorkspace(id) => {
-                    // TODO: Add workspace switching when implemented
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);
                 }
                 _ => {}
