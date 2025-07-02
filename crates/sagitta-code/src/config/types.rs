@@ -204,6 +204,14 @@ pub struct UiConfig {
     
     /// Currently selected repository context
     pub current_repository_context: Option<String>,
+    
+    /// Automatically create CLAUDE.md files when accessing repositories
+    #[serde(default = "default_auto_create_claude_md")]
+    pub auto_create_claude_md: bool,
+    
+    /// Custom CLAUDE.md template content
+    #[serde(default = "default_claude_md_template")]
+    pub claude_md_template: String,
 }
 
 impl Default for UiConfig {
@@ -215,6 +223,8 @@ impl Default for UiConfig {
             window_width: default_window_width(),
             window_height: default_window_height(),
             current_repository_context: None,
+            auto_create_claude_md: default_auto_create_claude_md(),
+            claude_md_template: default_claude_md_template(),
         }
     }
 }
@@ -556,6 +566,14 @@ fn default_enable_fast_model() -> bool {
     true
 }
 
+fn default_auto_create_claude_md() -> bool {
+    true
+}
+
+fn default_claude_md_template() -> String {
+    include_str!("../../templates/CLAUDE.md").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,6 +588,8 @@ mod tests {
         assert_eq!(config.window_width, 900); // default_window_width() returns 900
         assert_eq!(config.window_height, 700); // default_window_height() returns 700
         assert_eq!(config.current_repository_context, None);
+        assert_eq!(config.auto_create_claude_md, true); // default_auto_create_claude_md() returns true
+        assert!(!config.claude_md_template.is_empty()); // Should contain default template
     }
 
     #[test]

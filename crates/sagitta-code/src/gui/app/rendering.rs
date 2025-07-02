@@ -24,6 +24,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
 
     // Handle keyboard shortcuts
     handle_keyboard_shortcuts(app, ctx);
+    
+    // Handle CLAUDE.md modal shortcuts
+    app.claude_md_modal.handle_shortcuts(ctx);
 
     // Process agent events
     app.process_agent_events();
@@ -82,6 +85,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Render hotkeys modal if needed
     render_hotkeys_modal(app, ctx);
     render_tools_modal(app, ctx);
+    
+    // Render CLAUDE.md modal
+    render_claude_md_modal(app, ctx);
 }
 
 /// Render tools list modal
@@ -99,21 +105,21 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 
                 // Create a scrollable area for the tools list
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Tools list with descriptions
+                    // Tools list with descriptions - matches actual registered tools
                     let tools = vec![
                         ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
                         ("read_file", "Read file contents from repositories"),
-                        ("view_file", "View specific files in a repository with line range support"),
+                        ("view_file_in_repository", "View specific files in a repository with line range support"),
                         ("list_repositories", "List all configured repositories"),
                         ("add_existing_repository", "Add an existing local or remote repository"),
                         ("sync_repository", "Sync a repository to get latest changes"),
                         ("remove_repository", "Remove a repository from the system"),
                         ("search_file_in_repository", "Search for files by name pattern in a repository"),
-                        ("repository_map", "Generate a high-level map of repository structure with functions, classes, and their relationships (supports optional name - uses current context if not provided)"),
+                        ("repository_map", "Generate a high-level map of repository structure with functions, classes, and their relationships"),
                         ("targeted_view", "View specific code elements like functions or classes"),
                         ("code_search", "Search code semantically across repositories"),
                         ("web_search", "Search the web for information"),
-                        ("edit_file", "Edit files with precise text replacements"),
+                        ("edit", "Edit files with precise text replacements"),
                         ("validate", "Validate code changes for correctness"),
                         ("semantic_edit", "Make semantic code edits with AI assistance"),
                     ];
@@ -184,9 +190,6 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         // Ctrl+Shift+T: Toggle theme customizer panel
         app.panels.toggle_panel(ActivePanel::ThemeCustomizer);
     }
-    if ctx.input(|i| i.key_pressed(Key::Backtick) && i.modifiers.ctrl) {
-        // Ctrl+`: Terminal functionality removed
-    }
     if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.ctrl) {
         // Ctrl+M: Toggle model selection panel
         app.panels.toggle_panel(ActivePanel::ModelSelection);
@@ -198,6 +201,35 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
     if ctx.input(|i| i.key_pressed(Key::F2)) {
         // F2: Toggle tools list modal
         app.state.show_tools_modal = !app.state.show_tools_modal;
+    }
+    if ctx.input(|i| i.key_pressed(Key::F3)) {
+        // F3: Open CLAUDE.md modal
+        app.open_claude_md_modal();
+    }
+    
+    // Undo/redo for chat input
+    if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.ctrl && !i.modifiers.shift) {
+        // Ctrl+Z: Undo
+        if !app.state.input_undo_stack.is_empty() {
+            // Save current state to redo stack
+            app.state.input_redo_stack.push(app.state.chat_input_buffer.clone());
+            // Restore from undo stack
+            if let Some(previous_state) = app.state.input_undo_stack.pop() {
+                app.state.chat_input_buffer = previous_state;
+            }
+        }
+    }
+    if ctx.input(|i| (i.key_pressed(Key::Y) && i.modifiers.ctrl) || 
+                      (i.key_pressed(Key::Z) && i.modifiers.ctrl && i.modifiers.shift)) {
+        // Ctrl+Y or Ctrl+Shift+Z: Redo
+        if !app.state.input_redo_stack.is_empty() {
+            // Save current state to undo stack
+            app.state.input_undo_stack.push(app.state.chat_input_buffer.clone());
+            // Restore from redo stack
+            if let Some(next_state) = app.state.input_redo_stack.pop() {
+                app.state.chat_input_buffer = next_state;
+            }
+        }
     }
     
     // Phase 10: Conversation sidebar organization mode shortcuts (Ctrl+1-6)
@@ -783,15 +815,6 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
-                // Terminal Panel
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Ctrl + `: Toggle Terminal Panel").color(theme.text_color()));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Terminal Removed").color(theme.button_text_color())).clicked() {
-                            // Terminal functionality removed
-                        }
-                    });
-                });
                 
                 ui.separator();
                 
@@ -890,6 +913,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     });
                 });
                 
+                // F3 CLAUDE.md Template Manager
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("F3: CLAUDE.md Template Manager").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Open").color(theme.button_text_color())).clicked() {
+                            app.open_claude_md_modal();
+                        }
+                    });
+                });
+                
                 ui.separator();
                 ui.label(egui::RichText::new("Loop Control:").color(theme.accent_color()).strong());
                 
@@ -950,6 +983,10 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
         .frame(Frame::none().fill(theme_to_background_color(app.state.current_theme)).inner_margin(Vec2::new(16.0, 12.0)))
         .show(ctx, |ui| {
             let mut repository_refresh_requested = false;
+            
+            // Track text changes for undo/redo
+            let text_before = app.state.chat_input_buffer.clone();
+            
             let input_id = chat_input_ui(
                 ui, 
                 &mut app.state.chat_input_buffer, 
@@ -980,6 +1017,30 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     log::error!("Failed to send RefreshRepositoryList event: {}", e);
                 }
             }
+            
+            // Track text changes for undo/redo
+            if text_before != app.state.chat_input_buffer {
+                // Text changed - save snapshot for undo
+                // Only save if it's significantly different from the last snapshot
+                let should_save_snapshot = if let Some(last_snapshot) = app.state.input_undo_stack.last() {
+                    // Save if more than 5 chars different or it's been cleared
+                    (last_snapshot.len() as i32 - text_before.len() as i32).abs() > 5 || 
+                    text_before.is_empty() || 
+                    app.state.chat_input_buffer.is_empty()
+                } else {
+                    true // Always save if no history
+                };
+                
+                if should_save_snapshot && !text_before.is_empty() {
+                    app.state.input_undo_stack.push(text_before);
+                    // Limit undo stack size
+                    if app.state.input_undo_stack.len() > 50 {
+                        app.state.input_undo_stack.remove(0);
+                    }
+                    // Clear redo stack when new changes are made
+                    app.state.input_redo_stack.clear();
+                }
+            }
 
             // Handle repository context changes
             if let Some(new_repo) = app.state.pending_repository_context_change.take() {
@@ -1007,6 +1068,33 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 } else {
                     let repo_context = if new_repo.is_empty() { None } else { Some(new_repo.clone()) };
                     app.state.set_repository_context(repo_context.clone());
+                
+                // Check if auto-create CLAUDE.md is enabled and ensure it exists
+                if let Some(repo_name) = &repo_context {
+                    let repo_manager = app.repo_panel.get_repo_manager();
+                    let repo_name_clone = repo_name.clone();
+                    let config_clone = app.config.clone();
+                    
+                    tokio::spawn(async move {
+                        // Check if auto-create is enabled
+                        let auto_create_enabled = {
+                            let config_guard = config_clone.lock().await;
+                            config_guard.ui.auto_create_claude_md
+                        };
+                        
+                        if auto_create_enabled {
+                            // Get repository config and ensure CLAUDE.md exists
+                            let repo_manager_guard = repo_manager.lock().await;
+                            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
+                                    if let Err(e) = repo_manager_guard.ensure_claude_md(repo_config).await {
+                                        log::warn!("Failed to ensure CLAUDE.md for repository '{}': {}", repo_name_clone, e);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
                 
                 // Update working directory if we have a working directory manager
                 if let Some(working_dir_manager) = &app.working_dir_manager {
@@ -2049,4 +2137,34 @@ fn build_dependency_context(enabled_dependencies: &[String]) -> String {
     }
     
     context_message
+}
+
+/// Render CLAUDE.md modal
+fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
+    // Render the modal and handle any actions
+    if let Some(action) = app.claude_md_modal.render(ctx, &app.state.current_theme) {
+        // Handle the action
+        match action {
+            crate::gui::claude_md_modal::ClaudeMdModalAction::Save => {
+                // Schedule save action to be handled asynchronously
+                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::SaveClaudeMdTemplate) {
+                    log::error!("Failed to send SaveClaudeMdTemplate event: {}", e);
+                }
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::LoadFromFile => {
+                // Trigger file dialog (would be handled by main app)
+                log::info!("CLAUDE.md modal: Load from file requested");
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::ShowHelp => {
+                // Show help information
+                log::info!("CLAUDE.md modal: Help requested");
+            },
+            crate::gui::claude_md_modal::ClaudeMdModalAction::ApplyToAllRepos => {
+                // Apply template to all repositories
+                if let Err(e) = app.app_event_sender.send(crate::gui::app::AppEvent::ApplyClaudeMdToAllRepos) {
+                    log::error!("Failed to send ApplyClaudeMdToAllRepos event: {}", e);
+                }
+            },
+        }
+    }
 } 

@@ -279,6 +279,14 @@ impl RepositoryManager {
         sagitta_search::add_orphaned_repository(&mut *config_guard, orphaned_repo).await
             .map_err(|e| anyhow::anyhow!("Failed to add orphaned repository: {}", e))?;
         
+        // Find the newly added repository config to create CLAUDE.md
+        if let Some(repo_config) = config_guard.repositories.iter().find(|r| r.name == orphaned_repo.name) {
+            // Ensure CLAUDE.md exists in the repository
+            if let Err(e) = self.ensure_claude_md(repo_config).await {
+                log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for orphaned repository '{}': {}", orphaned_repo.name, e);
+            }
+        }
+        
         // Save config
         self.save_core_config_with_guard(&*config_guard).await?;
         
@@ -351,6 +359,42 @@ impl RepositoryManager {
         log::info!("[GUI RepoManager] Obsolete initialize_sync_status_for_new_repo called for '{}'", repo_name);
     }
 
+    /// Ensure CLAUDE.md exists in the repository root directory
+    pub async fn ensure_claude_md(&self, repo_config: &RepositoryConfig) -> Result<()> {
+        let claude_md_path = repo_config.local_path.join("CLAUDE.md");
+        
+        if !claude_md_path.exists() {
+            log::info!("[GUI RepoManager] Creating CLAUDE.md for repository '{}' at {}", 
+                      repo_config.name, claude_md_path.display());
+            
+            // Try to load custom template from SagittaCodeConfig
+            let template_content = match crate::config::load_config() {
+                Ok(sagitta_code_config) => {
+                    if !sagitta_code_config.ui.claude_md_template.is_empty() {
+                        sagitta_code_config.ui.claude_md_template
+                    } else {
+                        include_str!("../../../templates/CLAUDE.md").to_string()
+                    }
+                },
+                Err(_) => {
+                    // Fallback to default template if config can't be loaded
+                    include_str!("../../../templates/CLAUDE.md").to_string()
+                }
+            };
+            
+            // Write the file
+            tokio::fs::write(&claude_md_path, template_content)
+                .await
+                .with_context(|| format!("Failed to create CLAUDE.md at {}", claude_md_path.display()))?;
+            
+            log::info!("[GUI RepoManager] Successfully created CLAUDE.md for repository '{}'", repo_config.name);
+        } else {
+            log::debug!("[GUI RepoManager] CLAUDE.md already exists for repository '{}'", repo_config.name);
+        }
+        
+        Ok(())
+    }
+
     pub async fn add_local_repository(&self, name: &str, path: &str) -> Result<()> {
         log::info!("[GUI RepoManager] Add local repo: {} at {}", name, path);
         
@@ -419,7 +463,10 @@ impl RepositoryManager {
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
                 
-
+                // Ensure CLAUDE.md exists in the repository
+                if let Err(e) = self.ensure_claude_md(&new_repo_config).await {
+                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{}': {}", name, e);
+                }
                 
                 config_guard.repositories.push(new_repo_config.clone());
                 self.save_core_config_with_guard(&*config_guard).await?;
@@ -505,7 +552,10 @@ impl RepositoryManager {
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
                 }
                 
-
+                // Ensure CLAUDE.md exists in the repository
+                if let Err(e) = self.ensure_claude_md(&new_repo_config).await {
+                    log::warn!("[GUI RepoManager] Failed to create CLAUDE.md for repository '{}': {}", name, e);
+                }
                 
                 config_guard.repositories.push(new_repo_config.clone());
                 log::info!("[GUI RepoManager] Repository added to config. Total repositories: {}", config_guard.repositories.len());

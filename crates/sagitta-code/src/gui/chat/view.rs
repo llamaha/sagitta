@@ -987,43 +987,10 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         ui.add_space(4.0);
                     }
                     
-                    // Action buttons
-                    ui.horizontal(|ui| {
-                        if tool_call.result.is_some() {
-                            // View details button for completed tools
-                            log::trace!("Rendering view details button for tool: {}", tool_call.name);
-                            let view_details_btn = ui.small_button("View details");
-                            if view_details_btn.clicked() {
-                                // Determine display title based on tool type
-                                let result = tool_call.result.as_ref().unwrap();
-                                let is_shell_result = tool_call.name.contains("shell") || tool_call.name.contains("execution") ||
-                                                     result.contains("stdout") || result.contains("stderr") ||
-                                                     result.contains("exit_code");
-                                
-                                let display_title = if is_shell_result {
-                                    format!("{} - Terminal Output", tool_call.name)
-                                } else {
-                                    format!("{} - Result", tool_call.name)
-                                };
-                                
-                                log::debug!("View details clicked for tool: {}, display_title: {}", tool_call.name, display_title);
-                                clicked_tool_result = Some((display_title, result.clone()));
-                            }
-                            
-                            // Copy button for tool results
-                            let copy_text = copy_state.get_button_text("Copy");
-                            let copy_color = copy_state.get_button_color(app_theme);
-                            
-                            if ui.add(egui::Button::new(copy_text)
-                                .small()
-                                .fill(copy_color.gamma_multiply(0.1)))
-                                .clicked() {
-                                let result = tool_call.result.as_ref().unwrap();
-                                ui.output_mut(|o| o.copied_text = result.clone());
-                                copy_state.start_copy_feedback(result.clone());
-                                log::debug!("Copied tool result to clipboard");
-                            }
-                        } else if tool_call.status == MessageStatus::Streaming {
+                    // Action buttons - only show container if we have buttons to display
+                    if tool_call.result.is_none() && tool_call.status == MessageStatus::Streaming {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
                             // Cancel button for running tools
                             if ui.small_button("Cancel").clicked() {
                                 // Find the running tool by name to get its run_id
@@ -1036,14 +1003,14 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                                     log::warn!("Could not find running tool to cancel: {}", tool_call.name);
                                 }
                             }
-                        }
-                    });
+                        });
+                    }
                     
                     // Add inline result display for completed or error tools
                 if (matches!(tool_call.status, MessageStatus::Complete | MessageStatus::Error(_))) && tool_call.result.is_some() {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
+                    if !matches!(tool_call.status, MessageStatus::Streaming) {
+                        ui.add_space(4.0);
+                    }
                     
                     let result_str = tool_call.result.as_ref().unwrap();
                     
@@ -1067,32 +1034,92 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         };
                         let formatted_result = formatter.format_tool_result_for_preview(&tool_call.name, &tool_result);
                         
-                        // Display the formatted result in a scrollable area with limited height
-                        egui::ScrollArea::vertical()
-                            .max_height(400.0)
-                            .min_scrolled_height(400.0)  // Ensure minimum height of 400px
-                            .id_source(format!("tool_result_{}", tool_call.id))
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.set_max_width(tool_card_width - 24.0);
-                                
-                                // Check if this is a shell command result for special rendering (skip for errors)
-                                if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
-                                    render_terminal_output(ui, &result_json, app_theme);
-                                } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
-                                    render_diff_output(ui, &result_json, app_theme);
-                                } else {
-                                    // Default rendering with markdown support
-                                    ui.style_mut().wrap = Some(true);
+                        // Check content size to decide if we need scroll area
+                        // For file results, check the actual content field
+                        let actual_content_size = if tool_call.name.contains("__repository_view_file") {
+                            // Specifically for repository view file, check content field
+                            result_json.get("content")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.len())
+                                .unwrap_or(0)
+                        } else if tool_call.name.contains("file") || tool_call.name.contains("view") || tool_call.name.contains("read") {
+                            // For other file operations, check various possible content fields
+                            result_json.get("content")
+                                .or_else(|| result_json.get("file_content"))
+                                .or_else(|| result_json.get("data"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.len())
+                                .unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        
+                        let content_lines = formatted_result.lines().count();
+                        // Lower thresholds for file content to ensure proper scrolling
+                        let needs_scroll = if actual_content_size > 0 {
+                            // For file content, use lower thresholds
+                            content_lines > 10 || formatted_result.len() > 500 || actual_content_size > 500
+                        } else {
+                            // For other content, use standard thresholds
+                            content_lines > 20 || formatted_result.len() > 2000
+                        };
+                        
+                        if needs_scroll {
+                            // Large content - use scroll area
+                            let min_height = if actual_content_size > 0 {
+                                // For file content, ensure a reasonable minimum height
+                                300.0f32.min(400.0)
+                            } else {
+                                // For other content, allow more flexible sizing
+                                100.0
+                            };
+                            
+                            egui::ScrollArea::vertical()
+                                .max_height(400.0)
+                                .min_scrolled_height(min_height)
+                                .id_source(format!("tool_result_{}", tool_call.id))
+                                .auto_shrink([false, false])  // Don't auto-shrink to preserve content visibility
+                                .show(ui, |ui| {
+                                    ui.set_max_width(tool_card_width - 24.0);
                                     
-                                    // Use markdown rendering for formatted results
-                                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
-                                        let mut cache = cache.borrow_mut();
-                                        let viewer = egui_commonmark::CommonMarkViewer::new();
-                                        viewer.show(ui, &mut *cache, &formatted_result);
-                                    });
-                                }
-                            });
+                                    // Check if this is a shell command result for special rendering (skip for errors)
+                                    if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
+                                        render_terminal_output(ui, &result_json, app_theme);
+                                    } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
+                                        render_diff_output(ui, &result_json, app_theme);
+                                    } else {
+                                        // Default rendering with markdown support
+                                        ui.style_mut().wrap = Some(true);
+                                        
+                                        // Use markdown rendering for formatted results
+                                        crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                            let mut cache = cache.borrow_mut();
+                                            let viewer = egui_commonmark::CommonMarkViewer::new();
+                                            viewer.show(ui, &mut *cache, &formatted_result);
+                                        });
+                                    }
+                                });
+                        } else {
+                            // Small content - render directly without scroll area
+                            ui.set_max_width(tool_card_width - 24.0);
+                            
+                            // Check if this is a shell command result for special rendering (skip for errors)
+                            if !matches!(tool_call.status, MessageStatus::Error(_)) && is_shell_command_result(&tool_call.name, &result_json) {
+                                render_terminal_output(ui, &result_json, app_theme);
+                            } else if !matches!(tool_call.status, MessageStatus::Error(_)) && is_code_change_result(&tool_call.name, &result_json) {
+                                render_diff_output(ui, &result_json, app_theme);
+                            } else {
+                                // Default rendering with markdown support
+                                ui.style_mut().wrap = Some(true);
+                                
+                                // Use markdown rendering for formatted results
+                                crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                    let mut cache = cache.borrow_mut();
+                                    let viewer = egui_commonmark::CommonMarkViewer::new();
+                                    viewer.show(ui, &mut *cache, &formatted_result);
+                                });
+                            }
+                        }
                     } else {
                         // Fallback: display raw result if JSON parsing fails
                         ui.code(result_str);
@@ -1184,54 +1211,31 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                         ui.add_space(4.0);
                     }
                     
-                    // Action buttons
-                    ui.horizontal(|ui| {
-                        match &tool_card.status {
-                            ToolCardStatus::Completed { success: true } => {
-                            if tool_card.result.is_some() {
-                                // View details button
-                                if ui.small_button("View details").clicked() {
-                                    let result_json = tool_card.result.as_ref().unwrap();
-                                    let friendly_name = get_human_friendly_tool_name(&tool_card.tool_name);
-                                    let display_title = format!("{} - Result", friendly_name);
-                                    clicked_tool_result = Some((display_title, serde_json::to_string_pretty(result_json).unwrap_or_else(|_| result_json.to_string())));
-                                }
-                                
-                                // Copy button
-                                let copy_text = copy_state.get_button_text("Copy");
-                                let copy_color = copy_state.get_button_color(app_theme);
-                                
-                                if ui.add(egui::Button::new(copy_text)
-                                    .small()
-                                    .fill(copy_color.gamma_multiply(0.1)))
-                                    .clicked() {
-                                    let result_text = serde_json::to_string_pretty(tool_card.result.as_ref().unwrap())
-                                        .unwrap_or_else(|_| tool_card.result.as_ref().unwrap().to_string());
-                                    ui.output_mut(|o| o.copied_text = result_text.clone());
-                                    copy_state.start_copy_feedback(result_text);
-                                }
-                            }
-                        }
+                    // Action buttons - only show container if we have something to display
+                    match &tool_card.status {
                         ToolCardStatus::Running => {
-                            // Cancel button for running tools
-                            if ui.small_button("Cancel").clicked() {
-                                clicked_tool_result = Some(("__CANCEL_TOOL__".to_string(), tool_card.run_id.to_string()));
-                            }
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                // Cancel button for running tools
+                                if ui.small_button("Cancel").clicked() {
+                                    clicked_tool_result = Some(("__CANCEL_TOOL__".to_string(), tool_card.run_id.to_string()));
+                                }
+                            });
                         }
                         ToolCardStatus::Failed { error } => {
-                            ui.label(RichText::new(&format!("Error: {}", error))
-                                .color(app_theme.error_color())
-                                .size(11.0));
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(&format!("Error: {}", error))
+                                    .color(app_theme.error_color())
+                                    .size(11.0));
+                            });
                         }
                         _ => {}
                     }
-                });
             
             // Add inline result display for completed tools
             if let ToolCardStatus::Completed { success: true } = &tool_card.status {
                 if let Some(result) = &tool_card.result {
-                    ui.add_space(8.0);
-                    ui.separator();
                     ui.add_space(4.0);
                     
                     // Use ToolResultFormatter to format the result
@@ -1245,32 +1249,67 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     
                     let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
                     
-                    // Display the formatted result in a scrollable area with limited height
-                    egui::ScrollArea::vertical()
-                        .max_height(400.0)
-                        .min_scrolled_height(400.0)  // Ensure minimum height of 400px
-                        .id_source(format!("tool_result_{}", tool_card.run_id))
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.set_max_width(tool_card_width - 24.0);
-                            
-                            // Check if this is a shell command result for special rendering
-                            if is_shell_command_result(&tool_card.tool_name, result) {
-                                render_terminal_output(ui, result, app_theme);
-                            } else if is_code_change_result(&tool_card.tool_name, result) {
-                                render_diff_output(ui, result, app_theme);
-                            } else {
-                                // Default rendering with markdown support
-                                ui.style_mut().wrap = Some(true);
+                    // Check content size to decide if we need scroll area
+                    // For file results, check the actual content field
+                    let actual_content_size = if tool_card.tool_name.contains("file") || tool_card.tool_name.contains("view") {
+                        result.get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.len())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    
+                    let content_lines = formatted_result.lines().count();
+                    let needs_scroll = content_lines > 20 || formatted_result.len() > 2000 || actual_content_size > 1000;
+                    
+                    if needs_scroll {
+                        // Large content - use scroll area
+                        egui::ScrollArea::vertical()
+                            .max_height(400.0)  // Reduced from 600 for better UI
+                            .id_source(format!("tool_result_{}", tool_card.run_id))
+                            .auto_shrink([false, true])  // Auto-shrink vertically
+                            .show(ui, |ui| {
+                                ui.set_max_width(tool_card_width - 24.0);
                                 
-                                // Use markdown rendering for formatted results
-                                crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
-                                    let mut cache = cache.borrow_mut();
-                                    let viewer = egui_commonmark::CommonMarkViewer::new();
-                                    viewer.show(ui, &mut *cache, &formatted_result);
-                                });
-                            }
-                        });
+                                // Check if this is a shell command result for special rendering
+                                if is_shell_command_result(&tool_card.tool_name, result) {
+                                    render_terminal_output(ui, result, app_theme);
+                                } else if is_code_change_result(&tool_card.tool_name, result) {
+                                    render_diff_output(ui, result, app_theme);
+                                } else {
+                                    // Default rendering with markdown support
+                                    ui.style_mut().wrap = Some(true);
+                                    
+                                    // Use markdown rendering for formatted results
+                                    crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                        let mut cache = cache.borrow_mut();
+                                        let viewer = egui_commonmark::CommonMarkViewer::new();
+                                        viewer.show(ui, &mut *cache, &formatted_result);
+                                    });
+                                }
+                            });
+                    } else {
+                        // Small content - render directly without scroll area
+                        ui.set_max_width(tool_card_width - 24.0);
+                        
+                        // Check if this is a shell command result for special rendering
+                        if is_shell_command_result(&tool_card.tool_name, result) {
+                            render_terminal_output(ui, result, app_theme);
+                        } else if is_code_change_result(&tool_card.tool_name, result) {
+                            render_diff_output(ui, result, app_theme);
+                        } else {
+                            // Default rendering with markdown support
+                            ui.style_mut().wrap = Some(true);
+                            
+                            // Use markdown rendering for formatted results
+                            crate::gui::chat::view::COMMONMARK_CACHE.with(|cache| {
+                                let mut cache = cache.borrow_mut();
+                                let viewer = egui_commonmark::CommonMarkViewer::new();
+                                viewer.show(ui, &mut *cache, &formatted_result);
+                            });
+                        }
+                    }
                 }
             }
         });

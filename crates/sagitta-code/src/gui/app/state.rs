@@ -93,6 +93,11 @@ pub struct AppState {
     
     // Input focus management
     pub should_focus_input: bool,
+    
+    // Undo/redo for chat input
+    pub input_undo_stack: Vec<String>,
+    pub input_redo_stack: Vec<String>,
+    pub last_input_snapshot: String,
 }
 
 impl AppState {
@@ -169,6 +174,11 @@ impl AppState {
             
             // Input focus management
             should_focus_input: true, // Focus input on startup
+            
+            // Undo/redo for chat input
+            input_undo_stack: Vec::new(),
+            input_redo_stack: Vec::new(),
+            last_input_snapshot: String::new(),
         }
     }
 

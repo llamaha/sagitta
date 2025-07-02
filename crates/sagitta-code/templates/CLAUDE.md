@@ -29,6 +29,11 @@ This approach ensures you understand the actual implementation rather than outda
 
 ## Version Control Workflow
 
+Before making changes:
+
+1. **Check out a feature branch** if you haven't already done so (avoid working directly on main/master)
+2. Use descriptive branch names that reflect the work being done
+
 After making changes:
 
 1. **Create a git commit** with a concise one liner commit message that reflects the changes
