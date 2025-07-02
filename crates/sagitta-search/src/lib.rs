@@ -231,7 +231,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: None,
                 }
             ],
             ..Default::default()
@@ -360,7 +359,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: None,
                 }
             ],
             ..Default::default()
@@ -454,7 +452,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: None,
                 },
                 RepositoryConfig {
                     name: "missing-repo".to_string(),
@@ -470,7 +467,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: None,
                 }
             ],
             ..Default::default()
@@ -525,7 +521,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: true, // This makes it non-reclonable
                     target_ref: None,
-                    tenant_id: None,
                 }
             ],
             ..Default::default()
@@ -691,7 +686,6 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
         // max_sessions removed - using automatic session management
         session_timeout_seconds: app_config.embedding.session_timeout_seconds,
         enable_session_cleanup: app_config.embedding.enable_session_cleanup,
-        tenant_id: app_config.tenant_id.clone(),
         expected_dimension: Some(app_config.performance.vector_dimension as usize),
         embedding_batch_size: Some(app_config.embedding.embedding_batch_size),
         ..Default::default()
@@ -861,8 +855,6 @@ pub struct EnhancedRepositoryInfo {
     pub added_as_local_path: bool,
     /// Target ref if specified
     pub target_ref: Option<String>,
-    /// Tenant ID
-    pub tenant_id: Option<String>,
     /// Last sync timestamp if available
     pub last_sync_time: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -1118,7 +1110,6 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
         file_extensions,
         added_as_local_path: repo_config.added_as_local_path,
         target_ref: repo_config.target_ref.clone(),
-        tenant_id: repo_config.tenant_id.clone(),
         last_sync_time: None, // TODO: Could be extracted from metadata
     })
 }
@@ -1533,7 +1524,6 @@ pub async fn add_orphaned_repository(
         indexed_languages: None,
         added_as_local_path: true, // Mark as added from local path
         target_ref: None,
-        tenant_id: config.tenant_id.clone(),
     };
     
     // Check if repository with same name already exists

@@ -47,62 +47,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             data: None,
         })?;
 
-    // Tenant isolation check: Determine acting_tenant_id
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        info!(tenant_source = "AuthenticatedUser", tenant_id = %auth_user.0.tenant_id, repo_name = %params.repository_name);
-        Some(auth_user.0.tenant_id.clone())
-    } else if let Some(default_tenant_id) = config_read_guard.tenant_id.as_ref() {
-        info!(tenant_source = "ServerConfigDefault", tenant_id = %default_tenant_id, repo_name = %params.repository_name);
-        Some(default_tenant_id.clone())
-    } else {
-        info!(tenant_source = "None", repo_name = %params.repository_name, "No acting tenant ID determined (no auth, no server default) for query.");
-        None
-    };
-
-    // Perform tenant check and get the tenant_id to use for the collection
-    let tenant_id_for_collection_str: String = {
-        #[cfg(feature = "multi_tenant")]
-        {
-            match (&acting_tenant_id, &repo_config.tenant_id) {
-                (Some(act_tid), Some(repo_tid)) => {
-                    if act_tid == repo_tid {
-                        info!(repo_name = %params.repository_name, acting_tenant_id = %act_tid, "Tenant ID match successful for query.");
-                        repo_tid.clone() // Use this tenant ID for the collection
-                    } else {
-                        warn!(
-                            acting_tenant_id = %act_tid,
-                            repo_tenant_id = %repo_tid,
-                            repo_name = %params.repository_name,
-                            "Access denied: Acting tenant ID does not match repository's tenant ID for query."
-                        );
-                        return Err(ErrorObject {
-                            code: error_codes::ACCESS_DENIED,
-                            message: "Access denied: Tenant ID mismatch for query operation.".to_string(),
-                            data: None,
-                        });
-                    }
-                }
-                _ => { // All other cases: (None, Some), (Some, None), (None, None) -> Deny
-                    warn!(
-                        acting_tenant_id = ?acting_tenant_id,
-                        repo_tenant_id = ?repo_config.tenant_id,
-                        repo_name = %params.repository_name,
-                        "Access denied: Tenant ID mismatch or missing for query. Both acting context and repository must have a matching, defined tenant ID."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Query requires matching and defined tenant IDs for both context and repository.".to_string(),
-                        data: None,
-                    });
-                }
-            }
-        }
-        #[cfg(not(feature = "multi_tenant"))]
-        {
-            info!(repo_name = %params.repository_name, "Multi-tenancy disabled, using default tenant ID for query");
-            repo_config.tenant_id.as_ref().unwrap_or(&"default".to_string()).clone()
-        }
-    };
+    info!(repo_name = %params.repository_name, "Processing query request");
 
     let branch_name = params.branch_name.as_ref()
         .or(repo_config.active_branch.as_ref())
@@ -113,7 +58,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         })?;
 
     // Use branch-aware collection naming to match how collections are created during add/sync
-    let collection_name = get_branch_aware_collection_name(&tenant_id_for_collection_str, &params.repository_name, branch_name, &config_read_guard);
+    let collection_name = get_branch_aware_collection_name(&params.repository_name, branch_name, &config_read_guard);
 
     info!(
         collection=%collection_name,

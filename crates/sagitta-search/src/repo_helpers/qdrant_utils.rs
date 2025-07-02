@@ -15,8 +15,8 @@ use sha2::{Sha256, Digest};
 
 /// Generates the Qdrant collection name for a given repository name based on the config prefix.
 /// This is the legacy function that doesn't include branch information.
-pub fn get_collection_name(tenant_id: &str, repo_name: &str, config: &AppConfig) -> String {
-    format!("{}{}_{}", config.performance.collection_name_prefix, tenant_id, repo_name)
+pub fn get_collection_name(repo_name: &str, config: &AppConfig) -> String {
+    format!("{}{}", config.performance.collection_name_prefix, repo_name)
 }
 
 /// Generates a branch-aware Qdrant collection name that includes branch/ref information.
@@ -25,7 +25,6 @@ pub fn get_collection_name(tenant_id: &str, repo_name: &str, config: &AppConfig)
 /// Format: {prefix}{tenant_id}_{repo_name}_{branch_hash}
 /// Where branch_hash is a short hash of the branch/ref name to keep collection names manageable.
 pub fn get_branch_aware_collection_name(
-    tenant_id: &str, 
     repo_name: &str, 
     branch_or_ref: &str, 
     config: &AppConfig
@@ -37,9 +36,8 @@ pub fn get_branch_aware_collection_name(
     let hash = hasher.finalize();
     let branch_hash = format!("{:x}", hash)[..8].to_string(); // Use first 8 chars of hash
     
-    format!("{}{}_{}_br_{}", 
+    format!("{}{}_br_{}", 
         config.performance.collection_name_prefix, 
-        tenant_id, 
         repo_name, 
         branch_hash
     )
@@ -57,7 +55,7 @@ pub async fn collection_exists_for_branch<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+    let collection_name = get_branch_aware_collection_name(repo_name, branch_or_ref, config);
     client.collection_exists(collection_name).await
         .map_err(|e| Error::Other(format!("Failed to check collection existence: {}", e)))
 }
@@ -76,7 +74,6 @@ pub struct BranchSyncMetadata {
 /// and extracting metadata from stored points.
 pub async fn get_branch_sync_metadata<C>(
     client: &C,
-    tenant_id: &str,
     repo_name: &str,
     branch_or_ref: &str,
     config: &AppConfig,
@@ -84,7 +81,7 @@ pub async fn get_branch_sync_metadata<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+    let collection_name = get_branch_aware_collection_name(repo_name, branch_or_ref, config);
     
     // Check if collection exists
     let exists = client.collection_exists(collection_name.clone()).await

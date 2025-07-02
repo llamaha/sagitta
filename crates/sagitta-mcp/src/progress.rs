@@ -3,6 +3,18 @@ use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter, SyncStag
 use sagitta_search::sync_progress::{AddProgress, AddProgressReporter, RepoAddStage};
 use log;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+static PENDING_MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn take_pending_messages() -> Option<Vec<String>> {
+    let mut messages = PENDING_MESSAGES.lock().unwrap();
+    if messages.is_empty() {
+        None
+    } else {
+        Some(std::mem::take(&mut *messages))
+    }
+}
 
 pub struct LoggingProgressReporter;
 

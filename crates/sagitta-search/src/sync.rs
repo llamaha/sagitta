@@ -366,14 +366,11 @@ where
     info!("Files to index/update: {}, Files to delete: {}", files_to_index_count, files_to_delete_count);
     
     // --- Qdrant Operations ---
-    let tenant_id = repo_config.tenant_id.as_deref()
-        .ok_or_else(|| anyhow!("Tenant ID missing in RepositoryConfig for repository '{}' during sync operation", repo_name))?;
     
     let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
     
     // Use branch-aware collection naming for better sync management
     let collection_name = repo_helpers::get_branch_aware_collection_name(
-        tenant_id, 
         repo_name, 
         current_sync_branch_or_ref, 
         app_config
@@ -384,7 +381,6 @@ where
     // Check if we already have sync metadata for this branch/ref
     let sync_metadata = repo_helpers::get_branch_sync_metadata(
         client.as_ref(),
-        tenant_id,
         repo_name,
         current_sync_branch_or_ref,
         app_config,
@@ -782,8 +778,8 @@ mod tests {
         let config = create_test_app_config();
         
         // Test that different branches get different collection names
-        let main_collection = get_branch_aware_collection_name("tenant1", "my-repo", "main", &config);
-        let dev_collection = get_branch_aware_collection_name("tenant1", "my-repo", "dev", &config);
+        let main_collection = get_branch_aware_collection_name("my-repo", "main", &config);
+        let dev_collection = get_branch_aware_collection_name("my-repo", "dev", &config);
         
         // Verify they are different
         assert_ne!(main_collection, dev_collection);

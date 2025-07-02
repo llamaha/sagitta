@@ -52,9 +52,6 @@ pub struct RepositoryConfig {
     /// If set, `repo sync` will index this specific ref statically and will *not* pull updates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_ref: Option<String>,
-    /// ID of the tenant this repository belongs to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tenant_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -163,43 +160,6 @@ fn default_embedding_batch_size() -> usize {
     128 // Match sagitta-embed default
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-/// Configuration for OAuth2 authentication
-pub struct OAuthConfig {
-    /// OAuth client ID
-    pub client_id: String,
-    /// OAuth client secret
-    pub client_secret: String,
-    /// OAuth authorization endpoint
-    pub auth_url: String,
-    /// OAuth token endpoint
-    pub token_url: String,
-    /// OAuth user info endpoint
-    pub user_info_url: String,
-    /// Redirect URI for OAuth flow
-    pub redirect_uri: String,
-    /// Optional OAuth introspection endpoint URL for token validation
-    #[serde(skip_serializing_if = "Option::is_none")] // Keep field optional in TOML
-    pub introspection_url: Option<String>,
-    /// Optional scopes to request
-    #[serde(default)]
-    pub scopes: Vec<String>,
-}
-
-impl Default for OAuthConfig {
-    fn default() -> Self {
-        Self {
-            client_id: String::new(),
-            client_secret: String::new(),
-            auth_url: String::new(),
-            token_url: String::new(),
-            user_info_url: String::new(),
-            redirect_uri: String::new(),
-            introspection_url: None, // Default to None
-            scopes: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
-        }
-    }
-}
 
 /// Main application configuration structure.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -235,26 +195,6 @@ pub struct AppConfig {
     /// Embedding engine configuration settings
     #[serde(default)]
     pub embedding: EmbeddingEngineConfig,
-    /// Optional OAuth configuration
-    #[serde(default)]
-    pub oauth: Option<OAuthConfig>,
-
-    // TLS Configuration for HTTP Server
-    #[serde(default)]
-    pub tls_enable: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tls_cert_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tls_key_path: Option<String>,
-
-    // CORS Configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cors_allowed_origins: Option<Vec<String>>, // e.g., ["http://localhost:3000", "https://app.example.com"]
-    #[serde(default = "default_cors_allow_credentials")]
-    pub cors_allow_credentials: bool,
-    /// Optional tenant ID for this configuration (used as default for CLI/server operations)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tenant_id: Option<String>,
 }
 
 /// Configuration settings related to indexing.
@@ -277,13 +217,6 @@ impl Default for AppConfig {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None, // Default to None (no CORS headers or restrictive default by tower-http)
-            cors_allow_credentials: default_cors_allow_credentials(),
-            tenant_id: None,
         }
     }
 }
@@ -556,9 +489,6 @@ pub fn get_managed_repos_from_config(config: &AppConfig) -> ManagedRepositories 
     }
 }
 
-fn default_cors_allow_credentials() -> bool {
-    true // Common default for development, might be stricter in production
-}
 
 #[cfg(test)]
 mod tests {
@@ -607,7 +537,6 @@ mod tests {
             indexed_languages: Some(vec!["rs".to_string()]),
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: None,
         };
 
         let repo2_path = data_path.join("repo2");
@@ -625,7 +554,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: None,
         };
 
         let config = AppConfig {
@@ -641,13 +569,6 @@ mod tests {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: default_cors_allow_credentials(),
-            tenant_id: None,
         };
 
         // Save and load
@@ -703,13 +624,6 @@ mod tests {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: default_cors_allow_credentials(),
-            tenant_id: None,
         };
         
         // Should use the custom path from config
@@ -740,7 +654,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: None,
         };
         assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
     }
@@ -1091,18 +1004,6 @@ mod tests {
                 "vector_dimension should be serialized when it has a non-default value. Serialized: {}", serialized);
     }
 
-    #[test]
-    fn test_oauth_config_default() {
-        let default_oauth = OAuthConfig::default();
-        assert!(default_oauth.client_id.is_empty());
-        assert!(default_oauth.client_secret.is_empty());
-        assert!(default_oauth.auth_url.is_empty());
-        assert!(default_oauth.token_url.is_empty());
-        assert!(default_oauth.user_info_url.is_empty());
-        assert!(default_oauth.redirect_uri.is_empty());
-        assert_eq!(default_oauth.introspection_url, None);
-        assert_eq!(default_oauth.scopes, vec!["openid".to_string(), "profile".to_string(), "email".to_string()]);
-    }
 
     #[test]
     fn test_config_validation_mutually_exclusive() {

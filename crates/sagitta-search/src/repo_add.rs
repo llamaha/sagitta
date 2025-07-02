@@ -113,7 +113,6 @@ pub async fn handle_repo_add<C>(
     embedding_dim: u64,
     client: Arc<C>,
     config: &AppConfig,
-    tenant_id: &str,
     progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 ) -> Result<RepositoryConfig, AddRepoError>
 where
@@ -123,7 +122,6 @@ where
     info!("[handle_repo_add] Args: {:?}", args);
     info!("[handle_repo_add] Repo base path: {}", repo_base_path_for_add.display());
     info!("[handle_repo_add] Embedding dim: {}", embedding_dim);
-    info!("[handle_repo_add] Tenant ID: {}", tenant_id);
     
     // Validate basic arguments
     info!("[handle_repo_add] Validating arguments...");
@@ -202,7 +200,6 @@ where
     info!("[handle_repo_add]   ssh_passphrase: {:?}", args.ssh_passphrase.as_deref().map(|_| "***"));
     info!("[handle_repo_add]   repo_base_path: {}", repo_base_path.display());
     info!("[handle_repo_add]   embedding_dim: {}", embedding_dim);
-    info!("[handle_repo_add]   tenant_id: {}", tenant_id);
 
     // Call prepare_repository for both new clones and existing local paths.
     // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
@@ -219,7 +216,6 @@ where
         client.clone(),
         embedding_dim,
         config,      // Pass AppConfig for collection_name_prefix and other settings
-        tenant_id,   // Pass tenant_id
         progress_reporter,
     ).await.map_err(|e| {
         error!("[handle_repo_add] prepare_repository failed: {}", e);
@@ -317,7 +313,6 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: None,
         }
     }
 
@@ -356,7 +351,6 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         };
         
         // Use branch-aware collection naming - the default branch will be "main" or "master"
@@ -366,7 +360,6 @@ mod tests {
         let branch_name = head.shorthand().unwrap_or("main");
         
         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
-            "test_tenant", // Hardcoded tenant_id for this test
             repo_name_str,
             branch_name,
             &config
@@ -394,7 +387,6 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
-            "test_tenant", // Pass hardcoded tenant_id for this test
             None, // No progress reporter for test
         )
         .await;
@@ -451,7 +443,6 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         };
         
         // Use branch-aware collection naming - determine the actual branch name
@@ -460,7 +451,6 @@ mod tests {
         let branch_name = head.shorthand().unwrap_or("main");
         
         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
-            "test_tenant", // Hardcoded tenant_id for this test
             repo_name_str,
             branch_name,
             &config
@@ -488,7 +478,6 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
-            "test_tenant", // Pass hardcoded tenant_id for this test
             None, // No progress reporter for test
         )
         .await;
@@ -551,7 +540,6 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         };
 
         let repo_name_str = "test_cloned_repo";
@@ -562,7 +550,6 @@ mod tests {
         let branch_name = head.shorthand().unwrap_or("main");
         
         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
-            "test_tenant", // Hardcoded tenant_id for this test
             repo_name_str,
             branch_name,
             &config
@@ -594,7 +581,6 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
-            "test_tenant", // Pass hardcoded tenant_id for this test
             None, // No progress reporter for test
         )
         .await;
@@ -754,7 +740,6 @@ mod tests {
             tls_key_path: None,
             cors_allowed_origins: None,
             cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         };
 
         // Set up mock expectations
