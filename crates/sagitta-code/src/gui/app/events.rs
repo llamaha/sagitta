@@ -38,8 +38,12 @@ pub enum AppEvent {
         conversation_id: uuid::Uuid,
         new_title: String,
     },
+    UpdateConversationTitle {
+        conversation_id: uuid::Uuid,
+    },
     SaveClaudeMdTemplate,
     ApplyClaudeMdToAllRepos,
+    CreateNewConversation,
     // Add other app-level UI events here if needed
 }
 
@@ -297,6 +301,20 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     log::debug!("SagittaCodeApp: Tool stream event for run {}: {:?}", run_id, event);
                     handle_tool_stream(app, run_id, event);
                 },
+                AgentEvent::ConversationCompleted { conversation_id } => {
+                    log::info!("SagittaCodeApp: Conversation completed: {}", conversation_id);
+                    handle_conversation_completed(app, conversation_id);
+                },
+                AgentEvent::ConversationSummarizing { conversation_id } => {
+                    log::info!("SagittaCodeApp: Conversation summarizing: {}", conversation_id);
+                    // Could update UI to show summarizing status
+                },
+                AgentEvent::ConversationUpdated { conversation_id, old_status, new_status } => {
+                    log::info!("SagittaCodeApp: Conversation {} status updated from {:?} to {:?}", 
+                        conversation_id, old_status, new_status);
+                    // Refresh conversation list to show updated status
+                    force_refresh_conversation_data(app);
+                },
                 _ => {
                     // Optionally log unhandled events: log::debug!("Unhandled AgentEvent: {:?}", event);
                 }
@@ -377,6 +395,14 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::ApplyClaudeMdToAllRepos => {
                 log::info!("Received ApplyClaudeMdToAllRepos event");
                 handle_apply_claude_md_to_all_repos(app);
+            },
+            AppEvent::UpdateConversationTitle { conversation_id } => {
+                log::info!("Received UpdateConversationTitle event for conversation {}", conversation_id);
+                handle_update_conversation_title(app, conversation_id);
+            },
+            AppEvent::CreateNewConversation => {
+                log::info!("Received CreateNewConversation event");
+                handle_create_new_conversation(app);
             },
         }
     }
@@ -553,7 +579,13 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
 
 /// Handle agent state changes
 pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
-    // Update the current agent state first
+    // Check if we're transitioning from a working state to Idle
+    let was_working = matches!(
+        &app.state.current_agent_state,
+        AgentState::Thinking { .. } | AgentState::Responding { .. } | AgentState::ExecutingTool { .. }
+    );
+    
+    // Update the current agent state
     app.state.current_agent_state = state.clone();
     
     // Add state changes to events panel
@@ -568,6 +600,15 @@ pub fn handle_state_change(app: &mut SagittaCodeApp, state: AgentState) {
                 app.state.is_in_loop = false;
                 app.state.loop_break_requested = false;
             }
+            
+            // If we transitioned from a working state to Idle, the conversation is complete
+            if was_working {
+                if let Some(conversation_id) = app.state.current_conversation_id {
+                    log::info!("Agent completed work, triggering ConversationCompleted event for conversation {}", conversation_id);
+                    handle_conversation_completed(app, conversation_id);
+                }
+            }
+            
             ("Agent is Idle".to_string(), SystemEventType::StateChange)
         },
         AgentState::Thinking { message: _ } => {
@@ -1287,6 +1328,39 @@ pub fn handle_tool_cancellation(app: &mut SagittaCodeApp, run_id: ToolRunId) {
     // UI will update on next frame automatically
 }
 
+/// Handle conversation completed event - trigger title update
+pub fn handle_conversation_completed(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
+    log::info!("Handling conversation completed for {}", conversation_id);
+    
+    // Trigger title update using the title updater
+    if let Some(title_updater) = &app.title_updater {
+        let updater_clone = title_updater.clone();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            log::info!("Spawning title update task for conversation {}", conversation_id);
+            match updater_clone.maybe_update_title(conversation_id).await {
+                Ok(_) => {
+                    log::info!("Successfully updated title for conversation {}", conversation_id);
+                    
+                    // Trigger a refresh of the conversation list to show the new title
+                    if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
+                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to update title for conversation {}: {}", conversation_id, e);
+                }
+            }
+        });
+    } else {
+        log::warn!("No title updater available to update conversation title");
+    }
+    
+    // Also refresh conversation data to update the status in the UI
+    force_refresh_conversation_data(app);
+}
+
 /// Handle conversation rename request
 pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid, new_title: String) {
     // Update the conversation title in the service
@@ -1327,6 +1401,68 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
     if app.state.current_conversation_id == Some(conversation_id) {
         app.state.current_conversation_title = Some(new_title);
     }
+}
+
+/// Handle manual conversation title update request
+pub fn handle_update_conversation_title(app: &mut SagittaCodeApp, conversation_id: uuid::Uuid) {
+    log::info!("Handling manual title update request for conversation {}", conversation_id);
+    
+    // Use the title updater to regenerate the title
+    if let Some(title_updater) = &app.title_updater {
+        let updater_clone = title_updater.clone();
+        let app_event_sender = app.app_event_sender.clone();
+        
+        tokio::spawn(async move {
+            log::info!("Spawning manual title update task for conversation {}", conversation_id);
+            match updater_clone.maybe_update_title(conversation_id).await {
+                Ok(_) => {
+                    log::info!("Successfully updated title for conversation {} (manual request)", conversation_id);
+                    
+                    // Trigger a refresh of the conversation list to show the new title
+                    if let Err(e) = app_event_sender.send(AppEvent::RefreshConversationList) {
+                        log::error!("Failed to send RefreshConversationList event: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to update title for conversation {} (manual request): {}", conversation_id, e);
+                }
+            }
+        });
+    } else {
+        log::warn!("No title updater available to update conversation title");
+    }
+}
+
+/// Handle create new conversation event
+pub fn handle_create_new_conversation(app: &mut SagittaCodeApp) {
+    log::info!("Creating new conversation - clearing current state");
+    
+    // Clear current conversation state
+    app.state.current_conversation_id = None;
+    app.state.current_conversation_title = None;
+    app.state.messages.clear();
+    
+    // Clear chat manager messages
+    app.chat_manager.clear_all_messages();
+    
+    // Clear agent state
+    app.state.is_waiting_for_response = false;
+    app.state.is_thinking = false;
+    app.state.is_responding = false;
+    app.state.is_executing_tool = false;
+    app.state.current_response_id = None;
+    app.state.tool_results.clear();
+    app.state.pending_tool_calls.clear();
+    
+    // Update sidebar selection
+    app.conversation_sidebar.select_conversation(None);
+    
+    // Force a UI refresh
+    if let Err(e) = app.app_event_sender.send(AppEvent::RefreshConversationList) {
+        log::error!("Failed to send RefreshConversationList event after creating new conversation: {}", e);
+    }
+    
+    log::info!("New conversation state prepared - ready for first message");
 }
 
 #[cfg(test)]
@@ -1402,6 +1538,10 @@ mod tests {
             AppEvent::CancelTool(_) => assert!(true),
             AppEvent::RefreshRepositoryList => assert!(true),
             AppEvent::RenameConversation { .. } => assert!(true),
+            AppEvent::SaveClaudeMdTemplate => assert!(true),
+            AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
+            AppEvent::UpdateConversationTitle { .. } => assert!(true),
+            AppEvent::CreateNewConversation => assert!(true),
         }
         
         // Test the other variant too
@@ -1416,6 +1556,10 @@ mod tests {
             AppEvent::CancelTool(_) => assert!(true),
             AppEvent::RefreshRepositoryList => assert!(true),
             AppEvent::RenameConversation { .. } => assert!(true),
+            AppEvent::SaveClaudeMdTemplate => assert!(true),
+            AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
+            AppEvent::UpdateConversationTitle { .. } => assert!(true),
+            AppEvent::CreateNewConversation => assert!(true),
         }
     }
 

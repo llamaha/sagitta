@@ -435,6 +435,10 @@ impl ConversationSidebar {
                 self.edit_buffer = item.summary.title.clone();
                 ui.close_menu();
             }
+            if ui.button("🔄 Update Title").on_hover_text("Regenerate title based on conversation content").clicked() {
+                self.pending_action = Some(SidebarAction::UpdateConversationTitle(item.summary.id));
+                ui.close_menu();
+            }
             if ui.button("🗑️ Delete").clicked() {
                 self.pending_action = Some(SidebarAction::RequestDeleteConversation(item.summary.id));
                 ui.close_menu();
@@ -476,9 +480,17 @@ impl ConversationSidebar {
                     }
                 }
                 SidebarAction::CreateNewConversation => {
+                    log::info!("Creating new conversation");
+                    
                     // Clear current conversation to start fresh
                     app_state.current_conversation_id = None;
                     app_state.messages.clear();
+                    self.selected_conversation = None;
+                    
+                    // Send event to notify the app about the new conversation
+                    if let Err(e) = app_event_sender.send(AppEvent::CreateNewConversation) {
+                        log::error!("Failed to send CreateNewConversation event: {}", e);
+                    }
                     
                     // The next message will automatically create a new conversation
                     log::info!("Ready to create new conversation on next message");
@@ -500,6 +512,12 @@ impl ConversationSidebar {
                 }
                 SidebarAction::SetWorkspace(id) => {
                     let _ = app_event_sender.send(AppEvent::RefreshConversationList);
+                }
+                SidebarAction::UpdateConversationTitle(id) => {
+                    log::info!("Sidebar: Requesting title update for conversation {}", id);
+                    if let Err(e) = app_event_sender.send(AppEvent::UpdateConversationTitle { conversation_id: id }) {
+                        log::error!("Failed to send UpdateConversationTitle event: {}", e);
+                    }
                 }
                 _ => {}
             }

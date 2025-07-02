@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use uuid::Uuid;
 
 use crate::agent::conversation::types::ConversationSummary;
@@ -238,7 +238,8 @@ impl ConversationSidebar {
     
     /// Organize conversations by tags
     fn organize_by_tags(&self, conversations: &[ConversationSummary]) -> Result<Vec<ConversationGroup>> {
-        let mut tag_groups: HashMap<String, Vec<ConversationSummary>> = HashMap::new();
+        // Use BTreeMap for stable ordering of tags
+        let mut tag_groups: BTreeMap<String, Vec<ConversationSummary>> = BTreeMap::new();
         let mut untagged = Vec::new();
         
         for conv in conversations {

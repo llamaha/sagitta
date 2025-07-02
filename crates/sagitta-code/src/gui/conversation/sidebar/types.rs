@@ -34,6 +34,8 @@ pub enum SidebarAction {
     JumpToCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
     DeleteCheckpoint(Uuid, Uuid), // conversation_id, checkpoint_id
     ShowCheckpointDetails(Uuid, Uuid), // conversation_id, checkpoint_id
+    // Title update action
+    UpdateConversationTitle(Uuid), // conversation_id
 }
 
 // --- Display types for conversation items ---

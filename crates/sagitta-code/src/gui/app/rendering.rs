@@ -159,6 +159,12 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
 
 /// Handle keyboard shortcuts
 fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
+    if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.ctrl) {
+        // Ctrl+N: Create new conversation
+        if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
+            log::error!("Failed to send CreateNewConversation event: {}", e);
+        }
+    }
     if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.ctrl) {
         // Ctrl+R: Toggle repository panel
         app.panels.toggle_panel(ActivePanel::Repository);
@@ -892,6 +898,18 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
                 
                 ui.label(egui::RichText::new("General:").color(theme.accent_color()).strong());
+                
+                // New Conversation
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + N: New Conversation").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("New").color(theme.button_text_color())).clicked() {
+                            if let Err(e) = app.app_event_sender.send(AppEvent::CreateNewConversation) {
+                                log::error!("Failed to send CreateNewConversation event: {}", e);
+                            }
+                        }
+                    });
+                });
                 
                 // F1 Help
                 ui.horizontal(|ui| {
