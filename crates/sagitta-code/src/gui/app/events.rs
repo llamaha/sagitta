@@ -38,6 +38,8 @@ pub enum AppEvent {
         conversation_id: uuid::Uuid,
         new_title: String,
     },
+    SaveClaudeMdTemplate,
+    ApplyClaudeMdToAllRepos,
     // Add other app-level UI events here if needed
 }
 
@@ -367,6 +369,14 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::RenameConversation { conversation_id, new_title } => {
                 log::info!("Received RenameConversation event for conversation {} with new title: {}", conversation_id, new_title);
                 handle_rename_conversation(app, conversation_id, new_title);
+            },
+            AppEvent::SaveClaudeMdTemplate => {
+                log::info!("Received SaveClaudeMdTemplate event");
+                handle_save_claude_md_template(app);
+            },
+            AppEvent::ApplyClaudeMdToAllRepos => {
+                log::info!("Received ApplyClaudeMdToAllRepos event");
+                handle_apply_claude_md_to_all_repos(app);
             },
         }
     }
@@ -2182,4 +2192,72 @@ pub fn format_tool_arguments_for_display(tool_name: &str, arguments: &str) -> St
             }
         }
     }
+}
+
+/// Handle saving the CLAUDE.md template
+fn handle_save_claude_md_template(app: &mut SagittaCodeApp) {
+    let config_clone = app.config.clone();
+    let template_content = app.claude_md_modal.get_template_content().to_string();
+    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
+    
+    let rt = tokio::runtime::Handle::current();
+    rt.spawn(async move {
+        let mut config_guard = config_clone.lock().await;
+        config_guard.ui.claude_md_template = template_content;
+        config_guard.ui.auto_create_claude_md = auto_create_enabled;
+        
+        let config_to_save = config_guard.clone();
+        drop(config_guard);
+        
+        match crate::config::save_config(&config_to_save) {
+            Ok(_) => {
+                log::info!("CLAUDE.md template saved successfully");
+            },
+            Err(e) => {
+                log::error!("Failed to save CLAUDE.md template: {}", e);
+            }
+        }
+    });
+}
+
+/// Handle applying CLAUDE.md template to all repositories
+fn handle_apply_claude_md_to_all_repos(app: &mut SagittaCodeApp) {
+    let repo_manager = app.repo_panel.get_repo_manager();
+    let template_content = app.claude_md_modal.get_template_content().to_string();
+    let auto_create_enabled = app.claude_md_modal.is_auto_create_enabled();
+    
+    if !auto_create_enabled {
+        log::info!("Auto-create CLAUDE.md is disabled, skipping apply to all repos");
+        return;
+    }
+    
+    let rt = tokio::runtime::Handle::current();
+    rt.spawn(async move {
+        match repo_manager.lock().await.list_repositories().await {
+            Ok(repos) => {
+                let mut success_count = 0;
+                let mut error_count = 0;
+                
+                for repo in repos {
+                    let claude_md_path = repo.local_path.join("CLAUDE.md");
+                    
+                    match tokio::fs::write(&claude_md_path, &template_content).await {
+                        Ok(_) => {
+                            success_count += 1;
+                            log::info!("Updated CLAUDE.md for repository '{}'", repo.name);
+                        },
+                        Err(e) => {
+                            error_count += 1;
+                            log::error!("Failed to update CLAUDE.md for repository '{}': {}", repo.name, e);
+                        }
+                    }
+                }
+                
+                log::info!("CLAUDE.md template applied to {} repositories successfully, {} errors", success_count, error_count);
+            },
+            Err(e) => {
+                log::error!("Failed to list repositories for CLAUDE.md application: {}", e);
+            }
+        }
+    });
 } 

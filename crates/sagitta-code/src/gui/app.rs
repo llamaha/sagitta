@@ -12,6 +12,7 @@ use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
 use super::settings::SettingsPanel;
 use super::conversation::ConversationSidebar;
+use super::claude_md_modal::ClaudeMdModal;
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
@@ -79,6 +80,7 @@ pub struct SagittaCodeApp {
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     conversation_sidebar: ConversationSidebar,
+    claude_md_modal: ClaudeMdModal,
     config: Arc<Mutex<SagittaCodeConfig>>,
     app_core_config: Arc<AppConfig>,
     
@@ -117,7 +119,7 @@ impl SagittaCodeApp {
         sagitta_code_config: SagittaCodeConfig,
         app_core_config: AppConfig
     ) -> Self {
-        let sagitta_code_config_arc = Arc::new(sagitta_code_config.clone());
+        let sagitta_code_config_arc = Arc::new(Mutex::new(sagitta_code_config.clone()));
         let app_core_config_arc = Arc::new(app_core_config.clone());
 
         // Create settings panel
@@ -153,7 +155,8 @@ impl SagittaCodeApp {
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),
-            config: Arc::new(Mutex::new(sagitta_code_config)),
+            claude_md_modal: ClaudeMdModal::new(sagitta_code_config_arc.clone()),
+            config: sagitta_code_config_arc.clone(),
             app_core_config: app_core_config_arc,
             
             // Initialize state management with theme from config
@@ -547,6 +550,12 @@ impl SagittaCodeApp {
         self.state.available_repositories = repo_list;
     }
 
+    /// Open the CLAUDE.md modal
+    pub fn open_claude_md_modal(&mut self) {
+        // Open synchronously using the sync method
+        self.claude_md_modal.open_sync();
+    }
+    
     /// Trigger a manual refresh of the repository list
     pub fn trigger_repository_list_refresh(&mut self) {
         log::debug!("Triggering manual repository list refresh");

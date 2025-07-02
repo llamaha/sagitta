@@ -8,6 +8,7 @@ pub mod conversation;
 pub mod symbols;
 pub mod fonts;
 pub mod progress;
+pub mod claude_md_modal;
 
 pub use conversation::*;
 
