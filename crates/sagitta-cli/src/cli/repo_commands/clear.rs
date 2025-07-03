@@ -33,37 +33,23 @@ pub async fn handle_repo_clear<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                config.tenant_id.as_deref().ok_or_else(|| anyhow!("--tenant-id is required (or set tenant_id in config) to clear a repository."))?
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
-
     let repo_name_to_clear = match args.name.as_ref().or(config.active_repository.as_ref()) {
         Some(name) => name.clone(),
-        None => bail!("No active repository set and no repository name provided for tenant '{}'.", cli_tenant_id),
+        None => bail!("No active repository set and no repository name provided."),
     };
 
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
-        .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
+        .position(|r| r.name == repo_name_to_clear)
+        .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name_to_clear))?;
 
     let repo_config = &config.repositories[repo_config_index];
     let branch_name = repo_config.target_ref.as_deref()
         .or(repo_config.active_branch.as_deref())
         .unwrap_or(&repo_config.default_branch);
 
-    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name_to_clear, branch_name, &config);
+    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, &config);
     let collection_existed_before_clear = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {
@@ -76,9 +62,8 @@ where
         println!(
             "{}",
             format!(
-                "Preparing to clear repository '{}' (Tenant: '{}'). This will DELETE the Qdrant collection '{}'.",
+                "Preparing to clear repository '{}'. This will DELETE the Qdrant collection '{}'.",
                 repo_name_to_clear.cyan(),
-                cli_tenant_id.cyan(),
                 collection_name.cyan()
             ).yellow()
         );

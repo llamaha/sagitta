@@ -412,7 +412,6 @@ impl RepositoryManager {
         let config_guard = self.config.lock().await;
         
         // For local-only operation, use a default tenant ID
-        let tenant_id = "local".to_string();
         
         // Get embedding dimension (use default if embedding handler not available)
         let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
@@ -452,7 +451,6 @@ impl RepositoryManager {
             embedding_dim,
             client_clone,
             &config_clone,
-            &tenant_id,
             Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
@@ -498,7 +496,6 @@ impl RepositoryManager {
         let config_guard = self.config.lock().await;
         
         // For local-only operation, use a default tenant ID
-        let tenant_id = "local".to_string();
         
         // Get embedding dimension (use default if embedding handler not available)
         let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
@@ -539,7 +536,6 @@ impl RepositoryManager {
             embedding_dim,
             client_clone,
             &config_clone,
-            &tenant_id,
             Some(Arc::new(crate::gui::progress::GuiProgressReporter::new(name.to_string()))),
         ).await;
         
@@ -730,7 +726,6 @@ impl RepositoryManager {
         let config_guard = self.config.lock().await;
         
         // For local-only operation, use a default tenant ID
-        let tenant_id = "local".to_string();
         
         log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
                   repo_name, query_text, limit, element_type, language, branch);
@@ -752,7 +747,7 @@ impl RepositoryManager {
             .unwrap_or_else(|| repo_config.default_branch.clone());
         
         // Get collection name based on tenant, repo, and branch using branch-aware naming
-        let collection_name = repo_helpers::get_branch_aware_collection_name(&tenant_id, repo_name, &branch_name, &config_guard);
+        let collection_name = repo_helpers::get_branch_aware_collection_name(repo_name, &branch_name, &config_guard);
         
         log::info!("[GUI RepoManager] Using collection '{}' for search (branch: {})", collection_name, branch_name);
         
@@ -1271,8 +1266,6 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
-
         };
         config.repositories.push(test_repo);
 

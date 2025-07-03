@@ -26,23 +26,17 @@ pub async fn handle_clear(
     client: Arc<Qdrant>, // Accept client
     cli_args: &crate::cli::CliArgs, // Added cli_args
 ) -> Result<()> {
-    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            bail!("--tenant-id is required to clear a repository.");
-        }
-    };
 
     let repo_name_to_clear = match args.repo_name.as_ref().or(config.active_repository.as_ref()) {
         Some(name) => name.clone(),
-        None => bail!("No active repository set and no repository name provided for tenant '{}'.", cli_tenant_id),
+        None => bail!("No active repository set and no repository name provided."),
     };
 
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == repo_name_to_clear && r.tenant_id.as_deref() == Some(cli_tenant_id))
-        .ok_or_else(|| anyhow!("Configuration for repository '{}' under tenant '{}' not found.", repo_name_to_clear, cli_tenant_id))?;
+        .position(|r| r.name == repo_name_to_clear)
+        .ok_or_else(|| anyhow!("Configuration for repository '{}' not found.", repo_name_to_clear))?;
 
     let repo_config = &config.repositories[repo_config_index];
     let branch_name = repo_config.target_ref.as_deref()
@@ -50,7 +44,7 @@ pub async fn handle_clear(
         .unwrap_or(&repo_config.default_branch);
 
     // Use branch-aware collection naming to match the new sync behavior
-    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_name_to_clear, branch_name, &config);
+    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, &config);
 
     // --- Check Qdrant Collection Status (Informational) ---
     log::info!("Preparing to clear data for repository: '{}', collection: '{}'", repo_name_to_clear, collection_name);

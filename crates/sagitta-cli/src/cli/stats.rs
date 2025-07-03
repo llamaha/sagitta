@@ -61,50 +61,35 @@ pub async fn handle_stats<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                anyhow::bail!("--tenant-id is required to get repository stats.");
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
+    // Stats command processing
 
     let active_repo_name_opt = config.active_repository.clone(); 
     let target_repo_name = match active_repo_name_opt {
         Some(name) => name,
         None => {
-            let tenant_repos: Vec<&sagitta_search::config::RepositoryConfig> = config.repositories.iter()
-                .filter(|r| r.tenant_id.as_deref() == Some(cli_tenant_id))
-                .collect();
-            if tenant_repos.len() == 1 {
-                tenant_repos[0].name.clone()
-            } else if tenant_repos.is_empty() {
-                anyhow::bail!("No repositories found for tenant '{}'. Add one using 'repo add --tenant-id {}'.", cli_tenant_id, cli_tenant_id);
+            if config.repositories.len() == 1 {
+                config.repositories[0].name.clone()
+            } else if config.repositories.is_empty() {
+                anyhow::bail!("No repositories found. Add one using 'repo add'.");
             } else {
-                anyhow::bail!("No active repository set for tenant '{}' and multiple repositories exist. Please specify a repository with 'repo use <name> --tenant-id {}' or use the implicit single repository for the tenant.", cli_tenant_id, cli_tenant_id);
+                anyhow::bail!("No active repository set and multiple repositories exist. Please specify a repository with 'repo use <name>'.");
             }
         }
     };
 
     let repo_config = config.repositories.iter()
-        .find(|r| r.name == target_repo_name && r.tenant_id.as_deref() == Some(cli_tenant_id))
-        .ok_or_else(|| anyhow!("Repository '{}' not found for tenant '{}', or active repository does not belong to this tenant.", target_repo_name, cli_tenant_id))?;
+        .find(|r| r.name == target_repo_name)
+        .ok_or_else(|| anyhow!("Repository '{}' not found.", target_repo_name))?;
 
     let branch_name = repo_config.target_ref.as_deref()
         .or(repo_config.active_branch.as_deref())
         .unwrap_or(&repo_config.default_branch);
 
     // Use branch-aware collection naming to match the new sync behavior
-    let collection_name = get_branch_aware_collection_name(cli_tenant_id, &repo_config.name, branch_name, &config);
+    let collection_name = get_branch_aware_collection_name(&repo_config.name, branch_name, &config);
 
     if !args.json {
-        println!("Fetching stats for repository: {} (Tenant: {})", repo_config.name.cyan(), cli_tenant_id.cyan());
+        println!("Fetching stats for repository: {}", repo_config.name.cyan());
         println!("Fetching statistics for collection: {}", collection_name.cyan());
     }
 

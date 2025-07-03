@@ -39,20 +39,6 @@ where
 {
     let start_time = Instant::now();
 
-    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                return Err(anyhow!("--tenant-id is required to sync a repository."));
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
-
     let repo_name_str = args.name.as_ref().or(config.active_repository.as_ref())
         .ok_or_else(|| anyhow!("No active repository set and no repository name provided with --name."))?
         .clone();
@@ -60,8 +46,8 @@ where
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == repo_name_str && r.tenant_id.as_deref() == Some(cli_tenant_id))
-        .ok_or_else(|| anyhow!("Repository '{}' for tenant '{}' not found in configuration.", repo_name_str, cli_tenant_id))?;
+        .position(|r| r.name == repo_name_str)
+        .ok_or_else(|| anyhow!("Repository '{}' not found in configuration.", repo_name_str))?;
     
     let repo_config = &config.repositories[repo_config_index];
     let repo_path = PathBuf::from(&repo_config.local_path);

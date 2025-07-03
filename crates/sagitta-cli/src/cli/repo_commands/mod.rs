@@ -83,20 +83,6 @@ where
 {
     let command_result = match args.command {
         RepoCommand::Add(add_args) => {
-            let tenant_id = match cli_args.tenant_id.as_deref() {
-                Some(id) => id.to_string(),
-                None => {
-                    #[cfg(feature = "multi_tenant")]
-                    {
-                        return Err(anyhow!("--tenant-id is required to add a repository."));
-                    }
-                    #[cfg(not(feature = "multi_tenant"))]
-                    {
-                        "default".to_string()
-                    }
-                }
-            };
-
             let embedding_config = sagitta_search::app_config_to_embedding_config(config);
             let embedding_pool = sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config)
                 .map_err(|e| anyhow!("Failed to initialize embedding pool: {}", e))?;
@@ -114,7 +100,6 @@ where
                 embedding_dim, 
                 Arc::clone(&client),
                 config,
-                &tenant_id,
                 Some(Arc::new(crate::progress::IndicatifProgressReporter::new())),
             ).await;
             match repo_config_result {

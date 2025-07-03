@@ -62,20 +62,6 @@ where
     let repo_config = config.repositories[repo_config_index].clone();
     let repo_path = PathBuf::from(&repo_config.local_path);
     
-    // Get tenant ID
-    let tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                return Err(anyhow!("--tenant-id is required for cleanup operations"));
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
 
     // Determine cleanup types
     let git_cleanup = args.all || args.git_cleanup;
@@ -103,7 +89,7 @@ where
     let tracked_branches: HashSet<String> = repo_config.tracked_branches.iter().cloned().collect();
 
     // Find all collections for this repository
-    let collections = find_repository_collections(client.as_ref(), tenant_id, &repo_config.name, config).await?;
+    let collections = find_repository_collections(client.as_ref(), &repo_config.name, config).await?;
     
     println!("📊 Found {} collections for repository '{}'", collections.len(), repo_name);
 
@@ -113,7 +99,7 @@ where
     // Analyze each collection
     for collection_name in &collections {
         // Extract branch name from collection name
-        if let Some(branch_name) = extract_branch_from_collection_name(&collection_name, tenant_id, &repo_config.name, config) {
+        if let Some(branch_name) = extract_branch_from_collection_name(&collection_name, &repo_config.name, config) {
             let mut should_delete = false;
             let mut reasons = Vec::new();
 
@@ -133,7 +119,6 @@ where
             if empty_cleanup {
                 if let Ok(Some(metadata)) = get_branch_sync_metadata(
                     client.as_ref(),
-                    tenant_id,
                     &repo_config.name,
                     &branch_name,
                     config,
@@ -239,7 +224,6 @@ where
 
 async fn find_repository_collections<C>(
     client: &C,
-    tenant_id: &str,
     repo_name: &str,
     config: &AppConfig,
 ) -> Result<Vec<String>>
@@ -250,9 +234,8 @@ where
     let all_collections = client.list_collections().await
         .context("Failed to list collections")?;
 
-    let prefix = format!("{}{}_{}", 
+    let prefix = format!("{}{}", 
         config.performance.collection_name_prefix, 
-        tenant_id, 
         repo_name);
 
     let repo_collections: Vec<String> = all_collections
@@ -265,13 +248,11 @@ where
 
 fn extract_branch_from_collection_name(
     collection_name: &str,
-    tenant_id: &str,
     repo_name: &str,
     config: &AppConfig,
 ) -> Option<String> {
-    let prefix = format!("{}{}_{}_br_", 
+    let prefix = format!("{}{}_br_", 
         config.performance.collection_name_prefix, 
-        tenant_id, 
         repo_name);
 
     if collection_name.starts_with(&prefix) {

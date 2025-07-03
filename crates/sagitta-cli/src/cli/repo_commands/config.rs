@@ -101,13 +101,6 @@ fn get_default_config() -> AppConfig {
             ..PerformanceConfig::default()
         },
         embedding: EmbeddingEngineConfig::default(),
-        oauth: None,
-        tls_enable: false,
-        tls_cert_path: None,
-        tls_key_path: None,
-        cors_allowed_origins: None,
-        cors_allow_credentials: true,
-        tenant_id: Some("test-tenant".to_string()),
     }
 }
 
@@ -143,14 +136,7 @@ mod tests {
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-        };
+            };
         
         // Set repo base path
         let args = SetRepoBasePathArgs {
@@ -192,14 +178,7 @@ mod tests {
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-        };
+            };
         save_config(&config, Some(&config_path)).unwrap();
 
         // Args to set paths
@@ -215,7 +194,6 @@ mod tests {
             command: Commands::Repo(RepoArgs {command: RepoCommand::Config(args.clone()) }),
             onnx_model_path_arg: None, 
             onnx_tokenizer_dir_arg: None,
-            tenant_id: None,
         };
 
         let result = handle_config(args, &mut config, Some(&config_path));
@@ -246,14 +224,7 @@ mod tests {
             vocabulary_base_path: None,
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-        };
+            };
         save_config(&config, Some(&config_path)).unwrap();
 
         let args = ConfigArgs {
@@ -264,7 +235,6 @@ mod tests {
             command: Commands::Repo(RepoArgs {command: RepoCommand::Config(args.clone()) }), 
             onnx_model_path_arg: None, 
             onnx_tokenizer_dir_arg: None,
-            tenant_id: None,
         };
 
         let result = handle_config(args, &mut config, Some(&config_path));
