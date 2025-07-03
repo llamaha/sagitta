@@ -7,8 +7,40 @@ use crate::agent::message::types::AgentMessage;
 use crate::agent::message::history::ConversationAwareHistoryManager;
 use crate::agent::state::manager::{StateManager, StateEvent};
 use crate::agent::state::types::{AgentState, ConversationStatus};
-use crate::tools::executor::ToolExecutionEvent;
-use crate::tools::types::ToolResult;
+// Tool types removed - tools now via MCP
+
+/// Simple tool result type for events
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ToolResult {
+    Success { output: String },
+    Error { error: String },
+}
+
+impl ToolResult {
+    pub fn is_success(&self) -> bool {
+        matches!(self, ToolResult::Success { .. })
+    }
+}
+
+/// Tool execution event for internal event handling
+#[derive(Debug, Clone)]
+pub enum ToolExecutionEvent {
+    Started {
+        tool_call_id: String,
+        tool_name: String,
+        parameters: serde_json::Value,
+    },
+    Completed {
+        tool_call_id: String,
+        tool_name: String,
+        result: ToolResult,
+    },
+    Failed {
+        tool_call_id: String,
+        tool_name: String,
+        error: String,
+    },
+}
 use crate::llm::client::{LlmClient, Role};
 
 /// Type alias for tool run identification

@@ -215,7 +215,7 @@ async fn test_sidekiq_bug_investigation() {
         }
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client)
+    let agent = Agent::new(config, Some(tool_registry), embedding_provider_adapter, persistence, search_engine, mock_llm_client)
         .await
         .expect("Failed to create agent");
     
@@ -326,7 +326,7 @@ async fn test_add_repository_already_exists_handling() {
         }
     ]));
 
-    let agent = Agent::new(config, tool_registry, embedding_provider_adapter, persistence, search_engine, mock_llm_client_add_repo)
+    let agent = Agent::new(config, Some(tool_registry), embedding_provider_adapter, persistence, search_engine, mock_llm_client_add_repo)
         .await
         .expect("Failed to create agent");
     

@@ -4,7 +4,7 @@ use tokio::process::{Command, Child};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use anyhow::{anyhow, Result};
-use crate::tools::registry::ToolRegistry;
+// Tool registry removed - tools now via MCP
 use tempfile::NamedTempFile;
 use std::io::Write;
 use serde_json::json;
@@ -12,16 +12,15 @@ use sagitta_search::config::AppConfig;
 
 /// Manages an internal MCP server for Claude CLI integration
 pub struct McpIntegration {
-    tool_registry: Arc<ToolRegistry>,
+    // Tool registry removed - tools provided by sagitta-mcp
     server_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     config_file: Option<NamedTempFile>,
 }
 
 impl McpIntegration {
-    pub fn new(tool_registry: Arc<ToolRegistry>) -> Self {
+    pub fn new() -> Self {
         Self {
-            tool_registry,
             server_handle: None,
             shutdown_tx: None,
             config_file: None,
@@ -91,7 +90,7 @@ impl McpIntegration {
 
 /// Start an internal MCP server process
 /// This is called when the binary is run with --mcp-internal flag
-pub async fn run_internal_mcp_server(tool_registry: Arc<ToolRegistry>) -> Result<()> {
+pub async fn run_internal_mcp_server(_tool_registry: Option<()>) -> Result<()> {
     log::info!("Starting internal MCP server (using sagitta-mcp Server)");
     
     // Load the sagitta-search config (same as sagitta-mcp does)
@@ -117,87 +116,10 @@ impl Drop for McpIntegration {
     }
 }
 
+// Tests disabled - tools have been removed and are now provided via MCP
 #[cfg(test)]
+#[cfg(feature = "disabled_tests_tools_removed")]
 mod tests {
-    use super::*;
-    use crate::tools::types::{Tool, ToolDefinition, ToolResult, ToolCategory};
-    use serde_json::{json, Value};
-    use async_trait::async_trait;
-    use crate::utils::errors::SagittaCodeError;
-    
-    #[derive(Debug)]
-    struct MockTool {
-        name: String,
-    }
-    
-    #[async_trait]
-    impl Tool for MockTool {
-        fn definition(&self) -> ToolDefinition {
-            ToolDefinition {
-                name: self.name.clone(),
-                description: format!("Mock {} tool", self.name),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {}
-                }),
-                is_required: false,
-                category: ToolCategory::Other,
-                metadata: Default::default(),
-            }
-        }
-        
-        async fn execute(&self, _params: Value) -> Result<ToolResult, SagittaCodeError> {
-            Ok(ToolResult::success(json!({
-                "result": format!("{} executed", self.name)
-            })))
-        }
-        
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-    }
-    
-    #[tokio::test]
-    async fn test_mcp_integration_creates_config() {
-        // Create a tool registry with some test tools
-        let tool_registry = Arc::new(ToolRegistry::new());
-        tool_registry.register(Arc::new(MockTool { name: "test_tool_1".to_string() })).await.unwrap();
-        tool_registry.register(Arc::new(MockTool { name: "test_tool_2".to_string() })).await.unwrap();
-        
-        // Create MCP integration
-        let mut mcp = McpIntegration::new(tool_registry);
-        
-        // Start the integration
-        let config = mcp.start().await.unwrap();
-        
-        // Verify config has required fields
-        assert!(config.get("mcp_config_path").is_some());
-        assert!(config.get("server_name").is_some());
-        
-        // Read the config file
-        let config_path = config["mcp_config_path"].as_str().unwrap();
-        let config_content = std::fs::read_to_string(config_path).unwrap();
-        let parsed_config: Value = serde_json::from_str(&config_content).unwrap();
-        
-        // Verify the config structure
-        assert!(parsed_config.get("mcpServers").is_some());
-        let servers = parsed_config["mcpServers"].as_object().unwrap();
-        assert_eq!(servers.len(), 1);
-        
-        // Get the server config
-        let server_name = config["server_name"].as_str().unwrap();
-        let server_config = &servers[server_name];
-        
-        // Verify command points to current executable
-        let current_exe = std::env::current_exe().unwrap();
-        assert_eq!(server_config["command"].as_str().unwrap(), current_exe.to_string_lossy());
-        
-        // Verify args include --mcp-internal
-        let args = server_config["args"].as_array().unwrap();
-        assert_eq!(args.len(), 1);
-        assert_eq!(args[0].as_str().unwrap(), "--mcp-internal");
-        
-        // Clean up
-        mcp.stop().await;
-    }
+    // Tests removed as they depend on tool registry which is no longer used
+    // Tools are now provided via MCP from sagitta-mcp
 }

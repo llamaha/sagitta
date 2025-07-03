@@ -134,10 +134,10 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     
                     // Update the tool result in the message
                     if let Some(message_id) = app.state.active_tool_calls.get(&tool_call_id) {
-                        let success = matches!(result, crate::tools::types::ToolResult::Success(_));
+                        let success = matches!(result, crate::agent::events::ToolResult::Success { .. });
                         let result_json = match &result {
-                            crate::tools::types::ToolResult::Success(data) => data.clone(),
-                            crate::tools::types::ToolResult::Error { error } => serde_json::json!({
+                            crate::agent::events::ToolResult::Success { output } => serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.clone())),
+                            crate::agent::events::ToolResult::Error { error } => serde_json::json!({
                                 "error": error
                             }),
                         };
@@ -527,7 +527,7 @@ pub fn handle_tool_call(app: &mut SagittaCodeApp, tool_call: ToolCall) {
 pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, tool_name: String, result: crate::tools::types::ToolResult) {
     // Add to events panel
     let event_message = match &result {
-        crate::tools::types::ToolResult::Success(_) => {
+        crate::tools::types::ToolResult::Success { .. } => {
             format!("Tool {} completed successfully", tool_name)
         },
         crate::tools::types::ToolResult::Error { error } => {
@@ -536,7 +536,7 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     };
     
     let event_type = match &result {
-        crate::tools::types::ToolResult::Success(_) => SystemEventType::ToolExecution,
+        crate::tools::types::ToolResult::Success { .. } => SystemEventType::ToolExecution,
         crate::tools::types::ToolResult::Error { .. } => SystemEventType::Error,
     };
     
@@ -544,15 +544,15 @@ pub fn handle_tool_call_result(app: &mut SagittaCodeApp, tool_call_id: String, t
     
     // Create the result string
     let result_string = match &result {
-        crate::tools::types::ToolResult::Success(data) => {
-            serde_json::to_string_pretty(data).unwrap_or_else(|_| format!("{:?}", data))
+        crate::agent::events::ToolResult::Success { output } => {
+            output.clone()
         },
-        crate::tools::types::ToolResult::Error { error } => {
+        crate::agent::events::ToolResult::Error { error } => {
             format!("Error: {}", error)
         }
     };
     
-    let is_success = matches!(result, crate::tools::types::ToolResult::Success(_));
+    let is_success = matches!(result, crate::agent::events::ToolResult::Success { .. });
     
     // Update tool call status in the streaming chat manager
     // Try to update by tool_call_id first (most precise)
@@ -1712,7 +1712,7 @@ mod tests {
         let mut app = create_test_app();
         let tool_call_id = "test-tool-call-id".to_string();
         let tool_name = "web_search".to_string();
-        let result = ToolResultType::Success(serde_json::json!("Search results: Found 10 results"));
+        let result = ToolResultType::Success { output: "Search results: Found 10 results".to_string() };
         
         // Add a tool result to state first
         app.state.add_tool_result(tool_call_id.clone(), "pending".to_string());
@@ -1852,7 +1852,7 @@ mod tests {
         assert_eq!(messages.len(), 1); // Still 1 message, tool call attached
         
         // 4. Tool result - stores in tool_results rather than creating message
-        let result = ToolResultType::Success(serde_json::json!("Found comprehensive Rust tutorials"));
+        let result = ToolResultType::Success { output: "Found comprehensive Rust tutorials".to_string() };
         handle_tool_call_result(&mut app, tool_call.id.clone(), tool_call.name, result);
         let messages = app.chat_manager.get_all_messages();
         assert_eq!(messages.len(), 1); // Still 1 message
@@ -1947,13 +1947,15 @@ mod tests {
         let tool_call_id = "test-tool-call-id".to_string();
         let tool_name = "file_search".to_string();
         
-        let result = ToolResultType::Success(serde_json::json!({
-            "output": "Found 5 files",
-            "metadata": {
-                "file_count": 5,
-                "search_time": "150ms"
-            }
-        }));
+        let result = ToolResultType::Success { 
+            output: serde_json::json!({
+                "output": "Found 5 files",
+                "metadata": {
+                    "file_count": 5,
+                    "search_time": "150ms"
+                }
+            }).to_string() 
+        };
         
         handle_tool_call_result(&mut app, tool_call_id.clone(), tool_name, result);
         

@@ -18,7 +18,7 @@ use super::message_converter::{convert_messages_to_claude, ClaudeMessage, Claude
 use super::models::ClaudeCodeModel;
 use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
 use super::mcp_integration::McpIntegration;
-use crate::tools::registry::ToolRegistry;
+// Tool registry removed - tools now via MCP
 
 /// Process timeout for Claude Code (10 minutes like Roo-Code)
 const CLAUDE_CODE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -56,11 +56,11 @@ impl ClaudeCodeClient {
         })
     }
     
-    /// Initialize MCP integration with tool registry
-    pub async fn initialize_mcp(&mut self, tool_registry: Arc<ToolRegistry>) -> Result<(), SagittaCodeError> {
+    /// Initialize MCP integration (tools provided by sagitta-mcp)
+    pub async fn initialize_mcp(&mut self, _tool_registry: Option<()>) -> Result<(), SagittaCodeError> {
         log::info!("CLAUDE_CODE: Initializing MCP integration");
         
-        let mut mcp = McpIntegration::new(tool_registry);
+        let mut mcp = McpIntegration::new();
         
         // Start the MCP server and get config
         let mcp_config = mcp.start().await

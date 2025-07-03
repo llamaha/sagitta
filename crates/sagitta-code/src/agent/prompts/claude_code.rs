@@ -1,4 +1,4 @@
-use crate::tools::types::ToolDefinition;
+use crate::llm::client::ToolDefinition;
 use super::SystemPromptProvider;
 
 pub struct ClaudeCodeSystemPrompt;

@@ -28,11 +28,8 @@ use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::agent::streaming::StreamingProcessor;
 use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
-use crate::tools::executor::{ToolExecutor as SagittaCodeToolExecutorInternal, ToolExecutionEvent};
-use crate::tools::registry::ToolRegistry;
-use crate::tools::types::{ToolResult, ToolDefinition as ToolDefinitionType};
+// Tool imports removed - tools now via MCP
 use crate::utils::errors::SagittaCodeError;
-use crate::tools::code_search::tool::CodeSearchTool;
 // Import the EmbeddingProvider trait for generic use
 use sagitta_embed::provider::EmbeddingProvider;
 
@@ -57,8 +54,8 @@ pub struct Agent {
     /// The LLM client
     llm_client: Arc<dyn LlmClient>,
     
-    /// The tool registry
-    tool_registry: Arc<ToolRegistry>,
+    /// The tool registry (stub)
+    tool_registry: Arc<crate::tools::registry::ToolRegistry>,
     
     /// The message history manager
     history: Arc<ConversationAwareHistoryManager>,
@@ -66,8 +63,8 @@ pub struct Agent {
     /// The state manager
     state_manager: Arc<StateManager>,
     
-    /// The tool executor (from sagitta-code's own tools module)
-    tool_executor: Arc<tokio::sync::Mutex<SagittaCodeToolExecutorInternal>>,
+    /// The tool executor (stub)
+    tool_executor: Arc<tokio::sync::Mutex<crate::tools::executor::SagittaCodeToolExecutorInternal>>,
     
     /// Sender for agent events
     event_sender: broadcast::Sender<AgentEvent>,
@@ -100,7 +97,7 @@ impl Agent {
     /// Create a new agent with the provided configuration
     pub async fn new(
         config: SagittaCodeConfig,
-        tool_registry: Arc<ToolRegistry>,
+        tool_registry: Option<Arc<crate::tools::registry::ToolRegistry>>,
         embedding_provider: Arc<dyn EmbeddingProvider + Send + Sync + 'static>,
         persistence: Box<dyn ConversationPersistence>,
         search_engine: Box<dyn ConversationSearchEngine>,
@@ -116,13 +113,16 @@ impl Agent {
         debug!("Initializing StateManager.");
         let state_manager_instance = StateManager::new(); // Not Arc wrapped here
 
-        let (tool_executor_internal, tool_event_receiver_from_executor) = SagittaCodeToolExecutorInternal::new(
+        // Create stub tool registry if not provided
+        let tool_registry = tool_registry.unwrap_or_else(|| Arc::new(crate::tools::registry::ToolRegistry::new()));
+        
+        let (tool_executor_internal, tool_event_receiver_from_executor) = crate::tools::executor::SagittaCodeToolExecutorInternal::new(
             tool_registry.clone(), 
-            Arc::new(state_manager_instance.clone()) // SagittaCodeToolExecutorInternal might expect Arc
+            Arc::new(state_manager_instance.clone())
         );
         debug!("Sagitta-code internal ToolExecutor created.");
 
-        // Fetch tool definitions for system prompt
+        // Fetch tool definitions for system prompt (will be empty for stub)
         let tool_definitions_for_prompt = tool_registry.get_definitions().await;
         debug!("Fetched {} tool definitions for system prompt.", tool_definitions_for_prompt.len());
         
@@ -282,7 +282,7 @@ impl Agent {
     }
     
     /// Execute a tool by name with parameters (with recovery)
-    pub async fn execute_tool(&self, tool_name: &str, parameters: Value) -> Result<ToolResult, SagittaCodeError> {
+    pub async fn execute_tool(&self, tool_name: &str, parameters: Value) -> Result<crate::agent::events::ToolResult, SagittaCodeError> {
         self.tool_executor.lock().await.execute_tool(tool_name, parameters).await
     }
     
@@ -332,9 +332,10 @@ impl Agent {
         *break_flag = false;
     }
     
-    /// Register a tool with the agent
-    pub async fn register_tool(&self, tool: Arc<dyn crate::tools::types::Tool>) -> Result<(), SagittaCodeError> {
-        self.tool_registry.register(tool).await
+    /// Register a tool with the agent (stub - tools now come from MCP)
+    pub async fn register_tool(&self, _tool: Arc<dyn std::any::Any + Send + Sync>) -> Result<(), SagittaCodeError> {
+        // Tools are now provided via MCP, this is a no-op
+        Ok(())
     }
     
     /// Get the conversation manager for advanced conversation operations

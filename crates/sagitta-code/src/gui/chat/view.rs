@@ -1023,14 +1023,14 @@ fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32
                         let tool_result = if matches!(tool_call.status, MessageStatus::Error(_)) {
                             // For error status, wrap in Error variant
                             if let Some(error_msg) = result_json.get("error").and_then(|v| v.as_str()) {
-                                crate::tools::types::ToolResult::Error { error: error_msg.to_string() }
+                                crate::agent::events::ToolResult::Error { error: error_msg.to_string() }
                             } else if let Some(error_msg) = result_json.as_str() {
-                                crate::tools::types::ToolResult::Error { error: error_msg.to_string() }
+                                crate::agent::events::ToolResult::Error { error: error_msg.to_string() }
                             } else {
-                                crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                                crate::agent::events::ToolResult::Error { error: "Tool execution failed".to_string() }
                             }
                         } else {
-                            crate::tools::types::ToolResult::Success(result_json.clone())
+                            crate::agent::events::ToolResult::Success { output: result_json.to_string() }
                         };
                         let formatted_result = formatter.format_tool_result_for_preview(&tool_call.name, &tool_result);
                         
@@ -1242,9 +1242,9 @@ fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_w
                     let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
                     let success = matches!(tool_card.status, ToolCardStatus::Completed { success: true });
                     let tool_result = if success {
-                        crate::tools::types::ToolResult::Success(result.clone())
+                        crate::agent::events::ToolResult::Success { output: result.to_string() }
                     } else {
-                        crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                        crate::agent::events::ToolResult::Error { error: "Tool execution failed".to_string() }
                     };
                     
                     let formatted_result = formatter.format_tool_result_for_preview(&tool_card.tool_name, &tool_result);
@@ -2824,10 +2824,10 @@ fn format_conversation_with_tools_for_copying(items: &[ChatItem]) -> String {
                     let formatter = crate::gui::app::tool_formatting::ToolResultFormatter::new();
                     let tool_result = match &tool_card.status {
                         ToolCardStatus::Completed { success: true } => {
-                            crate::tools::types::ToolResult::Success(result.clone())
+                            crate::agent::events::ToolResult::Success { output: result.to_string() }
                         },
                         _ => {
-                            crate::tools::types::ToolResult::Error { error: "Tool execution failed".to_string() }
+                            crate::agent::events::ToolResult::Error { error: "Tool execution failed".to_string() }
                         }
                     };
                     
