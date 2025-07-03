@@ -418,7 +418,6 @@ mod integration_tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: None,
             };
             
             config.repositories.push(fake_repo_config);

@@ -113,7 +113,6 @@ let config = EmbeddingConfig {
     expected_dimension: Some(384),
     session_timeout_seconds: 300,
     enable_session_cleanup: true,
-    tenant_id: None,
     embedding_batch_size: Some(128), // Configurable batch size
 };
 ```

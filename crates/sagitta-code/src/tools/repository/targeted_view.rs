@@ -1066,7 +1066,7 @@ pub mod logging {
         // Create a test configuration
         let mut config = AppConfig::default();
         config.repositories_base_path = Some(temp_dir.path().to_string_lossy().to_string());
-        // tenant_id is hardcoded to "local" in sagitta-code operational code
+        // Configuration setup
         
         // Create repository manager with the test config
         let config_arc = Arc::new(Mutex::new(config));
@@ -1090,7 +1090,6 @@ pub mod logging {
                 indexed_languages: Some(vec!["rust".to_string()]),
                 added_as_local_path: true,
                 target_ref: None,
-                tenant_id: Some("local".to_string()), // hardcoded in sagitta-code
             };
             
             // Add to the config manually for testing
@@ -1298,7 +1297,7 @@ pub async fn network_operation_{}() -> Result<String, Box<dyn std::error::Error>
         // Create repository manager
         let mut config = AppConfig::default();
         config.repositories_base_path = Some(temp_dir.path().to_string_lossy().to_string());
-        // tenant_id is hardcoded to "local" in sagitta-code operational code
+        // Configuration setup
         
         let config_arc = Arc::new(Mutex::new(config));
         let repo_manager = Arc::new(Mutex::new(RepositoryManager::new(config_arc)));
@@ -1320,7 +1319,6 @@ pub async fn network_operation_{}() -> Result<String, Box<dyn std::error::Error>
                  indexed_languages: Some(vec!["rust".to_string()]),
                  added_as_local_path: true,
                  target_ref: None,
-                 tenant_id: Some("local".to_string()), // hardcoded in sagitta-code
              };
             
             let config_guard = manager.get_config();

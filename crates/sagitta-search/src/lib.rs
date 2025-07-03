@@ -117,7 +117,8 @@ pub use qdrant_ops::delete_all_points;
 
 // Re-export other necessary items if needed by CLI directly
 pub use edit::{apply_edit, validate_edit, EditTarget, EngineEditOptions, EngineValidationIssue, EngineValidationSeverity};
-pub use repo_helpers::{delete_repository_data, get_collection_name, ensure_repository_collection_exists};
+pub use repo_helpers::{delete_repository_data, get_collection_name};
+pub use indexing::ensure_collection_exists;
 pub use repo_add::{handle_repo_add, AddRepoArgs, AddRepoError}; // Assuming repo_add is needed by CLI
 pub use sync::{sync_repository, SyncOptions, SyncResult}; // Added sync re-export
 
@@ -154,7 +155,6 @@ mod tests {
         let mut app_config = AppConfig::default();
         app_config.onnx_model_path = Some("/path/to/model.onnx".to_string());
         app_config.onnx_tokenizer_path = Some("/path/to/tokenizer.json".to_string());
-        app_config.tenant_id = Some("test-tenant".to_string());
         app_config.performance.vector_dimension = 512;
         
         // Set custom embedding configuration
@@ -173,7 +173,6 @@ mod tests {
         assert_eq!(embedding_config.onnx_tokenizer_path, Some("/path/to/tokenizer.json".into()));
         assert_eq!(embedding_config.session_timeout_seconds, 600);
         assert_eq!(embedding_config.enable_session_cleanup, false);
-        assert_eq!(embedding_config.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(embedding_config.expected_dimension, Some(512));
         assert_eq!(embedding_config.embedding_batch_size, Some(64));
     }
@@ -190,7 +189,6 @@ mod tests {
         assert_eq!(embedding_config.onnx_tokenizer_path, None);
         assert_eq!(embedding_config.session_timeout_seconds, 300);
         assert_eq!(embedding_config.enable_session_cleanup, true);
-        assert_eq!(embedding_config.tenant_id, None);
         assert_eq!(embedding_config.expected_dimension, Some(384)); // Default vector dimension
         assert_eq!(embedding_config.embedding_batch_size, Some(128)); // Default batch size
     }
@@ -589,7 +587,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: None,
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();

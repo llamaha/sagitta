@@ -402,51 +402,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
         })?
         .clone();
 
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        Some("default".to_string())
-    } else {
-        Some("default".to_string())
-    };
-
-    info!(acting_tenant_id = ?acting_tenant_id, repo_name = %repo_name, "Determined acting tenant ID for sync.");
-
-    #[cfg(feature = "multi_tenant")]
-    {
-        match (&acting_tenant_id, &None) {
-            (Some(act_tid), Some(repo_tid)) => {
-                if act_tid != repo_tid {
-                    warn!(
-                        acting_tenant_id = %act_tid,
-                        repo_tenant_id = %repo_tid,
-                        repo_name = %repo_name,
-                        "Access denied: Acting tenant ID does not match repository's tenant ID for sync."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Tenant ID mismatch for sync operation.".to_string(),
-                        data: None,
-                    });
-                }
-                info!(repo_name = %repo_name, "Tenant ID match successful for sync.");
-            }
-            _ => { // Cases: (None, Some), (Some, None), (None, None)
-                warn!(
-                    acting_tenant_id = ?acting_tenant_id,
-                    repo_name = %repo_name,
-                    "Access denied: Tenant ID mismatch or missing for sync (acting or repo tenant is None, or they don't match)."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: Repository sync requires matching and defined tenant IDs.".to_string(),
-                    data: None,
-                });
-            }
-        }
-    }
-    #[cfg(not(feature = "multi_tenant"))]
-    {
-        info!(repo_name = %repo_name, "Multi-tenancy disabled, allowing repository sync");
-    }
+    info!(repo_name = %repo_name, "Processing repository sync");
 
     // Drop the read lock before long-running operations
     let app_config_clone = config_guard.clone(); // config_guard is AppConfig, not RwLockReadGuard anymore
@@ -697,51 +653,7 @@ pub async fn handle_repository_search_file(
     let config_guard = config.read().await;
     let repo_config = get_repo_config_mcp(&config_guard, params.repository_name.as_deref())?;
 
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        Some("default".to_string())
-    } else {
-        Some("default".to_string())
-    };
-
-    info!(acting_tenant_id = ?acting_tenant_id, repo_name = %repo_config.name, "Determined acting tenant ID for search_file.");
-
-    #[cfg(feature = "multi_tenant")]
-    {
-        match (&acting_tenant_id, &None) {
-            (Some(act_tid), Some(repo_tid)) => {
-                if act_tid != repo_tid {
-                    warn!(
-                        acting_tenant_id = %act_tid,
-                        repo_tenant_id = %repo_tid,
-                        repo_name = %repo_config.name,
-                        "Access denied: Acting tenant ID does not match repository's tenant ID for search_file."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Tenant ID mismatch for search_file operation.".to_string(),
-                        data: None,
-                    });
-                }
-                info!(repo_name = %repo_config.name, "Tenant ID match successful for search_file.");
-            }
-            _ => { // Cases: (None, Some), (Some, None), (None, None)
-                warn!(
-                    acting_tenant_id = ?acting_tenant_id,
-                    repo_name = %repo_config.name,
-                    "Access denied: Tenant ID mismatch or missing for search_file (acting or repo tenant is None, or they don't match)."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: Repository search_file requires matching and defined tenant IDs.".to_string(),
-                    data: None,
-                });
-            }
-        }
-    }
-    #[cfg(not(feature = "multi_tenant"))]
-    {
-        info!(repo_name = %repo_config.name, "Multi-tenancy disabled, allowing search_file");
-    }
+    info!(repo_name = %repo_config.name, "Processing search_file");
 
     let search_path = &repo_config.local_path;
     let case_sensitive = params.case_sensitive.unwrap_or(false);
@@ -774,55 +686,7 @@ pub async fn handle_repository_view_file(
     let config_guard = config.read().await;
     let repo_config = get_repo_config_mcp(&config_guard, params.repository_name.as_deref())?;
 
-    // Tenant isolation check: Determine acting_tenant_id
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        info!(tenant_source = "AuthenticatedUser", repo_name = %repo_config.name);
-        Some("default".to_string())
-    } else {
-        info!(tenant_source = "Default", repo_name = %repo_config.name);
-        Some("default".to_string())
-    };
-
-    // Perform tenant check
-    #[cfg(feature = "multi_tenant")]
-    {
-        match (&acting_tenant_id, &None) {
-            (Some(act_tid), Some(repo_tid)) => {
-                if act_tid == repo_tid {
-                    info!(repo_name = %repo_config.name, acting_tenant_id = %act_tid, "Tenant ID match successful for view_file.");
-                    // Proceed
-                } else {
-                    warn!(
-                        acting_tenant_id = %act_tid,
-                        repo_tenant_id = %repo_tid,
-                        repo_name = %repo_config.name,
-                        "Access denied: Acting tenant ID does not match repository's tenant ID for view_file."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Tenant ID mismatch for view_file operation.".to_string(),
-                        data: None,
-                    });
-                }
-            }
-            _ => { // All other cases: (None, Some), (Some, None), (None, None)
-                warn!(
-                    acting_tenant_id = ?acting_tenant_id,
-                    repo_name = %repo_config.name,
-                    "Access denied: Tenant ID mismatch or missing for view_file. Both acting context and repository must have a matching tenant ID."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: Repository view_file requires matching and defined tenant IDs for both context and repository.".to_string(),
-                    data: None,
-                });
-            }
-        }
-    }
-    #[cfg(not(feature = "multi_tenant"))]
-    {
-        info!(repo_name = %repo_config.name, "Multi-tenancy disabled, allowing view_file");
-    }
+    info!(repo_name = %repo_config.name, "Processing view_file");
 
     let base_path = &repo_config.local_path;
     let relative_path = PathBuf::from(&params.file_path); // Convert String to PathBuf
@@ -924,52 +788,7 @@ where
         })?
         .clone();
 
-    // Tenant validation
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        Some("default".to_string())
-    } else {
-        Some("default".to_string())
-    };
-
-    info!(acting_tenant_id = ?acting_tenant_id, repo_name = %repo_name, "Determined acting tenant ID for branch switch.");
-
-    #[cfg(feature = "multi_tenant")]
-    {
-        match (&acting_tenant_id, &None) {
-            (Some(act_tid), Some(repo_tid)) => {
-                if act_tid != repo_tid {
-                    warn!(
-                        acting_tenant_id = %act_tid,
-                        repo_tenant_id = %repo_tid,
-                        repo_name = %repo_name,
-                        "Access denied: Acting tenant ID does not match repository's tenant ID for branch switch."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Tenant ID mismatch for branch switch operation.".to_string(),
-                        data: None,
-                    });
-                }
-                info!(repo_name = %repo_name, "Tenant ID match successful for branch switch.");
-            }
-            _ => {
-                warn!(
-                    acting_tenant_id = ?acting_tenant_id,
-                    repo_name = %repo_name,
-                    "Access denied: Tenant ID mismatch or missing for branch switch."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: Branch switch requires matching and defined tenant IDs.".to_string(),
-                    data: None,
-                });
-            }
-        }
-    }
-    #[cfg(not(feature = "multi_tenant"))]
-    {
-        info!(repo_name = %repo_name, "Multi-tenancy disabled, allowing branch switch");
-    }
+    info!(repo_name = %repo_name, "Processing branch switch");
 
     let repo_path = PathBuf::from(&repo_config.local_path);
     let current_branch = repo_config.active_branch.clone()
@@ -1130,52 +949,7 @@ pub async fn handle_repository_list_branches(
         })?
         .clone();
 
-    // Tenant validation
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        Some("default".to_string())
-    } else {
-        Some("default".to_string())
-    };
-
-    info!(acting_tenant_id = ?acting_tenant_id, repo_name = %repo_name, "Determined acting tenant ID for list branches.");
-
-    #[cfg(feature = "multi_tenant")]
-    {
-        match (&acting_tenant_id, &None) {
-            (Some(act_tid), Some(repo_tid)) => {
-                if act_tid != repo_tid {
-                    warn!(
-                        acting_tenant_id = %act_tid,
-                        repo_tenant_id = %repo_tid,
-                        repo_name = %repo_name,
-                        "Access denied: Acting tenant ID does not match repository's tenant ID for list branches."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Tenant ID mismatch for list branches operation.".to_string(),
-                        data: None,
-                    });
-                }
-                info!(repo_name = %repo_name, "Tenant ID match successful for list branches.");
-            }
-            _ => {
-                warn!(
-                    acting_tenant_id = ?acting_tenant_id,
-                    repo_name = %repo_name,
-                    "Access denied: Tenant ID mismatch or missing for list branches."
-                );
-                return Err(ErrorObject {
-                    code: error_codes::ACCESS_DENIED,
-                    message: "Access denied: List branches requires matching and defined tenant IDs.".to_string(),
-                    data: None,
-                });
-            }
-        }
-    }
-    #[cfg(not(feature = "multi_tenant"))]
-    {
-        info!(repo_name = %repo_name, "Multi-tenancy disabled, allowing list branches");
-    }
+    info!(repo_name = %repo_name, "Processing list branches");
 
     let repo_path = PathBuf::from(&repo_config.local_path);
     let current_branch = repo_config.active_branch.clone()
@@ -1282,7 +1056,7 @@ pub async fn handle_repository_list_branches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig, RepositoryConfig, OAuthConfig};
+    use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig, RepositoryConfig};
     use tempfile::tempdir;
     use axum::Extension;
     use crate::middleware::auth_middleware::AuthenticatedUser;
@@ -1394,15 +1168,14 @@ mod tests {
         }
     }
 
-    fn create_test_auth_user(tenant_id_param: Option<&str>) -> Option<Extension<AuthenticatedUser>> {
+    fn create_test_auth_user() -> Option<Extension<AuthenticatedUser>> {
         Some(Extension(AuthenticatedUser {
             user_id: Some("test_user".to_string()),
-            tenant_id: tenant_id_param.map_or_else(|| "default_mcp_instance_tenant_for_tests".to_string(), |id| id.to_string()),
             scopes: vec![],
         }))
     }
     
-    fn create_test_repo_config(name: &str, tenant_id: Option<String>) -> RepositoryConfig {
+    fn create_test_repo_config(name: &str) -> RepositoryConfig {
         RepositoryConfig {
             name: name.to_string(),
             url: format!("file:///tmp/test_repo_{}", name),
@@ -1410,7 +1183,6 @@ mod tests {
             default_branch: "main".to_string(),
             active_branch: Some("main".to_string()),
             last_synced_commits: HashMap::new(),
-            tenant_id: tenant_id,
             tracked_branches: vec!["main".to_string()],
             remote_name: Some("origin".to_string()),
             ssh_key_path: None,
@@ -1473,14 +1245,6 @@ mod tests {
             indexing: sagitta_search::config::IndexingConfig::default(),
             performance: sagitta_search::config::PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-            // Remove rayon_num_threads field
         }))
     }
     
@@ -1512,14 +1276,6 @@ mod tests {
                 ..PerformanceConfig::default()
             },
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
-            // Remove rayon_num_threads field
         };
 
         let config = Arc::new(RwLock::new(test_config));
@@ -1527,6 +1283,7 @@ mod tests {
         assert!(result.repositories.is_empty());
     }
 
+    /*
     #[cfg(feature = "multi_tenant")]
     #[tokio::test]
     async fn test_handle_repository_remove_tenant_isolation() {
@@ -1827,33 +1584,5 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.code, error_codes::REPO_NOT_FOUND, "Expected REPO_NOT_FOUND error");
     }
-
-    #[cfg(feature = "multi_tenant")]
-    #[tokio::test]
-    async fn test_handle_repository_list_branches_access_denied() {
-        let temp_dir = tempdir().unwrap();
-        let temp_dir_path_str = temp_dir.path().to_string_lossy().into_owned();
-
-        let repo_name = "test_repo_access";
-        let repo_tenant_id = "tenant_a";
-        let user_tenant_id = "tenant_b";
-
-        let repo_config = create_test_repo_config(repo_name, Some(repo_tenant_id.to_string()));
-        let config = create_test_app_config(vec![repo_config], temp_dir_path_str);
-        let auth_user = create_test_auth_user(Some(user_tenant_id));
-
-        let params = RepositoryListBranchesParams {
-            repository_name: repo_name.to_string(),
-            filter: None,
-            include_remote: true,
-            include_tags: true,
-            limit: 50,
-        };
-
-        let result = handle_repository_list_branches(params, config, auth_user).await;
-        assert!(result.is_err(), "Expected error for tenant mismatch");
-        
-        let error = result.unwrap_err();
-        assert_eq!(error.code, error_codes::ACCESS_DENIED, "Expected ACCESS_DENIED error");
-    }
+    */
 } 

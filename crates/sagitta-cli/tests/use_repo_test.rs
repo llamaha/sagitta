@@ -27,13 +27,6 @@ mod tests {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         }
     }
     
@@ -59,7 +52,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test_tenant".to_string()),
         };
         config.repositories.push(repo1);
 
@@ -77,7 +69,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test_tenant".to_string()),
         };
         config.repositories.push(repo2);
         
@@ -116,7 +107,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test_tenant".to_string()),
         };
         config.repositories.push(repo1);
         

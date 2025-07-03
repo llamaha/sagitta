@@ -151,8 +151,7 @@ async fn create_test_repo_manager_with_real_config() -> Result<(Arc<Mutex<Reposi
     // Set up Qdrant URL (use a test URL that won't actually connect)
     config.qdrant_url = "http://localhost:6334".to_string();
     
-    // Set up tenant ID
-            // tenant_id is hardcoded to "local" in sagitta-code operational code
+    // Configuration is ready
     
     let config_arc = Arc::new(Mutex::new(config));
     let mut repo_manager = RepositoryManager::new(config_arc);
@@ -285,16 +284,16 @@ mod tests {
             (
                 config.repositories_base_path.clone(),
                 config.qdrant_url.clone(),
-                Some("local".to_string()) // hardcoded in sagitta-code
+                config.qdrant_url.clone()
             )
         };
         
         assert!(config_check.0.is_some(), "Should have repositories base path");
         assert!(!config_check.1.is_empty(), "Should have Qdrant URL");
-        assert!(config_check.2.is_some(), "Should have tenant ID");
+        assert!(!config_check.2.is_empty(), "Should have Qdrant URL");
         
-        println!("Configuration check passed: base_path={:?}, qdrant_url={}, tenant_id={:?}", 
-                config_check.0, config_check.1, config_check.2);
+        println!("Configuration check passed: base_path={:?}, qdrant_url={}", 
+                config_check.0, config_check.1);
     }
 
     /// Test file operations on a real repository
@@ -334,7 +333,6 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: true,
                 target_ref: None,
-                tenant_id: Some("test-tenant".to_string()),
             };
             
             config.repositories.push(repo_config);

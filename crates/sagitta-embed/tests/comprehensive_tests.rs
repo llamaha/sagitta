@@ -77,12 +77,10 @@ fn test_embedding_config_builder_pattern() {
     let config = EmbeddingConfigBuilder::new()
         .model_type(EmbeddingModelType::Onnx)
         .expected_dimension(512)
-        .tenant_id("test-tenant")
         .build_unchecked();
 
     assert_eq!(config.model_type, EmbeddingModelType::Onnx);
     assert_eq!(config.expected_dimension, Some(512));
-    assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
 }
 
 #[test]

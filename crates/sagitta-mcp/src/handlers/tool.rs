@@ -100,7 +100,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         }
         "repository_map" => {
             let map_params: RepositoryMapParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_map(map_params, config, None).await {
+             match handle_repository_map(map_params, config).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }

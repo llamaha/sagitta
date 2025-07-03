@@ -307,12 +307,6 @@ mod tests {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         }
     }
 
@@ -345,12 +339,6 @@ mod tests {
                  ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         };
         
         // Use branch-aware collection naming - the default branch will be "main" or "master"
@@ -437,12 +425,6 @@ mod tests {
                  ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         };
         
         // Use branch-aware collection naming - determine the actual branch name
@@ -534,12 +516,6 @@ mod tests {
                 ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         };
 
         let repo_name_str = "test_cloned_repo";
@@ -630,18 +606,10 @@ mod tests {
                 ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("3c62d9d6-0762-4063-bc26-23d4ced05d53".to_string()),
         };
         
         // Use branch-aware collection naming - the test specifies "master" branch
         let expected_collection_name = crate::repo_helpers::get_branch_aware_collection_name(
-            "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in the logs
             "hello-world",
             "master", // This test specifically uses master branch
             &config
@@ -672,7 +640,6 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
-            "3c62d9d6-0762-4063-bc26-23d4ced05d53", // Same tenant ID as in logs
             None, // No progress reporter for test
         )
         .await;
@@ -734,12 +701,6 @@ mod tests {
                  ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         };
 
         // Set up mock expectations
@@ -783,7 +744,6 @@ mod tests {
             config.performance.vector_dimension,
             client_arc,
             &config,
-            "test_tenant",
             Some(progress_reporter),
         )
         .await;

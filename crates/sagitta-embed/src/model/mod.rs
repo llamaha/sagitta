@@ -50,7 +50,6 @@ pub struct EmbeddingModel {
     onnx_model_path: Option<PathBuf>,
     #[allow(dead_code)] // Allow dead code for now, may be used for identification/debugging
     onnx_tokenizer_path: Option<PathBuf>,
-    tenant_id: Option<String>,
 }
 
 impl EmbeddingModel {
@@ -64,7 +63,6 @@ impl EmbeddingModel {
             model_type,
             onnx_model_path: None,
             onnx_tokenizer_path: None,
-            tenant_id: None,
         }
     }
 
@@ -86,7 +84,6 @@ impl EmbeddingModel {
             model_type: EmbeddingModelType::Onnx,
             onnx_model_path: Some(model_path.as_ref().to_path_buf()),
             onnx_tokenizer_path: Some(tokenizer_path.as_ref().to_path_buf()),
-            tenant_id: None,
         })
     }
 
@@ -117,16 +114,6 @@ impl EmbeddingModel {
         self.provider.embed_batch(texts)
     }
 
-    /// Set the tenant ID for this model.
-    pub fn with_tenant_id<S: Into<String>>(mut self, tenant_id: S) -> Self {
-        self.tenant_id = Some(tenant_id.into());
-        self
-    }
-
-    /// Get the tenant ID for this model.
-    pub fn tenant_id(&self) -> Option<&str> {
-        self.tenant_id.as_deref()
-    }
 }
 
 #[cfg(test)]

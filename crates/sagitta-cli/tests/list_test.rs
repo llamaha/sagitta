@@ -29,7 +29,6 @@ use tempfile::tempdir;
             indexed_languages: Some(vec!["rust".to_string()]),
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test_tenant".to_string()),
         }
     }
     

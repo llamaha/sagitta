@@ -93,19 +93,6 @@ impl RepositoryManager {
     }
     
     /// Create a new RepositoryManager for testing without spawning background tasks
-    #[cfg(feature = "multi_tenant")]
-    pub fn new_for_test(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
-        Self {
-            config,
-            client: None,
-            embedding_handler: None,
-            repositories: Arc::new(Mutex::new(Vec::new())),
-            sync_log_sender: Arc::new(Mutex::new(None)),
-        }
-    }
-    
-    /// Create a new RepositoryManager for testing without spawning background tasks (non-multi_tenant version)
-    #[cfg(not(feature = "multi_tenant"))]
     pub fn new_for_test(config: Arc<Mutex<SagittaAppConfig>>) -> Self {
         Self {
             config,
@@ -411,7 +398,6 @@ impl RepositoryManager {
         
         let config_guard = self.config.lock().await;
         
-        // For local-only operation, use a default tenant ID
         
         // Get embedding dimension (use default if embedding handler not available)
         let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
@@ -495,7 +481,6 @@ impl RepositoryManager {
         
         let config_guard = self.config.lock().await;
         
-        // For local-only operation, use a default tenant ID
         
         // Get embedding dimension (use default if embedding handler not available)
         let embedding_dim = if let Some(embedding_handler) = &self.embedding_handler {
@@ -725,7 +710,6 @@ impl RepositoryManager {
     pub async fn query(&self, repo_name: &str, query_text: &str, limit: usize, element_type: Option<&str>, language: Option<&str>, branch: Option<&str>) -> Result<QueryResponse> {
         let config_guard = self.config.lock().await;
         
-        // For local-only operation, use a default tenant ID
         
         log::info!("[GUI RepoManager] Query repo: {} for '{}' (limit: {}, element: {:?}, lang: {:?}, branch: {:?})", 
                   repo_name, query_text, limit, element_type, language, branch);
@@ -746,7 +730,7 @@ impl RepositoryManager {
             .or_else(|| repo_config.active_branch.clone())
             .unwrap_or_else(|| repo_config.default_branch.clone());
         
-        // Get collection name based on tenant, repo, and branch using branch-aware naming
+        // Get collection name based on repo and branch using branch-aware naming
         let collection_name = repo_helpers::get_branch_aware_collection_name(repo_name, &branch_name, &config_guard);
         
         log::info!("[GUI RepoManager] Using collection '{}' for search (branch: {})", collection_name, branch_name);
@@ -1144,7 +1128,6 @@ mod tests {
     use std::time::Duration;
 
     /// Helper to create a RepositoryManager instance with a temporary AppConfig for testing
-    #[cfg(feature = "multi_tenant")]
     async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         
@@ -1174,37 +1157,6 @@ mod tests {
         (repo_manager, temp_dir)
     }
 
-    // Alternative test helper for non-multi_tenant tests
-    #[cfg(not(feature = "multi_tenant"))]
-    async fn create_test_repo_manager_with_temp_config() -> (RepositoryManager, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
-        
-        let mut config = AppConfig::default();
-        config.repositories = vec![
-            RepositoryConfig {
-                name: "repo1".to_string(),
-                url: "https://github.com/test/repo1.git".to_string(),
-                local_path: temp_dir.path().join("repo1"),
-                default_branch: "main".to_string(),
-                tracked_branches: vec!["main".to_string()],
-                ..Default::default()
-            },
-            RepositoryConfig {
-                name: "repo2".to_string(),
-                url: "https://github.com/test/repo2.git".to_string(),
-                local_path: temp_dir.path().join("repo2"),
-                default_branch: "main".to_string(),
-                tracked_branches: vec!["main".to_string()],
-    
-                ..Default::default()
-            },
-        ];
-        
-        let config_arc = Arc::new(Mutex::new(config));
-        let repo_manager = RepositoryManager::new(config_arc);
-        
-        (repo_manager, temp_dir)
-    }
 
     #[tokio::test]
     async fn test_gpu_memory_cleanup_after_sync() {
@@ -1244,11 +1196,9 @@ mod tests {
     /// Tests that the query method uses branch-aware collection naming that matches
     /// what the CLI and sync logic use, ensuring collections are found correctly.
     #[tokio::test]
-    #[cfg(feature = "multi_tenant")]
     async fn test_query_uses_branch_aware_collection_naming() {
         let temp_dir = TempDir::new().unwrap();
         let mut config = AppConfig::default();
-        // tenant_id is hardcoded to "local" in sagitta-code operational code
         config.performance.collection_name_prefix = "test_repo_".to_string();
         
         // Add a test repository to the config
@@ -1271,7 +1221,7 @@ mod tests {
 
         let manager = RepositoryManager::new_for_test(Arc::new(Mutex::new(config)));
         
-        // Test query without client/embedding handler (should return placeholder)
+        // Test query without client/embedding handler (should error)
         let result = manager.query(
             "test-repo", 
             "test query", 
@@ -1281,8 +1231,9 @@ mod tests {
             None // No branch specified, should use active_branch
         ).await;
         
-        // Should not error due to collection name issues (would get placeholder response)
-        assert!(result.is_ok());
+        // Should error because infrastructure is not initialized
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Search infrastructure not initialized"));
         
         // Test with specific branch
         let result_with_branch = manager.query(
@@ -1294,9 +1245,9 @@ mod tests {
             Some("main") // Specific branch
         ).await;
         
-        assert!(result_with_branch.is_ok());
-        
-        // The test passes if we don't get "collection not found" errors
+        // Should also error because infrastructure is not initialized
+        assert!(result_with_branch.is_err());
+        assert!(result_with_branch.unwrap_err().to_string().contains("Search infrastructure not initialized"));
         // In a real scenario with Qdrant, the branch-aware collection name would be used
     }
 

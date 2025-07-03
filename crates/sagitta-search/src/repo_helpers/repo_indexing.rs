@@ -366,7 +366,41 @@ where
 
     // --- Handle target_ref --- 
     let final_active_branch: String;
+    let resolved_target_ref: Option<String>;
+    
+    // Resolve special refs like HEAD
     if let Some(target_ref) = target_ref_opt {
+        // Open repository to resolve refs
+        let repo = git2::Repository::open(&final_local_path)
+            .context(format!("Failed to open repository at {} to resolve refs", final_local_path.display()))?;
+        
+        if target_ref == "HEAD" {
+            match super::git_edge_cases::resolve_git_ref(&repo, target_ref) {
+                Ok(resolved) => {
+                    info!("Resolved '{}' to '{}'", target_ref, resolved);
+                    resolved_target_ref = Some(resolved);
+                }
+                Err(e) => {
+                    warn!("Failed to resolve '{}': {}, using default branch", target_ref, e);
+                    resolved_target_ref = None;
+                }
+            }
+        } else {
+            // Validate the ref name
+            match super::git_edge_cases::validate_ref_name(target_ref) {
+                Ok(_) => resolved_target_ref = Some(target_ref.to_string()),
+                Err(e) => {
+                    return Err(SagittaError::GitMessageError(format!(
+                        "Invalid target ref '{}': {}", target_ref, e
+                    )));
+                }
+            }
+        }
+    } else {
+        resolved_target_ref = None;
+    }
+    
+    if let Some(target_ref) = resolved_target_ref.as_ref() {
         info!("Attempting to checkout target ref '{}' for repository '{}'...", target_ref, repo_name);
         
         // Report fetch start
@@ -1231,7 +1265,6 @@ mod tests {
             client,
             384, // embedding_dim
             &config,
-            "test-tenant",
             None, // No progress reporter for test
         ).await;
         
@@ -1277,7 +1310,6 @@ mod tests {
             client,
             384,
             &config,
-            "test-tenant",
             None, // No progress reporter for test
         ).await;
         

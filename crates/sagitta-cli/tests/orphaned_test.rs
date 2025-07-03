@@ -35,7 +35,6 @@ fn create_test_repo_config(name: &str, url: &str, local_path: PathBuf, added_as_
         indexed_languages: None,
         added_as_local_path: added_as_local,
         target_ref: None,
-        tenant_id: None,
     }
 }
 
