@@ -183,14 +183,19 @@ mod tests {
 
     #[test]
     fn test_log_collector_storage() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        
         let collector = SagittaCodeLogCollector;
         
-        // Clear any existing logs
-        if let Ok(mut logs) = LOG_COLLECTOR.lock() {
-            logs.clear();
-        }
+        // Get count of logs before we add ours
+        let initial_count = if let Ok(logs) = LOG_COLLECTOR.lock() {
+            logs.len()
+        } else {
+            0
+        };
         
-        // Create a test record
+        // Create a test record with a simple static message to avoid lifetime issues
         let metadata = Metadata::builder()
             .level(Level::Info)
             .target("sagitta_code::test")
@@ -198,20 +203,25 @@ mod tests {
         
         let record = Record::builder()
             .metadata(metadata)
-            .args(format_args!("Test log message"))
+            .args(format_args!("Test log collector storage functionality"))
             .build();
         
         // Log the record
         collector.log(&record);
         
-        // Check that it was stored
+        // Check that a message was stored
         if let Ok(logs) = LOG_COLLECTOR.lock() {
-            assert!(!logs.is_empty());
-            let last_log = &logs[logs.len() - 1];
-            // The log format is: "[HH:MM:SS LEVEL] message"
-            assert!(last_log.1.contains("Test log message"));
-            // Could be INFO, Info, or info depending on the formatting
-            assert!(last_log.1.to_uppercase().contains("INFO"));
+            // Verify we have at least one more log than before
+            assert!(logs.len() > initial_count, "No new log was added");
+            
+            // Look for our specific test message
+            let found = logs.iter().any(|(_, msg)| msg.contains("Test log collector storage functionality"));
+            assert!(found, "Our test log message was not found in logs");
+            
+            // Also verify the message format contains INFO level
+            if let Some((_, found_msg)) = logs.iter().find(|(_, msg)| msg.contains("Test log collector storage functionality")) {
+                assert!(found_msg.to_uppercase().contains("INFO"));
+            }
         }
     }
 
