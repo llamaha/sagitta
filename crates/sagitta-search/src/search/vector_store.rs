@@ -74,9 +74,10 @@ pub struct CollectionConfig {
 }
 
 /// Distance metrics supported by the vector store.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DistanceMetric {
     /// Cosine similarity (default for most text embeddings)
+    #[default]
     Cosine,
     /// Euclidean distance
     Euclidean,
@@ -194,11 +195,6 @@ pub struct ScrollResult {
     pub next_offset: Option<String>,
 }
 
-impl Default for DistanceMetric {
-    fn default() -> Self {
-        DistanceMetric::Cosine
-    }
-}
 
 impl fmt::Display for DistanceMetric {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

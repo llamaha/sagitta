@@ -268,6 +268,7 @@ mod tests {
     use crate::agent::conversation::persistence::MockConversationPersistence;
     use crate::agent::conversation::search::MockConversationSearchEngine;
     use crate::agent::conversation::types::ConversationSummary;
+    use crate::conversation::ConversationManagerImpl;
     use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::collections::HashMap;

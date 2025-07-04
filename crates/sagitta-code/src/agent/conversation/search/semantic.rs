@@ -206,10 +206,9 @@ impl SemanticConversationSearchEngine {
                             
                             // Filter by tags
                             if let Some(tags_to_match) = &query.tags {
-                                if !tags_to_match.is_empty() {
-                                    if !tags_to_match.iter().any(|t| conversation.tags.contains(t)) {
-                                        return false;
-                                    }
+                                if !tags_to_match.is_empty() 
+                                    && !tags_to_match.iter().any(|t| conversation.tags.contains(t)) {
+                                    return false;
                                 }
                             }
                             

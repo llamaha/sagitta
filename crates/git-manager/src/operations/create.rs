@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Options for repository cloning operations
+#[derive(Default)]
 pub struct CloneOptions {
     /// Specific branch to checkout (defaults to remote HEAD)
     pub branch: Option<String>,
@@ -63,20 +64,6 @@ impl Clone for CloneOptions {
     }
 }
 
-impl Default for CloneOptions {
-    fn default() -> Self {
-        Self {
-            branch: None,
-            bare: false,
-            depth: None,
-            ssh_private_key: None,
-            ssh_public_key: None,
-            ssh_passphrase: None,
-            username: None,
-            password: None,
-        }
-    }
-}
 
 /// Result of a repository cloning operation
 #[derive(Debug)]

@@ -175,7 +175,7 @@ impl OnnxEmbeddingModel {
         let tokenizer_json_path = if tokenizer_path.is_file()
             && tokenizer_path
                 .file_name()
-                .map_or(false, |name| name == "tokenizer.json")
+                .is_some_and(|name| name == "tokenizer.json")
         {
             tokenizer_path.to_path_buf()
         } else if tokenizer_path.is_dir() {

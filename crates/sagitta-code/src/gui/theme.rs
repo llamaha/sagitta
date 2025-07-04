@@ -36,8 +36,9 @@ mod color32_serde {
 }
 
 /// Theme options for the application - includes custom theme support
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppTheme {
+    #[default]
     Dark,
     Light,
     Custom,
@@ -208,11 +209,6 @@ pub fn set_custom_theme_colors(colors: CustomThemeColors) {
     }
 }
 
-impl Default for AppTheme {
-    fn default() -> Self {
-        AppTheme::Dark
-    }
-}
 
 impl AppTheme {
     /// Convert to egui Visuals

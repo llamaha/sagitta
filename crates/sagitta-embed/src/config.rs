@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Execution provider preference order for auto-selection
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ExecutionProvider {
     /// CUDA GPU execution provider
     Cuda,
@@ -18,14 +18,10 @@ pub enum ExecutionProvider {
     /// CoreML execution provider (macOS)
     CoreML,
     /// Auto-detect optimal provider
+    #[default]
     Auto,
 }
 
-impl Default for ExecutionProvider {
-    fn default() -> Self {
-        ExecutionProvider::Auto
-    }
-}
 
 /// Memory pool configuration for tensor reuse
 #[derive(Debug, Clone, PartialEq)]

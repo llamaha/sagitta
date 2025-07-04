@@ -12,9 +12,8 @@ pub struct RubyParser {
     query: Query,
 }
 
-impl RubyParser {
-    /// Creates a new `RubyParser` with the Ruby grammar and queries.
-    pub fn new() -> Self {
+impl Default for RubyParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_ruby::language();
         parser
@@ -36,6 +35,13 @@ impl RubyParser {
         .expect("Error creating Ruby query");
 
         RubyParser { parser, query }
+    }
+}
+
+impl RubyParser {
+    /// Creates a new `RubyParser` with the Ruby grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     // Re-use a helper similar to Rust's, but specific to Ruby element types
@@ -100,8 +106,7 @@ impl SyntaxParser for RubyParser {
         // Fallback: If no chunks found in non-empty file, split into smaller chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Ruby items found in {}, splitting into smaller chunks.",
-                file_path
+                "No top-level Ruby items found in {file_path}, splitting into smaller chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -122,7 +127,7 @@ impl SyntaxParser for RubyParser {
                     start_line,
                     end_line,
                     language: "ruby".to_string(),
-                    element_type: format!("fallback_chunk_{}", i),
+                    element_type: format!("fallback_chunk_{i}"),
                 });
             }
         }

@@ -12,9 +12,8 @@ pub struct RustParser {
     query: Query,
 }
 
-impl RustParser {
-    /// Creates a new `RustParser` with the Rust grammar and queries.
-    pub fn new() -> Self {
+impl Default for RustParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_rust::language();
         parser
@@ -55,10 +54,17 @@ impl RustParser {
 
         RustParser { parser, query }
     }
+}
+
+impl RustParser {
+    /// Creates a new `RustParser` with the Rust grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Extracts doc comments immediately preceding the given node.
     fn extract_doc_comments(&self, node: &Node, code: &str) -> String {
-        let start_row = node.start_position().row as usize;
+        let start_row = node.start_position().row;
         let code_lines: Vec<&str> = code.lines().collect();
         let mut doc_lines = Vec::new();
         if start_row == 0 || code_lines.is_empty() {
@@ -103,7 +109,7 @@ impl RustParser {
         if matches!(element_type, "struct" | "enum" | "trait" | "function") {
             let doc = self.extract_doc_comments(&node, code);
             if !doc.is_empty() {
-                content = format!("{}\n{}", doc, content);
+                content = format!("{doc}\n{content}");
             }
         }
 
@@ -172,7 +178,7 @@ impl SyntaxParser for RustParser {
                             
                             if !func_is_covered {
                                 let func_content = code.get(func_start..func_end).unwrap_or("");
-                                let combined_content = format!("{}\n...\n{}", impl_signature, func_content);
+                                let combined_content = format!("{impl_signature}\n...\n{func_content}");
 
                                 // Use node_to_chunk logic but with modified content
                                 let start_line = child_node.start_position().row + 1;
@@ -250,8 +256,7 @@ impl SyntaxParser for RustParser {
         // For now, keep the simple fallback logic.
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level Rust items found in {}, splitting into smaller chunks.",
-                file_path
+                "No top-level Rust items found in {file_path}, splitting into smaller chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -272,7 +277,7 @@ impl SyntaxParser for RustParser {
                      start_line,
                      end_line,
                      language: "rust".to_string(),
-                     element_type: format!("fallback_chunk_{}", i),
+                     element_type: format!("fallback_chunk_{i}"),
                  });
             }
         }

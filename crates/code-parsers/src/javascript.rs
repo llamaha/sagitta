@@ -12,9 +12,8 @@ pub struct JavaScriptParser {
     query: Query,
 }
 
-impl JavaScriptParser {
-    /// Creates a new `JavaScriptParser` with the JS grammar and queries.
-    pub fn new() -> Self {
+impl Default for JavaScriptParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         let language = tree_sitter_javascript::language();
         parser
@@ -38,6 +37,13 @@ impl JavaScriptParser {
         .expect("Error creating JavaScript query");
 
         JavaScriptParser { parser, query }
+    }
+}
+
+impl JavaScriptParser {
+    /// Creates a new `JavaScriptParser` with the JS grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn node_to_chunk(
@@ -120,8 +126,7 @@ impl SyntaxParser for JavaScriptParser {
         // Fallback: If no chunks found in non-empty file, split into smaller chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level JavaScript items found in {}, splitting into smaller chunks.",
-                file_path
+                "No top-level JavaScript items found in {file_path}, splitting into smaller chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -142,7 +147,7 @@ impl SyntaxParser for JavaScriptParser {
                     start_line,
                     end_line,
                     language: "javascript".to_string(),
-                    element_type: format!("fallback_chunk_{}", i),
+                    element_type: format!("fallback_chunk_{i}"),
                 });
             }
         }

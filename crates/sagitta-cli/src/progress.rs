@@ -159,7 +159,7 @@ impl IndicatifProgressReporter {
                 }
                 
                 if let Some(fps) = files_per_second {
-                    let unit = if message.as_ref().map_or(false, |m| m.contains("chunk")) {
+                    let unit = if message.as_ref().is_some_and(|m| m.contains("chunk")) {
                         "chunks/s"
                     } else {
                         "files/s"

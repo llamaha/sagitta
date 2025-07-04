@@ -971,6 +971,7 @@ mod tests {
     use super::*;
     use crate::agent::state::types::ConversationStatus;
     use tempfile::TempDir;
+    use sagitta_search::AppConfig;
 
     async fn create_test_setup() -> (Arc<Qdrant>, EmbeddingPool) {
         let config = AppConfig::default();

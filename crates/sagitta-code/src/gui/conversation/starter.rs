@@ -605,26 +605,24 @@ impl ConversationStarter {
             
             // Action buttons
             ui.horizontal(|ui| {
-                if ui.add(Button::new("🚀 Start Conversation").min_size(Vec2::new(120.0, 30.0))).clicked() {
-                    if !self.input_text.trim().is_empty() {
-                        action = Some(StarterAction::StartConversation {
-                            title: self.extract_title(),
-                            content: self.input_text.clone(),
-                            intent: self.detected_intent.clone(),
-                            template_id: self.selected_template.and_then(|i| self.get_matching_templates().get(i).map(|t| t.id)),
-                            context_ids: self.selected_context.clone(),
-                        });
-                    }
+                if ui.add(Button::new("🚀 Start Conversation").min_size(Vec2::new(120.0, 30.0))).clicked() 
+                    && !self.input_text.trim().is_empty() {
+                    action = Some(StarterAction::StartConversation {
+                        title: self.extract_title(),
+                        content: self.input_text.clone(),
+                        intent: self.detected_intent.clone(),
+                        template_id: self.selected_template.and_then(|i| self.get_matching_templates().get(i).map(|t| t.id)),
+                        context_ids: self.selected_context.clone(),
+                    });
                 }
                 
-                if ui.button("📋 Save as Template").clicked() {
-                    if !self.input_text.trim().is_empty() {
-                        action = Some(StarterAction::SaveTemplate {
-                            name: self.extract_title(),
-                            content: self.input_text.clone(),
-                            intent: self.detected_intent.clone(),
-                        });
-                    }
+                if ui.button("📋 Save as Template").clicked() 
+                    && !self.input_text.trim().is_empty() {
+                    action = Some(StarterAction::SaveTemplate {
+                        name: self.extract_title(),
+                        content: self.input_text.clone(),
+                        intent: self.detected_intent.clone(),
+                    });
                 }
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

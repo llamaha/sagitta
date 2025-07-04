@@ -630,7 +630,7 @@ mod tests {
     use tempfile::TempDir;
     use std::fs;
     use sagitta_search::config::{AppConfig, IndexingConfig, PerformanceConfig};
-    use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig};
+    use crate::config::types::{SagittaCodeConfig, UiConfig, LoggingConfig, ConversationConfig, ClaudeCodeConfig};
     // Import specific loader functions for more direct testing of file operations
     use crate::config::loader::{load_config_from_path as load_sagitta_code_config_from_path, save_config_to_path as save_sagitta_code_config_to_path};
 

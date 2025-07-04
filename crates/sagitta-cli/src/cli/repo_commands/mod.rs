@@ -184,7 +184,7 @@ where
 mod tests {
     use super::*;
     use crate::cli::repo_commands::RepoArgs; 
-    use sagitta_search::config::{AppConfig, RepositoryConfig, IndexingConfig, load_config, save_config};
+    use sagitta_search::config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig, load_config, save_config};
     use std::path::PathBuf;
     use crate::cli::commands::Commands;
     use crate::cli::repo_commands::{RepoCommand};

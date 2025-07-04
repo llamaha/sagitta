@@ -36,7 +36,7 @@ pub struct BranchInfo {
 }
 
 /// Options for creating a new branch
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CreateBranchOptions {
     /// Starting point for the new branch (commit SHA, branch name, or tag)
     pub start_point: Option<String>,
@@ -46,15 +46,6 @@ pub struct CreateBranchOptions {
     pub track: Option<String>,
 }
 
-impl Default for CreateBranchOptions {
-    fn default() -> Self {
-        Self {
-            start_point: None,
-            force: false,
-            track: None,
-        }
-    }
-}
 
 /// Branch manager for git operations
 pub struct BranchManager {
@@ -110,7 +101,7 @@ impl BranchManager {
         let current_branch = self.get_current_branch_name()?;
         
         // Determine branch type by checking if the branch name contains "remotes/"
-        let branch_type = if branch.name().ok().flatten().map_or(false, |name| name.contains("remotes/")) {
+        let branch_type = if branch.name().ok().flatten().is_some_and(|name| name.contains("remotes/")) {
             BranchType::Remote
         } else {
             BranchType::Local

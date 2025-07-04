@@ -1,4 +1,4 @@
-use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, ErrorObject};
+use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, TodoPriority, ErrorObject};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -72,6 +72,7 @@ mod tests {
     use tempfile::TempDir;
     use std::path::PathBuf;
     use crate::handlers::test_utils::TODO_TEST_MUTEX;
+    use crate::mcp::types::{TodoItem, TodoPriority};
     
     async fn create_test_config() -> (Arc<RwLock<AppConfig>>, TempDir, std::sync::MutexGuard<'static, ()>) {
         // Handle poisoned mutex by clearing the poison

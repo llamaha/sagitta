@@ -289,13 +289,12 @@ impl CheckpointSuggestionsUI {
                             });
                         }
                         
-                        if self.config.allow_dismiss {
-                            if ui.small_button("✖").on_hover_text("Dismiss suggestion").clicked() {
-                                action = Some(CheckpointSuggestionAction::DismissSuggestion {
-                                    conversation_id,
-                                    message_id: suggestion.message_id,
-                                });
-                            }
+                        if self.config.allow_dismiss 
+                            && ui.small_button("✖").on_hover_text("Dismiss suggestion").clicked() {
+                            action = Some(CheckpointSuggestionAction::DismissSuggestion {
+                                conversation_id,
+                                message_id: suggestion.message_id,
+                            });
                         }
                         
                         // Details toggle

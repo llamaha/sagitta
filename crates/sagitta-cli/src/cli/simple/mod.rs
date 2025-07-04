@@ -44,20 +44,12 @@ pub mod view_file; // Added
 // const SIMPLE_INDEX_COLLECTION: &str = \"simple_index\"; // REMOVED - Unused
 
 // Arguments for the main 'simple' command group
-#[derive(Args, Debug, Clone)] 
+#[derive(Args, Debug, Clone, Default)] 
 pub struct SimpleArgs {
     #[command(subcommand)]
     pub command: SimpleCommand,
 }
 
-// Implement Default for SimpleArgs
-impl Default for SimpleArgs {
-    fn default() -> Self {
-        Self {
-            command: SimpleCommand::default(),
-        }
-    }
-}
 
 // Enum for the subcommands within 'simple'
 #[derive(Subcommand, Debug, Clone)] 

@@ -827,6 +827,8 @@ mod tests {
     use super::*;
     use crate::agent::conversation::manager::ConversationManager;
     use crate::agent::conversation::types::*;
+    use crate::agent::message::types::AgentMessage;
+    use crate::{Role, ConversationStatus};
     
     #[tokio::test]
     async fn test_navigation_manager_creation() {

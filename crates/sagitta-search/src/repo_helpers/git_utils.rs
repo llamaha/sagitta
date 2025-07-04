@@ -117,7 +117,7 @@ pub fn collect_files_from_tree(
         let entry_path = current_path.join(entry.name().unwrap_or(""));
         match entry.kind() {
             Some(git2::ObjectType::Blob) => {
-                if entry_path.extension().map_or(false, |ext| is_supported_extension(ext.to_str().unwrap_or(""))) {
+                if entry_path.extension().is_some_and(|ext| is_supported_extension(ext.to_str().unwrap_or(""))) {
                      file_list.push(entry_path);
                  } else {
                     log::trace!("Skipping non-supported file: {}", entry_path.display());

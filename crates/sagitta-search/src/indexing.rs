@@ -263,12 +263,11 @@ pub async fn index_paths<
         
         for token in tokens {
             // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
-            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
-                if !token.text.is_empty() {
-                    let token_id = vocabulary_manager.add_token(&token.text);
-                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
-                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
-                }
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) 
+                && !token.text.is_empty() {
+                let token_id = vocabulary_manager.add_token(&token.text);
+                let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
             }
         }
         
@@ -505,12 +504,11 @@ pub async fn index_repo_files<
         
         for token in tokens {
             // Only use identifiers and literals for sparse indexing (skip symbols, comments, etc.)
-            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) {
-                if !token.text.is_empty() {
-                    let token_id = vocabulary_manager.add_token(&token.text);
-                    let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
-                    *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
-                }
+            if matches!(token.kind, crate::tokenizer::TokenKind::Identifier | crate::tokenizer::TokenKind::Literal) 
+                && !token.text.is_empty() {
+                let token_id = vocabulary_manager.add_token(&token.text);
+                let boost_factor = if filename_terms.contains(&token.text) { 2 } else { 1 };
+                *term_frequencies.entry(token_id).or_insert(0) += boost_factor;
             }
         }
         

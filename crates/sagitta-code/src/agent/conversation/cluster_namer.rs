@@ -496,6 +496,7 @@ mod tests {
     use super::*;
     use uuid::Uuid;
     use chrono::Utc;
+    use crate::ConversationStatus;
     
     fn create_test_conversation(title: &str, tags: Vec<String>) -> ConversationSummary {
         ConversationSummary {

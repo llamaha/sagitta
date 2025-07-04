@@ -408,6 +408,7 @@ mod tests {
     use super::*;
     use crate::agent::conversation::types::{Conversation, ProjectContext, ProjectType};
     use crate::agent::message::types::AgentMessage;
+    use crate::conversation::TagRuleType;
     use std::collections::HashMap;
     use uuid::Uuid;
     

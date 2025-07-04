@@ -12,9 +12,8 @@ pub struct TypeScriptParser {
     query: Query,
 }
 
-impl TypeScriptParser {
-    /// Creates a new `TypeScriptParser` with the TypeScript grammar and queries.
-    pub fn new() -> Self {
+impl Default for TypeScriptParser {
+    fn default() -> Self {
         let mut parser = Parser::new();
         // Use the TypeScript-specific grammar
         let language = tree_sitter_typescript::language_typescript();
@@ -43,6 +42,13 @@ impl TypeScriptParser {
         .expect("Error creating TypeScript query");
 
         TypeScriptParser { parser, query }
+    }
+}
+
+impl TypeScriptParser {
+    /// Creates a new `TypeScriptParser` with the TypeScript grammar and queries.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     // Re-use the chunking logic, adding TypeScript types
@@ -115,8 +121,7 @@ impl SyntaxParser for TypeScriptParser {
         // Fallback: If no chunks found in non-empty file, split into smaller chunks
         if chunks.is_empty() && !code.trim().is_empty() {
             log::debug!(
-                "No top-level TypeScript items found in {}, splitting into smaller chunks.",
-                file_path
+                "No top-level TypeScript items found in {file_path}, splitting into smaller chunks."
             );
             let lines: Vec<&str> = code.lines().collect();
             let num_lines = lines.len();
@@ -137,7 +142,7 @@ impl SyntaxParser for TypeScriptParser {
                     start_line,
                     end_line,
                     language: "typescript".to_string(),
-                    element_type: format!("fallback_chunk_{}", i),
+                    element_type: format!("fallback_chunk_{i}"),
                 });
             }
         }

@@ -84,7 +84,7 @@ pub async fn handle_todo_write<C: QdrantClientTrait + Send + Sync + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::types::TodoPriority;
+    use crate::mcp::types::{TodoPriority, TodoItem};
     use tempfile::TempDir;
     use crate::handlers::test_utils::TODO_TEST_MUTEX;
     

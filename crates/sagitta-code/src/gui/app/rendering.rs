@@ -962,10 +962,9 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Ctrl + I: Toggle Loop Injection Input").color(theme.text_color()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
-                            if app.state.is_in_loop {
-                                app.state.show_loop_inject_input = !app.state.show_loop_inject_input;
-                            }
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() 
+                            && app.state.is_in_loop {
+                            app.state.show_loop_inject_input = !app.state.show_loop_inject_input;
                         }
                     });
                 });
@@ -974,10 +973,9 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Ctrl + B: Break Loop").color(theme.text_color()));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() {
-                            if app.state.is_in_loop {
-                                app.state.loop_break_requested = true;
-                            }
+                        if ui.button(egui::RichText::new("Break").color(theme.button_text_color())).clicked() 
+                            && app.state.is_in_loop {
+                            app.state.loop_break_requested = true;
                         }
                     });
                 });
@@ -1388,6 +1386,10 @@ fn refresh_repository_list_periodically(app: &mut SagittaCodeApp) {
 mod tests {
     use super::*;
     use egui::Key;
+    use crate::SagittaCodeConfig;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use crate::gui::repository::manager::RepositoryManager;
 
     /// Create a test app instance for testing
     fn create_test_app() -> SagittaCodeApp {

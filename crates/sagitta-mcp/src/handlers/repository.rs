@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use git2::Repository;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
- // For creating JSON content
+use serde_json::json; // For creating JSON content
 use git_manager::GitManager;
 use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
@@ -492,7 +492,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
             .unwrap_or(false)
     };
 
-    let should_index = actual_synced_commit.as_ref().map_or(false, |s| !s.is_empty()) || !vocab_exists_before_sync;
+    let should_index = actual_synced_commit.as_ref().is_some_and(|s| !s.is_empty()) || !vocab_exists_before_sync;
 
     if !should_index {
         info!(repo_name = %repo_name, commit = ?actual_synced_commit, vocab_exists_before = %vocab_exists_before_sync, "Skipping indexing stage: No new commit and vocabulary already exists.");
@@ -513,7 +513,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
 
         let repo_root = &repo_config.local_path; // Use the initially cloned repo_config
 
-        let indexing_commit_hash = if actual_synced_commit.as_ref().map_or(true, |s| s.is_empty()) {
+        let indexing_commit_hash = if actual_synced_commit.as_ref().is_none_or(|s| s.is_empty()) {
             info!(repo_name=%repo_name, "Fetching current HEAD commit for forced indexing (sync returned no commit or vocab missing).");
             match Repository::open(repo_root) {
                 Ok(repo) => repo.head()

@@ -38,7 +38,7 @@ impl CoreSyncProgressReporter for GuiProgressReporter {
         // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
         let mut simple = SIMPLE_STATUS
             .entry(self.repo_id.clone())
-            .or_insert_with(SimpleSyncStatus::default);
+            .or_default();
 
         simple.is_running = matches!(progress.stage, 
             SyncStage::GitFetch { .. } | 
@@ -92,7 +92,7 @@ impl CoreAddProgressReporter for GuiProgressReporter {
         // Compress into SimpleSyncStatus so the existing panel code can stay almost untouched
         let mut simple = SIMPLE_STATUS
             .entry(self.repo_id.clone())
-            .or_insert_with(SimpleSyncStatus::default);
+            .or_default();
 
         simple.is_running = matches!(progress.stage, 
             RepoAddStage::Clone { .. } | 

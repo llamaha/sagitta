@@ -119,7 +119,7 @@ fn should_ignore_entry(entry: &walkdir::DirEntry, ignore_patterns: &[&str]) -> b
             return true;
         }
         // Handle exact filename matches
-        else if path.file_name().map_or(false, |name| name.to_string_lossy() == *pattern) {
+        else if path.file_name().is_some_and(|name| name.to_string_lossy() == *pattern) {
             return true;
         }
     }

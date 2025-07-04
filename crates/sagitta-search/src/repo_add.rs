@@ -247,7 +247,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, IndexingConfig, PerformanceConfig};
+    use crate::config::{AppConfig, IndexingConfig, PerformanceConfig, EmbeddingEngineConfig};
     // use crate::qdrant_client_trait::MockQdrantClientTrait; // Remove mockall
     use crate::test_utils::ManualMockQdrantClient; // Use ManualMock
     use std::path::Path;

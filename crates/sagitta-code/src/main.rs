@@ -7,7 +7,6 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::sync::Arc;
-use std::path::PathBuf;
 
 use sagitta_code::{
     agent::Agent,
@@ -27,7 +26,6 @@ mod gui_app {
     // If sagitta_code::gui is the canonical path from lib.rs, these direct uses are fine.
     use sagitta_code::gui::repository::manager::RepositoryManager;
     use sagitta_code::gui::app::SagittaCodeApp; // Already using sagitta_code::gui path
-    use sagitta_code::gui::fonts;
     use sagitta_code::config::SagittaCodeConfig;
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
@@ -97,7 +95,7 @@ mod gui_app {
             let (update_sender, update_receiver) = tokio::sync::mpsc::channel(10);
             
             // Set up the app style
-            let mut visuals = egui::Visuals::dark();
+            let visuals = egui::Visuals::dark();
             cc.egui_ctx.set_visuals(visuals);
             
             // Configure fonts for better emoji support
@@ -145,17 +143,13 @@ mod cli_app {
     use super::*;
     use sagitta_code::agent::state::types::{AgentState, AgentMode};
     use futures_util::StreamExt;
-    use std::path::Path; // For Path::new
-
+    
     // Imports for sagitta-search components
     use sagitta_search::config::AppConfig as SagittaAppConfig;
     use sagitta_search::config::load_config as load_sagitta_config;
     use sagitta_search::qdrant_client_trait::QdrantClientTrait;
     use qdrant_client::Qdrant;
     // Qdrant collection imports removed - no longer needed after removing analyze_input tool
-    use serde_json;
-    use sagitta_embed::provider::{EmbeddingProvider, onnx::OnnxEmbeddingModel};
-    use sagitta_embed::EmbeddingModelType;
     use sagitta_code::llm::client::LlmClient; // Corrected path
     use sagitta_code::llm::claude_code::client::ClaudeCodeClient;
 
@@ -260,13 +254,13 @@ mod cli_app {
         let mut event_receiver = agent.subscribe();
         
         // Start a task to handle events
-        let event_task = tokio::spawn(async move {
+        let _event_task = tokio::spawn(async move {
             while let Ok(event) = event_receiver.recv().await {
                 match event {
-                    sagitta_code::agent::events::AgentEvent::LlmMessage(msg) => {
+                    sagitta_code::agent::events::AgentEvent::LlmMessage(_msg) => {
                         // We'll handle printing full messages elsewhere
                     },
-                    sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final, is_thinking } => {
+                    sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final, is_thinking: _ } => {
                         print!("{}", content);
                         io::stdout().flush().unwrap();
                         if is_final {
@@ -376,7 +370,7 @@ mod mcp_app {
             
             // For internal mode, just run the sagitta-mcp Server directly
             // No need for ToolRegistry or any of that complexity
-            let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new()); // Still needed by function signature
+            let _tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new()); // Still needed by function signature
             
             // Run the internal MCP server (which now uses sagitta-mcp Server)
             run_internal_mcp_server(None).await

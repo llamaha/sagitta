@@ -12,6 +12,7 @@ use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "sagitta";
 const CONFIG_FILE_NAME: &str = "config.toml";
+const REPO_DIR_NAME: &str = "repositories";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 /// Represents configuration for a single managed repository
