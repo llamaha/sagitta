@@ -33,6 +33,7 @@ pub enum AppEvent {
     },
     RepositoryListUpdated(Vec<String>),
     RefreshRepositoryList,
+    UpdateGitHistoryPath(std::path::PathBuf),
     CancelTool(ToolRunId),
     RenameConversation {
         conversation_id: uuid::Uuid,
@@ -379,6 +380,10 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::RefreshRepositoryList => {
                 log::debug!("Received RefreshRepositoryList event, triggering manual refresh");
                 app.trigger_repository_list_refresh();
+            },
+            AppEvent::UpdateGitHistoryPath(path) => {
+                log::debug!("Received UpdateGitHistoryPath event with path: {:?}", path);
+                app.panels.set_git_repository(path);
             },
             AppEvent::CancelTool(run_id) => {
                 log::info!("Received CancelTool event for run_id: {}", run_id);

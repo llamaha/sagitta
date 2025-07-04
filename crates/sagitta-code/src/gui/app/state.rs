@@ -40,6 +40,7 @@ pub struct AppState {
     pub current_repository_context: Option<String>,
     pub available_repositories: Vec<String>,
     pub pending_repository_context_change: Option<String>,
+    pub pending_git_repository_path: Option<std::path::PathBuf>,
     
     // Agent operational state flags for UI
     pub current_agent_state: AgentState,
@@ -121,6 +122,7 @@ impl AppState {
             current_repository_context: None,
             available_repositories: Vec::new(),
             pending_repository_context_change: None,
+            pending_git_repository_path: None,
             
             // Agent operational state flags for UI
             current_agent_state: AgentState::default(),

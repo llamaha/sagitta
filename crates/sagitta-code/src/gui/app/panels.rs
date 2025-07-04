@@ -5,6 +5,7 @@ use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, B
 use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;
+use super::super::git_history::GitHistoryModal;
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::analytics::AnalyticsReport;
 use std::path::PathBuf;
@@ -56,6 +57,7 @@ pub enum ActivePanel {
     Analytics,
     ThemeCustomizer,
     ModelSelection,
+    GitHistory,
 }
 
 
@@ -473,6 +475,7 @@ pub struct PanelManager {
     pub analytics_panel: AnalyticsPanel,
     pub theme_customizer: ThemeCustomizer,
     pub model_selection_panel: ModelSelectionPanel,
+    pub git_history_modal: GitHistoryModal,
 }
 
 impl PanelManager {
@@ -485,6 +488,7 @@ impl PanelManager {
             analytics_panel: AnalyticsPanel::new(),
             theme_customizer: ThemeCustomizer::new(),
             model_selection_panel: ModelSelectionPanel::new(),
+            git_history_modal: GitHistoryModal::new(),
         }
     }
 
@@ -497,6 +501,11 @@ impl PanelManager {
     /// Get the current model from the model selection panel
     pub fn get_current_model(&self) -> &str {
         self.model_selection_panel.get_current_model()
+    }
+
+    /// Set the repository path for git history modal
+    pub fn set_git_repository(&mut self, path: PathBuf) {
+        self.git_history_modal.set_repository(path);
     }
 
     /// Render the model selection panel and return any selected model
@@ -605,6 +614,16 @@ impl PanelManager {
                     self.active_panel = ActivePanel::ModelSelection;
                 }
             },
+            ActivePanel::GitHistory => {
+                if matches!(self.active_panel, ActivePanel::GitHistory) {
+                    self.git_history_modal.toggle(); // Close
+                    self.active_panel = ActivePanel::None;
+                } else {
+                    self.close_all_panels();
+                    self.git_history_modal.toggle(); // Open
+                    self.active_panel = ActivePanel::GitHistory;
+                }
+            },
             ActivePanel::None => {
                 self.close_all_panels();
             }
@@ -636,6 +655,11 @@ impl PanelManager {
             ActivePanel::ModelSelection => {
                 if self.model_selection_panel.visible {
                     self.model_selection_panel.toggle(); // Close
+                }
+            },
+            ActivePanel::GitHistory => {
+                if self.git_history_modal.visible {
+                    self.git_history_modal.toggle(); // Close
                 }
             },
             _ => {}

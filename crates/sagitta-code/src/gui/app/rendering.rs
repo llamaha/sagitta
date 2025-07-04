@@ -190,6 +190,10 @@ fn handle_keyboard_shortcuts(app: &mut SagittaCodeApp, ctx: &Context) {
         // Ctrl+E: Toggle events panel
         app.panels.toggle_panel(ActivePanel::Events);
     }
+    if ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.ctrl) {
+        // Ctrl+G: Toggle git history modal
+        app.panels.toggle_panel(ActivePanel::GitHistory);
+    }
     if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.ctrl && i.modifiers.shift) {
         // Ctrl+Shift+A: Toggle analytics panel
         app.panels.toggle_panel(ActivePanel::Analytics);
@@ -710,6 +714,10 @@ fn render_panels(app: &mut SagittaCodeApp, ctx: &Context) {
             let sagitta_config = app.config.clone();
             app.conversation_sidebar.show(ctx, &mut app.state, &theme, conversation_service, app_event_sender, sagitta_config);
         },
+        ActivePanel::GitHistory => {
+            // Render git history modal
+            app.panels.git_history_modal.render(ctx, app.state.current_theme);
+        },
         ActivePanel::None => {
             // When no panel is active, ensure all panels are closed
             if app.repo_panel.is_open() {
@@ -789,6 +797,16 @@ fn render_hotkeys_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
                             app.panels.logging_panel.toggle();
+                        }
+                    });
+                });
+                
+                // Git History Modal
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Ctrl + G: Toggle Git History").color(theme.text_color()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Toggle").color(theme.button_text_color())).clicked() {
+                            app.panels.toggle_panel(ActivePanel::GitHistory);
                         }
                     });
                 });
@@ -1110,6 +1128,27 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                                     if let Err(e) = repo_manager_guard.ensure_claude_md(repo_config).await {
                                         log::warn!("Failed to ensure CLAUDE.md for repository '{}': {}", repo_name_clone, e);
                                     }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Update git history modal with new repository
+                if let Some(repo_name) = &repo_context {
+                    // Get repository manager to find the path
+                    let repo_manager = app.repo_panel.get_repo_manager();
+                    let repo_name_clone = repo_name.clone();
+                    let app_event_sender = app.app_event_sender.clone();
+                    
+                    tokio::spawn(async move {
+                        let repo_manager_guard = repo_manager.lock().await;
+                        if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                            if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
+                                let local_path = repo_config.local_path.clone();
+                                // Send event to update git history modal
+                                if let Err(e) = app_event_sender.send(AppEvent::UpdateGitHistoryPath(local_path)) {
+                                    log::error!("Failed to send UpdateGitHistoryPath event: {}", e);
                                 }
                             }
                         }

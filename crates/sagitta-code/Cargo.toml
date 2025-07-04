@@ -62,6 +62,10 @@ egui_code_editor = { version = "0.2.2", optional = true }
 # Plotting for egui
 egui_plot = { version = "0.31.0", optional = true }
 
+# Graph visualization
+egui_graphs = { version = "0.25.1", optional = true }
+petgraph = { version = "0.8", optional = true }
+
 # Theming
 catppuccin = { version = "2.5.1", optional = true }
 catppuccin-egui = { version = "5.5.0", default-features = false, features = ["egui31"], optional = true }
@@ -96,6 +100,8 @@ gui = [
     "dep:egui_commonmark",
     "dep:egui_code_editor",
     "dep:egui_plot",
+    "dep:egui_graphs",
+    "dep:petgraph",
 ]
 
 [[bin]]
