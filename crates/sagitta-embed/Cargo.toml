@@ -37,6 +37,7 @@ uuid = { version = "1.8", features = ["v4"] }
 # Model downloading
 hf-hub = "0.3.2"
 dirs = "5.0.1"
+ureq = "2.9"
 
 [dev-dependencies]
 mockall = "0.12.1"
