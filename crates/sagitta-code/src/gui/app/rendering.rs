@@ -1651,6 +1651,7 @@ mod tests {
                 ActivePanel::Analytics => {},
                 ActivePanel::ThemeCustomizer => {},
                 ActivePanel::ModelSelection => {},
+                ActivePanel::GitHistory => {},
             }
         }
     }
@@ -1915,6 +1916,10 @@ mod tests {
                 ActivePanel::ModelSelection => {
                     assert_eq!(app.panels.active_panel, panel);
                     assert!(app.panels.model_selection_panel.visible);
+                },
+                ActivePanel::GitHistory => {
+                    assert_eq!(app.panels.active_panel, panel);
+                    // Can't test git history panel visibility since it might not be exposed
                 },
                 ActivePanel::None => {
                     // Should not happen in this test

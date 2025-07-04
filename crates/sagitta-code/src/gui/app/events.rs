@@ -1547,6 +1547,7 @@ mod tests {
             AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
+            AppEvent::UpdateGitHistoryPath(_) => assert!(true),
         }
         
         // Test the other variant too
@@ -1565,6 +1566,7 @@ mod tests {
             AppEvent::ApplyClaudeMdToAllRepos => assert!(true),
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
+            AppEvent::UpdateGitHistoryPath(_) => assert!(true),
         }
     }
 
