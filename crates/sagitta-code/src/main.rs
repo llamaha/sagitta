@@ -204,23 +204,13 @@ mod cli_app {
             .map_err(|e| anyhow!("Failed to create ClaudeCodeClient for CLI: {}", e))?;
         
 
-        // Register shell execution tools
-        let default_working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        
-        tool_registry.register(Arc::new(sagitta_code::tools::shell_execution::ShellExecutionTool::new(default_working_dir.clone()))).await.unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to register shell execution tool: {}", e);
-        });
-
-        // Note: Project creation and test execution functionality is now available through shell_execution tool
-        // Examples:
-        // - Project creation: Use shell_execution with commands like "cargo init my-project", "npm init", "python -m venv myenv"
-        // - Test execution: Use shell_execution with commands like "cargo test", "npm test", "pytest", "go test"
+        // Tools are now provided via MCP, not registered internally
         
         // Note: Qdrant tool collection setup removed - was only used by analyze_input tool which is no longer needed
         
         // Initialize MCP integration with the tool registry
         log::info!("CLI: Initializing MCP integration for Claude");
-        if let Err(e) = claude_client.initialize_mcp(tool_registry.clone()).await {
+        if let Err(e) = claude_client.initialize_mcp(None).await {
             log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work.", e);
         }
         
@@ -249,7 +239,7 @@ mod cli_app {
         
         let agent = match Agent::new(
             config.clone(), 
-            tool_registry.clone(), 
+            Some(tool_registry.clone()), 
             embedding_provider.clone(),
             persistence,
             search_engine,
@@ -287,10 +277,13 @@ mod cli_app {
                         println!("\n[Tool call: {}]", tool_call.name);
                     },
                     sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id: _, tool_name, result } => {
-                        if result.is_success() {
-                            println!("[Tool {} completed successfully]", tool_name);
-                        } else if let Some(error) = result.error_message() {
-                            println!("[Tool {} failed: {}]", tool_name, error);
+                        match &result {
+                            sagitta_code::ToolResult::Success { .. } => {
+                                println!("[Tool {} completed successfully]", tool_name);
+                            }
+                            sagitta_code::ToolResult::Error { error } => {
+                                println!("[Tool {} failed: {}]", tool_name, error);
+                            }
                         }
                     },
                     sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
@@ -386,7 +379,7 @@ mod mcp_app {
             let tool_registry = Arc::new(sagitta_code::tools::registry::ToolRegistry::new()); // Still needed by function signature
             
             // Run the internal MCP server (which now uses sagitta-mcp Server)
-            run_internal_mcp_server(tool_registry).await
+            run_internal_mcp_server(None).await
         } else {
             log::info!("Starting Sagitta Code MCP Server");
             

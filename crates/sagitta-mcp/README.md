@@ -119,19 +119,6 @@ Add a server configuration like this to your Cursor `mcp.json` file:
 
 1.  **Qdrant:** A running Qdrant vector database instance must be accessible by `sagitta-mcp` (configured in its `config.toml`).
 
-## Multi-Tenancy, API Keys, and Tenant Isolation
-
-For detailed documentation on multi-tenancy, API key management, and tenant data isolation in sagitta-mcp, see:
-
-- [Multi-Tenancy & API Keys Documentation](docs/multi_tenancy_api_keys.md)
-
-This covers:
-- How to create and manage tenants
-- How to create and use API keys
-- Data isolation model and Qdrant collection naming
-- CORS and client integration details
-- Current status of OAuth and global repositories
-
 ## Branch Operations
 
 The MCP server now supports advanced branch operations with automatic resync capabilities:
@@ -207,4 +194,4 @@ These operations are also available as MCP tools:
 - `repository_switch_branch` - Switch repository branch with automatic resync
 - `repository_list_branches` - List all branches in a repository
 
-Both operations respect tenant isolation and require appropriate access permissions.
+Both operations require appropriate access permissions.

@@ -83,20 +83,6 @@ where
 {
     let command_result = match args.command {
         RepoCommand::Add(add_args) => {
-            let tenant_id = match cli_args.tenant_id.as_deref() {
-                Some(id) => id.to_string(),
-                None => {
-                    #[cfg(feature = "multi_tenant")]
-                    {
-                        return Err(anyhow!("--tenant-id is required to add a repository."));
-                    }
-                    #[cfg(not(feature = "multi_tenant"))]
-                    {
-                        "default".to_string()
-                    }
-                }
-            };
-
             let embedding_config = sagitta_search::app_config_to_embedding_config(config);
             let embedding_pool = sagitta_search::EmbeddingPool::with_configured_sessions(embedding_config)
                 .map_err(|e| anyhow!("Failed to initialize embedding pool: {}", e))?;
@@ -114,7 +100,6 @@ where
                 embedding_dim, 
                 Arc::clone(&client),
                 config,
-                &tenant_id,
                 Some(Arc::new(crate::progress::IndicatifProgressReporter::new())),
             ).await;
             match repo_config_result {
@@ -237,13 +222,6 @@ mod tests {
             indexing: Default::default(),
             performance: PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         };
         config
     }
@@ -285,7 +263,6 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: Some("test-tenant".to_string()),
                 },
                 RepositoryConfig {
                     name: "repo2".to_string(),
@@ -301,20 +278,12 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
-                    tenant_id: Some("test-tenant".to_string()),
                 },
             ],
             active_repository: None,
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
@@ -326,7 +295,6 @@ mod tests {
              command: Commands::Repo(RepoArgs { command: repo_command }),
              onnx_model_path_arg: dummy_model_path.map(|p| p.to_string_lossy().into_owned()),
              onnx_tokenizer_dir_arg: dummy_tokenizer_dir.map(|p| p.to_string_lossy().into_owned()),
-             tenant_id: Some("test-tenant".to_string()),
          }
       }
 
@@ -363,8 +331,7 @@ mod tests {
                  indexed_languages: Some(vec!["rust".to_string()]),
                  added_as_local_path: false,
                  target_ref: None,
-                 tenant_id: Some("test-tenant".to_string()),
-            });
+                });
             config.active_repository = Some("other_repo".to_string());
             save_config(&config, Some(&temp_path)).unwrap();
             
@@ -412,8 +379,7 @@ mod tests {
                  indexed_languages: Some(vec!["python".to_string()]),
                  added_as_local_path: false,
                  target_ref: None,
-                 tenant_id: Some("test-tenant".to_string()),
-             });
+                 });
              config.active_repository = Some(active_repo_name.clone());
              save_config(&config, Some(&temp_path)).unwrap();
 
@@ -558,8 +524,7 @@ mod tests {
                   indexed_languages: None,
                   added_as_local_path: false,
                   target_ref: None,
-                  tenant_id: Some("test-tenant".to_string()),
-              });
+                   });
               save_config(&config, Some(&temp_path)).unwrap();
               let initial_repo_count = config.repositories.len();
 
@@ -613,8 +578,7 @@ mod tests {
                  indexed_languages: None,
                  added_as_local_path: false,
                  target_ref: None,
-                 tenant_id: Some("test-tenant".to_string()),
-             });
+                 });
              config.active_repository = None;
              save_config(&config, Some(&config_path)).unwrap();
              let initial_repo_count = config.repositories.len();
@@ -684,7 +648,7 @@ mod tests {
 
               let result = handle_repo_command(RepoArgs{ command: RepoCommand::Remove(remove_args)}, &dummy_cli_args, &mut config, client.clone(), Some(&temp_path)).await;
               assert!(result.is_err());
-              assert!(result.unwrap_err().to_string().contains("Repository 'repo3' for tenant 'test-tenant' not found."));
+              assert!(result.unwrap_err().to_string().contains("Repository 'repo3' not found"));
               
               let saved_config = load_config(Some(&temp_path)).unwrap();
               assert_eq!(saved_config.repositories, initial_config_state.repositories);

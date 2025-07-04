@@ -61,20 +61,6 @@ where
     let repo_config = config.repositories[repo_config_index].clone();
     let repo_path = PathBuf::from(&repo_config.local_path);
     
-    // Get tenant ID
-    let tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                return Err(anyhow!("--tenant-id is required for sync operations"));
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
 
     // Initialize git manager to get available branches
     let mut git_manager = GitManager::new();
@@ -125,7 +111,6 @@ where
     for branch in &branches_to_sync {
         let metadata = get_branch_sync_metadata(
             client.as_ref(),
-            tenant_id,
             &repo_config.name,
             branch,
             config,

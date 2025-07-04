@@ -100,28 +100,30 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
             .default_width(700.0)
             .default_height(500.0)
             .show(ctx, |ui| {
-                ui.label(egui::RichText::new("These tools are available to the AI assistant:").color(theme.accent_color()).strong());
+                ui.label(egui::RichText::new("These tools are available to the AI assistant via MCP:").color(theme.accent_color()).strong());
                 ui.separator();
                 
                 // Create a scrollable area for the tools list
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Tools list with descriptions - matches actual registered tools
+                    // Tools list with descriptions - matches actual MCP tools passed to Claude-code
                     let tools = vec![
-                        ("streaming_shell_execution", "Execute shell commands locally with real-time streaming output"),
-                        ("read_file", "Read file contents from repositories"),
-                        ("view_file_in_repository", "View specific files in a repository with line range support"),
-                        ("list_repositories", "List all configured repositories"),
-                        ("add_existing_repository", "Add an existing local or remote repository"),
-                        ("sync_repository", "Sync a repository to get latest changes"),
-                        ("remove_repository", "Remove a repository from the system"),
-                        ("search_file_in_repository", "Search for files by name pattern in a repository"),
-                        ("repository_map", "Generate a high-level map of repository structure with functions, classes, and their relationships"),
-                        ("targeted_view", "View specific code elements like functions or classes"),
-                        ("code_search", "Search code semantically across repositories"),
-                        ("web_search", "Search the web for information"),
-                        ("edit", "Edit files with precise text replacements"),
-                        ("validate", "Validate code changes for correctness"),
-                        ("semantic_edit", "Make semantic code edits with AI assistance"),
+                        ("ping", "Check if the MCP server is responsive"),
+                        ("repository_add", "Clone and add a new Git repository for indexing"),
+                        ("repository_list", "List currently configured repositories"),
+                        ("repository_remove", "Remove a repository configuration and delete its data"),
+                        ("repository_sync", "Fetch latest changes, update local copy, and re-index a repository"),
+                        ("query", "Perform semantic search on indexed repositories using hybrid vector search"),
+                        ("repository_search_file", "Search for files within a repository using glob patterns"),
+                        ("repository_view_file", "View the content of a specific file within a repository"),
+                        ("repository_switch_branch", "Switch to a different branch or Git reference with automatic resync"),
+                        ("repository_list_branches", "List branches and references in a repository with optional filtering"),
+                        ("todo_read", "Read the current todo list with detailed status information"),
+                        ("todo_write", "Update the todo list with structured todo items"),
+                        ("edit_file", "Perform exact string replacements in files with diff output"),
+                        ("multi_edit_file", "Perform multiple sequential edits to a single file"),
+                        ("shell_execute", "Execute shell commands with cross-platform support"),
+                        ("read_file", "Read file contents with optional line range support"),
+                        ("write_file", "Write content to a file with optional parent directory creation"),
                     ];
                     
                     for (tool_name, description) in tools {
@@ -139,7 +141,7 @@ fn render_tools_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Note:").color(theme.warning_color()).strong());
-                    ui.label(egui::RichText::new("Tools marked with 'optional name' support using the current repository context").color(theme.text_color()));
+                    ui.label(egui::RichText::new("These tools are provided via MCP (Model Context Protocol) and accessible to Claude-code").color(theme.text_color()));
                 });
                 
                 ui.separator();
@@ -1125,12 +1127,11 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         // Change working directory in background
                         tokio::spawn(async move {
                             let repo_manager_lock = repo_manager.lock().await;
-                            match working_dir_manager_clone.set_repository_context(&repo_name_clone, &*repo_manager_lock).await {
-                                Ok(result) => {
-                                    log::info!("Changed working directory to repository '{}': {} -> {}", 
-                                        repo_name_clone, 
-                                        result.previous_directory.display(), 
-                                        result.new_directory.display());
+                            // Convert repo name to path (stub doesn't use it anyway)
+                            let repo_path = std::path::Path::new(&repo_name_clone);
+                            match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
+                                Ok(()) => {
+                                    log::info!("Changed working directory to repository '{}'", repo_name_clone);
                                 }
                                 Err(e) => {
                                     log::error!("Failed to change working directory to repository '{}': {}", repo_name_clone, e);
@@ -1140,14 +1141,12 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                     } else {
                         // No repository selected, reset to base directory
                         let working_dir_manager_clone = working_dir_manager.clone();
-                        let base_dir = working_dir_manager.get_base_directory().clone();
+                        let base_dir = working_dir_manager.get_base_directory().to_path_buf();
                         
                         tokio::spawn(async move {
-                            match working_dir_manager_clone.change_directory(base_dir.clone()).await {
-                                Ok(result) => {
-                                    log::info!("Reset working directory to base: {} -> {}", 
-                                        result.previous_directory.display(), 
-                                        result.new_directory.display());
+                            match working_dir_manager_clone.change_directory(&base_dir) {
+                                Ok(()) => {
+                                    log::info!("Reset working directory to base");
                                 }
                                 Err(e) => {
                                     log::error!("Failed to reset working directory to base: {}", e);

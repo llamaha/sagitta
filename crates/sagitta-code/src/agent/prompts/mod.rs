@@ -1,6 +1,7 @@
 pub mod claude_code;
 
-use crate::tools::types::ToolDefinition;
+// Tool types removed - tools now via MCP
+use crate::llm::client::ToolDefinition;
 
 /// Provider-specific system prompt generation
 pub trait SystemPromptProvider {

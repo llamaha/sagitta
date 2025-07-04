@@ -36,17 +36,14 @@ dashmap = "5.5.3"
 futures-util = "0.3.30"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
 async-stream = "0.3.5"
-oauth2 = "4.4.1"
-jsonwebtoken = "9.2"
 base64 = "0.21"
 rand = "0.8"
+sha2 = "0.10"
 reqwest = { version = "0.11", features = ["json"] }
 thiserror = "1.0"
 async-trait = "0.1"
 tower = { version = "0.4", features = ["full"] }
-tower-http = { version = "0.5.2", features = ["trace", "cors"] }
-axum-limit = "0.1.0-alpha.2"
-axum-server = { version = "0.6.0", features = ["tls-rustls"] }
+tower-http = { version = "0.5.2", features = ["trace"] }
 walkdir = "2.4"
 similar = "2.4"
 
@@ -67,4 +64,3 @@ tower = { version = "0.4", features = ["full"] }
 
 [features]
 default = []
-multi_tenant = []

@@ -89,7 +89,25 @@ The resulting binaries will be located in the `target/release/` directory (e.g.,
 
 ### 3. Set Up Embedding Models
 
-Tools using `sagitta-search` (like `sagitta-cli`) require ONNX-format embedding models and their tokenizers.
+Tools using `sagitta-search` (like `sagitta-cli`) require embedding models. You have two options:
+
+#### Option 1: Automatic Download (Recommended)
+Simply specify the model name in your `config.toml`:
+```toml
+embed_model = "bge-small-fast"  # or "bge-small-fp32"
+```
+The model will be automatically downloaded from HuggingFace on first use.
+
+Available models:
+- `bge-small-fast`: INT8 quantized BGE model, optimized for speed (recommended)
+- `bge-small-fp32`: Full precision BGE model, slightly better quality
+
+#### Option 2: Manual Model Files
+Provide paths to ONNX model files and tokenizers:
+```toml
+onnx_model_path = "/path/to/model.onnx"
+onnx_tokenizer_path = "/path/to/tokenizer.json"
+```
 
 *   **Generate/Obtain Model Files**: The `scripts/` directory contains Python helper scripts to convert models from the Hugging Face Hub to the required ONNX format:
     *   To generate the default model (`all-MiniLM-L6-v2`), use `convert_all_minilm_model.py`. First, set up a Python environment (see section 6 below), then run:
@@ -103,7 +121,7 @@ Tools using `sagitta-search` (like `sagitta-cli`) require ONNX-format embedding 
         This script typically downloads the model and saves the ONNX model and tokenizer files into an `onnx/` directory (or similar, check the script output).
     *   To generate other models (like BGE small), use the corresponding script (e.g., `convert_bge_small_model.py`). See section 6 for more details.
 
-*   **Configure Model Paths**: The paths to the ONNX model (`.onnx` file) and tokenizer (`tokenizer.json` directory) need to be specified. This is typically done via the central configuration file (see section 4), although tools like `sagitta-cli` may also allow overriding via environment variables or command-line arguments (refer to specific tool documentation).
+**Note:** You cannot use both `embed_model` and manual paths together - choose one approach.
 
 ### 4. Configuration File
 

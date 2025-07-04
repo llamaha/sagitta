@@ -149,7 +149,6 @@ pub async fn prepare_repository<C>(
     client: Arc<C>,
     embedding_dim: u64,
     config: &AppConfig,
-    tenant_id: &str,
     add_progress_reporter: Option<Arc<dyn AddProgressReporter>>,
 ) -> Result<RepositoryConfig, SagittaError>
 where
@@ -173,7 +172,7 @@ where
     
     // Use branch-aware collection naming to match the new sync behavior
     let current_branch_or_ref = target_ref_opt.unwrap_or(final_branch);
-    let collection_name = get_branch_aware_collection_name(tenant_id, &repo_name_str, current_branch_or_ref, config);
+    let collection_name = get_branch_aware_collection_name(&repo_name_str, current_branch_or_ref, config);
 
     let mut was_cloned = false;
     if !final_local_path.exists() {
@@ -367,7 +366,41 @@ where
 
     // --- Handle target_ref --- 
     let final_active_branch: String;
+    let resolved_target_ref: Option<String>;
+    
+    // Resolve special refs like HEAD
     if let Some(target_ref) = target_ref_opt {
+        // Open repository to resolve refs
+        let repo = git2::Repository::open(&final_local_path)
+            .context(format!("Failed to open repository at {} to resolve refs", final_local_path.display()))?;
+        
+        if target_ref == "HEAD" {
+            match super::git_edge_cases::resolve_git_ref(&repo, target_ref) {
+                Ok(resolved) => {
+                    info!("Resolved '{}' to '{}'", target_ref, resolved);
+                    resolved_target_ref = Some(resolved);
+                }
+                Err(e) => {
+                    warn!("Failed to resolve '{}': {}, using default branch", target_ref, e);
+                    resolved_target_ref = None;
+                }
+            }
+        } else {
+            // Validate the ref name
+            match super::git_edge_cases::validate_ref_name(target_ref) {
+                Ok(_) => resolved_target_ref = Some(target_ref.to_string()),
+                Err(e) => {
+                    return Err(SagittaError::GitMessageError(format!(
+                        "Invalid target ref '{}': {}", target_ref, e
+                    )));
+                }
+            }
+        }
+    } else {
+        resolved_target_ref = None;
+    }
+    
+    if let Some(target_ref) = resolved_target_ref.as_ref() {
         info!("Attempting to checkout target ref '{}' for repository '{}'...", target_ref, repo_name);
         
         // Report fetch start
@@ -510,7 +543,6 @@ where
         ssh_key_passphrase: ssh_passphrase_opt.map(String::from),
         added_as_local_path: local_path_opt.is_some(),
         target_ref: target_ref_opt.map(|s| s.to_string()),
-        tenant_id: Some(tenant_id.to_string()),
     })
 }
 
@@ -524,16 +556,14 @@ where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     let repo_name = &repo_config.name;
-    let tenant_id = repo_config.tenant_id.as_deref()
-        .ok_or_else(|| SagittaError::Other(format!("Tenant ID missing in RepositoryConfig for repository '{}' during delete operation", repo_name)))?;
     
     // With branch-aware collections, we need to delete all collections for this repository
     // For now, we'll try to delete the legacy collection and the current branch collection
     // In the future, we could list all collections and filter by pattern
     
     // Try to delete legacy collection (for backward compatibility)
-    let legacy_collection_name = get_collection_name(tenant_id, repo_name, config);
-    info!("Attempting to delete legacy Qdrant collection '{legacy_collection_name}' for tenant '{tenant_id}'...");
+    let legacy_collection_name = get_collection_name(repo_name, config);
+    info!("Attempting to delete legacy Qdrant collection '{legacy_collection_name}'...");
     match client.delete_collection(legacy_collection_name.clone()).await {
         Ok(deleted) => {
             if deleted {
@@ -569,7 +599,7 @@ where
     all_refs_to_try.dedup();
     
     for branch_or_ref in all_refs_to_try {
-        let branch_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_or_ref, config);
+        let branch_collection_name = get_branch_aware_collection_name(repo_name, branch_or_ref, config);
         info!("Attempting to delete branch-aware Qdrant collection '{branch_collection_name}' for branch/ref '{branch_or_ref}'...");
         match client.delete_collection(branch_collection_name.clone()).await {
             Ok(deleted) => {
@@ -1095,7 +1125,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         };
 
         let app_config = AppConfig {
@@ -1139,7 +1168,6 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         });
 
         let repo_index = 0;
@@ -1237,7 +1265,6 @@ mod tests {
             client,
             384, // embedding_dim
             &config,
-            "test-tenant",
             None, // No progress reporter for test
         ).await;
         
@@ -1283,7 +1310,6 @@ mod tests {
             client,
             384,
             &config,
-            "test-tenant",
             None, // No progress reporter for test
         ).await;
         
@@ -1373,8 +1399,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: Some("test-tenant".to_string()),
-            };
+                };
             
             let mut mock_client = MockQdrantClientTrait::new();
             mock_client.expect_delete_collection()

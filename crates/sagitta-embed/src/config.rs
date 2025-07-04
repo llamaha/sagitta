@@ -138,8 +138,6 @@ pub struct EmbeddingConfig {
     pub session_timeout_seconds: u64,
     /// Enable session cleanup on idle
     pub enable_session_cleanup: bool,
-    /// Optional tenant ID for multi-tenancy
-    pub tenant_id: Option<String>,
     /// Batch size for embedding operations (number of texts processed together)
     pub embedding_batch_size: Option<usize>,
     
@@ -201,7 +199,6 @@ impl Default for EmbeddingConfig {
             expected_dimension: Some(DEFAULT_EMBEDDING_DIMENSION),
             session_timeout_seconds: DEFAULT_SESSION_TIMEOUT_SECONDS,
             enable_session_cleanup: DEFAULT_ENABLE_SESSION_CLEANUP,
-            tenant_id: None,
             embedding_batch_size: Some(DEFAULT_EMBEDDING_BATCH_SIZE),
             
             // Phase 1: Performance defaults - optimized for typical embedding workloads
@@ -264,11 +261,6 @@ impl EmbeddingConfig {
         self
     }
 
-    /// Set the tenant ID.
-    pub fn with_tenant_id(mut self, tenant_id: String) -> Self {
-        self.tenant_id = Some(tenant_id);
-        self
-    }
 
     /// Set the embedding batch size.
     pub fn with_embedding_batch_size(mut self, batch_size: usize) -> Self {
@@ -942,11 +934,6 @@ impl EmbeddingConfigBuilder {
         self
     }
 
-    /// Set the tenant ID.
-    pub fn tenant_id<S: Into<String>>(mut self, tenant_id: S) -> Self {
-        self.config.tenant_id = Some(tenant_id.into());
-        self
-    }
 
     /// Set the embedding batch size
     pub fn embedding_batch_size(mut self, batch_size: usize) -> Self {
@@ -1294,13 +1281,11 @@ mod tests {
         let config = EmbeddingConfigBuilder::new()
             .model_type(EmbeddingModelType::Onnx)
             .expected_dimension(512)
-            .tenant_id("test-tenant")
             .build_unchecked();
 
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
         // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(512));
-        assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
     }
 
     #[test]
@@ -1352,12 +1337,11 @@ mod tests {
         let config = EmbeddingConfig::new()
             .with_model_type(EmbeddingModelType::Onnx)
             .with_expected_dimension(512)
-            .with_tenant_id("test-tenant".to_string());
+;
 
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
         // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(512));
-        assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
     }
 
     #[test]
@@ -1994,7 +1978,6 @@ mod tests {
         let _ = config.expected_dimension;
         let _ = config.session_timeout_seconds;
         let _ = config.enable_session_cleanup;
-        let _ = config.tenant_id;
         let _ = config.embedding_batch_size;
         
         // Performance fields
@@ -2063,7 +2046,6 @@ mod tests {
             .onnx_model_path("/path/to/model.onnx")
             .onnx_tokenizer_path("/path/to/tokenizer.json")
             .expected_dimension(768)
-            .tenant_id("test-tenant")
             .embedding_batch_size(64)
             .with_intra_op_threads(8)
             .with_inter_op_threads(4)
@@ -2081,7 +2063,6 @@ mod tests {
         assert_eq!(config.model_type, EmbeddingModelType::Onnx);
         // max_sessions has been removed
         assert_eq!(config.expected_dimension, Some(768));
-        assert_eq!(config.tenant_id, Some("test-tenant".to_string()));
         assert_eq!(config.embedding_batch_size, Some(64));
         assert_eq!(config.intra_op_num_threads, Some(8));
         assert_eq!(config.inter_op_num_threads, Some(4));

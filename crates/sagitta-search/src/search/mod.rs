@@ -25,7 +25,6 @@ pub async fn search_semantic<C>(
     query: &str,
     limit: usize,
     filter: Option<Filter>,
-    tenant_id: &str,
     repo_name: &str,
     branch_name: &str,
     config: &Arc<AppConfig>, // Use Arc<AppConfig> for consistency
@@ -67,7 +66,7 @@ where
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
     // 2. Determine Collection Name using branch-aware naming
-    let collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &**config);
+    let collection_name = get_branch_aware_collection_name(repo_name, branch_name, &**config);
     debug!("Searching collection: {}", collection_name);
 
     // 3. Build Qdrant Search Request

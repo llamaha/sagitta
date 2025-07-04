@@ -1,20 +1,39 @@
-/// Utilities for Git operations.
-pub mod git_utils;
-/// Utilities for interacting with Qdrant.
 pub mod qdrant_utils;
-/// Functions related to repository indexing logic.
 pub mod repo_indexing;
+pub mod git_utils;
+pub mod git_edge_cases;
+pub mod recovery;
+pub mod collection_validation;
 
-pub use self::git_utils::{is_supported_extension, create_fetch_options, collect_files_from_tree};
-pub use self::qdrant_utils::{
-    get_collection_name, 
+// Re-export commonly used functions
+pub use qdrant_utils::{
+    get_collection_name,
     get_branch_aware_collection_name,
     collection_exists_for_branch,
+    delete_points_for_files,
     get_branch_sync_metadata,
     should_sync_branch,
+    create_branch_filter,
     BranchSyncMetadata,
-    delete_points_for_files, 
-    ensure_repository_collection_exists, 
-    create_branch_filter
 };
-pub use self::repo_indexing::{update_sync_status_and_languages, index_files, prepare_repository, delete_repository_data}; 
+
+pub use repo_indexing::{
+    prepare_repository,
+    index_files,
+    delete_repository_data,
+    sync_repository_branch,
+    update_sync_status_and_languages,
+};
+
+pub use git_utils::{
+    collect_files_from_tree,
+    create_fetch_options,
+};
+
+pub use git_edge_cases::{
+    resolve_git_ref,
+    validate_ref_name,
+    detect_default_branch,
+    check_working_tree_clean,
+    get_current_branch,
+};

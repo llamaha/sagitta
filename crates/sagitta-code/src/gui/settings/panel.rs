@@ -648,7 +648,6 @@ mod tests {
             embed_model: None, // Not using automatic model downloading
             repositories_base_path: Some("/test/repos".to_string()),
             vocabulary_base_path: None, // Use default path
-            tenant_id: None, // not used in sagitta-code (hardcoded to "local")
             repositories: vec![],
             active_repository: None,
             indexing: sagitta_search::config::IndexingConfig {
@@ -665,12 +664,6 @@ mod tests {
                 ..sagitta_search::config::EmbeddingEngineConfig::default()
             },
             server_api_key_path: None,
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         }
     }
 
@@ -866,7 +859,6 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: None,
             },
             sagitta_search::config::RepositoryConfig {
                 name: "test-repo-2".to_string(),
@@ -882,7 +874,6 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: None,
             },
         ];
         initial_sagitta_config.embed_model = Some("test-embed-model".to_string());

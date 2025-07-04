@@ -13,7 +13,8 @@ use crate::mcp::{
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
-use crate::handlers::{ping::handle_ping, query::handle_query, repository::*, repository_map::handle_repository_map, 
+use crate::handlers::{ping::handle_ping, query::handle_query, repository::*, 
+                      // repository_map::handle_repository_map, // DISABLED
                       todo_read::handle_todo_read, todo_write::handle_todo_write,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
@@ -98,13 +99,14 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
                 Err(e) => Err(e),
             }
         }
-        "repository_map" => {
-            let map_params: RepositoryMapParams = deserialize_value(arguments, tool_name)?;
-             match handle_repository_map(map_params, config, None).await {
-                Ok(res) => result_to_call_result(res),
-                Err(e) => Err(e),
-            }
-        }
+        // DISABLED: Repository mapper tool - consumes too many tokens
+        // "repository_map" => {
+        //     let map_params: RepositoryMapParams = deserialize_value(arguments, tool_name)?;
+        //      match handle_repository_map(map_params, config).await {
+        //         Ok(res) => result_to_call_result(res),
+        //         Err(e) => Err(e),
+        //     }
+        // }
         "repository_switch_branch" => {
             let switch_params: RepositorySwitchBranchParams = deserialize_value(arguments, tool_name)?;
              match handle_repository_switch_branch(switch_params, config, qdrant_client, None).await {
@@ -363,28 +365,29 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 open_world_hint: Some(false),
             }),
         },
-        // --- Repository Map ---
-        ToolDefinition {
-            name: "repository_map".to_string(),
-            description: Some("Generates a high-level map of code structure in a repository, showing functions, structs, and their relationships. Use targeted parameters to control scope and verbosity.".to_string()),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "repositoryName": { "type": "string", "description": "Name of the repository to map." },
-                    "verbosity": { "type": "integer", "description": "Verbosity level (0=minimal, 1=normal, 2=detailed).", "default": 1, "minimum": 0, "maximum": 2 },
-                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Optional: Specific paths to scan within the repository." },
-                    "fileExtension": { "type": "string", "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js')." }
-                },
-                "required": ["repositoryName"]
-            }),
-             annotations: Some(ToolAnnotations {
-                title: Some("Map Repository Structure".to_string()),
-                read_only_hint: Some(true),
-                destructive_hint: Some(false),
-                idempotent_hint: Some(true),
-                open_world_hint: Some(false),
-            }),
-        },
+        // DISABLED: Repository mapper tool - consumes too many tokens
+        // // --- Repository Map ---
+        // ToolDefinition {
+        //     name: "repository_map".to_string(),
+        //     description: Some("Generates a high-level map of code structure in a repository, showing functions, structs, and their relationships. Use targeted parameters to control scope and verbosity.".to_string()),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "repositoryName": { "type": "string", "description": "Name of the repository to map." },
+        //             "verbosity": { "type": "integer", "description": "Verbosity level (0=minimal, 1=normal, 2=detailed).", "default": 1, "minimum": 0, "maximum": 2 },
+        //             "paths": { "type": "array", "items": { "type": "string" }, "description": "Optional: Specific paths to scan within the repository." },
+        //             "fileExtension": { "type": "string", "description": "Optional: Filter by file extension (e.g., 'rs', 'py', 'js')." }
+        //         },
+        //         "required": ["repositoryName"]
+        //     }),
+        //      annotations: Some(ToolAnnotations {
+        //         title: Some("Map Repository Structure".to_string()),
+        //         read_only_hint: Some(true),
+        //         destructive_hint: Some(false),
+        //         idempotent_hint: Some(true),
+        //         open_world_hint: Some(false),
+        //     }),
+        // },
         // --- Repository Switch Branch ---
         ToolDefinition {
             name: "repository_switch_branch".to_string(),
@@ -715,7 +718,7 @@ mod tests {
             "query",
             "repository_search_file",
             "repository_view_file",
-            "repository_map",
+            // "repository_map", // DISABLED - consumes too many tokens
             "repository_switch_branch",
             "repository_list_branches",
         ];

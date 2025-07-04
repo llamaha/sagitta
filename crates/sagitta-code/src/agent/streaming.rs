@@ -11,12 +11,10 @@ use crate::agent::message::history::ConversationAwareHistoryManager;
 use crate::agent::state::manager::StateManager;
 use crate::agent::state::types::AgentMode;
 use crate::agent::events::AgentEvent;
-use crate::tools::executor::ToolExecutor;
-use crate::tools::registry::ToolRegistry;
+// Tool imports removed - tools now via MCP
 use crate::utils::errors::SagittaCodeError;
 use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, StreamChunk, MessagePart, ToolDefinition};
-use crate::tools::types::ToolDefinition as ToolDefinitionType;
 
 /// Streaming processor for handling LLM streaming responses and tool execution
 #[derive(Clone)]
@@ -24,8 +22,8 @@ pub struct StreamingProcessor {
     /// The LLM client
     llm_client: Arc<dyn LlmClient>,
     
-    /// The tool registry
-    tool_registry: Arc<ToolRegistry>,
+    /// The tool registry (stub)
+    tool_registry: Arc<crate::tools::registry::ToolRegistry>,
     
     /// The message history manager
     history: Arc<ConversationAwareHistoryManager>,
@@ -33,8 +31,8 @@ pub struct StreamingProcessor {
     /// The state manager
     state_manager: Arc<StateManager>,
     
-    /// The tool executor
-    tool_executor: Arc<tokio::sync::Mutex<ToolExecutor>>,
+    /// The tool executor (stub)
+    tool_executor: Arc<tokio::sync::Mutex<crate::tools::executor::SagittaCodeToolExecutorInternal>>,
     
     /// Sender for agent events
     event_sender: broadcast::Sender<AgentEvent>,
@@ -50,10 +48,10 @@ impl StreamingProcessor {
     /// Create a new streaming processor
     pub fn new(
         llm_client: Arc<dyn LlmClient>,
-        tool_registry: Arc<ToolRegistry>,
+        tool_registry: Arc<crate::tools::registry::ToolRegistry>,
         history: Arc<ConversationAwareHistoryManager>,
         state_manager: Arc<StateManager>,
-        tool_executor: Arc<tokio::sync::Mutex<ToolExecutor>>,
+        tool_executor: Arc<tokio::sync::Mutex<crate::tools::executor::SagittaCodeToolExecutorInternal>>,
         event_sender: broadcast::Sender<AgentEvent>,
         continue_reasoning_after_tool: Arc<Mutex<bool>>,
     ) -> Self {
@@ -89,17 +87,8 @@ impl StreamingProcessor {
         trace!("Messages for LLM (stream): {:?}", messages);
         
         // Get available tool definitions
-        let tool_defs_from_registry: Vec<ToolDefinitionType> = self.tool_registry.get_definitions().await;
-        debug!("Retrieved {} tool definitions from registry for LLM (stream).", tool_defs_from_registry.len());
-        let tool_defs_for_llm: Vec<ToolDefinition> = tool_defs_from_registry
-            .iter()
-            .map(|td| ToolDefinition {
-                name: td.name.clone(),
-                description: td.description.clone(),
-                parameters: td.parameters.clone(),
-                is_required: td.is_required,
-            })
-            .collect();
+        let tool_defs_for_llm: Vec<ToolDefinition> = self.tool_registry.get_definitions().await;
+        debug!("Retrieved {} tool definitions from registry for LLM (stream).", tool_defs_for_llm.len());
         
         // Create the agent response message
         let assistant_message = AgentMessage::assistant_streaming("".to_string());
@@ -228,12 +217,12 @@ impl StreamingProcessor {
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("Tool execution failed")
                                                     .to_string();
-                                                crate::tools::types::ToolResult::Error { error: error_msg }
+                                                crate::agent::events::ToolResult::Error { error: error_msg }
                                             } else {
-                                                crate::tools::types::ToolResult::Success(result.clone())
+                                                crate::agent::events::ToolResult::Success { output: result.to_string() }
                                             }
                                         } else {
-                                            crate::tools::types::ToolResult::Success(result.clone())
+                                            crate::agent::events::ToolResult::Success { output: result.to_string() }
                                         };
                                         
                                         let _ = event_sender.send(AgentEvent::ToolCallComplete {

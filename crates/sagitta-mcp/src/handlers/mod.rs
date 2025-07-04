@@ -5,8 +5,6 @@ pub mod query;
 pub mod repository;
 pub mod repository_map;
 pub mod tool;
-pub mod tenant_handler;
-pub mod oauth_mapping_handler;
 pub mod todo_read;
 pub mod todo_write;
 pub mod edit_file;

@@ -26,6 +26,7 @@ use std::{
 };
 use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
+use std::str::FromStr;
 use log::{info, warn, debug, trace};
 
 // Import git-manager traits for integration
@@ -307,7 +308,7 @@ where
 
     }).await.context("Git operation task failed")??; // Handle JoinError and inner Result
     
-    let (commit_oid_str, mut files_to_index, files_to_delete, sync_needed, diff_message) = git_result;
+    let (commit_oid_str, mut files_to_index, mut files_to_delete, mut sync_needed, diff_message) = git_result;
     
     // Report progress for diff calculation if it happened
     if let Some(message) = diff_message {
@@ -326,6 +327,78 @@ where
                 message: "Collected files for sync".to_string(),
             }
         )).await;
+    }
+    
+    // Before skipping sync, validate that collections actually exist
+    if !sync_needed && !force_sync {
+        // Check if the collection exists in Qdrant
+        let collection_name = repo_helpers::get_branch_aware_collection_name(
+            repo_name, 
+            target_ref.unwrap_or(active_branch), 
+            app_config
+        );
+        
+        let collection_exists = match client.collection_exists(collection_name.clone()).await {
+            Ok(exists) => exists,
+            Err(e) => {
+                warn!("Failed to check collection existence: {}. Forcing full sync.", e);
+                false
+            }
+        };
+        
+        if !collection_exists {
+            warn!(
+                "Collection '{}' does not exist but config shows repository was synced. Forcing full sync.",
+                collection_name
+            );
+            // Force a full sync by clearing the sync type
+            sync_needed = true;
+            files_to_index = Vec::new(); // Will be populated below
+            files_to_delete = Vec::new();
+        } else {
+            // Collection exists, check if it has content
+            match client.get_collection_info(collection_name.clone()).await {
+                Ok(info) => {
+                    let points_count = info.points_count.unwrap_or(0);
+                    if points_count == 0 {
+                        warn!(
+                            "Collection '{}' exists but is empty. Forcing full sync.",
+                            collection_name
+                        );
+                        sync_needed = true;
+                        files_to_index = Vec::new(); // Will be populated below
+                        files_to_delete = Vec::new();
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get collection info: {}. Forcing full sync.", e);
+                    sync_needed = true;
+                    files_to_index = Vec::new(); // Will be populated below
+                    files_to_delete = Vec::new();
+                }
+            }
+        }
+    }
+    
+    // If we determined we need to sync after validation, gather files
+    if sync_needed && files_to_index.is_empty() && files_to_delete.is_empty() {
+        info!("Gathering all files for full sync due to missing/empty collection...");
+        let repo_path_for_tree = repo_path.clone();
+        let commit_oid_for_tree = commit_oid_str.clone();
+        
+        let tree_result = task::spawn_blocking(move || -> Result<Vec<PathBuf>> {
+            let repo = git2::Repository::open(&repo_path_for_tree)?;
+            let commit = repo.find_commit(git2::Oid::from_str(&commit_oid_for_tree)?)?;
+            let tree = commit.tree()?;
+            let mut files = Vec::new();
+            repo_helpers::collect_files_from_tree(&repo, &tree, &mut files, &PathBuf::new())?;
+            Ok(files)
+        }).await
+            .context("Failed to gather files for sync")?
+            .context("Failed to collect files from tree")?;
+        
+        files_to_index = tree_result;
+        info!("Full sync: {} files found in tree.", files_to_index.len());
     }
     
     if !sync_needed {
@@ -366,14 +439,11 @@ where
     info!("Files to index/update: {}, Files to delete: {}", files_to_index_count, files_to_delete_count);
     
     // --- Qdrant Operations ---
-    let tenant_id = repo_config.tenant_id.as_deref()
-        .ok_or_else(|| anyhow!("Tenant ID missing in RepositoryConfig for repository '{}' during sync operation", repo_name))?;
     
     let current_sync_branch_or_ref = target_ref.unwrap_or(active_branch);
     
     // Use branch-aware collection naming for better sync management
     let collection_name = repo_helpers::get_branch_aware_collection_name(
-        tenant_id, 
         repo_name, 
         current_sync_branch_or_ref, 
         app_config
@@ -384,7 +454,6 @@ where
     // Check if we already have sync metadata for this branch/ref
     let sync_metadata = repo_helpers::get_branch_sync_metadata(
         client.as_ref(),
-        tenant_id,
         repo_name,
         current_sync_branch_or_ref,
         app_config,
@@ -475,7 +544,7 @@ where
             message: format!("Ensuring collection '{}' exists with dimension {}", collection_name, embedding_dim)
         }
     )).await;
-    repo_helpers::ensure_repository_collection_exists(client.as_ref(), &collection_name, embedding_dim as u64).await?;
+    crate::indexing::ensure_collection_exists(client.clone(), &collection_name, embedding_dim as u64).await?;
     
     // Handle Deletions
     if !files_to_delete.is_empty() {
@@ -691,7 +760,6 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
@@ -704,7 +772,6 @@ mod tests {
             embed_model: None,
             repositories_base_path: None,
             vocabulary_base_path: None,
-            tenant_id: Some("test-tenant".to_string()),
             indexing: IndexingConfig {
                 max_concurrent_upserts: 4,
             },
@@ -718,12 +785,6 @@ mod tests {
             repositories: Vec::new(),
             active_repository: None,
             server_api_key_path: None,
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
         }
     }
 
@@ -782,8 +843,8 @@ mod tests {
         let config = create_test_app_config();
         
         // Test that different branches get different collection names
-        let main_collection = get_branch_aware_collection_name("tenant1", "my-repo", "main", &config);
-        let dev_collection = get_branch_aware_collection_name("tenant1", "my-repo", "dev", &config);
+        let main_collection = get_branch_aware_collection_name("my-repo", "main", &config);
+        let dev_collection = get_branch_aware_collection_name("my-repo", "dev", &config);
         
         // Verify they are different
         assert_ne!(main_collection, dev_collection);

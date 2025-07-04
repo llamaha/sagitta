@@ -38,33 +38,19 @@ where
 {
     let repo_name_to_remove = args.name.clone();
 
-    let cli_tenant_id = match cli_args.tenant_id.as_deref() {
-        Some(id) => id,
-        None => {
-            #[cfg(feature = "multi_tenant")]
-            {
-                return Err(anyhow!("--tenant-id is required to remove a repository."));
-            }
-            #[cfg(not(feature = "multi_tenant"))]
-            {
-                "default"
-            }
-        }
-    };
 
     let repo_config_index = config
         .repositories
         .iter()
-        .position(|r| r.name == repo_name_to_remove && r.tenant_id.as_deref() == Some(cli_tenant_id))
-        .ok_or_else(|| anyhow!("Repository '{}' for tenant '{}' not found.", repo_name_to_remove, cli_tenant_id))?;
+        .position(|r| r.name == repo_name_to_remove)
+        .ok_or_else(|| anyhow!("Repository '{}' not found.", repo_name_to_remove))?;
 
     if !args.yes {
         println!(
             "{}",
             format!(
-                "Preparing to remove repository '{}' for tenant '{}'.",
-                repo_name_to_remove.cyan(),
-                cli_tenant_id.cyan()
+                "Preparing to remove repository '{}'.",
+                repo_name_to_remove.cyan()
             ).yellow()
         );
         println!("This will remove the repository configuration AND delete the vector index data in Qdrant.");
@@ -87,7 +73,7 @@ where
     let repo_config_clone = config.repositories[repo_config_index].clone();
 
     if args.delete_local {
-        info!("Calling core delete_repository_data (includes local files) for repo: {}, tenant: {}", repo_name_to_remove, cli_tenant_id);
+        info!("Calling core delete_repository_data (includes local files) for repo: {}", repo_name_to_remove);
         sagitta_search::repo_helpers::delete_repository_data(&repo_config_clone, client.clone(), config).await
             .with_context(|| format!("Failed to delete repository data for '{}'", repo_name_to_remove))?;
     } else {
@@ -98,7 +84,7 @@ where
             .unwrap_or(&repo_config.default_branch);
         
         // Try to delete current branch collection
-        let current_collection_name = sagitta_search::repo_helpers::get_branch_aware_collection_name(cli_tenant_id, &repo_name_to_remove, current_branch, config);
+        let current_collection_name = sagitta_search::repo_helpers::get_branch_aware_collection_name(&repo_name_to_remove, current_branch, config);
         match client.delete_collection(current_collection_name.clone()).await {
             Ok(_) => {
                 println!("✓ Deleted Qdrant collection: {}", current_collection_name);
@@ -109,7 +95,7 @@ where
         }
         
         // Also try to delete legacy collection for backward compatibility
-        let legacy_collection_name = sagitta_search::repo_helpers::get_collection_name(cli_tenant_id, &repo_name_to_remove, config);
+        let legacy_collection_name = sagitta_search::repo_helpers::get_collection_name(&repo_name_to_remove, config);
         info!("Deleting Qdrant collection '{}' (delete_local is false).", legacy_collection_name);
         match client.delete_collection(legacy_collection_name.clone()).await {
             Ok(deleted) => {
@@ -121,7 +107,7 @@ where
         info!("Local files for '{}' will NOT be deleted as per --delete-local=false.", repo_name_to_remove);
     }
 
-    info!("Removing repository configuration for '{}' (tenant: '{}').", repo_name_to_remove.cyan(), cli_tenant_id.cyan());
+    info!("Removing repository configuration for '{}'.", repo_name_to_remove.cyan());
     config.repositories.remove(repo_config_index);
 
     if config.active_repository.as_ref() == Some(&repo_name_to_remove) {

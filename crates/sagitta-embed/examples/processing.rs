@@ -39,7 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         onnx_model_path: Some(model_path.into()),
         onnx_tokenizer_path: Some(tokenizer_path.into()),
         enable_session_cleanup: true,
-        tenant_id: None,
         ..config
     };
 

@@ -257,9 +257,6 @@ pub struct RepositoryAddParams {
     /// If provided, this ref will be checked out instead of the default branch after cloning.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_ref: Option<String>,
-    /// Optional Tenant ID for this repository operation.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tenant_id: Option<String>,
 }
 
 /// Result of the `repository/add` method.

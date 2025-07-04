@@ -33,27 +33,12 @@ async fn main() -> Result<()> {
         }
     };
 
-    // If --tenant-id is not provided via CLI, use tenant_id from loaded config if present
-    if args.tenant_id.is_none() {
-        if let Some(cfg_tenant_id) = config.tenant_id.clone() {
-            args.tenant_id = Some(cfg_tenant_id);
-        }
-    }
-    // Note: The `Init` command itself will ensure config.tenant_id is populated before saving.
 
     // Handle Init command separately and exit early
     if matches!(args.command, sagitta_cli::cli::Commands::Init) {
         return sagitta_cli::cli::commands::execute_init_command(&mut config).await;
     }
 
-    // If still no tenant_id (and not Init cmd), error out for tenant-aware commands
-    let needs_tenant = matches!(args.command, sagitta_cli::cli::Commands::Repo(_) | sagitta_cli::cli::Commands::Edit(_));
-    #[cfg(feature = "multi_tenant")]
-    if needs_tenant && args.tenant_id.is_none() {
-        // For non-Init commands, if tenant_id is still None after checking args and config (from init),
-        // then it means the init step didn't set one or it was removed. This is an error for tenant-aware commands.
-        return Err(anyhow!("No tenant_id specified or found in config. Please provide --tenant-id or run 'sagitta-cli init' to set one."));
-    }
 
     // Handle ONNX model/tokenizer path overrides from CLI args
     if let Some(model_path_str) = &args.onnx_model_path_arg {

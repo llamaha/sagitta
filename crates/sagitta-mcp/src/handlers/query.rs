@@ -47,62 +47,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
             data: None,
         })?;
 
-    // Tenant isolation check: Determine acting_tenant_id
-    let acting_tenant_id: Option<String> = if let Some(auth_user) = auth_user_ext.as_ref() {
-        info!(tenant_source = "AuthenticatedUser", tenant_id = %auth_user.0.tenant_id, repo_name = %params.repository_name);
-        Some(auth_user.0.tenant_id.clone())
-    } else if let Some(default_tenant_id) = config_read_guard.tenant_id.as_ref() {
-        info!(tenant_source = "ServerConfigDefault", tenant_id = %default_tenant_id, repo_name = %params.repository_name);
-        Some(default_tenant_id.clone())
-    } else {
-        info!(tenant_source = "None", repo_name = %params.repository_name, "No acting tenant ID determined (no auth, no server default) for query.");
-        None
-    };
-
-    // Perform tenant check and get the tenant_id to use for the collection
-    let tenant_id_for_collection_str: String = {
-        #[cfg(feature = "multi_tenant")]
-        {
-            match (&acting_tenant_id, &repo_config.tenant_id) {
-                (Some(act_tid), Some(repo_tid)) => {
-                    if act_tid == repo_tid {
-                        info!(repo_name = %params.repository_name, acting_tenant_id = %act_tid, "Tenant ID match successful for query.");
-                        repo_tid.clone() // Use this tenant ID for the collection
-                    } else {
-                        warn!(
-                            acting_tenant_id = %act_tid,
-                            repo_tenant_id = %repo_tid,
-                            repo_name = %params.repository_name,
-                            "Access denied: Acting tenant ID does not match repository's tenant ID for query."
-                        );
-                        return Err(ErrorObject {
-                            code: error_codes::ACCESS_DENIED,
-                            message: "Access denied: Tenant ID mismatch for query operation.".to_string(),
-                            data: None,
-                        });
-                    }
-                }
-                _ => { // All other cases: (None, Some), (Some, None), (None, None) -> Deny
-                    warn!(
-                        acting_tenant_id = ?acting_tenant_id,
-                        repo_tenant_id = ?repo_config.tenant_id,
-                        repo_name = %params.repository_name,
-                        "Access denied: Tenant ID mismatch or missing for query. Both acting context and repository must have a matching, defined tenant ID."
-                    );
-                    return Err(ErrorObject {
-                        code: error_codes::ACCESS_DENIED,
-                        message: "Access denied: Query requires matching and defined tenant IDs for both context and repository.".to_string(),
-                        data: None,
-                    });
-                }
-            }
-        }
-        #[cfg(not(feature = "multi_tenant"))]
-        {
-            info!(repo_name = %params.repository_name, "Multi-tenancy disabled, using default tenant ID for query");
-            repo_config.tenant_id.as_ref().unwrap_or(&"default".to_string()).clone()
-        }
-    };
+    info!(repo_name = %params.repository_name, "Processing query request");
 
     let branch_name = params.branch_name.as_ref()
         .or(repo_config.active_branch.as_ref())
@@ -113,7 +58,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         })?;
 
     // Use branch-aware collection naming to match how collections are created during add/sync
-    let collection_name = get_branch_aware_collection_name(&tenant_id_for_collection_str, &params.repository_name, branch_name, &config_read_guard);
+    let collection_name = get_branch_aware_collection_name(&params.repository_name, branch_name, &config_read_guard);
 
     info!(
         collection=%collection_name,
@@ -398,28 +343,25 @@ mod tests {
                 ..PerformanceConfig::default()
             },
             embedding: EmbeddingEngineConfig::default(),
-            tenant_id: Some("test_tenant".to_string()),
             ..AppConfig::default()
         };
         
         Arc::new(RwLock::new(config))
     }
 
-    fn create_test_repo_config(name: &str, tenant_id: &str, active_branch: Option<&str>) -> RepositoryConfig {
+    fn create_test_repo_config(name: &str, active_branch: Option<&str>) -> RepositoryConfig {
         RepositoryConfig {
             name: name.to_string(),
             url: "https://example.com/repo.git".to_string(),
             local_path: std::path::PathBuf::from("/tmp/test_repo"),
             default_branch: "main".to_string(),
             active_branch: active_branch.map(|s| s.to_string()),
-            tenant_id: Some(tenant_id.to_string()),
             ..RepositoryConfig::default()
         }
     }
 
-    fn create_auth_user(tenant_id: &str) -> Extension<AuthenticatedUser> {
+    fn create_auth_user() -> Extension<AuthenticatedUser> {
         Extension(AuthenticatedUser {
-            tenant_id: tenant_id.to_string(),
             user_id: Some("test_user".to_string()),
             scopes: vec!["query:repositories".to_string()],
         })
@@ -429,17 +371,16 @@ mod tests {
     /// This test verifies the collection name determination logic without going through embedding generation
     #[tokio::test]
     async fn test_query_collection_name_generation() {
-        let tenant_id = "test_tenant_123";
         let repo_name = "test_repo";
         let branch_name = "main";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let repo_config = create_test_repo_config(repo_name, Some(branch_name));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Calculate what the collection names should be
-        let legacy_collection_name = get_collection_name(tenant_id, repo_name, &config_guard);
-        let branch_aware_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        let legacy_collection_name = get_collection_name(repo_name, &config_guard);
+        let branch_aware_collection_name = get_branch_aware_collection_name(repo_name, branch_name, &config_guard);
         
         // Ensure they're different (this validates our test setup)
         assert_ne!(
@@ -470,16 +411,15 @@ mod tests {
     /// (This verifies that the bug fix is working correctly)
     #[tokio::test]
     async fn test_collection_naming_mismatch_causes_failure() {
-        let tenant_id = "test_tenant_456";
         let repo_name = "test_repo";
         let branch_name = "main";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let repo_config = create_test_repo_config(repo_name, Some(branch_name));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Calculate the correct branch-aware collection name
-        let branch_aware_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        let branch_aware_collection_name = get_branch_aware_collection_name(repo_name, branch_name, &config_guard);
         
         drop(config_guard);
         
@@ -496,7 +436,7 @@ mod tests {
             show_code: None,
         };
         
-        let auth_user = Some(create_auth_user(tenant_id));
+        let auth_user = Some(create_auth_user());
         
         // This should fail because the mock client is configured to fail
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
@@ -509,16 +449,15 @@ mod tests {
     /// Test that query handler properly determines branch name from repo config when not specified
     #[tokio::test]
     async fn test_query_uses_repo_active_branch_when_not_specified() {
-        let tenant_id = "test_tenant_789";
         let repo_name = "test_repo";
         let active_branch = "develop";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(active_branch));
+        let repo_config = create_test_repo_config(repo_name, Some(active_branch));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Calculate the expected collection name based on repo's active branch
-        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, active_branch, &config_guard);
+        let expected_collection_name = get_branch_aware_collection_name(repo_name, active_branch, &config_guard);
         
         drop(config_guard);
         
@@ -536,10 +475,9 @@ mod tests {
     /// Test that query handler fails when no branch can be determined
     #[tokio::test]
     async fn test_query_fails_when_no_branch_available() {
-        let tenant_id = "test_tenant_000";
         let repo_name = "test_repo";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, None); // No active branch
+        let repo_config = create_test_repo_config(repo_name, None); // No active branch
         let config = create_test_config(repo_config);
         
         // Create a dummy mock client (won't be used)
@@ -555,7 +493,7 @@ mod tests {
             show_code: None,
         };
         
-        let auth_user = Some(create_auth_user(tenant_id));
+        let auth_user = Some(create_auth_user());
         
         // This should fail because no branch can be determined
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
@@ -570,16 +508,15 @@ mod tests {
     /// Test that query handler excludes content by default when show_code is not specified
     #[tokio::test]
     async fn test_query_excludes_content_by_default() {
-        let tenant_id = "test_tenant_show_code_default";
         let repo_name = "test_repo";
         let branch_name = "main";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let repo_config = create_test_repo_config(repo_name, Some(branch_name));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Expected collection name for mock client
-        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        let expected_collection_name = get_branch_aware_collection_name(repo_name, branch_name, &config_guard);
         drop(config_guard);
         
         // Create mock client that returns search results
@@ -595,7 +532,7 @@ mod tests {
             show_code: None, // Not specified - should default to false
         };
         
-        let auth_user = Some(create_auth_user(tenant_id));
+        let auth_user = Some(create_auth_user());
         
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
         
@@ -625,16 +562,15 @@ mod tests {
     /// Test that query handler excludes content when show_code is explicitly false
     #[tokio::test]
     async fn test_query_excludes_content_when_show_code_false() {
-        let tenant_id = "test_tenant_show_code_false";
         let repo_name = "test_repo";
         let branch_name = "main";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let repo_config = create_test_repo_config(repo_name, Some(branch_name));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Expected collection name for mock client
-        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        let expected_collection_name = get_branch_aware_collection_name(repo_name, branch_name, &config_guard);
         drop(config_guard);
         
         // Create mock client that returns search results
@@ -650,7 +586,7 @@ mod tests {
             show_code: Some(false), // Explicitly false
         };
         
-        let auth_user = Some(create_auth_user(tenant_id));
+        let auth_user = Some(create_auth_user());
         
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
         
@@ -671,16 +607,15 @@ mod tests {
     /// Test that query handler includes content when show_code is true
     #[tokio::test]
     async fn test_query_includes_content_when_show_code_true() {
-        let tenant_id = "test_tenant_show_code_true";
         let repo_name = "test_repo";
         let branch_name = "main";
         
-        let repo_config = create_test_repo_config(repo_name, tenant_id, Some(branch_name));
+        let repo_config = create_test_repo_config(repo_name, Some(branch_name));
         let config = create_test_config(repo_config);
         let config_guard = config.read().await;
         
         // Expected collection name for mock client
-        let expected_collection_name = get_branch_aware_collection_name(tenant_id, repo_name, branch_name, &config_guard);
+        let expected_collection_name = get_branch_aware_collection_name(repo_name, branch_name, &config_guard);
         drop(config_guard);
         
         // Create mock client that returns search results
@@ -696,7 +631,7 @@ mod tests {
             show_code: Some(true), // Explicitly true
         };
         
-        let auth_user = Some(create_auth_user(tenant_id));
+        let auth_user = Some(create_auth_user());
         
         let result = handle_query(query_params, config.clone(), mock_client, auth_user).await;
         

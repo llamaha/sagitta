@@ -16,7 +16,6 @@ use sagitta_search::config::AppConfig;
 pub async fn handle_repository_map(
     params: RepositoryMapParams,
     config: Arc<RwLock<AppConfig>>,
-    tenant_id: Option<String>,
 ) -> Result<RepositoryMapResult, ErrorObject> {
     debug!("Starting repository mapping for: {}", params.repository_name);
 
@@ -196,7 +195,7 @@ impl TestStruct {
             file_extension: Some("rs".to_string()),
         };
 
-        let result = handle_repository_map(params, config, None).await;
+        let result = handle_repository_map(params, config).await;
         assert!(result.is_ok());
 
         let map_result = result.unwrap();
@@ -269,7 +268,7 @@ def process_data(data):
             file_extension: Some("py".to_string()),
         };
 
-        let result = handle_repository_map(params, config, None).await;
+        let result = handle_repository_map(params, config).await;
         assert!(result.is_ok());
 
         let map_result = result.unwrap();
@@ -323,7 +322,7 @@ pub fn documented_function() {
             file_extension: Some("rs".to_string()),
         };
 
-        let result_0 = handle_repository_map(params_0, config.clone(), None).await.unwrap();
+        let result_0 = handle_repository_map(params_0, config.clone()).await.unwrap();
         let content_0 = &result_0.map_content;
         
         // Minimal should not contain calls or docs
@@ -339,7 +338,7 @@ pub fn documented_function() {
             file_extension: Some("rs".to_string()),
         };
 
-        let result_2 = handle_repository_map(params_2, config, None).await.unwrap();
+        let result_2 = handle_repository_map(params_2, config).await.unwrap();
         let content_2 = &result_2.map_content;
         
         // Detailed should contain both calls and docs

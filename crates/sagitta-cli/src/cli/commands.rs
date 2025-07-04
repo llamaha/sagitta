@@ -51,9 +51,6 @@ pub struct CliArgs {
     #[arg(short = 't', long = "onnx-tokenizer-dir", global = true, env = "SAGITTA_ONNX_TOKENIZER_DIR")]
     pub onnx_tokenizer_dir_arg: Option<String>,
 
-    /// Tenant ID for operations (overrides config & env var)
-    #[arg(long = "tenant-id", global = true, env = "SAGITTA_TENANT_ID")]
-    pub tenant_id: Option<String>,
 }
 
 // Implement Default for CliArgs for use in server code
@@ -71,7 +68,6 @@ impl Default for CliArgs {
             }),
             onnx_model_path_arg: None,
             onnx_tokenizer_dir_arg: None,
-            tenant_id: None,
         }
     }
 }
@@ -150,14 +146,7 @@ pub async fn execute_init_command(config: &mut AppConfig) -> Result<()> {
         println!("Existing configuration found at {}. Checking tenant_id.", config_path_display);
     }
 
-    // Check and set tenant_id if not already present in the loaded config
-    if config.tenant_id.is_none() {
-        let new_tenant_id = uuid::Uuid::new_v4().to_string();
-        config.tenant_id = Some(new_tenant_id.clone());
-        println!("Generated and set new tenant_id: {}", new_tenant_id);
-    } else {
-        println!("Existing tenant_id found: {}", config.tenant_id.as_ref().unwrap());
-    }
+    // Configuration loaded successfully
 
     // Save the potentially modified config
     sagitta_search::config::save_config(config, Some(&config_path_buf))?;

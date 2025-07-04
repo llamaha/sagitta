@@ -30,13 +30,6 @@ mod tests {
             indexing: IndexingConfig::default(),
             performance: PerformanceConfig::default(),
             embedding: sagitta_search::config::EmbeddingEngineConfig::default(),
-            oauth: None,
-            tls_enable: false,
-            tls_cert_path: None,
-            tls_key_path: None,
-            cors_allowed_origins: None,
-            cors_allow_credentials: true,
-            tenant_id: Some("test-tenant".to_string()),
         }
     }
     
@@ -62,12 +55,11 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: Some("test_tenant".to_string()),
             };
             config.repositories.push(repo);
             config.active_repository = Some("test_repo".to_string());
 
-            let mock_cli_args = CliArgs { tenant_id: Some("test_tenant".to_string()), ..Default::default() };
+            let mock_cli_args = CliArgs::default();
 
             let args = StatsArgs { 
                 config_file: None, 
@@ -119,7 +111,6 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: Some("test_tenant".to_string()),
             };
             config.repositories.push(repo1);
 
@@ -138,11 +129,10 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
-                tenant_id: Some("test_tenant".to_string()),
             };
             config.repositories.push(repo2);
 
-            let mock_cli_args = CliArgs { tenant_id: Some("test_tenant".to_string()), ..Default::default() };
+            let mock_cli_args = CliArgs::default();
 
             let args = StatsArgs {
                 config_file: None,
@@ -153,8 +143,8 @@ mod tests {
             assert!(result.is_err());
             
             let err = result.unwrap_err().to_string();
-            let expected_error_part1 = "No active repository set for tenant 'test_tenant' and multiple repositories exist.";
-            let expected_error_part2 = "Please specify a repository with 'repo use <name> --tenant-id test_tenant' or use the implicit single repository for the tenant.";
+            let expected_error_part1 = "No active repository set and multiple repositories exist.";
+            let expected_error_part2 = "Please specify a repository with 'repo use <name>'.";
             assert!(err.contains(expected_error_part1), "Error message did not contain: {}. Full error: {}", expected_error_part1, err);
             assert!(err.contains(expected_error_part2), "Error message did not contain: {}. Full error: {}", expected_error_part2, err);
         });

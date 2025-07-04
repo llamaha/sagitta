@@ -13,8 +13,22 @@ pub mod config;
 /// LLM clients (Gemini)
 pub mod llm;
 
-/// Tools for agent interaction
-pub mod tools;
+// Tools removed - now provided via MCP from sagitta-mcp
+// Minimal stub module for compilation compatibility
+mod tools_stub;
+pub mod tools {
+    pub mod registry {
+        pub use crate::tools_stub::ToolRegistry;
+    }
+    pub mod executor {
+        pub use crate::tools_stub::{ToolExecutor, SagittaCodeToolExecutorInternal};
+        pub use crate::agent::events::ToolExecutionEvent;
+    }
+    pub mod types {
+        pub use crate::tools_stub::{ToolResult, ToolDefinition, ToolCategory};
+    }
+    pub use crate::tools_stub::WorkingDirectoryManager;
+}
 
 /// Utilities
 pub mod utils;
@@ -46,5 +60,8 @@ pub use llm::client::{
     LlmResponse, StreamChunk, ThinkingConfig, GroundingConfig, TokenUsage,
 };
 
-// Re-export tool types for tests
-pub use tools::{Tool, ToolDefinition as ToolDefAlias, ToolResult, ToolCategory, ToolRegistry}; 
+// Re-export tool stub types for compatibility
+pub use tools::{
+    types::{ToolResult, ToolDefinition as ToolDefAlias, ToolCategory},
+    registry::ToolRegistry,
+}; 

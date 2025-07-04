@@ -11,9 +11,11 @@ impl ToolResultFormatter {
     }
 
     /// Format tool results in a human-readable way for the preview pane
-    pub fn format_tool_result_for_preview(&self, tool_name: &str, result: &crate::tools::types::ToolResult) -> String {
+    pub fn format_tool_result_for_preview(&self, tool_name: &str, result: &crate::agent::events::ToolResult) -> String {
+        use crate::agent::events::ToolResult;
         match result {
-            crate::tools::types::ToolResult::Success(value) => {
+            ToolResult::Success { output } => {
+                let value: serde_json::Value = serde_json::from_str(&output).unwrap_or(serde_json::Value::String(output.clone()));
                 // Check if this is actually an error wrapped as success (from MCP)
                 if let Some(obj) = value.as_object() {
                     if obj.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -23,9 +25,9 @@ impl ToolResultFormatter {
                         return format!("❌ **ERROR**\n\n{}", error_msg);
                     }
                 }
-                self.format_successful_tool_result(tool_name, value)
+                self.format_successful_tool_result(tool_name, &value)
             },
-            crate::tools::types::ToolResult::Error { error } => {
+            ToolResult::Error { error } => {
                 // Format error with better structure
                 let mut result = String::new();
                 result.push_str("❌ **Tool Execution Failed**\n\n");
@@ -1224,9 +1226,11 @@ mod tests {
     #[test]
     fn test_format_tool_result_for_preview_success() {
         let formatter = ToolResultFormatter::new();
-        let result = ToolResult::Success(json!({
-            "message": "Operation completed successfully"
-        }));
+        let result = ToolResult::Success { 
+            output: json!({
+                "message": "Operation completed successfully"
+            }).to_string()
+        };
         
         let formatted = formatter.format_tool_result_for_preview("test_tool", &result);
         assert!(formatted.contains("Operation completed successfully"));

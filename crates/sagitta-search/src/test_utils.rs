@@ -27,6 +27,16 @@ pub struct ManualMockQdrantClient {
     collection_exists_called: Arc<Mutex<u32>>,
     collection_exists_args: Arc<Mutex<Vec<String>>>,
     expected_collection_exists_responses: Arc<Mutex<Vec<Result<bool>>>>,
+    
+    // For get_collection_info
+    get_collection_info_called: Arc<Mutex<u32>>,
+    get_collection_info_args: Arc<Mutex<Vec<String>>>,
+    expected_get_collection_info_responses: Arc<Mutex<Vec<Result<CollectionInfo>>>>,
+    
+    // For delete_collection
+    delete_collection_called: Arc<Mutex<u32>>,
+    delete_collection_args: Arc<Mutex<Vec<String>>>,
+    expected_delete_collection_responses: Arc<Mutex<Vec<Result<bool>>>>,
 }
 
 impl ManualMockQdrantClient {
@@ -42,6 +52,12 @@ impl ManualMockQdrantClient {
             collection_exists_called: Arc::new(Mutex::new(0)),
             collection_exists_args: Arc::new(Mutex::new(Vec::new())),
             expected_collection_exists_responses: Arc::new(Mutex::new(Vec::new())),
+            get_collection_info_called: Arc::new(Mutex::new(0)),
+            get_collection_info_args: Arc::new(Mutex::new(Vec::new())),
+            expected_get_collection_info_responses: Arc::new(Mutex::new(Vec::new())),
+            delete_collection_called: Arc::new(Mutex::new(0)),
+            delete_collection_args: Arc::new(Mutex::new(Vec::new())),
+            expected_delete_collection_responses: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -87,6 +103,11 @@ impl ManualMockQdrantClient {
         }
     }
 
+    /// Returns the arguments passed to the last `create_collection` call.
+    pub fn get_create_collection_args(&self) -> (String, u64) {
+        self.create_collection_args.lock().unwrap().clone().unwrap_or(("".to_string(), 0))
+    }
+
     // --- Methods for collection_exists --- 
     /// Adds an expected response to the queue for future `collection_exists` calls.
     pub fn expect_collection_exists(&self, response: Result<bool>) {
@@ -101,6 +122,18 @@ impl ManualMockQdrantClient {
     /// Returns a clone of the arguments passed to each `collection_exists` call.
     pub fn get_collection_exists_args(&self) -> Vec<String> {
         self.collection_exists_args.lock().unwrap().clone()
+    }
+    
+    // --- Methods for get_collection_info ---
+    /// Adds an expected response to the queue for future `get_collection_info` calls.
+    pub fn expect_get_collection_info(&self, response: Result<CollectionInfo>) {
+        self.expected_get_collection_info_responses.lock().unwrap().push(response);
+    }
+    
+    // --- Methods for delete_collection ---
+    /// Adds an expected response to the queue for future `delete_collection` calls.
+    pub fn expect_delete_collection(&self, response: Result<bool>) {
+        self.expected_delete_collection_responses.lock().unwrap().push(response);
     }
 }
 
@@ -163,9 +196,31 @@ impl QdrantClientTrait for ManualMockQdrantClient {
 
     // --- Implement other trait methods with default "unimplemented" behavior --- 
     async fn health_check(&self) -> Result<HealthCheckReply> { unimplemented!("health_check not mocked in ManualMockQdrantClient") }
-    async fn delete_collection(&self, _collection_name: String) -> Result<bool> { unimplemented!("delete_collection not mocked in ManualMockQdrantClient") }
+    async fn delete_collection(&self, collection_name: String) -> Result<bool> {
+        *self.delete_collection_called.lock().unwrap() += 1;
+        self.delete_collection_args.lock().unwrap().push(collection_name.clone());
+        log::debug!("ManualMock: delete_collection called for {}", collection_name);
+        
+        let mut responses = self.expected_delete_collection_responses.lock().unwrap();
+        if !responses.is_empty() {
+            responses.remove(0)
+        } else {
+            Err(SagittaError::Other("Mock Error: delete_collection called without expected response".into()))
+        }
+    }
     async fn search_points(&self, _request: SearchPoints) -> Result<SearchResponse> { unimplemented!("search_points not mocked in ManualMockQdrantClient") }
-    async fn get_collection_info(&self, _collection_name: String) -> Result<CollectionInfo> { unimplemented!("get_collection_info not mocked in ManualMockQdrantClient") }
+    async fn get_collection_info(&self, collection_name: String) -> Result<CollectionInfo> {
+        *self.get_collection_info_called.lock().unwrap() += 1;
+        self.get_collection_info_args.lock().unwrap().push(collection_name.clone());
+        log::debug!("ManualMock: get_collection_info called for {}", collection_name);
+        
+        let mut responses = self.expected_get_collection_info_responses.lock().unwrap();
+        if !responses.is_empty() {
+            responses.remove(0)
+        } else {
+            Err(SagittaError::Other("Mock Error: get_collection_info called without expected response".into()))
+        }
+    }
     async fn count(&self, _request: CountPoints) -> Result<CountResponse> { unimplemented!("count not mocked in ManualMockQdrantClient") }
     async fn delete_points_blocking(&self, _collection_name: &str, _points_selector: &PointsSelector) -> Result<()> { unimplemented!("delete_points_blocking not mocked in ManualMockQdrantClient") }
     async fn scroll(&self, _request: ScrollPoints) -> Result<ScrollResponse> { unimplemented!("scroll not mocked in ManualMockQdrantClient") }
@@ -213,7 +268,6 @@ mod enhanced_repository_tests {
             indexed_languages: Some(vec!["rust".to_string(), "markdown".to_string()]),
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         }
     }
 
@@ -250,7 +304,6 @@ mod enhanced_repository_tests {
         // Check other fields
         assert_eq!(enhanced_info.indexed_languages, Some(vec!["rust".to_string(), "markdown".to_string()]));
         assert!(!enhanced_info.added_as_local_path);
-        assert_eq!(enhanced_info.tenant_id, Some("test-tenant".to_string()));
     }
 
     #[tokio::test]
@@ -301,7 +354,6 @@ mod enhanced_repository_tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
@@ -344,7 +396,6 @@ mod enhanced_repository_tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
-            tenant_id: Some("test-tenant".to_string()),
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();

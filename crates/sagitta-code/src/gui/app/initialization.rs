@@ -13,21 +13,8 @@ use crate::llm::claude_code::client::ClaudeCodeClient;
 use crate::llm::client::LlmClient;
 use crate::agent::Agent;
 use crate::agent::state::types::AgentMode;
-use crate::tools::code_search::tool::CodeSearchTool;
-use crate::tools::file_operations::read::ReadFileTool;
-use crate::tools::repository::list::ListRepositoriesTool;
-use crate::tools::repository::search::SearchFileInRepositoryTool;
-use crate::tools::repository::view::ViewFileInRepositoryTool;
-use crate::tools::repository::add::AddExistingRepositoryTool;
-use crate::tools::repository::sync::SyncRepositoryTool;
-use crate::tools::repository::remove::RemoveRepositoryTool;
-use crate::tools::repository::map::RepositoryMapTool;
-use crate::tools::repository::targeted_view::TargetedViewTool;
-use crate::tools::web_search::WebSearchTool;
-use crate::tools::code_edit::edit::EditTool; // Corrected import for EditTool
+// Tool imports removed - tools now via MCP
 use crate::config::SagittaCodeConfig;
-use crate::tools::registry::ToolRegistry;
-use crate::tools::shell_execution::{ShellExecutionTool, StreamingShellExecutionTool};
 // Add imports for concrete persistence/search and traits
 use crate::agent::conversation::persistence::{
     ConversationPersistence, 
@@ -40,18 +27,7 @@ use crate::agent::conversation::search::{
 use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
 use sagitta_search::{EmbeddingPool, EmbeddingProcessor};
 use std::path::PathBuf;
-// Add missing imports for additional tools
-use crate::tools::code_edit::validate::ValidateTool;
-use crate::tools::code_edit::semantic_edit::SemanticEditTool;
-use crate::tools::file_operations::direct_read::DirectFileReadTool;
-use crate::tools::file_operations::direct_edit::DirectFileEditTool;
-use crate::tools::working_directory_tools::{GetCurrentDirectoryTool, ChangeDirectoryTool};
-use crate::tools::git::{GitCreateBranchTool, GitListBranchesTool};
-use crate::tools::repository::switch_branch::SwitchBranchTool;
-use crate::tools::repository::pull_changes::PullChangesTool;
-use crate::tools::repository::push_changes::PushChangesTool;
-use crate::tools::repository::commit_changes::CommitChangesTool;
-use crate::tools::repository::create_branch::CreateBranchTool;
+// Additional tool imports removed - tools now via MCP
 
 // Imports for sagitta-search components for embedding provider
 use std::path::Path; // For Path::new
@@ -143,7 +119,7 @@ pub fn create_embedding_pool(core_config: &sagitta_search::AppConfig) -> Result<
 }
 
 /// Create LLM client from config (always Claude Code now)
-pub async fn create_llm_client(config: &SagittaCodeConfig, tool_registry: Option<Arc<ToolRegistry>>) -> Result<Arc<dyn LlmClient>> {
+pub async fn create_llm_client(config: &SagittaCodeConfig, _tool_registry: Option<()>) -> Result<Arc<dyn LlmClient>> {
     log::info!("Creating Claude Code LLM client");
     let mut claude_client = match ClaudeCodeClient::new(config) {
         Ok(client) => client,
@@ -156,12 +132,10 @@ pub async fn create_llm_client(config: &SagittaCodeConfig, tool_registry: Option
         }
     };
     
-    // Initialize MCP if tool registry is provided
-    if let Some(registry) = tool_registry {
-        log::info!("Initializing MCP integration for Claude Code client");
-        if let Err(e) = claude_client.initialize_mcp(registry).await {
-            log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work properly.", e);
-        }
+    // Initialize MCP directly (tools provided by sagitta-mcp)
+    log::info!("Initializing MCP integration for Claude Code client");
+    if let Err(e) = claude_client.initialize_mcp(None).await {
+        log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work properly.", e);
     }
     
     Ok(Arc::new(claude_client))
@@ -240,12 +214,9 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
     // Configure theme
     configure_theme_from_config(app).await;
     
-    // Initialize ToolRegistry early (we'll register tools later)
-    let tool_registry = Arc::new(crate::tools::registry::ToolRegistry::new());
-    
-    // Create LLM client with tool registry for MCP
+    // Create LLM client (MCP tools are handled internally)
     let config_guard = app.config.lock().await;
-    let llm_client = create_llm_client(&*config_guard, Some(tool_registry.clone())).await.map_err(|e| {
+    let llm_client = create_llm_client(&*config_guard, None).await.map_err(|e| {
         let error_message = StreamingMessage::from_text(
             MessageAuthor::System,
             format!("CRITICAL: Failed to initialize LLM Client: {}. Agent is disabled.", e),
@@ -292,13 +263,15 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         }
     }
     
-    // Create WorkingDirectoryManager
+    // Create WorkingDirectoryManager stub
     let working_dir_manager = Arc::new(crate::tools::WorkingDirectoryManager::new(working_dir.clone())
         .map_err(|e| anyhow::anyhow!("Failed to create WorkingDirectoryManager: {}", e))?);
-
+    
     // Store the working directory manager in the app
     app.working_dir_manager = Some(working_dir_manager.clone());
     log::info!("Working directory manager initialized with base path: {}", working_dir.display());
+
+    // Working directory manager removed
     
     // Load saved repository context from config
     let saved_repo_context = {
@@ -310,72 +283,10 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
         app.state.set_repository_context(Some(saved_repo_context.clone()));
         log::info!("Restored repository context from config: {}", saved_repo_context);
         
-        // Also update the working directory to match
-        let repo_name = saved_repo_context.clone();
-        let working_dir_mgr = working_dir_manager.clone();
-        let repo_mgr = repo_manager.clone();
-        
-        tokio::spawn(async move {
-            let repo_manager_lock = repo_mgr.lock().await;
-            match working_dir_mgr.set_repository_context(&repo_name, &*repo_manager_lock).await {
-                Ok(result) => {
-                    log::info!("Restored working directory to repository '{}': {}", 
-                        repo_name, result.new_directory.display());
-                }
-                Err(e) => {
-                    log::warn!("Failed to restore working directory to repository '{}': {}", repo_name, e);
-                }
-            }
-        });
+        // Working directory context handling removed
     }
 
-    // Register tools first - ALL TOOLS TO CAPTURE ALL SCHEMA ERRORS
-    
-    // Register shell execution tools with working directory manager
-    tool_registry.register(Arc::new(StreamingShellExecutionTool::new_with_working_dir_manager(
-        working_dir.clone(),
-        working_dir_manager.clone()
-    ))).await?;
-
-    // Repository tools
-    tool_registry.register(Arc::new(ReadFileTool::new(repo_manager.clone(), working_dir.clone()))).await?;
-    tool_registry.register(Arc::new(ViewFileInRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(ListRepositoriesTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(AddExistingRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(SyncRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(RemoveRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(SearchFileInRepositoryTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(RepositoryMapTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(TargetedViewTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(CodeSearchTool::new(repo_manager.clone()))).await?;
-
-    // Web search tool
-    tool_registry.register(Arc::new(WebSearchTool::new(llm_client.clone()))).await?;
-
-    // Code editing tool
-    tool_registry.register(Arc::new(EditTool::new(repo_manager.clone(), working_dir.clone()))).await?;
-
-    // Add missing tools to capture ALL schema errors:
-    
-    // Code editing validation tools
-    tool_registry.register(Arc::new(ValidateTool::new(repo_manager.clone()))).await?;
-    tool_registry.register(Arc::new(SemanticEditTool::new(repo_manager.clone()))).await?;
-
-    // Comment out problematic tools for now
-    // tool_registry.register(Arc::new(crate::tools::shell_execution::ShellExecutionTool::new(working_dir.clone()))).await?;
-    // tool_registry.register(Arc::new(DirectFileReadTool::new(working_dir.clone()))).await?;
-    // tool_registry.register(Arc::new(DirectFileEditTool::new(working_dir.clone()))).await?;
-    // tool_registry.register(Arc::new(GetCurrentDirectoryTool::new(working_dir_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(ChangeDirectoryTool::new(working_dir_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(GitCreateBranchTool::new(working_dir.clone()))).await?;
-    // tool_registry.register(Arc::new(GitListBranchesTool::new(working_dir.clone()))).await?;
-    // tool_registry.register(Arc::new(SwitchBranchTool::new(repo_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(PullChangesTool::new(repo_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(PushChangesTool::new(repo_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(CommitChangesTool::new(repo_manager.clone()))).await?;
-    // tool_registry.register(Arc::new(CreateBranchTool::new(repo_manager.clone()))).await?;
-
-    // Note: Qdrant tool population removed - was only used by analyze_input tool which is no longer needed
+    // Tool registration removed - tools now provided via MCP from sagitta-mcp
 
     // Create conversation persistence
     let config_guard = app.config.lock().await;
@@ -386,7 +297,7 @@ pub async fn initialize(app: &mut SagittaCodeApp) -> Result<()> {
 
     let agent_result = Agent::new(
         config_clone, 
-        tool_registry.clone(), // tool_registry is now defined
+        None, // No tool registry - tools via MCP
         embedding_provider_adapter.clone(), // Use the adapter instead of raw pool
         persistence, // Pass concrete persistence
         search_engine, // Pass concrete search engine
