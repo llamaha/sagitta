@@ -554,7 +554,8 @@ mod tests {
     fn test_current_branch() {
         let (_temp_dir, repo) = create_test_repo();
         let branch = repo.current_branch().unwrap();
-        assert_eq!(branch, "main"); // git2 creates 'main' by default
+        // Git may create either 'main' or 'master' as default branch
+        assert!(branch == "main" || branch == "master");
     }
 
     #[test]
@@ -566,7 +567,8 @@ mod tests {
         
         // List branches
         let branches = repo.list_branches(Some(BranchType::Local)).unwrap();
-        assert!(branches.contains(&"main".to_string()));
+        // Check for either main or master
+        assert!(branches.contains(&"main".to_string()) || branches.contains(&"master".to_string()));
         assert!(branches.contains(&"feature".to_string()));
     }
 
@@ -574,7 +576,9 @@ mod tests {
     fn test_branch_exists() {
         let (_temp_dir, repo) = create_test_repo();
         
-        assert!(repo.branch_exists("main").unwrap());
+        // Check for either main or master
+        let default_branch = repo.current_branch().unwrap();
+        assert!(repo.branch_exists(&default_branch).unwrap());
         assert!(!repo.branch_exists("nonexistent").unwrap());
         
         repo.create_branch("test", None).unwrap();
@@ -586,7 +590,8 @@ mod tests {
         let (_temp_dir, repo) = create_test_repo();
         let info = repo.get_info().unwrap();
         
-        assert_eq!(info.current_branch, "main");
+        // Check for either main or master
+        assert!(info.current_branch == "main" || info.current_branch == "master");
         assert!(!info.current_commit.is_empty());
         assert!(info.is_clean);
     }
@@ -595,8 +600,9 @@ mod tests {
     fn test_reference_exists() {
         let (_temp_dir, repo) = create_test_repo();
         
-        // Test existing branch
-        assert!(repo.reference_exists("main").unwrap());
+        // Test existing branch (main or master)
+        let default_branch = repo.current_branch().unwrap();
+        assert!(repo.reference_exists(&default_branch).unwrap());
         assert!(repo.reference_exists("HEAD").unwrap());
         
         // Test non-existent reference
@@ -608,7 +614,8 @@ mod tests {
         let (_temp_dir, repo) = create_test_repo();
         
         // Should not find remote branches in a local-only repo
-        assert!(!repo.remote_branch_exists("main", Some("origin")).unwrap());
+        let default_branch = repo.current_branch().unwrap();
+        assert!(!repo.remote_branch_exists(&default_branch, Some("origin")).unwrap());
         assert!(!repo.remote_branch_exists("feature", Some("origin")).unwrap());
     }
 
@@ -617,7 +624,8 @@ mod tests {
         let (_temp_dir, repo) = create_test_repo();
         
         let refs = repo.list_all_references().unwrap();
-        assert!(refs.contains(&"main".to_string()));
+        // Check for either main or master
+        assert!(refs.contains(&"main".to_string()) || refs.contains(&"master".to_string()));
         
         // Create a tag to test tag listing
         let head = repo.repo.head().unwrap();
@@ -755,8 +763,9 @@ mod tests {
         repo.repo.tag("v1.0.0", commit.as_object(), &signature, "Test tag", false).unwrap();
         
         // Switch to the tag
+        let default_branch = repo.current_branch().unwrap();
         let previous_branch = repo.switch_branch("v1.0.0").unwrap();
-        assert_eq!(previous_branch, "main");
+        assert_eq!(previous_branch, default_branch);
         
         // Verify we're now in detached HEAD state
         let current_branch = repo.current_branch().unwrap();
@@ -781,7 +790,9 @@ mod tests {
         assert!(!repo.branch_exists(&detached_branch_name).unwrap());
         
         // But the original branch should still exist
-        assert!(repo.branch_exists("main").unwrap());
+        // Get default branch from repo rather than hardcoding
+        let branches = repo.list_branches(Some(BranchType::Local)).unwrap();
+        assert!(branches.iter().any(|b| b == "main" || b == "master"));
     }
 
     #[test]

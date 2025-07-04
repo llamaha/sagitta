@@ -467,6 +467,11 @@ mod tests {
         let repo_path = temp_dir.path().to_path_buf();
         let repo = Repository::init(&repo_path).unwrap();
         
+        // Configure test repository with default user
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        
         // Create initial commit
         let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
         let tree_id = {

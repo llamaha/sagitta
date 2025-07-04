@@ -666,8 +666,14 @@ mod tests {
         let git_repo = crate::core::GitRepository::open(repo_path).unwrap();
         let mut switcher = BranchSwitcher::new();
         
-        // Test diff from main to feature
-        let diff = switcher.calculate_git_tree_diff(&git_repo, "main", "feature").unwrap();
+        // Get the default branch name (could be main or master)
+        repo.set_head("refs/heads/master").unwrap_or_else(|_| {
+            repo.set_head("refs/heads/main").unwrap();
+        });
+        let default_branch = git_repo.current_branch().unwrap();
+        
+        // Test diff from default branch to feature
+        let diff = switcher.calculate_git_tree_diff(&git_repo, &default_branch, "feature").unwrap();
         
         println!("Git tree diff results:");
         println!("  Added files: {:?}", diff.added);
@@ -683,8 +689,8 @@ mod tests {
         assert!(diff.modified.contains(&std::path::PathBuf::from("file1.txt")));
         assert!(diff.deleted.contains(&std::path::PathBuf::from("file2.txt")));
         
-        // Test reverse diff (feature to main)
-        let reverse_diff = switcher.calculate_git_tree_diff(&git_repo, "feature", "main").unwrap();
+        // Test reverse diff (feature to default branch)
+        let reverse_diff = switcher.calculate_git_tree_diff(&git_repo, "feature", &default_branch).unwrap();
         
         // Should be exactly reversed
         assert_eq!(reverse_diff.added.len(), 1, "Reverse: should have 1 added file");
@@ -700,7 +706,7 @@ mod tests {
         let mut git_repo = crate::core::GitRepository::open(repo_path).unwrap();
         let sync_req = switcher.calculate_sync_requirements(
             &mut git_repo,
-            "main",
+            &default_branch,
             "feature", 
             None
         ).await.unwrap();
@@ -769,9 +775,12 @@ mod tests {
         let repo_state = git_repo.calculate_repository_state().unwrap();
         state_manager.set_repository_state(repo_path.to_path_buf(), repo_state);
         
+        // Get default branch name
+        let default_branch = git_repo.current_branch().unwrap();
+        
         // Mark the branch as synced
         if let Some(repo_state) = state_manager.get_repository_state_mut(&repo_path.to_path_buf()) {
-            if let Some(branch_state) = repo_state.get_branch_state_mut("main") {
+            if let Some(branch_state) = repo_state.get_branch_state_mut(&default_branch) {
                 branch_state.mark_synced();
             }
         }
@@ -779,8 +788,8 @@ mod tests {
         // Now with cached state and synced branch, should not require sync
         let sync_req_with_state = switcher.calculate_sync_requirements(
             &mut git_repo,
-            "main",
-            "main", 
+            &default_branch,
+            &default_branch, 
             state_manager.get_repository_state(&repo_path.to_path_buf())
         ).await.unwrap();
         

@@ -18,6 +18,11 @@ use std::fs;
 fn create_test_repo(path: &Path) -> GitResult<()> {
     let repo = init_repository(path, false)?;
     
+    // Configure test repository with default user
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+    
     // Create an initial file and commit
     let test_file = path.join("README.md");
     fs::write(&test_file, "# Test Repository\n\nThis is a test repository.").unwrap();
