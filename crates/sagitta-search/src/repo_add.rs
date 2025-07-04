@@ -10,16 +10,12 @@ use crate::qdrant_client_trait::QdrantClientTrait;
 // Other dependencies
 use anyhow::anyhow;
 use clap::Args; // Keep Args
-use colored::*;
-use git2::{Repository, build::RepoBuilder, Signature};
-use std::{fs, path::PathBuf, sync::Arc, collections::HashMap};
+use std::{fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
-use log::{info, error, warn};
+use log::{info, error};
 use crate::config::AppConfig;
-use crate::config::EmbeddingEngineConfig;
 // Use ManualMock
-use std::io::Write;
-use crate::sync_progress::{AddProgressReporter, NoOpAddProgressReporter};
+use crate::sync_progress::AddProgressReporter;
 
 /// Arguments for the `repo add` command.
 #[derive(Args, Debug)]

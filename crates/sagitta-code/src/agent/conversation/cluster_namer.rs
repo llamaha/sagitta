@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::types::{ConversationSummary, ProjectType};
-use crate::agent::state::types::ConversationStatus;
 use crate::llm::client::{LlmClient, Role, Message, MessagePart};
 use sagitta_embed::EmbeddingPool;
 

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::{TagSuggestion, TagSource};
 use super::suggester::{TagSuggester, TagSuggesterConfig};
-use super::rules::{RuleBasedTagger, TagRule, TagRuleType};
+use super::rules::{RuleBasedTagger, TagRule};
 use super::ui::{TagManagementUI, TagUIAction};
 use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use crate::agent::conversation::manager::ConversationManager;

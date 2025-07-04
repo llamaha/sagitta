@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error")).init();
 
     // Parse command-line arguments
-    let mut args = CliArgs::parse();
+    let args = CliArgs::parse();
 
     // Determine configuration path
     let config_path_override: Option<PathBuf> = None; // Placeholder, fix if needed

@@ -5,9 +5,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn, instrument};
-use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 
 #[instrument(skip(server))]

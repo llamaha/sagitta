@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use crate::agent::message::types::AgentMessage;
 use crate::llm::client::{LlmClient, Role};
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
-use crate::config::types::SagittaCodeConfig;
+use crate::llm::fast_model::FastModelOperations;
 use sagitta_embed::EmbeddingPool;
 
 /// Configuration for title generation

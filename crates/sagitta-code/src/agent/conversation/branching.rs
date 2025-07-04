@@ -2,15 +2,15 @@
 // TODO: Implement actual branching algorithms
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{Conversation, ConversationBranch, BranchStatus};
+use crate::agent::conversation::types::{Conversation, ConversationBranch};
 use crate::agent::message::types::AgentMessage;
 use crate::llm::client::Role;
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::llm::fast_model::FastModelOperations;
 use std::sync::Arc;
 
 /// Context-aware conversation branching manager

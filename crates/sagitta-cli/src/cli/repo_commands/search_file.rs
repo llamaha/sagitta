@@ -1,6 +1,5 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use clap::Args;
-use std::path::PathBuf;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use std::io::Write;
 use serde_json::json;

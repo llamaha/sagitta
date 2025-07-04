@@ -6,7 +6,6 @@ use crate::model::EmbeddingModelType;
 use crate::provider::EmbeddingProvider;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 #[cfg(feature = "onnx")]
 use crate::provider::onnx::OnnxEmbeddingModel;
@@ -17,7 +16,6 @@ pub struct EmbeddingHandler {
     config: EmbeddingConfig,
     #[cfg(feature = "onnx")]
     onnx_provider: Option<Arc<Mutex<OnnxEmbeddingModel>>>,
-    last_used: Instant,
 }
 
 impl EmbeddingHandler {
@@ -56,7 +54,6 @@ impl EmbeddingHandler {
             config: config.clone(),
             #[cfg(feature = "onnx")]
             onnx_provider,
-            last_used: Instant::now(),
         })
     }
 
@@ -222,7 +219,6 @@ impl Clone for EmbeddingHandler {
             config: self.config.clone(),
             #[cfg(feature = "onnx")]
             onnx_provider: self.onnx_provider.clone(),
-            last_used: Instant::now(), // Reset last_used for the clone
         }
     }
 }

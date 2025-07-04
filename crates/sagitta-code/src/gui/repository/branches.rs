@@ -1,9 +1,8 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, Grid, ScrollArea, Button};
+use egui::{Ui, RichText, Grid, ScrollArea, Button};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 use super::types::{RepoPanelState, BranchSyncResult, RefTypeTab, BranchOperationResult, TagOperationResult, SwitchOperationResult, CreateBranchResult, DeleteBranchResult};
-use git_manager::GitManager;
 use log::{info, error, warn};
 
 /// Render the branch management view

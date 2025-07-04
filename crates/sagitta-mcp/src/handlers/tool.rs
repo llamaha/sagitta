@@ -2,8 +2,7 @@ use crate::mcp::{
     error_codes,
     types::{
         CallToolParams, CallToolResult, ContentBlock, ErrorObject, PingParams, QueryParams,
-        RepositoryAddParams, RepositoryListParams, RepositoryRemoveParams, RepositorySyncParams,
-        RepositoryMapParams, ToolAnnotations, ToolDefinition,
+        RepositoryAddParams, RepositoryListParams, RepositoryRemoveParams, RepositorySyncParams, ToolAnnotations, ToolDefinition,
         RepositorySearchFileParams, RepositoryViewFileParams,
         RepositorySwitchBranchParams, RepositoryListBranchesParams,
         TodoReadParams, TodoWriteParams,
@@ -25,7 +24,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::instrument;
-use sagitta_search::{config::AppConfig, EmbeddingPool, EmbeddingProcessor, app_config_to_embedding_config, qdrant_client_trait::QdrantClientTrait};
+use sagitta_search::{config::AppConfig, qdrant_client_trait::QdrantClientTrait};
 
 #[instrument(skip(config, qdrant_client), fields(tool_name = %params.name))]
 pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(

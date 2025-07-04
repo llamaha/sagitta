@@ -1,7 +1,6 @@
-use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 use egui::Color32;
 use std::time::Instant;
@@ -10,7 +9,7 @@ use crate::agent::conversation::types::{ConversationSummary, ProjectType};
 use crate::agent::conversation::clustering::ConversationCluster;
 use crate::agent::conversation::branching::BranchSuggestion;
 use crate::agent::conversation::checkpoints::CheckpointSuggestion;
-use crate::agent::state::types::{AgentMode, ConversationStatus};
+use crate::agent::state::types::ConversationStatus;
 use super::super::branch_suggestions::{BranchSuggestionsUI, BranchSuggestionAction};
 use super::super::checkpoint_suggestions::{CheckpointSuggestionsUI, CheckpointSuggestionAction};
 

@@ -1,7 +1,6 @@
 // Panel management for the Sagitta Code application
 
-use std::sync::Arc;
-use egui::{Context, ScrollArea, Window, RichText, Color32, TextEdit, ComboBox, Button, Vec2, Rounding, TextFormat, TextStyle};
+use egui::{Context, ScrollArea, RichText, Color32, ComboBox, Button, TextFormat};
 use egui_plot::{Line, Plot, Bar, BarChart, Legend, PlotPoints};
 use super::super::theme::AppTheme;
 use super::super::theme_customizer::ThemeCustomizer;

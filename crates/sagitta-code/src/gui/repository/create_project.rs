@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::path::PathBuf;
 use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke};
 use tokio::sync::Mutex;
 
@@ -318,7 +317,7 @@ fn create_project(
                             }
                             
                             // Add to repository manager
-                            let mut manager = repo_manager_clone.lock().await;
+                            let manager = repo_manager_clone.lock().await;
                             if let Err(e) = manager.add_repository(&project_name, &full_path, None, None).await {
                                 log::error!("Failed to add repository after creation: {}", e);
                             } else {

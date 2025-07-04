@@ -6,8 +6,8 @@
 
 use crate::{GitError, GitResult};
 use git2::{
-    build::RepoBuilder, CredentialType, RemoteCallbacks, Progress, Repository, 
-    FetchOptions, ProxyOptions
+    build::RepoBuilder, CredentialType, RemoteCallbacks, Repository, 
+    FetchOptions
 };
 use std::path::Path;
 use std::sync::Arc;

@@ -2,10 +2,8 @@ use std::process::{Command, Stdio, Child};
 use std::io::{BufReader, BufRead};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
 use crate::config::types::ClaudeCodeConfig;
 use super::error::ClaudeCodeError;
-use super::message_converter::ClaudeMessage;
 
 /// Manages the Claude process lifecycle
 pub struct ClaudeProcess {

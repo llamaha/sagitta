@@ -1,4 +1,4 @@
-use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, TodoPriority, ErrorObject};
+use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, ErrorObject};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -6,7 +6,6 @@ use axum::Extension;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::fs;
-use std::path::Path;
 use serde_json;
 
 // Import the shared function from todo_write module

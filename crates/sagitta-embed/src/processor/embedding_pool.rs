@@ -7,7 +7,6 @@ use crate::config::EmbeddingConfig;
 use std::sync::Arc;
 use tokio::sync::{Semaphore, Mutex, mpsc};
 use std::time::Instant;
-use futures::future::try_join_all;
 
 /// Pool of embedding model instances with controlled GPU memory usage and optimized CPU threading.
 /// This version uses trait-based providers to support different model types.
@@ -97,77 +96,6 @@ impl EmbeddingPool {
             .collect();
 
         Ok(embeddings)
-    }
-
-    /// Get or create an embedding provider instance from the pool.
-    async fn acquire_provider(&self) -> Result<Arc<dyn EmbeddingProvider>> {
-        // Try to get an existing provider from the pool first
-        {
-            let mut providers = self.providers.lock().await;
-            if let Some(provider) = providers.pop() {
-                log::debug!("EmbeddingPool: Reusing existing provider from pool (remaining: {})", providers.len());
-                return Ok(provider);
-            }
-        }
-
-        // No provider available in pool, create a new one
-        log::debug!("EmbeddingPool: Creating new provider (max allowed: {})", self.config.max_embedding_sessions);
-        log::debug!("EmbeddingPool: Embedding config model type: {:?}", self.embedding_config.model_type);
-        let provider = create_embedding_provider(&self.embedding_config)?;
-        log::debug!("EmbeddingPool: Successfully created new provider");
-        Ok(provider)
-    }
-
-    /// Return a provider instance to the pool.
-    async fn release_provider(&self, provider: Arc<dyn EmbeddingProvider>) {
-        let mut providers = self.providers.lock().await;
-        
-        // Only keep up to max_embedding_sessions providers in the pool
-        if providers.len() < self.config.max_embedding_sessions {
-            providers.push(provider);
-            log::debug!("EmbeddingPool: Returned provider to pool (total in pool: {}/{})", providers.len(), self.config.max_embedding_sessions);
-        } else {
-            log::debug!("EmbeddingPool: Pool full, dropping provider");
-            // If pool is full, the provider will be dropped
-        }
-    }
-
-    /// Process a batch of chunks with controlled concurrency.
-    async fn process_batch_internal(&self, chunks: Vec<ProcessedChunk>) -> Result<Vec<EmbeddedChunk>> {
-        if chunks.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Acquire semaphore permit to control concurrency
-        let _permit = self.semaphore.acquire().await
-            .map_err(|e| SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e)))?;
-
-        // Acquire a provider from the pool
-        let provider = self.acquire_provider().await?;
-        
-        // Extract text content for embedding
-        let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        
-        // Generate embeddings
-        let embeddings = provider.embed_batch(&text_refs)?;
-        
-        // Return provider to pool
-        self.release_provider(provider).await;
-        
-        // Combine chunks with embeddings
-        let processed_at = Instant::now();
-        let embedded_chunks = chunks
-            .into_iter()
-            .zip(embeddings.into_iter())
-            .map(|(chunk, embedding)| EmbeddedChunk {
-                chunk,
-                embedding,
-                processed_at,
-            })
-            .collect();
-
-        Ok(embedded_chunks)
     }
 
     /// Process multiple chunks in parallel using worker threads.

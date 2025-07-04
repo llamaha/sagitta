@@ -12,12 +12,10 @@ use super::types::{
 };
 use super::persistence::ConversationPersistence;
 use super::search::ConversationSearchEngine;
-use super::tagging::{TaggingPipeline, TaggingPipelineConfig, TaggingResult, TagMetadata, TagSuggestion};
+use super::tagging::{TaggingPipeline, TaggingResult, TagMetadata, TagSuggestion};
 use crate::agent::state::types::ConversationStatus;
 use crate::agent::conversation::types::BranchStatus;
-use crate::agent::events::AgentEvent;
-use crate::config::types::ConversationConfig;
-use crate::llm::title::{TitleGenerator, TitleGeneratorConfig};
+use crate::llm::title::TitleGenerator;
 
 /// Trait for managing conversations
 #[async_trait]

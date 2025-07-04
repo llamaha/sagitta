@@ -1,19 +1,13 @@
 // Settings panel UI will go here
 
 use std::sync::Arc;
-use anyhow::Result;
-use egui::{Context, Ui, RichText, Color32, Window, SidePanel, Grid, Button, TextEdit, ScrollArea, TextStyle, Checkbox, ComboBox};
+use egui::{Context, RichText, Color32, Grid, TextEdit, ScrollArea};
 use tokio::sync::Mutex;
 use rfd::FileDialog;
-use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
-use sagitta_search::config::{AppConfig, load_config, save_config, get_config_path_or_default, get_repo_base_path};
-use uuid::Uuid;
-use log::{info, warn, error};
+use std::path::PathBuf;
+use sagitta_search::config::{AppConfig, get_repo_base_path};
 
-use crate::config::{SagittaCodeConfig, load_merged_config, save_config as save_sagitta_code_config};
-use crate::config::types::ClaudeCodeConfig;
-use crate::config::paths::{get_sagitta_code_app_config_path};
+use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
 use crate::llm::claude_code::models::CLAUDE_CODE_MODELS;
 
 /// Settings panel for configuring Sagitta core settings

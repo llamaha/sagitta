@@ -9,7 +9,6 @@ use crate::agent::conversation::service::ConversationService;
 use crate::agent::state::types::ConversationStatus;
 use crate::config::SagittaCodeConfig;
 use super::types::{ConversationSidebar, ConversationGroup, ConversationItem, SidebarAction, OrganizationMode};
-use super::organization::*;
 
 impl ConversationSidebar {
     /// Main rendering method for the sidebar

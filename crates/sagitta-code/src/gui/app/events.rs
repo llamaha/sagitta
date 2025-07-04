@@ -1,21 +1,15 @@
 // Event handling for the Sagitta Code application
 
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use uuid::{self, Uuid};
+use uuid::{self};
 
-use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::state::types::AgentState;
 use crate::agent::events::{AgentEvent, ToolRunId};
 use crate::llm::client::Role;
-use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall, MessageType};
+use super::super::chat::view::{ChatMessage, MessageAuthor, StreamingMessage, MessageStatus, ToolCall as ViewToolCall};
 use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
-use crate::config::types::SagittaCodeConfig;
-use sagitta_search::AppConfig;
-use crate::gui::repository::manager::RepositoryManager;
-use serde_json::{Value, Map};
+use serde_json::Value;
 
 /// Application-specific UI events
 #[derive(Debug, Clone)]
@@ -1021,7 +1015,7 @@ pub fn analyze_conversation_for_suggestions(app: &mut SagittaCodeApp, conversati
                 let mut checkpoint_suggestions = Vec::new();
                 
                 // Create a branching manager
-                let mut branching_manager = crate::agent::conversation::branching::ConversationBranchingManager::with_default_config();
+                let branching_manager = crate::agent::conversation::branching::ConversationBranchingManager::with_default_config();
                 
                 // Try to use fast model if enabled
                 // Note: We can't access config from ConversationService directly

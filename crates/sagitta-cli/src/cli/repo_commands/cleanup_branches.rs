@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::collections::HashSet;
 use git_manager::GitManager;
 use sagitta_search::{AppConfig, save_config, qdrant_client_trait::QdrantClientTrait};
-use sagitta_search::repo_helpers::{get_branch_aware_collection_name, get_branch_sync_metadata};
+use sagitta_search::repo_helpers::get_branch_sync_metadata;
 use colored::*;
 use crate::cli::CliArgs;
 

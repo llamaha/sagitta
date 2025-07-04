@@ -4,7 +4,6 @@ use egui::{
     ScrollArea, 
     Color32, 
     RichText, 
-    Rounding, 
     Stroke, 
     Ui, 
     Vec2, 
@@ -12,17 +11,10 @@ use egui::{
     Frame,
     Align, 
     Layout,
-    Response,
-    Rect,
     CornerRadius,
-    TextStyle,
-    FontId,
-    FontFamily,
-    Sense,
-    Pos2,
 };
 use syntect::{
-    highlighting::{ThemeSet, Style as SyntectStyle, Theme},
+    highlighting::{ThemeSet, Style as SyntectStyle},
     parsing::SyntaxSet,
     easy::HighlightLines,
     util::LinesWithEndings,
@@ -34,20 +26,14 @@ use crate::gui::symbols;
 use crate::gui::app::RunningToolInfo;
 use crate::agent::events::ToolRunId;
 use super::{ChatItem, ToolCard, ToolCardStatus};
-use catppuccin_egui::Theme as CatppuccinTheme;
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use std::cell::RefCell;
-use std::thread::LocalKey;
 use serde_json;
 use uuid;
 use std::time::Instant;
 use std::collections::HashMap;
 use regex;
 
-#[cfg(feature = "gui")]
-use egui_notify::Toasts;
-#[cfg(feature = "gui")]
-use egui_modal::Modal;
 
 /// Convert raw tool names (including MCP format) to human-friendly display names
 fn get_human_friendly_tool_name(raw_name: &str) -> String {

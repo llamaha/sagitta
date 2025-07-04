@@ -1,4 +1,4 @@
-use crate::mcp::types::{TodoWriteParams, TodoWriteResult, TodoItem, TodoStatus, ErrorObject};
+use crate::mcp::types::{TodoWriteParams, TodoWriteResult, TodoStatus, ErrorObject};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;

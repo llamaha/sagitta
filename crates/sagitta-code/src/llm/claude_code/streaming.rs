@@ -7,7 +7,6 @@ use tokio::task;
 use tokio::sync::mpsc;
 use crate::llm::client::{StreamChunk, MessagePart, TokenUsage};
 use crate::utils::errors::SagittaCodeError;
-use super::error::ClaudeCodeError;
 use super::message_converter::{ClaudeChunk, ContentBlock};
 use serde_json::Deserializer;
 

@@ -24,13 +24,11 @@ use crate::agent::conversation::search::{
     ConversationSearchEngine, 
     text::TextConversationSearchEngine
 };
-use sagitta_embed::provider::{onnx::OnnxEmbeddingModel, EmbeddingProvider};
-use sagitta_search::{EmbeddingPool, EmbeddingProcessor};
 use std::path::PathBuf;
 // Additional tool imports removed - tools now via MCP
 
 // Imports for sagitta-search components for embedding provider
-use std::path::Path; // For Path::new
+ // For Path::new
 
 // Qdrant imports
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;

@@ -21,8 +21,8 @@ use std::fs;
 use git2::Repository;
 use std::os::unix::fs::PermissionsExt;
 use tokio;
-use crate::sync_progress::{SyncProgressReporter, SyncStage, AddProgressReporter, AddProgress, RepoAddStage, NoOpAddProgressReporter};
-use sagitta_embed::{EmbeddingPool, EmbeddingProcessor};
+use crate::sync_progress::{SyncProgressReporter, AddProgressReporter, AddProgress, RepoAddStage};
+use sagitta_embed::EmbeddingProcessor;
 
 /// Updates the last synced commit for a branch in the AppConfig and refreshes the
 /// list of indexed languages for that branch by querying Qdrant.

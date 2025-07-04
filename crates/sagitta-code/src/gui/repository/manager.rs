@@ -11,20 +11,17 @@ use qdrant_client::qdrant::{QueryResponse, Filter, Condition};
 use qdrant_client::Qdrant as QdrantClient;
 use qdrant_client::config::QdrantConfig;
 use sagitta_search::repo_add::{handle_repo_add, AddRepoArgs};
-use sagitta_search::config::{save_config, get_repo_base_path, AppConfig as SagittaAppConfig, load_config};
+use sagitta_search::config::{save_config, get_repo_base_path, AppConfig as SagittaAppConfig};
 use std::path::PathBuf;
-use log::{info, warn, error};
-use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
-use sagitta_search::sync_progress::SyncProgressReporter as CoreSyncProgressReporter;
+use log::info;
+use sagitta_search::sync::{sync_repository, SyncOptions};
 use sagitta_search::fs_utils::{find_files_matching_pattern, read_file_range};
-use std::collections::HashMap;
 use tokio::sync::mpsc;
-use git_manager::{GitManager, SwitchResult, SyncRequirement};
+use git_manager::GitManager;
 use sagitta_search::{EmbeddingProcessor};
 
-use super::types::{RepoInfo, CoreSyncProgress, SimpleSyncStatus, DisplayableSyncProgress};
-use crate::gui::progress::{GuiProgressReporter, GuiSyncReport};
-use sagitta_search::sync_progress::SyncStage as CoreSyncStage;
+use super::types::{RepoInfo, DisplayableSyncProgress};
+use crate::gui::progress::GuiProgressReporter;
 
 // Structure to track sync status with detailed progress
 #[derive(Debug, Clone)]
@@ -441,7 +438,7 @@ impl RepositoryManager {
         ).await;
         
         match repo_config_result {
-            Ok(mut new_repo_config) => {
+            Ok(new_repo_config) => {
                 let mut config_guard = self.config.lock().await;
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {
                     return Err(anyhow!("Repository '{}' already exists in configuration.", name));
@@ -525,7 +522,7 @@ impl RepositoryManager {
         ).await;
         
         match repo_config_result {
-            Ok(mut new_repo_config) => {
+            Ok(new_repo_config) => {
                 log::info!("[GUI RepoManager] Repository addition successful, saving to config...");
                 let mut config_guard = self.config.lock().await;
                 if config_guard.repositories.iter().any(|r| r.name == new_repo_config.name) {

@@ -3,13 +3,11 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
-use std::sync::Mutex as StdMutex;
-use std::collections::HashMap;
 
 use super::types::{Conversation, ConversationSummary};
-use super::clustering::{ConversationCluster, ConversationClusteringManager, ClusteringResult};
+use super::clustering::{ConversationCluster, ConversationClusteringManager};
 use super::analytics::{ConversationAnalyticsManager, AnalyticsReport};
-use super::manager::{ConversationManager, ConversationManagerImpl};
+use super::manager::ConversationManager;
 
 /// Events emitted by the conversation service
 #[derive(Debug, Clone)]

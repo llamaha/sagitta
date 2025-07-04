@@ -129,7 +129,6 @@ pub use qdrant_client::qdrant::{PointStruct, Filter, Condition, FieldCondition, 
 pub use config::{get_config_path, ManagedRepositories, get_repo_base_path};
 
 use std::sync::Arc;
-use async_trait::async_trait;
 
 /// Basic addition function (example/placeholder).
 pub fn add(left: u64, right: u64) -> u64 {
@@ -613,7 +612,6 @@ mod tests {
     }
 }
 
-#[macro_use]
 extern crate log;
 
 /// Converts AppConfig to EmbeddingConfig for use with sagitta-embed
@@ -1060,7 +1058,7 @@ pub async fn get_enhanced_repository_list(config: &AppConfig) -> Result<Enhanced
 
 /// Get enhanced information for a single repository
 pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Result<EnhancedRepositoryInfo> {
-    use std::path::Path;
+    
     
     // Check filesystem status
     let filesystem_status = get_filesystem_status(&repo_config.local_path).await?;
@@ -1083,7 +1081,7 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
     };
     
     // Determine the current active branch
-    let active_branch = if let Some(git_status) = &git_status {
+    let _active_branch = if let Some(git_status) = &git_status {
         if git_status.is_detached_head {
             None // Don't show branch name for detached HEAD
         } else {
@@ -1364,34 +1362,6 @@ async fn get_git_remote_url(path: &Path) -> Result<String> {
     repo_info.remote_url.ok_or_else(|| SagittaError::RepositoryError("No remote URL found".to_string()))
 }
 
-/// Get basic statistics for a directory
-async fn get_directory_stats(path: &Path) -> Result<(Option<usize>, Option<u64>)> {
-    use walkdir::WalkDir;
-    
-    let mut file_count = 0;
-    let mut total_size = 0u64;
-    
-    for entry in WalkDir::new(path)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            !name.starts_with('.') && 
-            name != "target" && 
-            name != "node_modules" &&
-            name != "__pycache__"
-        })
-        .filter_map(|e| e.ok())
-    {
-        if entry.file_type().is_file() {
-            file_count += 1;
-            if let Ok(metadata) = entry.metadata() {
-                total_size += metadata.len();
-            }
-        }
-    }
-    
-    Ok((Some(file_count), Some(total_size)))
-}
 
 /// Reclone a missing repository
 pub async fn reclone_missing_repository(

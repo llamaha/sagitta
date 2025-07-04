@@ -4,7 +4,6 @@ use anyhow::{Result, anyhow};
 use uuid::Uuid;
 use dashmap::DashMap;
 use std::sync::Arc;
-use tracing;
 use async_trait::async_trait;
 
 pub const API_KEY_PREFIX: &str = "vdb_sk_"; // Made public

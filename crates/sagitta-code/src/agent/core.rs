@@ -4,40 +4,31 @@ use futures_util::{Stream, StreamExt};
 use serde_json::Value;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::broadcast;
 use uuid::Uuid;
-use async_trait::async_trait;
-use serde_json::Value as JsonValue;
-use log::{debug, info, warn, error, trace};
-use chrono;
-use std::time::Duration;
+use log::{debug, info, trace};
 use std::collections::HashMap;
 use std::boxed::Box;
 
-use crate::agent::message::history::{MessageHistoryManager, ConversationAwareHistoryManager};
+use crate::agent::message::history::ConversationAwareHistoryManager;
 use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::message::history::MessageHistory;
-use crate::agent::state::manager::{StateManager, StateEvent};
-use crate::agent::state::types::{AgentState, AgentMode, ConversationStatus, AgentStateInfo};
+use crate::agent::state::manager::StateManager;
+use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
-use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
-use crate::agent::conversation::search::text::TextConversationSearchEngine;
 use crate::agent::conversation::context_manager::ConversationContextManager;
 use crate::agent::events::{AgentEvent, EventHandler};
 use crate::agent::recovery::{RecoveryManager, RecoveryConfig, RecoveryState};
 use crate::agent::streaming::StreamingProcessor;
 use crate::config::types::SagittaCodeConfig;
-use crate::llm::client::{LlmClient, LlmResponse, Message, Role, StreamChunk as SagittaCodeStreamChunk, MessagePart as SagittaCodeMessagePart, ToolDefinition as LlmToolDefinition, ThinkingConfig};
+use crate::llm::client::{LlmClient, StreamChunk as SagittaCodeStreamChunk, ThinkingConfig};
 // Tool imports removed - tools now via MCP
 use crate::utils::errors::SagittaCodeError;
 // Import the EmbeddingProvider trait for generic use
 use sagitta_embed::provider::EmbeddingProvider;
 
 // Tokio stream wrappers
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 // Import agent's Role for mapping
-use crate::llm::client::Role as LlmClientRole;
 
 // Import prompt providers
 use crate::agent::prompts::{SystemPromptProvider, claude_code::ClaudeCodeSystemPrompt}; 
@@ -201,7 +192,7 @@ impl Agent {
             continue_reasoning_flag,
         ));
 
-        let mut agent_self = Self {
+        let agent_self = Self {
             llm_client,
             tool_registry,
             history: Arc::new(history_manager),
@@ -356,7 +347,7 @@ impl Agent {
     /// Create a new conversation
     pub async fn create_new_conversation(&self, title: String) -> Result<uuid::Uuid, SagittaCodeError> {
         let manager = self.get_conversation_manager();
-        let mut manager_guard = manager.lock().await;
+        let manager_guard = manager.lock().await;
         manager_guard.create_conversation(title, None).await
             .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))
     }

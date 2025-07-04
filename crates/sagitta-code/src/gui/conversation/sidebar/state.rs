@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::state::types::ConversationStatus;
-use crate::config::{SagittaCodeConfig, SidebarPersistentConfig, save_config};
-use super::types::{ConversationSidebar, OrganizationMode, SidebarFilters, ConversationItem};
+use crate::config::{SagittaCodeConfig, SidebarPersistentConfig};
+use super::types::{ConversationSidebar, OrganizationMode, SidebarFilters};
 
 impl ConversationSidebar {
     /// Get display name for organization mode

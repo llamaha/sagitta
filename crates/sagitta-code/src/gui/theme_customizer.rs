@@ -1,7 +1,6 @@
 // Theme customization panel with color pickers for all UI components
 
-use egui::{Context, Ui, Color32, Grid, RichText, ScrollArea, CollapsingHeader, Button, Frame, Vec2, CornerRadius, Stroke};
-use egui::widgets::color_picker::Alpha;
+use egui::{Context, Ui, Color32, Grid, RichText, ScrollArea, CollapsingHeader, Button, Frame, Vec2, Stroke};
 use crate::gui::theme::{AppTheme, CustomThemeColors, get_custom_theme_colors, set_custom_theme_colors};
 use rand::Rng;
 
@@ -298,7 +297,7 @@ impl ThemeCustomizer {
     
     /// Render comprehensive test section showing all UI elements
     fn render_test_section(&mut self, ui: &mut Ui) -> bool {
-        let mut changed = false;
+        let changed = false;
         
         CollapsingHeader::new("🧪 Test Section - Preview All Colors")
             .default_open(true)
@@ -428,7 +427,7 @@ impl ThemeCustomizer {
     
     /// Render individual tests for each color property
     fn render_individual_tests(&mut self, ui: &mut Ui) -> bool {
-        let mut changed = false;
+        let changed = false;
         
         CollapsingHeader::new("🔬 Individual Color Tests - Isolated Examples")
             .default_open(false)
@@ -1217,7 +1216,7 @@ impl ThemeCustomizer {
         let background_lightness = if is_dark { rng.gen_range(0.05..0.15) } else { rng.gen_range(0.85..0.95) };
         let text_lightness = if is_dark { rng.gen_range(0.8..0.95) } else { rng.gen_range(0.1..0.3) };
         
-        let mut get_analogous_hue = || {
+        let get_analogous_hue = || {
             (base_hue + rng.gen_range(-hue_range/2.0..hue_range/2.0)) % 360.0
         };
         
@@ -1238,7 +1237,7 @@ impl ThemeCustomizer {
         let text_lightness = if is_dark { rng.gen_range(0.8..0.95) } else { rng.gen_range(0.1..0.3) };
         
         let mut use_complement = false;
-        let mut get_complementary_hue = || {
+        let get_complementary_hue = || {
             use_complement = !use_complement;
             if use_complement { complement_hue } else { base_hue }
         };
@@ -1259,7 +1258,7 @@ impl ThemeCustomizer {
         let text_lightness = if is_dark { rng.gen_range(0.8..0.95) } else { rng.gen_range(0.1..0.3) };
         
         let mut hue_index = 0;
-        let mut get_triadic_hue = || {
+        let get_triadic_hue = || {
             let hue = hues[hue_index % 3];
             hue_index += 1;
             hue

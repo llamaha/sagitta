@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use anyhow::Result;
-use egui::{Context, SidePanel, Vec2, Ui, RichText};
+use egui::{Context, SidePanel, Ui};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 

@@ -1,6 +1,6 @@
 // Application state management for the Sagitta Code
 
-use crate::agent::state::types::{AgentMode, AgentState, ConversationStatus};
+use crate::agent::state::types::{AgentMode, AgentState};
 use crate::agent::message::types::{ToolCall, AgentMessage};
 use crate::agent::events::ToolRunId;
 use crate::gui::conversation::sidebar::SidebarAction;
@@ -9,7 +9,6 @@ use super::super::theme::AppTheme;
 use egui_notify::Toasts;
 use uuid::Uuid;
 use std::collections::{HashMap, VecDeque};
-use tokio::sync::mpsc;
 
 /// Information about a currently running tool
 #[derive(Debug, Clone)]

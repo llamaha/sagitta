@@ -7,7 +7,6 @@ use std::path::Path;
 use std::time::{UNIX_EPOCH};
 use log;
 use chrono::{Utc};
-use std::path::PathBuf;
 
 /// Cache entry
 #[derive(Serialize, Deserialize, Debug, Clone)]

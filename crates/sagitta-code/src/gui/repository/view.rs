@@ -1,10 +1,9 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, ScrollArea, ComboBox, Button, text::LayoutJob, TextStyle, TextFormat, FontId};
+use egui::{Ui, RichText, Color32, Grid, ScrollArea, ComboBox, TextStyle, TextFormat};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
-use egui_code_editor::CodeEditor;
 use syntect::{
-    highlighting::{ThemeSet, Style as SyntectStyle, Theme},
+    highlighting::{ThemeSet, Style as SyntectStyle},
     parsing::SyntaxSet,
     easy::HighlightLines,
     util::LinesWithEndings,

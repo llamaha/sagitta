@@ -1,8 +1,8 @@
-use super::{TagSuggestion, TagSource, SuggestionConfidence};
-use crate::agent::conversation::types::{Conversation, ConversationSummary, ProjectContext, ProjectType};
+use super::{TagSuggestion, TagSource};
+use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use crate::agent::message::types::AgentMessage;
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
-use sagitta_embed::{EmbeddingPool, EmbeddingConfig, Result as EmbedResult};
+use crate::llm::fast_model::FastModelOperations;
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

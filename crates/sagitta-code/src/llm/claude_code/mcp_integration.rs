@@ -1,8 +1,5 @@
-use std::process::Stdio;
-use std::sync::Arc;
-use tokio::process::{Command, Child};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, oneshot};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::oneshot;
 use anyhow::{anyhow, Result};
 // Tool registry removed - tools now via MCP
 use tempfile::NamedTempFile;

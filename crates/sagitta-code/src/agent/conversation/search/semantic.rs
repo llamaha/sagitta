@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, ScoredPoint, SearchPoints, PointId, Value as QdrantValue, point_id::PointIdOptions}};
-use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
+use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, ScoredPoint, SearchPoints, point_id::PointIdOptions}};
+use sagitta_search::EmbeddingPool;
 
 use super::ConversationSearchEngine;
 use crate::agent::conversation::types::{

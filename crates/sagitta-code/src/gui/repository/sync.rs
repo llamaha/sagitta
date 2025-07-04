@@ -1,14 +1,10 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, ScrollArea, Button, Grid, ProgressBar, TextEdit, Layout, Align};
+use egui::{Ui, RichText, ScrollArea, Button, ProgressBar};
 use tokio::sync::{Mutex, oneshot};
-use super::manager::{RepositoryManager, SyncStatus as ManagerSyncStatus};
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use super::manager::RepositoryManager;
 
-use super::types::{RepoPanelState, RepoInfo, SimpleSyncStatus, DisplayableSyncProgress};
+use super::types::{RepoPanelState, SimpleSyncStatus};
 use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
-use crate::gui::theme::AppTheme;
 
 /// Watchdog configuration for sync operations
 /// Maximum time without progress updates before considering sync stuck (in seconds)
@@ -183,7 +179,7 @@ pub fn render_sync_repo(
     ui.separator();
 
     let mut is_any_selected_syncing = false;
-    let mut is_any_repo_syncing_at_all = false;
+    let is_any_repo_syncing_at_all = false;
     
     // Try to get sync status with better error handling
     for repo_name in &state.selected_repos {

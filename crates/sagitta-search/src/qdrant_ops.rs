@@ -3,7 +3,7 @@ use crate::{
     error::{Result as CoreResult, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use qdrant_client::{
     qdrant::{
         PointStruct, UpsertPointsBuilder,

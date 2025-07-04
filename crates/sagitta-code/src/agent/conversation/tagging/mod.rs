@@ -6,7 +6,6 @@ pub mod pipeline;
 // Core types
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 /// A tag suggestion with confidence and reasoning
 #[derive(Debug, Clone, Serialize, Deserialize)]

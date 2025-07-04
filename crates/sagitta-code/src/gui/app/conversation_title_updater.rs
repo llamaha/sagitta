@@ -6,8 +6,8 @@ use crate::agent::conversation::service::ConversationService;
 use crate::llm::title::{TitleGenerator, TitleGeneratorConfig};
 use crate::llm::client::LlmClient;
 use crate::agent::message::types::AgentMessage;
-use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
-use crate::llm::fast_model::{FastModelProvider, FastModelOperations};
+use crate::agent::conversation::tagging::TaggingPipeline;
+use crate::llm::fast_model::FastModelOperations;
 
 /// Updates conversation titles automatically after messages are added
 pub struct ConversationTitleUpdater {
@@ -88,7 +88,7 @@ impl ConversationTitleUpdater {
                 match fast_model.suggest_tags(&updated_conversation).await {
                     Ok(tag_suggestions) => {
                         // Filter high-confidence tags (>= 0.7) and take top 5
-                        let mut high_confidence_tags: Vec<String> = tag_suggestions.into_iter()
+                        let high_confidence_tags: Vec<String> = tag_suggestions.into_iter()
                             .filter(|(_, confidence)| *confidence >= 0.7)
                             .take(5)
                             .map(|(tag, _)| tag)

@@ -4,9 +4,8 @@
 //! including staging files, committing changes, and synchronizing with remotes.
 
 use crate::{GitError, GitResult};
-use git2::{Repository, Index, Signature, Oid, Remote, FetchOptions, RemoteCallbacks};
+use git2::{Repository, Signature, Oid, FetchOptions, RemoteCallbacks};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 /// Options for committing changes
 #[derive(Debug, Clone)]
@@ -449,7 +448,7 @@ impl ChangeManager {
     }
 
     /// Calculate commit statistics
-    fn calculate_commit_stats(&self, commit_id: &Oid) -> GitResult<(usize, usize, usize)> {
+    fn calculate_commit_stats(&self, _commit_id: &Oid) -> GitResult<(usize, usize, usize)> {
         // TODO: Implement proper commit statistics calculation
         // This would involve comparing the commit tree with its parent
         Ok((1, 0, 0)) // Placeholder values

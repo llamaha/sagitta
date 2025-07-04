@@ -5,10 +5,8 @@ use crate::{
     constants::*,
     vocabulary::VocabularyManager,
     sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
-    qdrant_ops::{self, upsert_batch, delete_collection_by_name},
-    app_config_to_embedding_config,
-    syntax, // Import our syntax parsing module
-    tokenizer, // Import the tokenizer module for consistent tokenization
+    qdrant_ops::{upsert_batch, delete_collection_by_name},
+    app_config_to_embedding_config, // Import the tokenizer module for consistent tokenization
 };
 use qdrant_client::{
     qdrant::{PointStruct, Vector, NamedVectors},
@@ -17,19 +15,17 @@ use qdrant_client::{
 use std::{
     collections::{HashSet, HashMap},
     path::PathBuf,
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::Arc,
     time::Instant,
 };
 use walkdir::WalkDir;
 use uuid::Uuid;
 use tokio::sync::Semaphore;
-use anyhow::anyhow;
-use async_trait::async_trait;
 
 // Import from sagitta-embed for the new decoupled processing architecture
 use sagitta_embed::{
     DefaultFileProcessor, EmbeddingPool, FileProcessor, EmbeddingProcessor,
-    ProcessingConfig, ProcessedChunk, EmbeddedChunk, ChunkMetadata,
+    ProcessingConfig,
 };
 use sagitta_embed::processor::{
     ProgressReporter as EmbedProgressReporter, ProcessingProgress, ProcessingStage
@@ -201,7 +197,7 @@ pub async fn index_paths<
         total_files: files_to_process.len(),
     });
 
-    let start_time = Instant::now();
+    let _start_time = Instant::now();
     let processed_chunks = file_processor.process_files_with_progress(&files_to_process, progress_bridge).await?;
     
     if processed_chunks.is_empty() {

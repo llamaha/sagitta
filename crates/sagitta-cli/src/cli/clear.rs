@@ -4,9 +4,9 @@ use colored::*;
 use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
-use sagitta_search::{AppConfig, RepositoryConfig}; // Added RepositoryConfig
+use sagitta_search::AppConfig; // Added RepositoryConfig
 use sagitta_search::qdrant_client_trait::QdrantClientTrait; // Use core trait
-use sagitta_search::repo_helpers::{get_collection_name, get_branch_aware_collection_name}; // Use core helper
+use sagitta_search::repo_helpers::get_branch_aware_collection_name; // Use core helper
 
 #[derive(Args, Debug)]
 pub struct ClearArgs {

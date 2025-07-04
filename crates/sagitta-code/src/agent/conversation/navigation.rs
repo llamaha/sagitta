@@ -8,12 +8,8 @@ use chrono::{DateTime, Utc};
 use anyhow::Result;
 
 use crate::agent::conversation::manager::ConversationManager;
-use crate::agent::conversation::types::*;
-use crate::agent::state::types::ConversationStatus;
-use crate::agent::message::types::AgentMessage;
-use crate::llm::client::Role;
 
-use super::types::{Conversation, ConversationBranch, ConversationCheckpoint, ConversationQuery, ConversationSearchResult};
+use super::types::{Conversation, ConversationQuery, ConversationSearchResult};
 use super::search::ConversationSearchEngine;
 
 /// Advanced conversation navigation and timeline management

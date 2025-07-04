@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use std::pin::Pin;
-use std::sync::Arc;
 use futures_util::Stream;
 use uuid::Uuid;
 use tokio::time::Duration;
@@ -8,13 +7,11 @@ use tokio::time::Duration;
 use crate::config::types::{SagittaCodeConfig, ClaudeCodeConfig};
 use crate::llm::client::{
     LlmClient, Message, MessagePart, Role, ToolDefinition, LlmResponse, 
-    StreamChunk, ThinkingConfig, GroundingConfig, TokenUsage
+    StreamChunk, ThinkingConfig, GroundingConfig
 };
 use crate::utils::errors::SagittaCodeError;
-use super::error::ClaudeCodeError;
 use super::process::ClaudeProcess;
 use super::streaming::ClaudeCodeStream;
-use super::message_converter::{convert_messages_to_claude, ClaudeMessage, ClaudeMessageContent, stream_message_as_json};
 use super::models::ClaudeCodeModel;
 use super::claude_interface::{ClaudeInterface, ClaudeModelInfo, ClaudeConfigInfo};
 use super::mcp_integration::McpIntegration;

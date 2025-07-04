@@ -2,11 +2,10 @@
 
 use std::sync::Arc;
 use anyhow::Result;
-use egui::{Context, Key};
+use egui::Context;
 use tokio::sync::{Mutex, mpsc, broadcast};
 use uuid;
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
 
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
@@ -15,7 +14,7 @@ use super::conversation::ConversationSidebar;
 use super::claude_md_modal::ClaudeMdModal;
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::state::types::{AgentState, AgentMode, AgentStateInfo};
+use crate::agent::state::types::{AgentState, AgentStateInfo};
 use super::chat::StreamingChatManager;
 use super::theme::AppTheme;
 use crate::config::SagittaCodeConfig;
@@ -28,9 +27,8 @@ use crate::agent::conversation::manager::{ConversationManager, ConversationManag
 use crate::agent::conversation::persistence::disk::DiskConversationPersistence;
 use crate::agent::conversation::search::text::TextConversationSearchEngine;
 
-use crate::agent::conversation::tagging::{TaggingPipeline, TaggingPipelineConfig};
+use crate::agent::conversation::tagging::TaggingPipeline;
 use crate::llm::title::TitleGenerator;
-use crate::tools::WorkingDirectoryManager;
 
 // Import the modularized components
 mod panels;

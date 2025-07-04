@@ -4,10 +4,9 @@
 //! creating, deleting, listing, and information about git branches.
 
 use crate::{GitError, GitResult};
-use git2::{Branch, BranchType, Repository, Reference};
+use git2::{Branch, BranchType, Repository};
 use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
 
 /// Information about a git branch
 #[derive(Debug, Clone)]
@@ -66,7 +65,7 @@ impl BranchManager {
     /// Create a new branch manager for the given repository
     pub fn new(repo_path: &Path) -> GitResult<Self> {
         let repo = Repository::open(repo_path)
-            .map_err(|e| GitError::RepositoryNotFound {
+            .map_err(|_e| GitError::RepositoryNotFound {
                 path: repo_path.to_path_buf(),
             })?;
 
@@ -225,7 +224,7 @@ impl BranchManager {
         }
 
         // Get the target commit
-        let commit = branch.get().peel_to_commit()
+        let _commit = branch.get().peel_to_commit()
             .map_err(|e| GitError::GitOperationFailed {
                 message: format!("Failed to get commit for branch '{}': {}", branch_name, e),
             })?;
@@ -356,12 +355,12 @@ impl BranchManager {
             })
     }
 
-    fn set_upstream(&self, branch: &Branch, upstream: &str) -> GitResult<()> {
+    fn set_upstream(&self, _branch: &Branch, _upstream: &str) -> GitResult<()> {
         // TODO: Implement upstream tracking
         Ok(())
     }
 
-    fn has_unmerged_commits(&self, branch: &Branch) -> GitResult<bool> {
+    fn has_unmerged_commits(&self, _branch: &Branch) -> GitResult<bool> {
         // TODO: Implement unmerged commit detection
         Ok(false)
     }
@@ -371,7 +370,7 @@ impl BranchManager {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::fs;
+    use std::path::PathBuf;
 
     fn create_test_repo() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::new().unwrap();

@@ -3,9 +3,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
-use egui::{Align, Color32, Frame, Layout, RichText, ScrollArea, Stroke, Ui, Vec2};
+use egui::{Align, Color32, Frame, Layout, RichText, ScrollArea, Stroke, Ui};
 
 use crate::agent::conversation::checkpoints::{CheckpointSuggestion, CheckpointReason};
 use crate::gui::theme::AppTheme;

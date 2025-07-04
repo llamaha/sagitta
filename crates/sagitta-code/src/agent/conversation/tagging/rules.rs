@@ -3,7 +3,6 @@ use crate::agent::conversation::types::{Conversation, ConversationSummary, Proje
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use regex::Regex;
-use crate::agent::message::types::AgentMessage;
 
 /// Type of tag rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

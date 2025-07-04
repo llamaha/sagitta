@@ -3,8 +3,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{Args, Subcommand};
 use qdrant_client::{
     qdrant::{ 
-        Condition, Filter, 
-        UpdateStatus, SearchResponse,
+        Condition, Filter,
         QueryResponse,
     },
     Qdrant,
@@ -20,7 +19,7 @@ use std::{
 use sagitta_search::config::AppConfig;
 use crate::cli::CliArgs;
 use sagitta_search::EmbeddingPool; // Use re-export from main crate
-use sagitta_search::EmbeddingProcessor; // For dimension() method
+ // For dimension() method
 use crate::cli::commands::{ // Only import necessary items from commands
     LEGACY_INDEX_COLLECTION, 
     FIELD_CHUNK_CONTENT, FIELD_ELEMENT_TYPE, FIELD_END_LINE,
@@ -29,7 +28,7 @@ use crate::cli::commands::{ // Only import necessary items from commands
 use sagitta_search::search_collection;
 use sagitta_search::qdrant_ops::{delete_collection_by_name, delete_all_points};
 use sagitta_search::error::SagittaError; // Import SagittaError
-use sagitta_search::config::load_config; // Import load_config
+ // Import load_config
 use sagitta_search::indexing::ensure_collection_exists; // Import ensure_collection_exists
 use colored::Colorize; // Added import for Colorize trait
 use sagitta_search::sync_progress::{SyncProgress, SyncStage, SyncProgressReporter};

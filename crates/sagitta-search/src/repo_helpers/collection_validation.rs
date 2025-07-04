@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use tracing::{info, warn};
 use crate::QdrantClientTrait;
 use crate::config::{AppConfig, RepositoryConfig};
-use super::qdrant_utils::{get_branch_aware_collection_name, get_collection_name};
+use super::qdrant_utils::get_branch_aware_collection_name;
 
 /// Validates that a repository's collections exist in Qdrant and match the config state.
 /// Returns true if collections are valid, false if they need to be recreated.

@@ -1,16 +1,13 @@
 use axum::{
-    extract::{State, Json, Query, Path, Extension},
+    extract::{State, Json, Path},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
-    middleware,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, warn};
+use tracing::{info, error};
 
 use crate::http_transport::AppState;
-use crate::api_key::{ApiKey, ApiKeyStore, ApiKeyInfo, InMemoryApiKeyStore, API_KEY_PREFIX};
-use crate::middleware::auth_middleware::{API_KEY_HEADER, AuthenticatedUser};
+use crate::api_key::{ApiKey, ApiKeyStore};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateApiKeyRequest {

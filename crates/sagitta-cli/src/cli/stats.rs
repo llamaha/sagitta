@@ -6,7 +6,6 @@ use clap::Args;
 use colored::*;
 use std::sync::Arc;
 use sagitta_search::AppConfig;
-use sagitta_search::repo_helpers::get_collection_name;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use std::path::PathBuf;
 use qdrant_client::qdrant::CountPointsBuilder;

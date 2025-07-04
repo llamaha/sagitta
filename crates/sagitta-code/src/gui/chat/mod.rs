@@ -6,7 +6,6 @@ use view::{StreamingMessage, MessageAuthor, MessageStatus, ToolCall, MessageType
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use crate::agent::events::ToolRunId;
 
 /// Represents an item in the chat timeline

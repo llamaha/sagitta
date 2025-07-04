@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
-use hf_hub::{api::sync::{Api, ApiBuilder}, Repo, RepoType};
+use hf_hub::{api::sync::Api, Repo, RepoType};
 use std::path::{Path, PathBuf};
 use std::fs;
-use std::io::Write;
 use log::{info, debug, warn};
 
 /// Predefined embedding models with their HuggingFace model IDs and file paths
@@ -297,7 +296,6 @@ impl ModelPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_embedding_model_from_str() {

@@ -7,15 +7,9 @@ use super::SagittaCodeApp;
 use super::super::chat::input::chat_input_ui;
 use super::super::chat::view::modern_chat_view_ui;
 use super::super::theme::{AppTheme, apply_theme};
-use super::super::symbols;
-use crate::agent::state::types::AgentState;
 use crate::utils::logging::LOG_COLLECTOR;
 use futures_util::StreamExt;
 use super::panels::ActivePanel;
-use crate::config::SagittaCodeConfig;
-use crate::gui::repository::manager::RepositoryManager;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Main rendering function for the application
 pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {

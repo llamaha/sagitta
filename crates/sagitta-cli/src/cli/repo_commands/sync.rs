@@ -3,13 +3,13 @@ use clap::Args;
 use colored::*;
 use std::{path::PathBuf, sync::Arc};
 use std::time::Instant;
-use log::{info, warn, error};
+use log::error;
 
 use git_manager::{GitManager, SyncType};
 use sagitta_search::{AppConfig, save_config};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use std::fmt::Debug;
-use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
+use sagitta_search::sync::{sync_repository, SyncOptions};
 use crate::progress::IndicatifProgressReporter;
 
 #[derive(Args, Debug)]

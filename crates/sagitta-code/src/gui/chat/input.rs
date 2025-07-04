@@ -12,7 +12,6 @@ use egui::{
     Vec2, 
     RichText,
     Frame,
-    ComboBox,
 };
 use crate::gui::theme::AppTheme;
 

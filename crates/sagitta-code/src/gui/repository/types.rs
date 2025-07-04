@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
 use sagitta_search::RepositoryConfig;
 use tokio::sync::mpsc;
 pub use sagitta_search::sync_progress::SyncProgress as CoreSyncProgress;

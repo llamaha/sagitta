@@ -1,10 +1,8 @@
 use crate::mcp::types::{
-    ErrorObject, InitializeParams, InitializeResult, MCPRequest, MCPResponse, PingParams, PingResult, QueryParams,
-    QueryResult, RepositoryAddParams, RepositoryAddResult, RepositoryInfo, RepositoryListParams,
-    RepositoryListResult, RepositorySyncParams, RepositorySyncResult, RepositoryRemoveParams, RepositoryRemoveResult, SearchResultItem,
-    Request, Response, ServerInfo, ServerCapabilities, ListToolsParams, ListToolsResult, ToolDefinition, InitializedNotificationParams, ToolAnnotations,
+    ErrorObject, InitializeParams, PingParams, QueryParams, RepositoryAddParams, RepositoryListParams, RepositorySyncParams, RepositoryRemoveParams,
+    Request, Response, ListToolsParams, ListToolsResult, InitializedNotificationParams,
     CallToolParams, CallToolResult, ContentBlock, RepositorySearchFileParams, RepositoryViewFileParams,
-    RepositorySwitchBranchParams, RepositorySwitchBranchResult, RepositoryListBranchesParams, RepositoryListBranchesResult,
+    RepositorySwitchBranchParams, RepositoryListBranchesParams,
 };
 use crate::mcp::error_codes;
 use anyhow::{anyhow, Context, Result};
@@ -16,24 +14,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn, instrument};
 use sagitta_search::{
-    config::{AppConfig, get_repo_base_path, save_config, load_config, RepositoryConfig, get_config_path_or_default},
-    constants::{
-        FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
-    },
-    EmbeddingPool, EmbeddingProcessor,
-    app_config_to_embedding_config,
+    config::{AppConfig, load_config},
     qdrant_client_trait::QdrantClientTrait,
     error::SagittaError,
-    repo_add::{AddRepoArgs, handle_repo_add, AddRepoError},
-    repo_helpers::{
-        get_collection_name, delete_repository_data, index_files,
-    },
-    search_collection,
-    indexing::{self, index_repo_files, gather_files},
-    sync::{sync_repository, SyncOptions},
+    repo_add::AddRepoError,
 };
 use qdrant_client::{
-    qdrant::{Filter, Condition, value::Kind, FieldCondition, Match, Value as QdrantValue},
     Qdrant, QdrantError
 };
 use serde_json::json;

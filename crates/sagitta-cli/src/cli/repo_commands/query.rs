@@ -4,10 +4,10 @@ use std::sync::Arc;
 use sagitta_search::{
     config::AppConfig,
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
+    repo_helpers::get_branch_aware_collection_name,
     error::SagittaError,
     search_impl::search_collection,
-    EmbeddingPool, EmbeddingProcessor,
+    EmbeddingPool,
     app_config_to_embedding_config,
     constants::{FIELD_BRANCH, FIELD_LANGUAGE, FIELD_ELEMENT_TYPE},
 };
@@ -18,13 +18,7 @@ use qdrant_client::qdrant::{Filter, QueryResponse, Condition};
 use colored::*;
 use std::fmt::Debug;
 
-use crate::{
-    cli::commands::{
-        LEGACY_INDEX_COLLECTION,
-    },
-    cli::repo_commands::RepoCommand,
-    cli::formatters::print_search_results,
-};
+use crate::cli::formatters::print_search_results;
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoQueryArgs {

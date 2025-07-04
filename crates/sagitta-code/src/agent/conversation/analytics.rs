@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{Conversation, ConversationSummary, ProjectType};
+use crate::agent::conversation::types::{Conversation, ProjectType};
 use crate::agent::state::types::ConversationStatus;
-use crate::config::types::SagittaCodeConfig;
 // Tool types removed - tools now via MCP
 
 /// Conversation analytics manager for tracking metrics and patterns

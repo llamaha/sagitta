@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
 

@@ -6,7 +6,7 @@ use qdrant_client::qdrant::{
     UpsertPoints, PointsOperationResponse, CreateCollection, Distance,
     VectorParamsBuilder, QueryPoints, QueryResponse,
     VectorsConfig, VectorParamsMap, vectors_config::Config as VectorsConfig_oneof_config,
-    SparseVectorParams, SparseVectorConfig, Modifier, ListCollectionsRequest
+    SparseVectorParams, SparseVectorConfig, Modifier
 };
 use qdrant_client::Qdrant;
 // Import our custom error type instead

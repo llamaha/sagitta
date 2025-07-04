@@ -3,7 +3,7 @@
 //! This module provides compatibility functions and types to ease the migration
 //! from the old scattered git functionality to the new centralized git-manager.
 
-use crate::{GitManager, GitResult, SwitchResult, SyncResult};
+use crate::{GitManager, GitResult, SwitchResult};
 use std::path::{Path, PathBuf};
 
 /// Compatibility type for old sync results
@@ -140,6 +140,7 @@ pub mod performance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SyncResult;
     use tempfile::TempDir;
     use std::fs;
     

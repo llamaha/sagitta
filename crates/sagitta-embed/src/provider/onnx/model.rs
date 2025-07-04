@@ -5,17 +5,17 @@ use crate::model::EmbeddingModelType;
 use crate::provider::EmbeddingProvider;
 use crate::provider::onnx::memory_pool::{TensorMemoryPool, MemoryPoolStats};
 use crate::provider::onnx::io_binding::{AdvancedIOBinding, IOBindingStats};
-use anyhow::{anyhow, Error};
 use log::{debug, warn, info};
-use ndarray::Array;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "cuda")]
+use ort::execution_providers::CUDAExecutionProvider;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "onnx")]
 use ort::{
-    execution_providers::{CPUExecutionProvider, CUDAExecutionProvider},
-    session::{builder::GraphOptimizationLevel, Session},
+    execution_providers::CPUExecutionProvider,
+    session::Session,
     value::Value,
 };
 
@@ -639,7 +639,7 @@ impl OnnxEmbeddingModel {
         let total_setup_start = Instant::now();
         
         // Create GPU memory info for CUDA device 0
-        let gpu_memory_info = MemoryInfo::new(
+        let _gpu_memory_info = MemoryInfo::new(
             AllocationDevice::CUDA,
             0, // CUDA device ID
             AllocatorType::Device,
@@ -763,7 +763,7 @@ impl OnnxEmbeddingModel {
                     debug!("PROFILE: pooler_output bind failed: {}, trying embeddings", e3);
                     io_binding.bind_output_to_device("embeddings", &cpu_memory_info)
                 })
-                .map_err(|e| {
+                .map_err(|_e| {
                     let available_outputs: Vec<&str> = self.session.outputs.iter().map(|o| o.name.as_str()).collect();
                     SagittaEmbedError::onnx_runtime(format!("Failed to bind any output. Available outputs: {:?}", available_outputs))
                 })?;

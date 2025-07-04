@@ -15,13 +15,11 @@ use tracing::{error, info, instrument, warn};
 use sagitta_search::{
     config::{self, get_repo_base_path, save_config, AppConfig, RepositoryConfig},
     EmbeddingPool, EmbeddingProcessor, // Use re-export
-    indexing::{self, gather_files, index_repo_files},
+    indexing::{self, gather_files},
     qdrant_client_trait::QdrantClientTrait,
-    repo_add::{handle_repo_add, AddRepoArgs, AddRepoError},
-    repo_helpers::{delete_repository_data, get_collection_name, get_branch_aware_collection_name},
-    error::SagittaError,
-    sync::{sync_repository, SyncOptions, SyncResult},
-    sync_progress::{SyncProgressReporter, SyncProgress},
+    repo_add::{handle_repo_add, AddRepoArgs},
+    repo_helpers::{delete_repository_data, get_branch_aware_collection_name},
+    sync::SyncOptions,
     fs_utils::{find_files_matching_pattern, read_file_range},
 };
 use crate::server::{map_add_repo_error, create_error_data};
@@ -29,8 +27,7 @@ use std::path::PathBuf;
 use git2::Repository;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
-use serde_json::json; // For creating JSON content
-use git_manager::GitRepository;
+ // For creating JSON content
 use git_manager::GitManager;
 use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter

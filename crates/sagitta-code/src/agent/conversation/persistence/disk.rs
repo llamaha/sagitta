@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use super::ConversationPersistence;

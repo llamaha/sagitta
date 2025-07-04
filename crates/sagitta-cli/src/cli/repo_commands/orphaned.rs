@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Args, Subcommand};
 use colored::*;
 use sagitta_search::{
-    config::{AppConfig, save_config, load_config, get_repo_base_path},
+    config::{AppConfig, save_config},
     scan_for_orphaned_repositories, reclone_missing_repository,
     add_orphaned_repository, remove_orphaned_repository,
-    get_enhanced_repository_list, OrphanedRepository,
+    get_enhanced_repository_list,
 };
 use std::path::PathBuf;
 use std::io::{self, Write};

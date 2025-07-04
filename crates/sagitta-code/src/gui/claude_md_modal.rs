@@ -1,8 +1,8 @@
-use egui::{Context, Ui, TextEdit, Button, RichText, Color32, ScrollArea, Window};
+use egui::{Context, TextEdit, RichText, Color32, ScrollArea, Window};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
-use log::{info, warn, error};
+use log::info;
 
 use crate::config::{SagittaCodeConfig, save_config as save_sagitta_code_config};
 

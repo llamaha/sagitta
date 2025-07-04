@@ -1,6 +1,5 @@
 use std::sync::Arc;
-use std::path::PathBuf;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, Button, Checkbox, Layout, Align, Spinner};
+use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, Spinner};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 use rfd::FileDialog;
@@ -125,7 +124,7 @@ pub fn render_add_repo(
                 // Schedule the add operation
                 let handle = tokio::runtime::Handle::current();
                 handle.spawn(async move {
-                    let mut manager = repo_manager_clone.lock().await;
+                    let manager = repo_manager_clone.lock().await;
                     let result: Result<(), anyhow::Error> = if form.use_local {
                         manager.add_local_repository(&form.name, &form.local_path).await
                     } else {

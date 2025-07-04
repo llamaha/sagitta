@@ -121,8 +121,8 @@ More content.
         // Try to find a newline near the split point
         let split_point = large_content[..approx_split_point].rfind('\n').map_or(approx_split_point, |p| p + 1);
 
-        let content1 = &large_content[..split_point];
-        let content2 = &large_content[split_point..];
+        let _content1 = &large_content[..split_point];
+        let _content2 = &large_content[split_point..];
         
         let code = format!("{}{}{}", header1, header2, large_content);
         

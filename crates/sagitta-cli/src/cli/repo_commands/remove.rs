@@ -1,6 +1,6 @@
 use clap::Args;
 use anyhow::{Result, Context, anyhow};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use std::io::{self, Write};
 use colored::*;
 use log::info;

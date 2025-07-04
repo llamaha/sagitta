@@ -4,8 +4,6 @@ use std::path::PathBuf;
 use git2::{Repository, FetchOptions, Cred, RemoteCallbacks, CredentialType};
 use anyhow::Result;
 use crate::config::RepositoryConfig;
-use crate::error::SagittaError as Error;
-use crate::config::AppConfig;
 
 /// Helper function to check if a file extension is explicitly supported by a parser
 pub fn is_supported_extension(extension: &str) -> bool {

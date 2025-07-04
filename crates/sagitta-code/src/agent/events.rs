@@ -41,7 +41,7 @@ pub enum ToolExecutionEvent {
         error: String,
     },
 }
-use crate::llm::client::{LlmClient, Role};
+use crate::llm::client::Role;
 
 /// Type alias for tool run identification
 pub type ToolRunId = Uuid;

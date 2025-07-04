@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use sagitta_search::{EmbeddingPool, embed_single_text_with_pool, embed_text_with_pool, SagittaError};
+use sagitta_search::{EmbeddingPool, embed_single_text_with_pool};
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_embed::EmbeddingProcessor;
 

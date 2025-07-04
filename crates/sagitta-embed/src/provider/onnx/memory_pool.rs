@@ -1,7 +1,6 @@
 //! Memory pool implementation for tensor reuse
 
 use crate::config::MemoryPoolConfig;
-use std::sync::Arc;
 
 /// Statistics for memory pool usage
 #[derive(Debug, Clone, Default)]
@@ -16,15 +15,13 @@ pub struct MemoryPoolStats {
 /// Tensor memory pool for efficient tensor reuse
 #[derive(Debug)]
 pub struct TensorMemoryPool {
-    config: MemoryPoolConfig,
     stats: MemoryPoolStats,
 }
 
 impl TensorMemoryPool {
     /// Create a new memory pool with the given configuration
-    pub fn new(config: MemoryPoolConfig) -> Self {
+    pub fn new(_config: MemoryPoolConfig) -> Self {
         Self {
-            config,
             stats: MemoryPoolStats::default(),
         }
     }

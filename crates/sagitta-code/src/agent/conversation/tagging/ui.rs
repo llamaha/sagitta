@@ -1,9 +1,8 @@
 use super::{TagSuggestion, TagAction, TagSuggestionWithAction, TagSource, SuggestionConfidence};
-use crate::agent::conversation::types::{Conversation, ConversationSummary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 /// State for the tag management UI
 #[derive(Debug, Clone, Serialize, Deserialize)]

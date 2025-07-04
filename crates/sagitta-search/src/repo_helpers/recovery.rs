@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::fs;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Attempts to recover a repository that may be in a bad state
 pub async fn recover_repository(repo_path: &Path) -> Result<()> {

@@ -72,7 +72,7 @@ pub fn validate_embedding_dimensions(
     embeddings: &[Vec<f32>],
     expected_dimension: usize,
 ) -> Result<()> {
-    for (i, embedding) in embeddings.iter().enumerate() {
+    for (_i, embedding) in embeddings.iter().enumerate() {
         if embedding.len() != expected_dimension {
             return Err(SagittaEmbedError::dimension_mismatch(
                 expected_dimension,

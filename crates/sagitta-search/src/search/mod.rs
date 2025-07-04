@@ -13,11 +13,10 @@ use qdrant_client::qdrant::{SearchPointsBuilder, Filter};
 use crate::config::AppConfig;
 use crate::qdrant_client_trait::QdrantClientTrait;
 use crate::{EmbeddingPool, app_config_to_embedding_config};
-use crate::repo_helpers::get_collection_name;
 use crate::repo_helpers::get_branch_aware_collection_name;
 use crate::error::SagittaError;
 use crate::constants::{FIELD_FILE_PATH, FIELD_START_LINE, FIELD_END_LINE, FIELD_CHUNK_CONTENT};
-use sagitta_embed::{ProcessedChunk, EmbeddingProcessor};
+use sagitta_embed::EmbeddingProcessor;
 // --- End imports --- 
 
 /// Performs semantic search against a specific repository collection in Qdrant.

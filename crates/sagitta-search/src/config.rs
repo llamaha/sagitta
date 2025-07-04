@@ -12,8 +12,6 @@ use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "sagitta";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const REPO_DIR_NAME: &str = "repositories";
-const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 /// Represents configuration for a single managed repository

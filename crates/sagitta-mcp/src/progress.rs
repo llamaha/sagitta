@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter, SyncStage};
 use sagitta_search::sync_progress::{AddProgress, AddProgressReporter, RepoAddStage};
 use log;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 static PENDING_MESSAGES: Mutex<Vec<String>> = Mutex::new(Vec::new());

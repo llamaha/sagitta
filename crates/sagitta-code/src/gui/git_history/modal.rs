@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use egui::{Context, Ui};
 use git2::{Repository, Oid};
-use chrono::{DateTime, Utc, TimeZone};
+use chrono::{Utc, TimeZone};
 
 use crate::gui::theme::AppTheme;
 use super::types::{CommitInfo, GitHistoryState};

@@ -1,11 +1,10 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use egui::{Ui, Vec2, TextEdit, Button, ComboBox, ScrollArea, RichText, Color32};
+use egui::{Ui, Vec2, TextEdit, Button, ScrollArea, Color32};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{ConversationSummary, ProjectContext, ProjectType};
+use crate::agent::conversation::types::ConversationSummary;
 use crate::gui::app::AppState;
 use crate::gui::theme::AppTheme;
 

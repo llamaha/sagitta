@@ -5,12 +5,8 @@ use std::path::PathBuf;
 use tempfile::tempdir;
 
 use sagitta_search::AppConfig;
-use sagitta_search::config::{save_config, get_config_path_or_default, IndexingConfig, load_config, PerformanceConfig};
+use sagitta_search::config::{IndexingConfig, PerformanceConfig};
 use sagitta_search::config::EmbeddingEngineConfig;
-use crate::cli::CliArgs;
-use crate::cli::commands::Commands;
-use crate::cli::simple;
-use crate::cli::repo_commands::{RepoArgs, RepoCommand};
 
 #[derive(Args, Debug)]
 #[derive(Clone)]

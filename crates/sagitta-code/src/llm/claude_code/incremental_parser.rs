@@ -1,4 +1,4 @@
-use serde_json::{Value, Map};
+use serde_json::Value;
 
 pub struct IncrementalJsonParser {
     buffer: String,

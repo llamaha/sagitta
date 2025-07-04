@@ -4,11 +4,8 @@ use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use log::{debug, info, warn};
+use log::{debug, info};
 
-use crate::agent::conversation::types::{Conversation, ConversationCheckpoint};
-use crate::agent::message::types::{AgentMessage, ToolCall};
-use crate::agent::state::types::AgentState;
 use crate::utils::errors::SagittaCodeError;
 
 /// Tracks context and flow for a conversation to provide intelligent assistance

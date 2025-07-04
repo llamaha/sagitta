@@ -2,13 +2,12 @@ use crate::mcp::{
     error_codes,
     types::{ErrorObject, RepositoryMapParams, RepositoryMapResult, RepositoryMapSummary},
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use repo_mapper::{generate_repo_map, RepoMapOptions};
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 use sagitta_search::config::AppConfig;
 
 /// Handles repository mapping requests using the new repo-mapper crate

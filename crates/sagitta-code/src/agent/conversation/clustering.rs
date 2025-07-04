@@ -6,13 +6,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use qdrant_client::{Qdrant, qdrant::{PointStruct, Filter, Condition, SearchPoints}};
-use sagitta_search::{EmbeddingPool, EmbeddingProcessor, config::AppConfig};
+use sagitta_search::EmbeddingPool;
 use crate::agent::conversation::types::ProjectType;
 use crate::agent::conversation::cluster_namer::{ClusterNamer, ClusterNamerConfig};
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
-use crate::llm::client::LlmClient;
 
 use super::types::{Conversation, ConversationSummary};
 

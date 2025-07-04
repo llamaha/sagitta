@@ -171,7 +171,7 @@ impl ThreadSafeSessionPool {
     /// If a pool already exists for the current thread, it is returned.
     /// Otherwise, a new pool is created, added to the central list, and returned.
     pub fn get_pool(&self) -> Result<OnnxSessionPool> {
-        let thread_id = thread::current().id();
+        let _thread_id = thread::current().id();
         let mut pools = self.thread_pools.lock().unwrap();
         
         // Try to find existing pool for this thread

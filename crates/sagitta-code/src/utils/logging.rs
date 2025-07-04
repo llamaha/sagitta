@@ -1,5 +1,5 @@
-use env_logger::{Builder, Env};
-use log::{LevelFilter, Record, Metadata, SetLoggerError, Level, Log};
+use env_logger::Builder;
+use log::{LevelFilter, Record, Metadata, Log};
 use std::io::Write;
 use std::sync::{Mutex, Arc};
 use lazy_static::lazy_static;

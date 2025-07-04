@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, ScrollArea, Response, Sense, Rect, Pos2};
+use egui::{Ui, RichText, Color32, Grid, ScrollArea};
 use tokio::sync::Mutex;
 use super::manager::RepositoryManager;
 

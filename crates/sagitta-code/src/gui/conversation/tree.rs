@@ -1170,7 +1170,7 @@ impl ConversationTree {
     
     /// Render the conversation tree with UI interactions
     pub fn render(&mut self, ui: &mut egui::Ui, theme: &crate::gui::theme::AppTheme) -> Result<Option<TreeAction>> {
-        use egui::{Color32, Pos2, Rect, Stroke, Vec2};
+        use egui::{Pos2, Rect, Vec2};
         
         let mut action = None;
         

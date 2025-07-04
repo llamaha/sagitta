@@ -22,16 +22,11 @@ use clap::{Args, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
 use sagitta_search::{
-    config::{AppConfig, save_config}, 
-    EmbeddingPool, EmbeddingProcessor,
-    app_config_to_embedding_config,
-    repo_helpers::get_collection_name,
-    error::SagittaError,
+    config::{AppConfig, save_config}, EmbeddingProcessor,
 };
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
 use sagitta_search::config::get_repo_base_path;
 use crate::cli::CliArgs;
-use sagitta_search::config::{IndexingConfig, PerformanceConfig};
 
 #[derive(Args, Debug, Clone)]
 pub struct RepoArgs {

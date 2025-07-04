@@ -230,7 +230,7 @@ impl MarkdownParser {
         let mut chunks = Vec::new();
         let mut heading_stack: Vec<&MarkdownHeading> = Vec::new();
 
-        let mut current_pos = 0; // Current line index (0-based)
+        let current_pos = 0; // Current line index (0-based)
 
         // 1. Handle content before the first heading
         let first_heading_start_line = headings.first().map_or(usize::MAX, |h| h.start_line);
@@ -262,10 +262,10 @@ impl MarkdownParser {
                         "root_content".to_string(),
                         &[],
                     );
-                    current_pos = slice_end_idx; // Update position (0-based index)
+                    // Position updated for tracking
                 } else {
                      log::debug!("Content before first heading (lines 1-{}) is empty/whitespace, skipping root chunk.", root_end_line_idx);
-                     current_pos = slice_end_idx; // Still update position
+                     // Position would be updated for tracking
                 }
             }
         } else {
@@ -347,7 +347,7 @@ impl MarkdownParser {
             // Push current heading onto the stack for subsequent sections
             heading_stack.push(heading);
             // Update current_pos: section content ends at content_end_line (1-based)
-            current_pos = content_end_line.min(total_lines);
+            // Position tracking for section end
         }
 
         log::debug!("build_section_chunks created {} chunks for {}", chunks.len(), file_path);
@@ -515,7 +515,7 @@ impl MarkdownParser {
                  // Estimate start/end lines - this is tricky!
                  // The `section_start_line` refers to the original heading.
                  // The physical content starts later. Let's try to be slightly more accurate.
-                 let physical_content_start_line = current_heading.map_or(1, |h| h.end_line + 1);
+                 let _physical_content_start_line = current_heading.map_or(1, |h| h.end_line + 1);
                  let chunk_start_line_approx = if current_chunk_idx == 1 { section_start_line } else { current_chunk_start_line };
                  // This end line calc is still flawed. 
                  let chunk_end_line_approx = chunk_start_line_approx + header_lines + lines_in_content_part - 1; 

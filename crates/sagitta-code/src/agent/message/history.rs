@@ -7,7 +7,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use log::{debug, info, warn, error, trace};
 
-use crate::agent::message::types::{AgentMessage, ToolCall};
+use crate::agent::message::types::AgentMessage;
 use crate::llm::client::{Message as LlmMessage, Role, MessagePart};
 use crate::utils::errors::SagittaCodeError;
 use crate::agent::conversation::manager::{ConversationManager, ConversationManagerImpl};
@@ -509,7 +509,7 @@ impl ConversationAwareHistoryManager {
         let title = format!("Conversation {}", chrono::Utc::now().format("%Y-%m-%d %H:%M"));
         
         let conversation_id = {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             manager.create_conversation(title, self.workspace_id).await
                 .map_err(|e| SagittaCodeError::Unknown(format!("Failed to create conversation: {}", e)))?
         }; // Release the lock here
@@ -541,7 +541,7 @@ impl ConversationAwareHistoryManager {
                 settings: HashMap::new(),
             };
             
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.project_context = Some(project_context);
                 let _ = manager.update_conversation(conversation).await;
@@ -554,7 +554,7 @@ impl ConversationAwareHistoryManager {
     
     /// Add a message to a specific conversation
     async fn add_message_to_conversation(&self, conversation_id: Uuid, message: AgentMessage) -> Result<(), SagittaCodeError> {
-        let mut manager = self.conversation_manager.lock().await;
+        let manager = self.conversation_manager.lock().await;
         
         if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
             conversation.add_message(message);
@@ -651,7 +651,7 @@ impl ConversationAwareHistoryManager {
     /// Remove a message by its ID
     pub async fn remove_message(&self, id: Uuid) -> Option<AgentMessage> {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 if let Some(pos) = conversation.messages.iter().position(|m| m.id == id) {
                     let removed = conversation.messages.remove(pos);
@@ -694,7 +694,7 @@ impl ConversationAwareHistoryManager {
     /// Add a tool call result to the most recent assistant message
     pub async fn add_tool_result(&self, tool_call_id: &str, result: serde_json::Value, successful: bool) -> Result<(), SagittaCodeError> {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 // Find the most recent assistant message with a matching tool call
                 for message in conversation.messages.iter_mut().rev() {
@@ -722,7 +722,7 @@ impl ConversationAwareHistoryManager {
     /// Clear all messages except system messages
     pub async fn clear_except_system(&self) {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.messages.retain(|m| m.role == Role::System);
                 let _ = manager.update_conversation(conversation).await;
@@ -733,7 +733,7 @@ impl ConversationAwareHistoryManager {
     /// Clear all messages
     pub async fn clear(&self) {
         if let Ok(conversation_id) = self.ensure_active_conversation().await {
-            let mut manager = self.conversation_manager.lock().await;
+            let manager = self.conversation_manager.lock().await;
             if let Ok(Some(mut conversation)) = manager.get_conversation(conversation_id).await {
                 conversation.messages.clear();
                 let _ = manager.update_conversation(conversation).await;

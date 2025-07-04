@@ -1,13 +1,12 @@
 use std::sync::Arc;
-use egui::{Ui, RichText, Color32, Grid, TextEdit, ScrollArea, ComboBox, Label, Button, Stroke, Rounding, Frame, Vec2};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use egui::{Ui, RichText, Grid, TextEdit, ScrollArea, ComboBox, Button, Stroke, Frame, Vec2};
+use tokio::sync::{Mutex, oneshot};
 use super::manager::RepositoryManager;
 
 use super::types::{RepoPanelState, QueryResultItem};
 use super::types::QueryResult;
 use anyhow::Result;
 use qdrant_client::qdrant::QueryResponse;
-use std::time::Duration;
 
 // A simple non-blocking channel for query results
 pub struct QueryChannel {

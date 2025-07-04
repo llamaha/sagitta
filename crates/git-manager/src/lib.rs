@@ -116,7 +116,6 @@ pub use indexing::{
 };
 
 use std::sync::Arc;
-use anyhow::Context;
 
 /// Main git manager struct that coordinates all git operations
 ///

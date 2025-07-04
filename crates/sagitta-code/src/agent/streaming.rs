@@ -3,17 +3,14 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
-use log::{debug, info, trace, warn, error};
-use uuid::Uuid;
+use log::{debug, info, trace, error};
 
 use crate::agent::message::types::{AgentMessage, ToolCall};
 use crate::agent::message::history::ConversationAwareHistoryManager;
 use crate::agent::state::manager::StateManager;
-use crate::agent::state::types::AgentMode;
 use crate::agent::events::AgentEvent;
 // Tool imports removed - tools now via MCP
 use crate::utils::errors::SagittaCodeError;
-use crate::config::types::SagittaCodeConfig;
 use crate::llm::client::{LlmClient, StreamChunk, MessagePart, ToolDefinition};
 
 /// Streaming processor for handling LLM streaming responses and tool execution

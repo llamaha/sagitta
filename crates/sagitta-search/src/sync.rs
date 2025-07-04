@@ -1,18 +1,14 @@
 // crates/sagitta-search/src/sync.rs
 
 use crate::{
-    config::{AppConfig, RepositoryConfig, IndexingConfig, PerformanceConfig, EmbeddingEngineConfig},
+    config::{AppConfig, RepositoryConfig},
     error::{Result, SagittaError},
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::{
-        repo_indexing::{index_files, sync_repository_branch, update_sync_status_and_languages},
-        qdrant_utils::{get_branch_aware_collection_name, delete_points_for_files},
-    },
     sync_progress::{SyncProgressReporter, SyncProgress, SyncStage, NoOpProgressReporter},
-    constants::{FIELD_BRANCH, FIELD_COMMIT_HASH, FIELD_LANGUAGE},
+    constants::FIELD_LANGUAGE,
 };
 use crate::repo_helpers; // Use core repo_helpers
-use anyhow::{anyhow, Context, Result as AnyhowResult};
+use anyhow::{anyhow, Context};
 use qdrant_client::qdrant::{
     ScrollPointsBuilder,
     PayloadIncludeSelector,
@@ -26,15 +22,13 @@ use std::{
 };
 use tokio::task;
 use git2::{Repository, FetchOptions, RemoteCallbacks, AutotagOption, DiffOptions, Delta, Oid as GitOid};
-use std::str::FromStr;
 use log::{info, warn, debug, trace};
 
 // Import git-manager traits for integration
 use git_manager::{VectorSyncTrait, VectorSyncResult};
 use async_trait::async_trait;
-use std::sync::Mutex; // Added for Mock
-use qdrant_client::qdrant::Distance;
-use sagitta_embed::{EmbeddingPool, EmbeddingProcessor}; // Added EmbeddingProcessor trait
+ // Added for Mock
+use sagitta_embed::EmbeddingProcessor; // Added EmbeddingProcessor trait
 
 /// Contains the results of a repository synchronization operation.
 #[derive(Debug, Clone)]
@@ -688,10 +682,10 @@ where
 {
     async fn sync_files(
         &self,
-        repo_path: &std::path::Path,
-        files_to_add: &[std::path::PathBuf],
-        files_to_update: &[std::path::PathBuf], 
-        files_to_delete: &[std::path::PathBuf],
+        _repo_path: &std::path::Path,
+        _files_to_add: &[std::path::PathBuf],
+        _files_to_update: &[std::path::PathBuf], 
+        _files_to_delete: &[std::path::PathBuf],
         is_full_sync: bool,
     ) -> std::result::Result<VectorSyncResult, Box<dyn std::error::Error + Send + Sync + 'static>> {
         // Create sync options based on the parameters

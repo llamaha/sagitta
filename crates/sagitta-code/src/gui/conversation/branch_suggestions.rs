@@ -1,9 +1,8 @@
 use anyhow::Result;
-use egui::{Align, Color32, Layout, RichText, Ui, Vec2, Stroke, Rect, Pos2, Shape};
+use egui::{Align, Color32, Layout, RichText, Ui, Vec2, Stroke};
 use uuid::Uuid;
 
-use crate::agent::conversation::branching::{BranchSuggestion, BranchReason, ConversationState};
-use crate::agent::conversation::types::Conversation;
+use crate::agent::conversation::branching::{BranchSuggestion, BranchReason};
 use crate::gui::theme::AppTheme;
 
 /// Action that can be triggered from the branch suggestions UI

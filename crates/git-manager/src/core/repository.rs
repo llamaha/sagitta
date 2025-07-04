@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
-use git2::{Repository, Branch, BranchType, Oid, Reference};
+use git2::{Repository, BranchType};
 use crate::error::{GitError, GitResult};
 use crate::core::state::{BranchState, RepositoryState};
 use crate::sync::merkle::MerkleManager;
-use std::collections::HashMap;
 
 /// Core repository manager that wraps git2::Repository with enhanced functionality
 pub struct GitRepository {
@@ -28,7 +27,7 @@ impl GitRepository {
     /// Open an existing git repository
     pub fn open<P: AsRef<Path>>(path: P) -> GitResult<Self> {
         let path = path.as_ref().to_path_buf();
-        let repo = Repository::open(&path).map_err(|e| {
+        let repo = Repository::open(&path).map_err(|_e| {
             GitError::RepositoryNotFound { path: path.clone() }
         })?;
 
@@ -514,7 +513,6 @@ pub struct RepositoryInfo {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::fs;
 
     fn create_test_repo() -> (TempDir, GitRepository) {
         let temp_dir = TempDir::new().unwrap();

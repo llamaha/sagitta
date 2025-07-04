@@ -10,21 +10,16 @@ use sagitta_search::{
     constants::{
         FIELD_BRANCH, FIELD_CHUNK_CONTENT, FIELD_END_LINE, FIELD_FILE_PATH, FIELD_START_LINE,
     },
-    EmbeddingPool, EmbeddingProcessor,
-    app_config_to_embedding_config,
+    EmbeddingPool,
     error::SagittaError,
     qdrant_client_trait::QdrantClientTrait,
-    repo_helpers::{get_collection_name, get_branch_aware_collection_name},
+    repo_helpers::get_branch_aware_collection_name,
     search_impl::search_collection,
 };
 use qdrant_client::qdrant::{value::Kind, Condition, Filter};
 use anyhow::Result;
 use axum::Extension;
 use crate::middleware::auth_middleware::AuthenticatedUser;
-use qdrant_client::qdrant::{SearchPoints, SearchResponse, HealthCheckReply, CollectionInfo, CountPoints, CountResponse, PointsSelector, ScrollPoints, ScrollResponse, UpsertPoints, PointsOperationResponse, CreateCollection, DeletePoints, QueryPoints, QueryResponse};
-use async_trait::async_trait;
-use tempfile::tempdir;
-use serde_json::json;
 
 #[instrument(skip(config, qdrant_client, auth_user_ext), fields(repo_name = %params.repository_name, query = %params.query_text))]
 pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(

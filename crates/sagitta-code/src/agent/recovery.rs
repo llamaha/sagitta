@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
-use log::{info, warn, error};
+use log::{info, warn};
 use chrono;
 
 use crate::agent::state::manager::StateManager;

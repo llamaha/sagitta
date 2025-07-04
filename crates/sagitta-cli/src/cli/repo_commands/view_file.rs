@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use clap::Args;
 use std::path::PathBuf;
 use serde_json::json;

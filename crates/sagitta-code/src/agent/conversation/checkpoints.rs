@@ -1,7 +1,7 @@
 // Smart conversation checkpoints with context awareness
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 use crate::agent::conversation::types::{Conversation, ConversationCheckpoint, ContextSnapshot};
 use crate::agent::message::types::AgentMessage;
-use crate::llm::client::Role;
 
 /// Smart checkpoint manager for conversation state management
 pub struct ConversationCheckpointManager {

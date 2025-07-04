@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use git_manager::GitManager;
 use sagitta_search::{AppConfig, save_config, qdrant_client_trait::QdrantClientTrait};
 use sagitta_search::sync::{sync_repository, SyncOptions, SyncResult};
-use sagitta_search::config::RepositoryConfig;
 use sagitta_search::repo_helpers::{get_branch_sync_metadata, BranchSyncMetadata};
 use colored::*;
 use tokio::task::JoinSet;

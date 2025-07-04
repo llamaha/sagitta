@@ -1,7 +1,7 @@
 use axum::{
     routing::{get, post},
     Router,
-    extract::{State, Query, Extension},
+    extract::{State, Extension},
     response::{sse::Sse, sse::Event, IntoResponse},
     http::{StatusCode, HeaderMap},
     Json,
@@ -12,17 +12,15 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn, instrument};
 use uuid::Uuid;
 use serde_json::json;
 use serde::Deserialize;
 use async_stream;
-use std::sync::RwLock;
 use crate::api_key::InMemoryApiKeyStore;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use sagitta_search::config::AppConfig;
 
 use crate::server::Server;
 use qdrant_client::Qdrant;
@@ -31,7 +29,6 @@ use crate::mcp::error_codes;
 use crate::api_key::ApiKeyStore;
 use crate::handlers::api_key_handler::{create_api_key_handler, list_api_keys_handler, delete_api_key_handler};
 use crate::middleware::auth_middleware::{auth_layer, AuthenticatedUser};
-use axum::middleware;
 use crate::middleware::secure_headers_middleware;
 use std::net::SocketAddr;
 use anyhow::Context;
