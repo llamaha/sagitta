@@ -103,6 +103,11 @@ impl ManualMockQdrantClient {
         }
     }
 
+    /// Returns the arguments passed to the last `create_collection` call.
+    pub fn get_create_collection_args(&self) -> (String, u64) {
+        self.create_collection_args.lock().unwrap().clone().unwrap_or(("".to_string(), 0))
+    }
+
     // --- Methods for collection_exists --- 
     /// Adds an expected response to the queue for future `collection_exists` calls.
     pub fn expect_collection_exists(&self, response: Result<bool>) {
