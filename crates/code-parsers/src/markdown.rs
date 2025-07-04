@@ -24,6 +24,12 @@ pub struct MarkdownParser {
     // Query might not be needed directly if extract_headings uses its own
 }
 
+impl Default for MarkdownParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MarkdownParser {
     /// Creates a new `MarkdownParser` with the Markdown grammar.
     pub fn new() -> Self {
@@ -146,7 +152,7 @@ impl MarkdownParser {
                  if let Some(heading) = self.node_to_heading(capture.node, code) {
                      if heading.level == 1 || heading.level == 2 { // Extra check for setext typical levels
                          let kind = if code[node.start_byte()..node.end_byte()].contains("===") { "Setext H1" } else { "Setext H2" };
-                         log::debug!("extract_headings: Converted node to {} heading: {:?}", kind, heading);
+                         log::debug!("extract_headings: Converted node to {kind} heading: {heading:?}");
                      }
                      headings.push(heading);
                  }
@@ -162,7 +168,7 @@ impl MarkdownParser {
     /// Handles plain text splitting when no markdown structure is found or parsing fails.
     /// Splits purely by MAX_CHUNK_LINES.
     fn handle_plain_text(&self, code: &str, file_path: &str) -> Vec<CodeChunk> {
-        log::debug!("Handling content as plain text for file: {}", file_path);
+        log::debug!("Handling content as plain text for file: {file_path}");
         let lines: Vec<&str> = code.lines().collect();
         let mut fallback_chunks = Vec::new();
         let mut current_line_start = 1;
@@ -264,7 +270,7 @@ impl MarkdownParser {
                     );
                     // Position updated for tracking
                 } else {
-                     log::debug!("Content before first heading (lines 1-{}) is empty/whitespace, skipping root chunk.", root_end_line_idx);
+                     log::debug!("Content before first heading (lines 1-{root_end_line_idx}) is empty/whitespace, skipping root chunk.");
                      // Position would be updated for tracking
                 }
             }
@@ -276,7 +282,7 @@ impl MarkdownParser {
         // 2. Process each heading and the content following it
         for (i, heading) in headings.iter().enumerate() {
             // Update heading stack (pop higher/equal levels)
-            log::debug!("build_section_chunks: Processing heading: {:?}", heading);
+            log::debug!("build_section_chunks: Processing heading: {heading:?}");
             while let Some(last_heading) = heading_stack.last() {
                 if last_heading.level >= heading.level {
                     heading_stack.pop();
@@ -387,18 +393,18 @@ impl MarkdownParser {
             None => "".to_string(), // No heading line for root content (handled by base_element_type == "root_content")
         };
         
-        let full_header = format!("{}{}", parent_context, current_heading_line);
+        let full_header = format!("{parent_context}{current_heading_line}");
 
         // Calculate the actual content slice *excluding* the headers
         let section_content_trimmed = section_content.trim();
 
         // Combine header with the actual content slice for this section
-        let full_content_combined = format!("{}{}", full_header, section_content_trimmed);
+        let full_content_combined = format!("{full_header}{section_content_trimmed}");
 
         // Now, check size and split `full_content` if needed
         if full_content_combined.len() <= MAX_SECTION_SIZE {
             // Fits in one chunk
-            log::debug!("Creating single chunk: Start={}, End={}, Type={}", section_start_line, section_end_line, base_element_type);
+            log::debug!("Creating single chunk: Start={section_start_line}, End={section_end_line}, Type={base_element_type}");
             let chunk = CodeChunk {
                 content: full_content_combined,
                 file_path: file_path.to_string(),
@@ -423,7 +429,7 @@ impl MarkdownParser {
             let mut current_chunk_start_line = section_start_line; // Start line for the first split chunk
 
             while !remaining_content_to_split.is_empty() {
-                let chunk_element_type = format!("{}_split_{}", base_element_type, current_chunk_idx);
+                let chunk_element_type = format!("{base_element_type}_split_{current_chunk_idx}");
                 
                 let available_content_len = MAX_SECTION_SIZE.saturating_sub(full_header.len());
                 if available_content_len == 0 {
@@ -481,19 +487,19 @@ impl MarkdownParser {
                      current_chunk_content_part = remaining_content_to_split[..last_processed_byte_pos].to_string();
                 } else if current_chunk_content_part.is_empty() && last_processed_byte_pos == 0 {
                      // Edge case: available_content_len was 0 or negative (checked above), or first char invalid?
-                     log::warn!("Unable to extract any content for split chunk {} in {}. Header length might be too close to MAX_SECTION_SIZE.", current_chunk_idx, file_path);
+                     log::warn!("Unable to extract any content for split chunk {current_chunk_idx} in {file_path}. Header length might be too close to MAX_SECTION_SIZE.");
                      break; // Avoid infinite loop
                 }
 
 
                 // Use the determined content_part and update remaining_content_to_split
                 let content_part = current_chunk_content_part.trim_end(); // Trim trailing whitespace
-                let final_chunk_content = format!("{}{}", full_header, content_part);
+                let final_chunk_content = format!("{full_header}{content_part}");
 
                 // Check if we actually consumed any bytes
                 if last_processed_byte_pos == 0 && !remaining_content_to_split.is_empty() {
-                     log::error!("Split logic failed to advance in chunk {}. File: {}, Heading Line: {}. Remaining content starts with: '{}'", 
-                                current_chunk_idx, file_path, section_start_line, remaining_content_to_split.chars().take(20).collect::<String>());
+                     log::error!("Split logic failed to advance in chunk {current_chunk_idx}. File: {file_path}, Heading Line: {section_start_line}. Remaining content starts with: '{}'", 
+                                remaining_content_to_split.chars().take(20).collect::<String>());
                      break; // Prevent potential infinite loop
                 }
 
@@ -543,7 +549,7 @@ impl MarkdownParser {
 
 impl SyntaxParser for MarkdownParser {
     fn parse(&mut self, code: &str, file_path: &str) -> Result<Vec<CodeChunk>> {
-        log::debug!("Parsing markdown file: {}", file_path);
+        log::debug!("Parsing markdown file: {file_path}");
         // 1. Handle empty or whitespace-only content right away
         if code.trim().is_empty() {
             log::debug!("Content is empty, returning zero chunks.");
@@ -560,7 +566,7 @@ impl SyntaxParser for MarkdownParser {
         let tree = match self.parser.parse(code, None) {
             Some(t) => t,
             None => {
-                log::warn!("Tree-sitter failed to parse {}, falling back to plain text handling.", file_path);
+                log::warn!("Tree-sitter failed to parse {file_path}, falling back to plain text handling.");
                 // Fallback if initial parse fails
                 return Ok(self.handle_plain_text(code, file_path));
             }
@@ -570,7 +576,7 @@ impl SyntaxParser for MarkdownParser {
         let headings = match self.extract_headings(&tree, code) {
              Ok(h) => h,
              Err(e) => {
-                 log::error!("Failed to extract headings from {}: {}. Falling back to plain text.", file_path, e);
+                 log::error!("Failed to extract headings from {file_path}: {e}. Falling back to plain text.");
                  return Ok(self.handle_plain_text(code, file_path));
              }
         };
@@ -578,7 +584,7 @@ impl SyntaxParser for MarkdownParser {
         // 4. Determine chunking strategy
         if headings.is_empty() {
             // No headings found, treat as plain text
-            log::debug!("No headings found in {}, using plain text handler.", file_path);
+            log::debug!("No headings found in {file_path}, using plain text handler.");
             Ok(self.handle_plain_text(code, file_path))
         } else {
             // Headings found, build chunks based on sections

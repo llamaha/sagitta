@@ -96,28 +96,28 @@ impl ModelDownloader {
             model_id, filename
         );
         
-        info!("Attempting direct download from: {}", url);
+        info!("Attempting direct download from: {url}");
         
         // Create cache directory if it doesn't exist
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create cache directory: {:?}", parent))?;
+                .with_context(|| format!("Failed to create cache directory: {parent:?}"))?;
         }
         
         // Download the file
         let response = ureq::get(&url)
             .call()
-            .map_err(|e| anyhow::anyhow!("Failed to download {}: {}", filename, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to download {filename}: {e}"))?;
         
         // Write to cache file
         let mut file = fs::File::create(cache_path)
-            .with_context(|| format!("Failed to create file: {:?}", cache_path))?;
+            .with_context(|| format!("Failed to create file: {cache_path:?}"))?;
             
         let mut reader = response.into_reader();
         std::io::copy(&mut reader, &mut file)
-            .with_context(|| format!("Failed to write file: {:?}", cache_path))?;
+            .with_context(|| format!("Failed to write file: {cache_path:?}"))?;
             
-        info!("Successfully downloaded {} to {:?}", filename, cache_path);
+        info!("Successfully downloaded {filename} to {cache_path:?}");
         Ok(cache_path.to_path_buf())
     }
 
@@ -146,7 +146,7 @@ impl ModelDownloader {
     /// Download a model and return paths to the model and tokenizer
     pub fn download_model(&self, model: &EmbeddingModel) -> Result<ModelPaths> {
         let model_id = model.model_id();
-        info!("Downloading model: {}", model_id);
+        info!("Downloading model: {model_id}");
 
         // Log cache directory
         debug!("Using cache directory: {:?}", self.cache_dir);

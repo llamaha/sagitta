@@ -217,8 +217,8 @@ impl OnnxEmbeddingModel {
         // Configure with BatchLongest padding strategy
         tokenizer.with_padding(Some(PaddingParams {
             strategy: PaddingStrategy::BatchLongest,
-            pad_token: pad_token,
-            pad_id: pad_id,
+            pad_token,
+            pad_id,
             pad_type_id: 0,
             direction: tokenizers::PaddingDirection::Right,
             pad_to_multiple_of: None,

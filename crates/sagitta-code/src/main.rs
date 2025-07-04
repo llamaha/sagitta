@@ -205,7 +205,7 @@ mod cli_app {
         // Initialize MCP integration with the tool registry
         log::info!("CLI: Initializing MCP integration for Claude");
         if let Err(e) = claude_client.initialize_mcp(None).await {
-            log::warn!("Failed to initialize MCP integration: {}. Tool calls may not work.", e);
+            log::warn!("Failed to initialize MCP integration: {e}. Tool calls may not work.");
         }
         
         // Now wrap the client in Arc for use with the agent
@@ -241,8 +241,8 @@ mod cli_app {
         ).await {
             Ok(agent) => agent,
             Err(e) => {
-                eprintln!("Failed to create agent: {}", e);
-                return Err(anyhow!("Failed to create agent: {}", e));
+                eprintln!("Failed to create agent: {e}");
+                return Err(anyhow!("Failed to create agent: {e}"));
             }
         };
         
@@ -261,7 +261,7 @@ mod cli_app {
                         // We'll handle printing full messages elsewhere
                     },
                     sagitta_code::agent::events::AgentEvent::LlmChunk { content, is_final, is_thinking: _ } => {
-                        print!("{}", content);
+                        print!("{content}");
                         io::stdout().flush().unwrap();
                         if is_final {
                             println!();
@@ -273,20 +273,19 @@ mod cli_app {
                     sagitta_code::agent::events::AgentEvent::ToolCallComplete { tool_call_id: _, tool_name, result } => {
                         match &result {
                             sagitta_code::ToolResult::Success { .. } => {
-                                println!("[Tool {} completed successfully]", tool_name);
+                                println!("[Tool {tool_name} completed successfully]");
                             }
                             sagitta_code::ToolResult::Error { error } => {
-                                println!("[Tool {} failed: {}]", tool_name, error);
+                                println!("[Tool {tool_name} failed: {error}]");
                             }
                         }
                     },
-                    sagitta_code::agent::events::AgentEvent::StateChanged(state) => {
-                        if let AgentState::Error { message, details: _ } = &state {
-                            eprintln!("Error: {}", message);
-                        }
+                    sagitta_code::agent::events::AgentEvent::StateChanged(AgentState::Error { message, details: _ }) => {
+                        eprintln!("Error: {message}");
                     },
+                    sagitta_code::agent::events::AgentEvent::StateChanged(_) => {},
                     sagitta_code::agent::events::AgentEvent::Error(msg) => {
-                        eprintln!("Error: {}", msg);
+                        eprintln!("Error: {msg}");
                     },
                     _ => {}
                 }
@@ -345,10 +344,10 @@ mod cli_app {
             match agent.process_message_stream(input).await {
                 Ok(mut stream) => {
                     // We'll handle the actual output through the event receiver
-                    while let Some(_) = stream.next().await {}
+                    while stream.next().await.is_some() {}
                 },
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    eprintln!("Error: {e}");
                 }
             }
         }
@@ -419,7 +418,7 @@ async fn main() -> Result<()> {
     let config = match load_config() {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Warning: Failed to load config: {}", e);
+            eprintln!("Warning: Failed to load config: {e}");
             eprintln!("Using default configuration");
             SagittaCodeConfig::default()
         }

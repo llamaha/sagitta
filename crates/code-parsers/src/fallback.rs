@@ -9,6 +9,12 @@ const MAX_CHUNK_LINES: usize = 500;
 /// Used for unsupported languages or when other parsers fail.
 pub struct FallbackParser;
 
+impl Default for FallbackParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FallbackParser {
     /// Creates a new `FallbackParser`.
     pub fn new() -> Self {

@@ -35,7 +35,7 @@ where
     debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
 
     // 1. Get Query Embedding using EmbeddingPool
-    let embedding_config = app_config_to_embedding_config(&**config);
+    let embedding_config = app_config_to_embedding_config(config);
     let embedding_pool = EmbeddingPool::with_configured_sessions(embedding_config)
         .map_err(|e| SagittaError::EmbeddingError(e.to_string()))?;
     
@@ -65,7 +65,7 @@ where
     debug!("Generated query embedding of dimension {}", query_embedding.len());
 
     // 2. Determine Collection Name using branch-aware naming
-    let collection_name = get_branch_aware_collection_name(repo_name, branch_name, &**config);
+    let collection_name = get_branch_aware_collection_name(repo_name, branch_name, config);
     debug!("Searching collection: {}", collection_name);
 
     // 3. Build Qdrant Search Request

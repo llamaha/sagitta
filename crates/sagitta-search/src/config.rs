@@ -425,14 +425,14 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
     // Add embed_model comments if not set
     if config.embed_model.is_none() && config.onnx_model_path.is_none() && config.onnx_tokenizer_path.is_none() {
         onnx_comments.push_str("\n# Embedding model configuration - choose ONE of the following options:");
-        onnx_comments.push_str("\n");
+        onnx_comments.push('\n');
         onnx_comments.push_str("\n# Option 1: Automatic model downloading (recommended)");
         onnx_comments.push_str("\n# The model will be downloaded to ~/.cache/huggingface/hub/");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # BGE Small v1.5 with INT8 quantization (fast)");
         onnx_comments.push_str("\n#embed_model = \"bge-small-fp32\"  # BGE Small v1.5 with FP32 (standard precision)");
         onnx_comments.push_str("\n# Or use any HuggingFace model ID:");
         onnx_comments.push_str("\n#embed_model = \"BAAI/bge-base-en-v1.5\"");
-        onnx_comments.push_str("\n");
+        onnx_comments.push('\n');
         onnx_comments.push_str("\n# Option 2: Manual model paths (for custom models)");
         onnx_comments.push_str("\n#onnx_model_path = \"/path/to/your/model.onnx\"");
         onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
@@ -445,14 +445,14 @@ pub fn save_config(config: &AppConfig, override_path: Option<&PathBuf>) -> Resul
         }
         if config.onnx_tokenizer_path.is_none() {
             if !onnx_comments.is_empty() { // Add a newline if model_path comments were also added
-                onnx_comments.push_str("\n");
+                onnx_comments.push('\n');
             }
             onnx_comments.push_str("\n# Path to the directory containing tokenizer.json (required for indexing/querying)");
             onnx_comments.push_str("\n#onnx_tokenizer_path = \"/path/to/your/tokenizer_directory\"");
             onnx_comments.push_str("\n# Example: /path/to/sagitta-cli/onnx/");
         }
         if !onnx_comments.is_empty() {
-            onnx_comments.push_str("\n");
+            onnx_comments.push('\n');
             onnx_comments.push_str("\n# Alternative: Use automatic model downloading instead");
             onnx_comments.push_str("\n#embed_model = \"bge-small-fast\"  # or \"bge-small-fp32\"");
         }

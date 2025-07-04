@@ -911,7 +911,7 @@ where
     }
 
     Ok(RepositorySwitchBranchResult {
-        previous_branch: previous_branch,
+        previous_branch,
         new_branch: target_ref_to_checkout.clone(),
         sync_performed,
         files_changed,

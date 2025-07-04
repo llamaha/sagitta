@@ -203,14 +203,14 @@ impl SagittaEmbedError {
 #[cfg(feature = "onnx")]
 impl From<ort::Error> for SagittaEmbedError {
     fn from(error: ort::Error) -> Self {
-        Self::onnx_runtime(format!("ORT error: {}", error))
+        Self::onnx_runtime(format!("ORT error: {error}"))
     }
 }
 
 // Conversion from tokenizer errors
 impl From<tokenizers::Error> for SagittaEmbedError {
     fn from(error: tokenizers::Error) -> Self {
-        Self::tokenization(format!("Tokenizer error: {}", error))
+        Self::tokenization(format!("Tokenizer error: {error}"))
     }
 }
 

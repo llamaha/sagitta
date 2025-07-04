@@ -34,6 +34,12 @@ pub struct MessageHistory {
     token_counter: Option<TokenCounter>,
 }
 
+impl Default for MessageHistory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageHistory {
     /// Create a new empty message history
     pub fn new() -> Self {
@@ -315,6 +321,12 @@ impl MessageHistory {
 #[derive(Debug, Clone)]
 pub struct MessageHistoryManager {
     history: Arc<RwLock<MessageHistory>>,
+}
+
+impl Default for MessageHistoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MessageHistoryManager {

@@ -54,19 +54,19 @@ pub trait QdrantClientTrait: Send + Sync {
 #[async_trait]
 impl QdrantClientTrait for Qdrant {
     async fn health_check(&self) -> Result<HealthCheckReply> {
-        self.health_check().await.map_err(|e| SagittaError::QdrantError(e))
+        self.health_check().await.map_err(SagittaError::QdrantError)
     }
 
     async fn delete_collection(&self, collection_name: String) -> Result<bool> {
         let request = DeleteCollection {
-            collection_name: collection_name,
+            collection_name,
             ..Default::default()
         };
-        Ok(self.delete_collection(request).await.map_err(|e| SagittaError::QdrantError(e))?.result)
+        Ok(self.delete_collection(request).await.map_err(SagittaError::QdrantError)?.result)
     }
 
     async fn search_points(&self, request: SearchPoints) -> Result<SearchResponse> {
-        self.search_points(request).await.map_err(|e| SagittaError::QdrantError(e))
+        self.search_points(request).await.map_err(SagittaError::QdrantError)
     }
 
     async fn get_collection_info(&self, collection_name: String) -> Result<CollectionInfo> {
