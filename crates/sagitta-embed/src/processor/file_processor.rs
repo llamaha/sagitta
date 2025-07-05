@@ -206,7 +206,7 @@ impl DefaultFileProcessor {
                 
                 async move {
                     let _permit = semaphore.acquire().await.map_err(|e| {
-                        SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {}", e))
+                        SagittaEmbedError::thread_safety(format!("Failed to acquire semaphore: {e}"))
                     })?;
                     
                     // Process entire batch in a single blocking task to reduce task overhead
@@ -227,7 +227,7 @@ impl DefaultFileProcessor {
                         batch_chunks
                     })
                     .await
-                    .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing batch task failed: {}", e)))?;
+                    .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing batch task failed: {e}")))?;
                     
                     // Update completed count and report progress
                     let completed = files_completed.fetch_add(batch_size, std::sync::atomic::Ordering::Relaxed) + batch_size;
@@ -291,7 +291,7 @@ impl FileProcessor for DefaultFileProcessor {
             processor.process_file_sync(&file_path)
         })
         .await
-        .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing task failed: {}", e)))?
+        .map_err(|e| SagittaEmbedError::thread_safety(format!("File processing task failed: {e}")))?
     }
 
     async fn process_files(&self, file_paths: &[PathBuf]) -> Result<Vec<ProcessedChunk>> {
@@ -600,7 +600,7 @@ mod tests {
         let content = "fn hello() {\n    println!(\"Hello\");\n}\n\nfn world() {\n    println!(\"World\");\n}";
         let chunks = parse_content_into_chunks(content, "rust").unwrap();
         
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
         assert!(chunks[0].content.contains("hello") || chunks[0].content.contains("world"));
         assert_eq!(chunks[0].language, "rust");
     }
@@ -734,7 +734,7 @@ mod tests {
     #[tokio::test]
     async fn test_processor_debug_format() {
         let processor = DefaultFileProcessor::with_defaults();
-        let debug_str = format!("{:?}", processor);
+        let debug_str = format!("{processor:?}");
         assert!(debug_str.contains("DefaultFileProcessor"));
         assert!(debug_str.contains("config"));
         assert!(debug_str.contains("syntax_parser_fn"));
@@ -747,8 +747,8 @@ mod tests {
         
         // Create many small files
         for i in 0..50 {
-            let file_path = temp_dir.path().join(format!("test_{}.rs", i));
-            fs::write(&file_path, format!("fn test_{}() {{}}", i)).unwrap();
+            let file_path = temp_dir.path().join(format!("test_{i}.rs"));
+            fs::write(&file_path, format!("fn test_{i}() {{}}")).unwrap();
             files.push(file_path);
         }
 

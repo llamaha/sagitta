@@ -98,7 +98,7 @@ where
 
     match sync_repository(
         client,
-        &repo_config,
+        repo_config,
         options,
         &app_config_clone, // Pass reference instead of Arc<RwLock<>>
         Some(progress_reporter),
@@ -123,7 +123,7 @@ where
                 }
 
                 if let Err(e) = save_config(config, override_path) {
-                    error!("Failed to save config after sync: {}", e);
+                    error!("Failed to save config after sync: {e}");
                     println!("{}", "Warning: Failed to save configuration after successful sync.".red());
                 } else {
                      println!("{}", "Configuration saved.".dimmed());
@@ -135,8 +135,8 @@ where
             }
         }
         Err(e) => {
-            error!("Sync error: {}", e);
-            println!("{}", format!("❌ Sync error: {}", e).red());
+            error!("Sync error: {e}");
+            println!("{}", format!("❌ Sync error: {e}").red());
             return Err(e.into());
         }
     }

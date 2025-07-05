@@ -36,11 +36,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Model loaded successfully with optimized configuration!");
             
             // Example texts for embedding
-            let texts = vec![
-                "This is a sample text for embedding".to_string(),
+            let texts = ["This is a sample text for embedding".to_string(),
                 "Another example sentence".to_string(),
-                "Machine learning is fascinating".to_string(),
-            ];
+                "Machine learning is fascinating".to_string()];
 
             // Generate embeddings using optimized configuration
             let text_refs: Vec<&str> = texts.iter().map(|s| &**s).collect();
@@ -52,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Err(e) => {
-            println!("Note: This example uses dummy paths. Error: {}", e);
+            println!("Note: This example uses dummy paths. Error: {e}");
             println!("In real usage, provide valid paths to your ONNX model and tokenizer files.");
         }
     }

@@ -139,21 +139,21 @@ impl SyncProgressReporter for IndicatifCliReporter {
                 self.pb.set_length(total_files as u64);
                 self.pb.set_position(current_file_num as u64);
                 let file_name = current_file.map_or_else(|| "".to_string(), |p| p.file_name().unwrap_or_default().to_string_lossy().to_string());
-                let mut msg = format!("Indexing {}/{} {}", current_file_num, total_files, file_name);
+                let mut msg = format!("Indexing {current_file_num}/{total_files} {file_name}");
                 if let Some(fps) = files_per_second {
-                    msg.push_str(&format!(" ({:.1} files/s)", fps));
+                    msg.push_str(&format!(" ({fps:.1} files/s)"));
                 }
                 self.pb.set_message(msg);
             }
             SyncStage::CollectFiles { total_files, message } => {
                 self.pb.set_length(total_files as u64); // Or some other appropriate length
-                self.pb.set_message(format!("Collect: {} ({})", message, total_files));
+                self.pb.set_message(format!("Collect: {message} ({total_files})"));
             }
             SyncStage::Completed { message } => {
-                self.pb.finish_with_message(format!("Completed: {}", message));
+                self.pb.finish_with_message(format!("Completed: {message}"));
             }
             SyncStage::Error { message } => {
-                self.pb.abandon_with_message(format!("Error: {}", message));
+                self.pb.abandon_with_message(format!("Error: {message}"));
             }
             _ => { // For other stages, just tick or set a generic message
                 self.pb.tick();
@@ -190,7 +190,7 @@ async fn handle_simple_index(
     log::info!("Starting simple indexing process...");
 
     let collection_name = LEGACY_INDEX_COLLECTION;
-    log::info!("Using default collection: '{}'", collection_name);
+    log::info!("Using default collection: '{collection_name}'");
 
     // --- Validate Config for ONNX paths for simple index FIRST ---
     if cli_args.onnx_model_path_arg.is_some() || std::env::var("SAGITTA_ONNX_MODEL").is_ok() {
@@ -209,25 +209,25 @@ async fn handle_simple_index(
     log::info!("Using embedding configuration from configuration file for simple index.");
 
     // --- Ensure Collection Exists with Correct Dimension --- 
-    let vector_dim = config.performance.vector_dimension as u64;
+    let vector_dim = config.performance.vector_dimension;
 
     ensure_collection_exists(client.clone(), collection_name, vector_dim)
         .await
-        .with_context(|| format!("Failed to ensure collection '{}' exists with dimension {}", collection_name, vector_dim))?;
-    log::info!("Ensured collection '{}' exists with dimension {}.", collection_name, vector_dim);
+        .with_context(|| format!("Failed to ensure collection '{collection_name}' exists with dimension {vector_dim}"))?;
+    log::info!("Ensured collection '{collection_name}' exists with dimension {vector_dim}.");
 
     // --- Clear existing points from collection before indexing (optional, original behavior) ---
     // If ensure_collection_exists recreates on dimension mismatch, this might not be strictly necessary
     // but clearing points ensures a fresh index if the collection already existed with the correct dimension.
-    println!("Clearing points from default collection '{}' before indexing...", collection_name);
+    println!("Clearing points from default collection '{collection_name}' before indexing...");
     match delete_all_points(client.clone(), collection_name).await {
         Ok(_) => {
-            log::info!("Successfully cleared points from collection '{}'.", collection_name);
+            log::info!("Successfully cleared points from collection '{collection_name}'.");
             println!("Collection points cleared.");
         }
         Err(e) => {
-            log::error!("Failed to clear points from collection '{}': {}. Proceeding anyway.", collection_name, e);
-            eprintln!("Warning: Failed to clear points from collection '{}': {}. Proceeding anyway.", collection_name, e);
+            log::error!("Failed to clear points from collection '{collection_name}': {e}. Proceeding anyway.");
+            eprintln!("Warning: Failed to clear points from collection '{collection_name}': {e}. Proceeding anyway.");
         }
     }
 
@@ -284,22 +284,22 @@ async fn handle_simple_index(
             Ok(())
         }
         Err(e) => {
-            log::error!("Simple indexing failed: {}", e);
+            log::error!("Simple indexing failed: {e}");
             match e {
                 sagitta_search::error::SagittaError::ConfigurationError(ref msg) => {
-                    eprintln!("Configuration Error: {}", msg);
+                    eprintln!("Configuration Error: {msg}");
                 }
                 sagitta_search::error::SagittaError::EmbeddingError(ref msg) => {
-                    eprintln!("Embedding Error: {}", msg);
+                    eprintln!("Embedding Error: {msg}");
                 }
                 sagitta_search::error::SagittaError::QdrantError(ref msg) => {
-                    eprintln!("Database Error: {}", msg);
+                    eprintln!("Database Error: {msg}");
                 }
                  sagitta_search::error::SagittaError::IOError(ref io_err) => {
-                     eprintln!("I/O Error during indexing: {}", io_err);
+                     eprintln!("I/O Error during indexing: {io_err}");
                  }
                 _ => {
-                    eprintln!("An unexpected error occurred during indexing: {}", e);
+                    eprintln!("An unexpected error occurred during indexing: {e}");
                 }
             }
             // Convert the specific error back to a generic anyhow::Error for the CLI handler return type
@@ -323,8 +323,8 @@ async fn handle_simple_query(
 
     // Ensure collection exists before querying
     if !client.collection_exists(collection_name).await? {
-        log::warn!("Collection '{}' doesn't exist. Creating it before searching.", collection_name);
-        let vector_dim = config.performance.vector_dimension as u64;
+        log::warn!("Collection '{collection_name}' doesn't exist. Creating it before searching.");
+        let vector_dim = config.performance.vector_dimension;
         ensure_collection_exists(client.clone(), collection_name, vector_dim).await?;
         println!("No results found (new collection created).");
         return Ok(());
@@ -334,11 +334,11 @@ async fn handle_simple_query(
     let mut filter_conditions = Vec::new();
     if let Some(lang_name) = &args.lang {
         filter_conditions.push(Condition::matches(FIELD_LANGUAGE, lang_name.clone()));
-        log::debug!("Filtering by language: {}", lang_name);
+        log::debug!("Filtering by language: {lang_name}");
     }
     if let Some(element_type) = &args.element_type {
         filter_conditions.push(Condition::matches(FIELD_ELEMENT_TYPE, element_type.clone()));
-        log::debug!("Filtering by element type: {}", element_type);
+        log::debug!("Filtering by element type: {element_type}");
     }
     let filter = if filter_conditions.is_empty() { None } else { Some(Filter::must(filter_conditions)) };
 
@@ -379,7 +379,7 @@ async fn handle_simple_query(
                         let payload_json = serde_json::to_value(point.payload)
                             .unwrap_or(serde_json::Value::Null);
                         serde_json::json!({
-                            "id": point.id.map(|id| format!("{:?}", id)).unwrap_or_default(),
+                            "id": point.id.map(|id| format!("{id:?}")).unwrap_or_default(),
                             "score": point.score,
                             "payload": payload_json
                         })
@@ -398,18 +398,18 @@ async fn handle_simple_query(
                         println!("--- Result {} (Score: {:.4}) ---", i + 1, point.score);
                         // Pretty print payload fields
                         if let Some(path) = point.payload.get(FIELD_FILE_PATH).and_then(|v| v.as_str()) {
-                            println!("  File: {}", path);
+                            println!("  File: {path}");
                         }
                         if let Some(start) = point.payload.get(FIELD_START_LINE).and_then(|v| v.as_integer()) {
                             if let Some(end) = point.payload.get(FIELD_END_LINE).and_then(|v| v.as_integer()) {
-                                println!("  Lines: {}-{}", start, end);
+                                println!("  Lines: {start}-{end}");
                             }
                         }
                         if let Some(lang) = point.payload.get(FIELD_LANGUAGE).and_then(|v| v.as_str()) {
-                            println!("  Lang: {}", lang);
+                            println!("  Lang: {lang}");
                         }
                         if let Some(elem_type) = point.payload.get(FIELD_ELEMENT_TYPE).and_then(|v| v.as_str()) {
-                            println!("  Type: {}", elem_type);
+                            println!("  Type: {elem_type}");
                         }
                         if let Some(content) = point.payload.get(FIELD_CHUNK_CONTENT).and_then(|v| v.as_str()) {
                             println!("  Content:\n    {}", content.trim().replace('\n', "\n    "));
@@ -422,19 +422,19 @@ async fn handle_simple_query(
             // Handle specific SagittaError variants if needed, otherwise use anyhow
             match &e {
                  sagitta_search::error::SagittaError::ConfigurationError(ref msg) => {
-                     eprintln!("Configuration Error: {}", msg);
+                     eprintln!("Configuration Error: {msg}");
                  }
                  sagitta_search::error::SagittaError::EmbeddingError(ref msg) => {
-                     eprintln!("Embedding Error: {}", msg);
+                     eprintln!("Embedding Error: {msg}");
                  }
                  sagitta_search::error::SagittaError::IOError(ref io_err) => {
-                     eprintln!("Error during search (IO): {}", io_err);
+                     eprintln!("Error during search (IO): {io_err}");
                  }
                  sagitta_search::error::SagittaError::QdrantError(ref msg) => {
-                    eprintln!("Qdrant client error during search: {}", msg);
+                    eprintln!("Qdrant client error during search: {msg}");
                  }
                  // Add other specific SagittaError arms here if needed
-                 _ => eprintln!("An error occurred during search: {}", e),
+                 _ => eprintln!("An error occurred during search: {e}"),
              }
              return Err(anyhow!(e).context("Search operation failed"));
         }
@@ -451,36 +451,36 @@ async fn handle_simple_clear(
     client: Arc<Qdrant>,
 ) -> Result<()> {
     let collection_name = LEGACY_INDEX_COLLECTION;
-    log::info!("Starting simple clear (delete collection) process for: '{}'", collection_name);
+    log::info!("Starting simple clear (delete collection) process for: '{collection_name}'");
 
     if !client.collection_exists(collection_name).await.unwrap_or(false) {
-        println!("Default collection '{}' does not exist. Nothing to clear.", collection_name);
+        println!("Default collection '{collection_name}' does not exist. Nothing to clear.");
         return Ok(());
     }
 
-    println!("Deleting default collection '{}'...", collection_name);
-    log::info!("Calling core delete_collection_by_name for collection '{}'...", collection_name);
+    println!("Deleting default collection '{collection_name}'...");
+    log::info!("Calling core delete_collection_by_name for collection '{collection_name}'...");
 
     match delete_collection_by_name(client.clone(), collection_name).await {
         Ok(_) => {
             // The delete_collection_by_name function in core already logs success/warnings based on response.result
-            println!("Successfully deleted default collection '{}'.", collection_name);
-            log::info!("Successfully initiated deletion of collection '{}'.", collection_name);
+            println!("Successfully deleted default collection '{collection_name}'.");
+            log::info!("Successfully initiated deletion of collection '{collection_name}'.");
         }
         Err(e) => {
             if e.to_string().contains("Not found") || e.to_string().contains("doesn\'t exist") {
                 println!(
                     "{}",
-                    format!("Collection '{}' did not exist.", collection_name).yellow()
+                    format!("Collection '{collection_name}' did not exist.").yellow()
                 );
-                log::warn!("Collection '{}' not found during delete attempt.", collection_name);
+                log::warn!("Collection '{collection_name}' not found during delete attempt.");
             } else {
                 // For other errors, report them
                 eprintln!(
                     "{}",
-                    format!("Failed to delete collection '{}': {}", collection_name, e).red()
+                    format!("Failed to delete collection '{collection_name}': {e}").red()
                 );
-                return Err(e).context(format!("Failed to delete collection '{}'", collection_name));
+                return Err(e).context(format!("Failed to delete collection '{collection_name}'"));
             }
         }
     }

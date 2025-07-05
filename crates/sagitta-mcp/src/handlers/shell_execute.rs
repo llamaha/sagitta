@@ -78,7 +78,7 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
             // Command failed to execute
             Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to execute command: {}", e),
+                message: format!("Failed to execute command: {e}"),
                 data: None,
             })
         }

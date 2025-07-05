@@ -37,12 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = EmbeddingPool::with_configured_sessions(config)?;
     
     // Sample texts to embed
-    let texts = vec![
-        "Hello, world!",
+    let texts = ["Hello, world!",
         "This is a sample text for embedding generation.",
         "Sagitta-embed provides high-performance text embeddings.",
-        "ONNX models enable fast inference with session pooling.",
-    ];
+        "ONNX models enable fast inference with session pooling."];
     
     println!("Generating embeddings for {} texts...", texts.len());
     
@@ -59,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 element_type: "text".to_string(),
                 context: None,
             },
-            id: format!("text_{}", i),
+            id: format!("text_{i}"),
         }
     }).collect();
     

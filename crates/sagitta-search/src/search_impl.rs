@@ -118,11 +118,7 @@ where
     let search_config = search_config.unwrap_or_default();
     
     log::debug!(
-        "Core: Hybrid searching collection \"{}\" for query: \"{}\" with limit {} and filter: {:?}",
-        collection_name,
-        query_text,
-        limit,
-        filter
+        "Core: Hybrid searching collection \"{collection_name}\" for query: \"{query_text}\" with limit {limit} and filter: {filter:?}"
     );
 
     // --- Load Vocabulary --- 
@@ -132,7 +128,7 @@ where
     let vocabulary_manager = match VocabularyManager::load(&vocab_path) {
         Ok(vm) => {
             if vm.is_empty() {
-                log::warn!("Vocabulary for collection '{}' is empty. Performing dense-only search.", collection_name);
+                log::warn!("Vocabulary for collection '{collection_name}' is empty. Performing dense-only search.");
             }
             Some(vm)
         },
@@ -206,7 +202,7 @@ where
         log::debug!("Core: Generated sparse query vector with {} unique terms using improved scoring.", sparse_vec.len());
         sparse_vec
     } else {
-        log::info!("No vocabulary available for collection '{}'. Performing dense-only search.", collection_name);
+        log::info!("No vocabulary available for collection '{collection_name}'. Performing dense-only search.");
         Vec::new()
     };
 
@@ -241,7 +237,7 @@ where
         log::debug!("Core: Using hybrid search (dense + sparse) with {} fusion.", 
                    match search_config.fusion_method { FusionMethod::Rrf => "RRF", FusionMethod::Dbsf => "DBSF" });
     } else {
-        log::info!("Performing dense-only search for query: '{}'", query_text);
+        log::info!("Performing dense-only search for query: '{query_text}'");
     }
 
     // Choose fusion method based on config

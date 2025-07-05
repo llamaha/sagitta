@@ -505,7 +505,7 @@ where
                                 files_added: 0,
                                 files_updated: 0,
                                 files_removed: 0,
-                                error_message: Some(format!("Sync failed: {}", e)),
+                                error_message: Some(format!("Sync failed: {e}")),
                             })
                         }
                     }

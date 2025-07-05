@@ -42,7 +42,7 @@ pub fn find_files_matching_pattern(
     log::debug!("Searching in: {} for pattern: '{}' (case_sensitive: {})", search_path.display(), pattern_str, case_sensitive);
 
     let glob_pattern = Pattern::new(pattern_str)
-        .with_context(|| format!("Invalid glob pattern: {}", pattern_str))?;
+        .with_context(|| format!("Invalid glob pattern: {pattern_str}"))?;
 
     let match_options = MatchOptions {
         case_sensitive,

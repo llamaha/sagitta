@@ -49,11 +49,11 @@ where
         .or(repo_config.active_branch.as_deref())
         .unwrap_or(&repo_config.default_branch);
 
-    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, &config);
+    let collection_name = get_branch_aware_collection_name(&repo_name_to_clear, branch_name, config);
     let collection_existed_before_clear = match client.collection_exists(collection_name.clone()).await {
         Ok(exists) => exists,
         Err(e) => {
-            log::warn!("Failed to check existence of Qdrant collection '{}': {}. Proceeding with config clear anyway.", collection_name, e);
+            log::warn!("Failed to check existence of Qdrant collection '{collection_name}': {e}. Proceeding with config clear anyway.");
             false 
         }
     };
@@ -84,15 +84,15 @@ where
         println!("Deleting Qdrant collection '{}'...", collection_name.cyan());
         match delete_collection_by_name(client.clone(), &collection_name).await {
             Ok(_) => {
-                log::info!("Successfully initiated deletion of collection '{}' for repository '{}'.", collection_name, repo_name_to_clear);
+                log::info!("Successfully initiated deletion of collection '{collection_name}' for repository '{repo_name_to_clear}'.");
             }
             Err(e) => {
-                log::error!("Failed to delete collection '{}' for repository '{}': {}", collection_name, repo_name_to_clear, e);
-                eprintln!("{}", format!("Warning: Failed to delete Qdrant collection '{}'. Error: {}. Proceeding to clear local sync state.", collection_name, e).red());
+                log::error!("Failed to delete collection '{collection_name}' for repository '{repo_name_to_clear}': {e}");
+                eprintln!("{}", format!("Warning: Failed to delete Qdrant collection '{collection_name}'. Error: {e}. Proceeding to clear local sync state.").red());
             }
         }
     } else {
-         log::info!("Qdrant Collection '{}' did not exist. Only clearing local sync state.", collection_name);
+         log::info!("Qdrant Collection '{collection_name}' did not exist. Only clearing local sync state.");
          println!("Qdrant Collection '{}' does not exist. Only clearing local sync state.", collection_name.cyan());
     }
 
@@ -111,9 +111,9 @@ where
         .context("Failed to save configuration after clearing repository state")?;
     
     if collection_existed_before_clear {
-        println!("{}", format!("Qdrant collection for repository '{}' marked for deletion and local sync status reset.", repo_name_to_clear).green());
+        println!("{}", format!("Qdrant collection for repository '{repo_name_to_clear}' marked for deletion and local sync status reset.").green());
     } else {
-        println!("{}", format!("Local sync status for repository '{}' reset (Qdrant collection was not present).", repo_name_to_clear).green());
+        println!("{}", format!("Local sync status for repository '{repo_name_to_clear}' reset (Qdrant collection was not present).").green());
     }
 
     Ok(())

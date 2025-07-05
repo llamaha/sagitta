@@ -58,8 +58,7 @@ pub fn validate_text_batch(texts: &[&str]) -> Result<()> {
     for (i, text) in texts.iter().enumerate() {
         if text.trim().is_empty() {
             return Err(SagittaEmbedError::invalid_input(format!(
-                "Text at index {} is empty or whitespace-only",
-                i
+                "Text at index {i} is empty or whitespace-only"
             )));
         }
     }

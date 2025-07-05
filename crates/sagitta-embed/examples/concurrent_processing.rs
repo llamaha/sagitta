@@ -1,4 +1,4 @@
-use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProcessor, EmbeddingModelType};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingProcessor};
 use sagitta_embed::processor::{ProcessedChunk, ChunkMetadata};
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,8 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check if model files exist
     if !std::path::Path::new(model_path).exists() || !std::path::Path::new(tokenizer_path).exists() {
         println!("⚠️  Model files not found. This example requires:");
-        println!("   - ONNX model file: {}", model_path);
-        println!("   - Tokenizer file: {}", tokenizer_path);
+        println!("   - ONNX model file: {model_path}");
+        println!("   - Tokenizer file: {tokenizer_path}");
         println!();
         println!("To run this example:");
         println!("1. Download a compatible ONNX embedding model");
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let batch_count = 10;
     let texts_per_batch = 5;
     
-    println!("Starting {} concurrent batches with {} texts each...", batch_count, texts_per_batch);
+    println!("Starting {batch_count} concurrent batches with {texts_per_batch} texts each...");
     
     let start_time = Instant::now();
     let mut handles = vec![];
@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Generate texts for this batch
             let texts: Vec<String> = (0..texts_per_batch)
-                .map(|i| format!("Batch {} text {}: This is sample text for concurrent embedding generation.", batch_id, i))
+                .map(|i| format!("Batch {batch_id} text {i}: This is sample text for concurrent embedding generation."))
                 .collect();
             
             // Convert texts to ProcessedChunks
@@ -72,15 +72,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ProcessedChunk {
                     content: text.clone(),
                     metadata: ChunkMetadata {
-                        file_path: PathBuf::from(format!("batch_{}.txt", batch_id)),
+                        file_path: PathBuf::from(format!("batch_{batch_id}.txt")),
                         start_line: i,
                         end_line: i,
                         language: "text".to_string(),
                         file_extension: "txt".to_string(),
                         element_type: "text".to_string(),
-                        context: Some(format!("batch_{}", batch_id)),
+                        context: Some(format!("batch_{batch_id}")),
                     },
-                    id: format!("batch_{}_{}", batch_id, i),
+                    id: format!("batch_{batch_id}_{i}"),
                 }
             }).collect();
             
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok((batch_id, embedded_chunks.len(), batch_duration))
                 },
                 Err(e) => {
-                    println!("❌ Batch {} failed: {}", batch_id, e);
+                    println!("❌ Batch {batch_id} failed: {e}");
                     Err(e)
                 }
             }
@@ -118,10 +118,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 batch_durations.push(duration);
             },
             Ok(Err(e)) => {
-                println!("Batch processing error: {}", e);
+                println!("Batch processing error: {e}");
             },
             Err(e) => {
-                println!("Task join error: {}", e);
+                println!("Task join error: {e}");
             }
         }
     }
@@ -132,9 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("Concurrent Processing Summary");
     println!("============================");
-    println!("Total duration: {:?}", total_duration);
-    println!("Successful batches: {}/{}", successful_batches, batch_count);
-    println!("Total embeddings generated: {}", total_embeddings);
+    println!("Total duration: {total_duration:?}");
+    println!("Successful batches: {successful_batches}/{batch_count}");
+    println!("Total embeddings generated: {total_embeddings}");
     
     if !batch_durations.is_empty() {
         let avg_batch_duration = batch_durations.iter().sum::<std::time::Duration>() / batch_durations.len() as u32;
@@ -142,12 +142,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let max_batch_duration = batch_durations.iter().max().unwrap();
         
         println!("Batch duration stats:");
-        println!("  Average: {:?}", avg_batch_duration);
-        println!("  Min: {:?}", min_batch_duration);
-        println!("  Max: {:?}", max_batch_duration);
+        println!("  Average: {avg_batch_duration:?}");
+        println!("  Min: {min_batch_duration:?}");
+        println!("  Max: {max_batch_duration:?}");
         
         let embeddings_per_second = total_embeddings as f64 / total_duration.as_secs_f64();
-        println!("Throughput: {:.2} embeddings/second", embeddings_per_second);
+        println!("Throughput: {embeddings_per_second:.2} embeddings/second");
     }
     
     // Demonstrate sequential vs concurrent comparison
@@ -160,22 +160,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     for batch_id in 0..3 { // Just do a few batches for comparison
         let texts: Vec<String> = (0..texts_per_batch)
-            .map(|i| format!("Sequential batch {} text {}: Sample text for comparison.", batch_id, i))
+            .map(|i| format!("Sequential batch {batch_id} text {i}: Sample text for comparison."))
             .collect();
         
         let chunks: Vec<ProcessedChunk> = texts.iter().enumerate().map(|(i, text)| {
             ProcessedChunk {
                 content: text.clone(),
                 metadata: ChunkMetadata {
-                    file_path: PathBuf::from(format!("sequential_{}.txt", batch_id)),
+                    file_path: PathBuf::from(format!("sequential_{batch_id}.txt")),
                     start_line: i,
                     end_line: i,
                     language: "text".to_string(),
                     file_extension: "txt".to_string(),
                     element_type: "text".to_string(),
-                    context: Some(format!("sequential_{}", batch_id)),
+                    context: Some(format!("sequential_{batch_id}")),
                 },
-                id: format!("sequential_{}_{}", batch_id, i),
+                id: format!("sequential_{batch_id}_{i}"),
             }
         }).collect();
         
@@ -186,13 +186,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sequential_duration = sequential_start.elapsed();
     let sequential_rate = sequential_embeddings as f64 / sequential_duration.as_secs_f64();
     
-    println!("Sequential: {} embeddings in {:?} ({:.2} embeddings/second)", 
-             sequential_embeddings, sequential_duration, sequential_rate);
+    println!("Sequential: {sequential_embeddings} embeddings in {sequential_duration:?} ({sequential_rate:.2} embeddings/second)");
     
     if !batch_durations.is_empty() {
         let concurrent_rate = total_embeddings as f64 / total_duration.as_secs_f64();
         let speedup = concurrent_rate / sequential_rate;
-        println!("Concurrent speedup: {:.2}x faster", speedup);
+        println!("Concurrent speedup: {speedup:.2}x faster");
     }
     
     Ok(())

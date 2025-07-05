@@ -15,8 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tokenizer_path = std::env::var("SAGITTA_ONNX_TOKENIZER")
         .unwrap_or_else(|_| "bge_small_onnx".to_string());
 
-    println!("Model path: {}", model_path);
-    println!("Tokenizer path: {}", tokenizer_path);
+    println!("Model path: {model_path}");
+    println!("Tokenizer path: {tokenizer_path}");
 
     // Create configuration - sequence length will be auto-detected
     let config = EmbeddingConfig::default();
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test with a sample text to see tokenization behavior
     println!("\n--- Testing Tokenization ---");
     let test_text = "This is a test sentence to see how tokenization works with the current sequence length setting.";
-    println!("Test text: {}", test_text);
+    println!("Test text: {test_text}");
 
     let embeddings = model.embed_batch(&[test_text])?;
     println!("Generated embedding with dimension: {}", embeddings[0].len());

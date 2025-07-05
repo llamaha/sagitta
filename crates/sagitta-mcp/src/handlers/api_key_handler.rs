@@ -57,7 +57,7 @@ pub async fn create_api_key_handler(
                     id: String::new(),
                     key: String::new(),
                     user_id: None,
-                    description: Some(format!("Error: {}", e)),
+                    description: Some(format!("Error: {e}")),
                     created_at: 0,
                     expires_at: None,
                     last_used_at: None,

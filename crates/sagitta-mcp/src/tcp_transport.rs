@@ -78,7 +78,7 @@ async fn handle_connection<C: QdrantClientTrait + Send + Sync + 'static>(
                         Some(Response::error(
                             ErrorObject {
                                 code: error_codes::PARSE_ERROR,
-                                message: format!("Failed to parse request: {}", e),
+                                message: format!("Failed to parse request: {e}"),
                                 data: None,
                             },
                             None, // No ID if request parsing failed

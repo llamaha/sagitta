@@ -22,50 +22,50 @@ impl SyncProgressReporter for LoggingProgressReporter {
     async fn report(&self, progress: SyncProgress) {
         match progress.stage {
             SyncStage::GitFetch { message, progress: Some((received, total)) } => {
-                log::info!("[GitFetch] {}: {}/{}", message, received, total);
+                log::info!("[GitFetch] {message}: {received}/{total}");
             }
             SyncStage::GitFetch { message, progress: None } => {
-                log::info!("[GitFetch] {}", message);
+                log::info!("[GitFetch] {message}");
             }
             SyncStage::DiffCalculation { message } => {
-                log::info!("[DiffCalculation] {}", message);
+                log::info!("[DiffCalculation] {message}");
             }
             SyncStage::IndexFile { current_file, total_files, current_file_num, files_per_second, .. } => {
                 let file_name = current_file.map_or_else(|| "N/A".to_string(), |p| p.to_string_lossy().to_string());
                 if let Some(fps) = files_per_second {
-                    log::info!("[IndexFile] Processing file {}/{} ({:.2} files/s): {}", current_file_num, total_files, fps, file_name);
+                    log::info!("[IndexFile] Processing file {current_file_num}/{total_files} ({fps:.2} files/s): {file_name}");
                 } else {
-                    log::info!("[IndexFile] Processing file {}/{}: {}", current_file_num, total_files, file_name);
+                    log::info!("[IndexFile] Processing file {current_file_num}/{total_files}: {file_name}");
                 }
             }
             SyncStage::DeleteFile { current_file, total_files, current_file_num, files_per_second, .. } => {
                 let file_name = current_file.map_or_else(|| "N/A".to_string(), |p| p.to_string_lossy().to_string());
                 if let Some(fps) = files_per_second {
-                    log::info!("[DeleteFile] Deleting file {}/{} ({:.2} files/s): {}", current_file_num, total_files, fps, file_name);
+                    log::info!("[DeleteFile] Deleting file {current_file_num}/{total_files} ({fps:.2} files/s): {file_name}");
                 } else {
-                    log::info!("[DeleteFile] Deleting file {}/{}: {}", current_file_num, total_files, file_name);
+                    log::info!("[DeleteFile] Deleting file {current_file_num}/{total_files}: {file_name}");
                 }
             }
             SyncStage::CollectFiles { total_files, message } => {
-                log::info!("[CollectFiles] {}: {} files", message, total_files);
+                log::info!("[CollectFiles] {message}: {total_files} files");
             }
             SyncStage::QueryLanguages { message } => {
-                log::info!("[QueryLanguages] {}", message);
+                log::info!("[QueryLanguages] {message}");
             }
             SyncStage::VerifyingCollection { message } => {
-                log::info!("[VerifyingCollection] {}", message);
+                log::info!("[VerifyingCollection] {message}");
             }
             SyncStage::Completed { message } => {
-                log::info!("[Completed] {}", message);
+                log::info!("[Completed] {message}");
             }
             SyncStage::Error { message } => {
-                log::error!("[Error] {}", message);
+                log::error!("[Error] {message}");
             }
             SyncStage::Idle => {
                 log::debug!("[Idle]");
             }
             SyncStage::Heartbeat { message } => {
-                log::debug!("[Heartbeat] {}", message);
+                log::debug!("[Heartbeat] {message}");
             }
         }
     }
@@ -76,25 +76,25 @@ impl AddProgressReporter for LoggingProgressReporter {
     async fn report(&self, progress: AddProgress) {
         match progress.stage {
             RepoAddStage::Clone { message, progress: Some((received, total)) } => {
-                log::info!("[Clone] {}: {}/{}", message, received, total);
+                log::info!("[Clone] {message}: {received}/{total}");
             }
             RepoAddStage::Clone { message, progress: None } => {
-                log::info!("[Clone] {}", message);
+                log::info!("[Clone] {message}");
             }
             RepoAddStage::Fetch { message, progress: Some((received, total)) } => {
-                log::info!("[Fetch] {}: {}/{}", message, received, total);
+                log::info!("[Fetch] {message}: {received}/{total}");
             }
             RepoAddStage::Fetch { message, progress: None } => {
-                log::info!("[Fetch] {}", message);
+                log::info!("[Fetch] {message}");
             }
             RepoAddStage::Checkout { message } => {
-                log::info!("[Checkout] {}", message);
+                log::info!("[Checkout] {message}");
             }
             RepoAddStage::Completed { message } => {
-                log::info!("[Completed] {}", message);
+                log::info!("[Completed] {message}");
             }
             RepoAddStage::Error { message } => {
-                log::error!("[Error] {}", message);
+                log::error!("[Error] {message}");
             }
             RepoAddStage::Idle => {
                 log::debug!("[Idle]");

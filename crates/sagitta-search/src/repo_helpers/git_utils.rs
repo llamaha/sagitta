@@ -31,12 +31,12 @@ pub fn create_fetch_options<'a>(
     let is_ssh_url = repo_url.starts_with("git@") || repo_url.starts_with("ssh://");
     
     callbacks.credentials(move |_url, username_from_git, allowed_types| {
-        log::debug!("Credential callback triggered. URL: {}, Username: {:?}, Allowed: {:?}", _url, username_from_git, allowed_types);
+        log::debug!("Credential callback triggered. URL: {_url}, Username: {username_from_git:?}, Allowed: {allowed_types:?}");
         
         // In server mode, immediately fail for SSH URLs without explicit credentials
         if is_server_mode && is_ssh_url && ssh_key_path.is_none() && 
-           !relevant_repo_config.as_ref().and_then(|r| r.ssh_key_path.as_ref()).is_some() {
-            log::error!("Server mode detected with SSH URL '{}' but no SSH key configured. Use HTTPS URLs or configure SSH keys explicitly.", _url);
+           relevant_repo_config.as_ref().and_then(|r| r.ssh_key_path.as_ref()).is_none() {
+            log::error!("Server mode detected with SSH URL '{_url}' but no SSH key configured. Use HTTPS URLs or configure SSH keys explicitly.");
             return Err(git2::Error::from_str("Server mode cannot use interactive authentication. Use HTTPS URLs or configure SSH keys explicitly."));
         }
         
@@ -47,7 +47,7 @@ pub fn create_fetch_options<'a>(
             log::debug!("Attempting SSH key authentication from direct parameters. User: '{}', Key Path: {}", user, key_path.display());
             match Cred::ssh_key(user, None, key_path, ssh_key_passphrase) {
                 Ok(cred) => {
-                    log::info!("SSH key credential created successfully from direct parameters for user '{}'.", user);
+                    log::info!("SSH key credential created successfully from direct parameters for user '{user}'.");
                     return Ok(cred);
                 }
                 Err(e) => {
@@ -64,7 +64,7 @@ pub fn create_fetch_options<'a>(
                     log::debug!("Attempting SSH key authentication from repo config. User: '{}', Key Path: {}", user, key_path.display());
                     match Cred::ssh_key(user, None, key_path, repo_config.ssh_key_passphrase.as_deref()) {
                         Ok(cred) => {
-                            log::info!("SSH key credential created successfully from repo config for user '{}'.", user);
+                            log::info!("SSH key credential created successfully from repo config for user '{user}'.");
                             return Ok(cred);
                         }
                         Err(e) => {
@@ -76,12 +76,12 @@ pub fn create_fetch_options<'a>(
                 }
             }
         } else {
-            log::debug!("No repository configuration found for URL '{}' in credential callback.", _url);
+            log::debug!("No repository configuration found for URL '{_url}' in credential callback.");
         }
         
         // In server mode, don't try to use default credentials which might prompt for a password
         if is_server_mode && is_ssh_url {
-            log::error!("No configured SSH credentials found for URL '{}' in server mode. Unable to authenticate.", _url);
+            log::error!("No configured SSH credentials found for URL '{_url}' in server mode. Unable to authenticate.");
             return Err(git2::Error::from_str("Server mode cannot use interactive authentication. Configure SSH keys explicitly."));
         }
         
@@ -94,11 +94,11 @@ pub fn create_fetch_options<'a>(
                     return Ok(cred);
                 }
                 Err(e) => {
-                    log::warn!("Failed to get default system credentials: {}", e);
+                    log::warn!("Failed to get default system credentials: {e}");
                 }
             }
         }
-        log::error!("No suitable credentials found or configured for URL '{}', user '{:?}'", _url, username_from_git);
+        log::error!("No suitable credentials found or configured for URL '{_url}', user '{username_from_git:?}'");
         Err(git2::Error::from_str("Authentication failed: no suitable credentials found"))
     });
     let mut fetch_opts = FetchOptions::new();

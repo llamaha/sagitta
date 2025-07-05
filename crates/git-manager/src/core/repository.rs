@@ -74,14 +74,14 @@ impl GitRepository {
                 let oid = head.target().ok_or_else(|| {
                     GitError::invalid_state("HEAD has no target")
                 })?;
-                Ok(format!("detached-{}", oid))
+                Ok(format!("detached-{oid}"))
             }
         } else {
             // We're in detached HEAD state
             let oid = head.target().ok_or_else(|| {
                 GitError::invalid_state("HEAD has no target")
             })?;
-            Ok(format!("detached-{}", oid))
+            Ok(format!("detached-{oid}"))
         }
     }
 
@@ -121,7 +121,7 @@ impl GitRepository {
     /// Check if a remote branch exists
     pub fn remote_branch_exists(&self, branch_name: &str, remote_name: Option<&str>) -> GitResult<bool> {
         let remote_name = remote_name.unwrap_or("origin");
-        let remote_branch_name = format!("{}/{}", remote_name, branch_name);
+        let remote_branch_name = format!("{remote_name}/{branch_name}");
         
         match self.repo.find_branch(&remote_branch_name, BranchType::Remote) {
             Ok(_) => Ok(true),
@@ -161,10 +161,8 @@ impl GitRepository {
         
         // Add tags
         if let Ok(tag_refs) = self.repo.tag_names(None) {
-            for tag_name in tag_refs.iter() {
-                if let Some(tag) = tag_name {
-                    refs.push(tag.to_string());
-                }
+            for tag in tag_refs.iter().flatten() {
+                refs.push(tag.to_string());
             }
         }
         
@@ -178,7 +176,7 @@ impl GitRepository {
         remote_name: Option<&str>
     ) -> GitResult<()> {
         let remote_name = remote_name.unwrap_or("origin");
-        let remote_branch_name = format!("{}/{}", remote_name, branch_name);
+        let remote_branch_name = format!("{remote_name}/{branch_name}");
         
         // Check if remote branch exists
         if !self.remote_branch_exists(branch_name, Some(remote_name))? {
@@ -261,7 +259,7 @@ impl GitRepository {
                 tracing::info!("Creating local tracking branch for remote: {}", branch_name);
                 
                 // Create local branch from remote if it doesn't exist
-                if let Err(_) = self.create_local_branch_from_remote(branch_name, None) {
+                if self.create_local_branch_from_remote(branch_name, None).is_err() {
                     tracing::warn!("Failed to create tracking branch, will checkout detached");
                 }
             }
@@ -303,7 +301,7 @@ impl GitRepository {
         // Update HEAD
         if self.branch_exists(branch_name)? {
             // Switch to local branch
-            let branch_ref = format!("refs/heads/{}", branch_name);
+            let branch_ref = format!("refs/heads/{branch_name}");
             self.repo.set_head(&branch_ref)?;
             tracing::info!("Switched to local branch: {}", branch_name);
         } else {
@@ -347,7 +345,7 @@ impl GitRepository {
         let branch = self.repo.find_branch(branch_name, BranchType::Local)?;
         let reference = branch.get();
         let oid = reference.target().ok_or_else(|| {
-            GitError::invalid_state(format!("Branch {} has no target", branch_name))
+            GitError::invalid_state(format!("Branch {branch_name} has no target"))
         })?;
         Ok(oid.to_string())
     }
@@ -466,7 +464,7 @@ impl GitRepository {
         })?;
 
         remote.url().ok_or_else(|| {
-            GitError::invalid_state(format!("Remote {} has no URL", remote_name))
+            GitError::invalid_state(format!("Remote {remote_name} has no URL"))
         }).map(|s| s.to_string())
     }
 
@@ -654,7 +652,7 @@ mod tests {
         assert!(current_branch.contains(&commit_id.to_string()));
         
         // Verify it matches the expected format exactly
-        let expected = format!("detached-{}", commit_id);
+        let expected = format!("detached-{commit_id}");
         assert_eq!(current_branch, expected);
     }
 
@@ -711,7 +709,7 @@ mod tests {
         
         // Verify the repository state is correctly calculated
         assert!(repo_state.current_branch.starts_with("detached-"));
-        assert_eq!(repo_state.current_branch, format!("detached-{}", commit_id));
+        assert_eq!(repo_state.current_branch, format!("detached-{commit_id}"));
         
         // Verify we have branch state for the detached HEAD
         let branch_state = repo_state.get_branch_state(&repo_state.current_branch);
@@ -736,7 +734,7 @@ mod tests {
         // Detach HEAD to the current commit
         repo.repo.set_head_detached(commit_id).unwrap();
         
-        let detached_branch_name = format!("detached-{}", commit_id);
+        let detached_branch_name = format!("detached-{commit_id}");
         
         // Test calculating branch state for a detached HEAD branch name
         let branch_state = repo.calculate_branch_state(&detached_branch_name).unwrap();
@@ -782,7 +780,7 @@ mod tests {
         // Detach HEAD to the current commit
         repo.repo.set_head_detached(commit_id).unwrap();
         
-        let detached_branch_name = format!("detached-{}", commit_id);
+        let detached_branch_name = format!("detached-{commit_id}");
         
         // Verify that the "detached-{oid}" name is not considered a real branch
         assert!(!repo.branch_exists(&detached_branch_name).unwrap());
@@ -813,7 +811,7 @@ mod tests {
         assert!(result.is_ok(), "Repository state calculation should succeed in detached HEAD state");
         
         let repo_state = result.unwrap();
-        let expected_branch_name = format!("detached-{}", commit_id);
+        let expected_branch_name = format!("detached-{commit_id}");
         assert_eq!(repo_state.current_branch, expected_branch_name);
         
         // Verify the branch state was calculated correctly

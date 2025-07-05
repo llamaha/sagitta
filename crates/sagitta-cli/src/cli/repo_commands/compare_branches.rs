@@ -95,12 +95,12 @@ where
         // Display matrix
         print!("{:>15}", "");
         for branch in &branches {
-            print!("{:>15}", branch);
+            print!("{branch:>15}");
         }
         println!();
 
         for (i, branch_a) in branches.iter().enumerate() {
-            print!("{:>15}", branch_a);
+            print!("{branch_a:>15}");
             for (j, branch_b) in branches.iter().enumerate() {
                 if i == j {
                     print!("{:>15}", "●".blue());

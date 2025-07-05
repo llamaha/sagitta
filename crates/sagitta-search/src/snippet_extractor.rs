@@ -18,7 +18,7 @@ const DEFAULT_CONTEXT_LINES: usize = 3; // Number of context lines above/below
 pub fn extract_snippet(file_path: &str, chunk_start_line: usize, chunk_end_line: usize) -> Result<String> {
     let path = Path::new(file_path);
     let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read file for snippet extraction: {}", file_path))?;
+        .with_context(|| format!("Failed to read file for snippet extraction: {file_path}"))?;
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
 

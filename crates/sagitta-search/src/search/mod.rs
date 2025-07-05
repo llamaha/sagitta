@@ -32,7 +32,7 @@ pub async fn search_semantic<C>(
 where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
-    debug!("Performing semantic search query=\"{}\" repo=\"{}\" branch=\"{}\" limit={} filter={:?}", query, repo_name, branch_name, limit, filter);
+    debug!("Performing semantic search query=\"{query}\" repo=\"{repo_name}\" branch=\"{branch_name}\" limit={limit} filter={filter:?}");
 
     // 1. Get Query Embedding using EmbeddingPool
     let embedding_config = app_config_to_embedding_config(config);
@@ -66,7 +66,7 @@ where
 
     // 2. Determine Collection Name using branch-aware naming
     let collection_name = get_branch_aware_collection_name(repo_name, branch_name, config);
-    debug!("Searching collection: {}", collection_name);
+    debug!("Searching collection: {collection_name}");
 
     // 3. Build Qdrant Search Request
     let mut builder = SearchPointsBuilder::new(collection_name, query_embedding, limit as u64);
@@ -78,8 +78,7 @@ where
     // 4. Execute Search
     let search_response = client
         .search_points(search_request) // Pass ownership
-        .await
-        .map_err(SagittaError::from)?;
+        .await?;
     
     debug!("Received {} search results from Qdrant", search_response.result.len());
 

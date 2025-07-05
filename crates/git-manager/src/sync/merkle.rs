@@ -29,7 +29,7 @@ pub fn calculate_file_hash(path: &Path) -> GitResult<String> {
     }
 
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(format!("{result:x}"))
 }
 
 /// Calculate merkle root from a collection of file hashes
@@ -50,7 +50,7 @@ pub fn calculate_merkle_root(file_hashes: &HashMap<PathBuf, String>) -> String {
     }
 
     let result = hasher.finalize();
-    format!("{:x}", result)
+    format!("{result:x}")
 }
 
 /// Calculate hashes for all files in a directory
@@ -66,7 +66,7 @@ pub fn calculate_directory_hashes(
         .filter_entry(|e| !should_ignore_entry(e, ignore_patterns))
     {
         let entry = entry.map_err(|e| {
-            GitError::filesystem_error(format!("Error walking directory: {}", e))
+            GitError::filesystem_error(format!("Error walking directory: {e}"))
         })?;
 
         if entry.file_type().is_file() {
@@ -106,8 +106,7 @@ fn should_ignore_entry(entry: &walkdir::DirEntry, ignore_patterns: &[&str]) -> b
     // Check custom ignore patterns
     for pattern in ignore_patterns {
         // Handle wildcard patterns like "*.tmp"
-        if pattern.starts_with("*.") {
-            let extension = &pattern[2..];
+        if let Some(extension) = pattern.strip_prefix("*.") {
             if let Some(file_extension) = path.extension() {
                 if file_extension.to_string_lossy() == extension {
                     return true;
@@ -138,6 +137,12 @@ pub struct HashDiff {
     pub deleted: Vec<PathBuf>,
     /// Files that are unchanged
     pub unchanged: Vec<PathBuf>,
+}
+
+impl Default for HashDiff {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HashDiff {

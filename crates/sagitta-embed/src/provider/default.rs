@@ -33,7 +33,7 @@ impl EmbeddingProvider for DefaultEmbeddingProvider {
         EmbeddingModelType::Default
     }
 
-    fn embed_batch<'a>(&self, texts: &[&'a str]) -> Result<Vec<Vec<f32>>> {
+    fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         // Generate deterministic embeddings based on text hash
         texts.iter().map(|text| {
             let mut embedding = vec![0.0f32; self.dimension];

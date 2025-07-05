@@ -208,10 +208,10 @@ where
                             println!("  ❌ {} - Error: {}", branch.red(), e);
                         }
                     }
-                    results.insert(branch, sync_result.map_err(|e| anyhow::Error::from(e)));
+                    results.insert(branch, sync_result.map_err(anyhow::Error::from));
                 }
                 Err(e) => {
-                    println!("  ❌ Task error: {}", e);
+                    println!("  ❌ Task error: {e}");
                 }
             }
             

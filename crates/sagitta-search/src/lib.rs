@@ -623,7 +623,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
     // First validate the config
     if let Err(e) = app_config.validate() {
         // Log the error but continue with defaults if validation fails
-        log::error!("Configuration validation error: {}", e);
+        log::error!("Configuration validation error: {e}");
     }
 
     let (model_type, onnx_model_path, onnx_tokenizer_path) = if let Some(embed_model) = &app_config.embed_model {
@@ -638,7 +638,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
             Ok(downloader) => {
                 match downloader.download_model(&model) {
                     Ok(paths) => {
-                        log::info!("Using model: {}", embed_model);
+                        log::info!("Using model: {embed_model}");
                         let tokenizer_dir = paths.tokenizer_dir().ok();
                         (
                             EmbeddingModelType::Onnx, 
@@ -647,7 +647,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
                         )
                     },
                     Err(e) => {
-                        log::error!("Failed to download model {}: {}", embed_model, e);
+                        log::error!("Failed to download model {embed_model}: {e}");
                         log::warn!("Falling back to Default model type due to download failure");
                         // Use Default model type when download fails to avoid validation errors
                         log::debug!("app_config_to_embedding_config: Setting model type to Default due to download failure");
@@ -656,7 +656,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
                 }
                 },
                 Err(e) => {
-                    log::error!("Failed to create model downloader: {}", e);
+                    log::error!("Failed to create model downloader: {e}");
                     // Use Default model type when downloader creation fails to avoid validation errors
                     (EmbeddingModelType::Default, None, None)
                 }
@@ -671,8 +671,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
         (EmbeddingModelType::Default, None, None)
     };
 
-    log::debug!("Creating EmbeddingConfig with model_type: {:?}, model_path: {:?}, tokenizer_path: {:?}", 
-               model_type, onnx_model_path, onnx_tokenizer_path);
+    log::debug!("Creating EmbeddingConfig with model_type: {model_type:?}, model_path: {onnx_model_path:?}, tokenizer_path: {onnx_tokenizer_path:?}");
     
     EmbeddingConfig {
         model_type,
@@ -746,7 +745,7 @@ pub async fn embed_text_with_pool(pool: &EmbeddingPool, texts: &[&str]) -> Resul
                 element_type: "text".to_string(),
                 context: None,
             },
-            id: format!("text_{}", i),
+            id: format!("text_{i}"),
         }
     }).collect();
     
@@ -1168,7 +1167,7 @@ async fn get_git_repository_status(path: &Path) -> Result<GitRepositoryStatus> {
     
     let git_manager = GitManager::new();
     let repo_info = git_manager.get_repository_info(path)
-        .map_err(|e| SagittaError::RepositoryError(format!("Failed to get git repository info: {}", e)))?;
+        .map_err(|e| SagittaError::RepositoryError(format!("Failed to get git repository info: {e}")))?;
     
     // Get available branches
     let available_branches = git_manager.list_branches(path).unwrap_or_default();
@@ -1305,7 +1304,7 @@ pub async fn scan_for_orphaned_repositories(config: &AppConfig) -> Result<Vec<Or
                         continue;
                     }
                     
-                    log::debug!("Found potential orphaned directory: {}", dir_name);
+                    log::debug!("Found potential orphaned directory: {dir_name}");
                     let dir_path = entry.path();
                     
                     // Check if it's a git repository
@@ -1357,7 +1356,7 @@ async fn get_git_remote_url(path: &Path) -> Result<String> {
     
     let git_manager = GitManager::new();
     let repo_info = git_manager.get_repository_info(path)
-        .map_err(|e| SagittaError::RepositoryError(format!("Failed to get git repository info: {}", e)))?;
+        .map_err(|e| SagittaError::RepositoryError(format!("Failed to get git repository info: {e}")))?;
     
     repo_info.remote_url.ok_or_else(|| SagittaError::RepositoryError("No remote URL found".to_string()))
 }
@@ -1374,13 +1373,13 @@ pub async fn reclone_missing_repository(
     let repo_config = config.repositories
         .iter()
         .find(|r| r.name == repository_name)
-        .ok_or_else(|| SagittaError::RepositoryError(format!("Repository '{}' not found in config", repository_name)))?;
+        .ok_or_else(|| SagittaError::RepositoryError(format!("Repository '{repository_name}' not found in config")))?;
     
     // Determine the local path
     let local_path = if repo_config.added_as_local_path {
         // For repos added as local path, we can't reclone
         return Err(SagittaError::RepositoryError(
-            format!("Repository '{}' was added as a local path and cannot be recloned. Use 'add' to re-add it.", repository_name)
+            format!("Repository '{repository_name}' was added as a local path and cannot be recloned. Use 'add' to re-add it.")
         ));
     } else {
         // For cloned repos, use the standard path
@@ -1391,7 +1390,7 @@ pub async fn reclone_missing_repository(
     // Remove existing directory if it exists
     if local_path.exists() {
         std::fs::remove_dir_all(&local_path)
-            .map_err(|e| SagittaError::RepositoryError(format!("Failed to remove existing directory: {}", e)))?;
+            .map_err(|e| SagittaError::RepositoryError(format!("Failed to remove existing directory: {e}")))?;
     }
     
     // Clone the repository using git2
@@ -1434,9 +1433,9 @@ pub async fn reclone_missing_repository(
     }
     
     builder.clone(&repo_config.url, &local_path)
-        .map_err(|e| SagittaError::RepositoryError(format!("Failed to clone repository: {}", e)))?;
+        .map_err(|e| SagittaError::RepositoryError(format!("Failed to clone repository: {e}")))?;
     
-    log::info!("Successfully recloned repository '{}'", repository_name);
+    log::info!("Successfully recloned repository '{repository_name}'");
     
     Ok(())
 }
@@ -1495,13 +1494,13 @@ pub async fn add_orphaned_repository(
     
     // Check if repository with same name already exists
     if config.repositories.iter().any(|r| r.name == name) {
-        return Err(SagittaError::RepositoryError(format!("Repository with name '{}' already exists", name)));
+        return Err(SagittaError::RepositoryError(format!("Repository with name '{name}' already exists")));
     }
     
     // Add to configuration
     config.repositories.push(repo_config);
     
-    log::info!("Added orphaned repository '{}' to configuration", name);
+    log::info!("Added orphaned repository '{name}' to configuration");
     
     Ok(())
 }

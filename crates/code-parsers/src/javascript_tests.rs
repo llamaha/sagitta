@@ -123,7 +123,7 @@ divide = (a, b) => {
         let chunks = parser.parse(code, "test.js")?;
         // Expecting 1 chunk (the arrow function itself)
         if chunks.len() != 1 {
-             eprintln!("Arrow assignment test chunks: {:?}", chunks);
+             eprintln!("Arrow assignment test chunks: {chunks:?}");
         }
         assert_eq!(chunks.len(), 1, "Expected 1 chunk (arrow function assignment)");
         assert_chunk(&chunks[0], "(a, b) => {\n  if (b === 0) throw new Error(\"Division by zero\");\n  return a / b;\n}", 3, 6, "function");

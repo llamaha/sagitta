@@ -133,7 +133,7 @@ impl InMemoryApiKeyStore {
             .map(char::from)
             .collect();
         
-        format!("{}{}", API_KEY_PREFIX, random_part)
+        format!("{API_KEY_PREFIX}{random_part}")
     }
 
     fn hash_key(key: &str) -> String {

@@ -171,7 +171,7 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         }
         _ => Err(ErrorObject {
             code: error_codes::METHOD_NOT_FOUND,
-            message: format!("Tool '{}' not found or not callable via tools/call", tool_name),
+            message: format!("Tool '{tool_name}' not found or not callable via tools/call"),
             data: None,
         }),
     };

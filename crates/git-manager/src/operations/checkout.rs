@@ -148,25 +148,25 @@ impl ChangeManager {
     pub fn stage_files(&self, files: &[PathBuf]) -> GitResult<usize> {
         let mut index = self.repo.index()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get repository index: {}", e),
+                message: format!("Failed to get repository index: {e}"),
             })?;
 
         let files_staged = if files.is_empty() {
             // Stage all modified files
-            index.add_all(&["*"], git2::IndexAddOption::DEFAULT, None)
+            index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to stage all files: {}", e),
+                    message: format!("Failed to stage all files: {e}"),
                 })?;
             
             index.write()
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to write index: {}", e),
+                    message: format!("Failed to write index: {e}"),
                 })?;
 
             // Count staged files
             let statuses = self.repo.statuses(None)
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to get repository status: {}", e),
+                    message: format!("Failed to get repository status: {e}"),
                 })?;
             
             statuses.iter()
@@ -186,7 +186,7 @@ impl ChangeManager {
             
             index.write()
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to write index: {}", e),
+                    message: format!("Failed to write index: {e}"),
                 })?;
             
             count
@@ -199,7 +199,7 @@ impl ChangeManager {
     pub fn unstage_files(&self, files: &[PathBuf]) -> GitResult<usize> {
         let mut index = self.repo.index()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get repository index: {}", e),
+                message: format!("Failed to get repository index: {e}"),
             })?;
 
         let mut count = 0;
@@ -214,7 +214,7 @@ impl ChangeManager {
 
         index.write()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to write index: {}", e),
+                message: format!("Failed to write index: {e}"),
             })?;
 
         Ok(count)
@@ -224,14 +224,14 @@ impl ChangeManager {
     pub fn commit(&self, options: CommitOptions) -> GitResult<CommitResult> {
         let mut index = self.repo.index()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get repository index: {}", e),
+                message: format!("Failed to get repository index: {e}"),
             })?;
 
         // Check if there are staged changes (unless allowing empty commits)
         if !options.allow_empty {
             let tree_id = index.write_tree()
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to write tree: {}", e),
+                    message: format!("Failed to write tree: {e}"),
                 })?;
 
             // Check if this would be an empty commit
@@ -253,12 +253,12 @@ impl ChangeManager {
         // Write tree
         let tree_id = index.write_tree()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to write tree: {}", e),
+                message: format!("Failed to write tree: {e}"),
             })?;
 
         let tree = self.repo.find_tree(tree_id)
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to find tree: {}", e),
+                message: format!("Failed to find tree: {e}"),
             })?;
 
         // Get parent commits
@@ -268,7 +268,7 @@ impl ChangeManager {
                 Ok(head) => {
                     let head_commit = head.peel_to_commit()
                         .map_err(|e| GitError::GitOperationFailed {
-                            message: format!("Failed to get HEAD commit: {}", e),
+                            message: format!("Failed to get HEAD commit: {e}"),
                         })?;
                     head_commit.parents().collect::<Vec<_>>()
                 }
@@ -280,7 +280,7 @@ impl ChangeManager {
                 Ok(head) => {
                     let head_commit = head.peel_to_commit()
                         .map_err(|e| GitError::GitOperationFailed {
-                            message: format!("Failed to get HEAD commit: {}", e),
+                            message: format!("Failed to get HEAD commit: {e}"),
                         })?;
                     vec![head_commit]
                 }
@@ -299,7 +299,7 @@ impl ChangeManager {
             &parent_refs,
         )
         .map_err(|e| GitError::GitOperationFailed {
-            message: format!("Failed to create commit: {}", e),
+            message: format!("Failed to create commit: {e}"),
         })?;
 
         // Calculate statistics
@@ -336,7 +336,7 @@ impl ChangeManager {
         });
 
         // Push the branch
-        let refspec = format!("refs/heads/{}:refs/heads/{}", branch_to_push, branch_to_push);
+        let refspec = format!("refs/heads/{branch_to_push}:refs/heads/{branch_to_push}");
         let mut push_options = git2::PushOptions::new();
         push_options.remote_callbacks(callbacks);
 
@@ -353,7 +353,7 @@ impl ChangeManager {
                 remote: options.remote,
                 branch: branch_to_push.to_string(),
                 commits_pushed: 0,
-                error_message: Some(format!("Push failed: {}", e)),
+                error_message: Some(format!("Push failed: {e}")),
             }),
         }
     }
@@ -385,7 +385,7 @@ impl ChangeManager {
 
         let refspecs: Vec<String> = remote.fetch_refspecs()
             .map_err(|e| GitError::GitOperationFailed {
-                message: format!("Failed to get fetch refspecs: {}", e),
+                message: format!("Failed to get fetch refspecs: {e}"),
             })?
             .iter()
             .map(|s| s.unwrap().to_string())
@@ -412,7 +412,7 @@ impl ChangeManager {
                 branch: branch_to_pull.to_string(),
                 commits_pulled: 0,
                 merge_performed: false,
-                error_message: Some(format!("Fetch failed: {}", e)),
+                error_message: Some(format!("Fetch failed: {e}")),
             }),
         }
     }
@@ -436,13 +436,13 @@ impl ChangeManager {
         if let Some(sig) = sig_option {
             Signature::now(&sig.name, &sig.email)
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to create signature: {}", e),
+                    message: format!("Failed to create signature: {e}"),
                 })
         } else {
             // Use repository default signature
             self.repo.signature()
                 .map_err(|e| GitError::GitOperationFailed {
-                    message: format!("Failed to get default signature: {}", e),
+                    message: format!("Failed to get default signature: {e}"),
                 })
         }
     }

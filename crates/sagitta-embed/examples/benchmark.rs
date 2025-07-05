@@ -3,7 +3,7 @@
 //! This example demonstrates performance characteristics of the embedding engine
 //! with different configurations and provides throughput measurements.
 
-use sagitta_embed::{EmbeddingPool, EmbeddingConfig, EmbeddingModelType, ProcessingConfig};
+use sagitta_embed::{EmbeddingPool, EmbeddingConfig};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -19,8 +19,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check if model files exist
     if !std::path::Path::new(model_path).exists() || !std::path::Path::new(tokenizer_path).exists() {
         println!("⚠️  Model files not found. This benchmark requires:");
-        println!("   - ONNX model file: {}", model_path);
-        println!("   - Tokenizer file: {}", tokenizer_path);
+        println!("   - ONNX model file: {model_path}");
+        println!("   - Tokenizer file: {tokenizer_path}");
         println!();
         println!("To run this benchmark:");
         println!("1. Download a compatible ONNX embedding model");
@@ -31,9 +31,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Generate test data
     let test_texts: Vec<String> = (0..1000).map(|i| {
-        format!("This is test text number {} for benchmarking the embedding generation performance. \
+        format!("This is test text number {i} for benchmarking the embedding generation performance. \
                  It contains enough content to be representative of real-world usage patterns. \
-                 The text includes various programming concepts like functions, variables, and algorithms.", i)
+                 The text includes various programming concepts like functions, variables, and algorithms.")
     }).collect();
     
     let text_refs: Vec<&str> = test_texts.iter().map(|s| s.as_ref()).collect();
@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     
     for (name, config) in configs {
-        println!("Benchmarking: {}", name);
+        println!("Benchmarking: {name}");
         println!("Configuration:");
         println!("  - Session management: automatic");
         println!("  - Batch size: {}", config.get_embedding_batch_size());
@@ -57,12 +57,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match run_benchmark(&config, &text_refs).await {
             Ok((duration, throughput)) => {
                 println!("  ✅ Results:");
-                println!("     - Duration: {:?}", duration);
-                println!("     - Throughput: {:.2} embeddings/second", throughput);
+                println!("     - Duration: {duration:?}");
+                println!("     - Throughput: {throughput:.2} embeddings/second");
                 println!("     - Latency per embedding: {:.2}ms", 1000.0 / throughput);
             },
             Err(e) => {
-                println!("  ❌ Failed: {}", e);
+                println!("  ❌ Failed: {e}");
             }
         }
         println!();
@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     println!("✅ Simple API test completed:");
     println!("   - Texts: {}", simple_texts.len());
-    println!("   - Duration: {:?}", duration);
+    println!("   - Duration: {duration:?}");
     println!("   - Embedding dimension: {}", embeddings[0].len());
     println!("   - First embedding preview: {:?}", &embeddings[0][..5]);
     

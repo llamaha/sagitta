@@ -24,11 +24,11 @@ pub enum VectorStoreError {
 impl fmt::Display for VectorStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VectorStoreError::Connection(msg) => write!(f, "Connection error: {}", msg),
-            VectorStoreError::CollectionNotFound(name) => write!(f, "Collection not found: {}", name),
-            VectorStoreError::InvalidQuery(msg) => write!(f, "Invalid query: {}", msg),
-            VectorStoreError::Serialization(msg) => write!(f, "Serialization error: {}", msg),
-            VectorStoreError::Operation(msg) => write!(f, "Operation error: {}", msg),
+            VectorStoreError::Connection(msg) => write!(f, "Connection error: {msg}"),
+            VectorStoreError::CollectionNotFound(name) => write!(f, "Collection not found: {name}"),
+            VectorStoreError::InvalidQuery(msg) => write!(f, "Invalid query: {msg}"),
+            VectorStoreError::Serialization(msg) => write!(f, "Serialization error: {msg}"),
+            VectorStoreError::Operation(msg) => write!(f, "Operation error: {msg}"),
         }
     }
 }

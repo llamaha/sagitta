@@ -48,7 +48,7 @@ pub async fn handle_repository_map(
     let result = generate_repo_map(&repo_path, options)
         .map_err(|e| ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to generate repository map: {}", e),
+            message: format!("Failed to generate repository map: {e}"),
             data: None,
         })?;
 

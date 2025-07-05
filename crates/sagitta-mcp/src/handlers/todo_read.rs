@@ -1,4 +1,4 @@
-use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, TodoPriority, ErrorObject};
+use crate::mcp::types::{TodoReadParams, TodoReadResult, TodoItem, TodoStatus, ErrorObject};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use sagitta_search::config::AppConfig;
 use sagitta_search::qdrant_client_trait::QdrantClientTrait;
@@ -29,7 +29,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
                     Err(e) => {
                         return Err(ErrorObject {
                             code: -32603,
-                            message: format!("Failed to parse todos file: {}", e),
+                            message: format!("Failed to parse todos file: {e}"),
                             data: None,
                         });
                     }
@@ -38,7 +38,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
             Err(e) => {
                 return Err(ErrorObject {
                     code: -32603,
-                    message: format!("Failed to read todos file: {}", e),
+                    message: format!("Failed to read todos file: {e}"),
                     data: None,
                 });
             }
@@ -57,7 +57,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
     let summary = if total == 0 {
         "No todos found".to_string()
     } else {
-        format!("{} todos: {} completed, {} in progress, {} pending", total, completed, in_progress, pending)
+        format!("{total} todos: {completed} completed, {in_progress} in progress, {pending} pending")
     };
     
     Ok(TodoReadResult {

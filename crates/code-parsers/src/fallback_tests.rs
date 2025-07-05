@@ -11,7 +11,7 @@ mod fallback_tests {
         // Create a temporary file with an unsupported extension
         let mut temp_file = NamedTempFile::new().unwrap();
         let content = "Line 1\nLine 2\nLine 3";
-        writeln!(temp_file, "{}", content).unwrap();
+        writeln!(temp_file, "{content}").unwrap();
         let temp_path = temp_file.path().to_path_buf();
         // Rename to have a .txt extension to ensure fallback
         let new_path = temp_path.with_extension("txt");

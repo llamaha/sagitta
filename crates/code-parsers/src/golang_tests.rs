@@ -141,7 +141,7 @@ package main // Need package for it to be valid Go
             String::from("// Start comments")
         ];
         for i in 0..500 { // Generate 500 lines of comments
-            large_code_lines.push(format!("// Line {}", i));
+            large_code_lines.push(format!("// Line {i}"));
         }
         let code = large_code_lines.join("\n");
 

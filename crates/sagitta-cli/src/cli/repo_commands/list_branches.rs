@@ -35,7 +35,7 @@ pub async fn handle_list_branches(
         if branch == *current_branch {
             println!("  {} {}", "*".green(), branch.green().bold());
         } else {
-            println!("    {}", branch);
+            println!("    {branch}");
         }
     }
     

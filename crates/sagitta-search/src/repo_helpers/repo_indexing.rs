@@ -37,10 +37,10 @@ pub async fn update_sync_status_and_languages<
     collection_name: &str,
 ) -> Result<(), SagittaError> {
     let repo_config = config.repositories.get_mut(repo_config_index)
-        .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {} out of bounds", repo_config_index)))?;
-    log::debug!("Updating last synced commit for branch '{}' to {}", branch_name, commit_oid_str);
+        .ok_or_else(|| SagittaError::ConfigurationError(format!("Repository index {repo_config_index} out of bounds")))?;
+    log::debug!("Updating last synced commit for branch '{branch_name}' to {commit_oid_str}");
     repo_config.last_synced_commits.insert(branch_name.to_string(), commit_oid_str.to_string());
-    log::debug!("Querying Qdrant for distinct languages in collection '{}' for branch '{}'", collection_name, branch_name);
+    log::debug!("Querying Qdrant for distinct languages in collection '{collection_name}' for branch '{branch_name}'");
     let mut languages = HashSet::new();
     let mut offset: Option<PointId> = None;
     loop {
@@ -159,7 +159,7 @@ where
     }
 
     let repo_name = name_opt.unwrap_or_else(|| {
-        url.split('/').last().unwrap_or("unknown_repo").trim_end_matches(".git")
+        url.split('/').next_back().unwrap_or("unknown_repo").trim_end_matches(".git")
     });
     let final_local_path = local_path_opt
         .cloned()
@@ -183,7 +183,7 @@ where
         // Report clone start
         if let Some(reporter) = &add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Clone {
-                message: format!("Starting clone of repository '{}'", repo_name_str),
+                message: format!("Starting clone of repository '{repo_name_str}'"),
                 progress: None,
             })).await;
         }
@@ -263,11 +263,11 @@ where
                 // Report clone error
                 if let Some(reporter) = &add_progress_reporter {
                     reporter.report(AddProgress::new(RepoAddStage::Error {
-                        message: format!("Git clone failed: {}", e),
+                        message: format!("Git clone failed: {e}"),
                     })).await;
                 }
                 
-                return Err(SagittaError::GitMessageError(format!("Git clone failed: {}", e)));
+                return Err(SagittaError::GitMessageError(format!("Git clone failed: {e}")));
             }
         };
 
@@ -279,7 +279,7 @@ where
             // Report clone completion
             if let Some(reporter) = &add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Clone {
-                    message: format!("Successfully cloned repository to {}", path_str),
+                    message: format!("Successfully cloned repository to {path_str}"),
                     progress: Some((1, 1)), // Mark as complete
                 })).await;
             }
@@ -300,7 +300,7 @@ where
                 // Report checkout start
                 if let Some(reporter) = &add_progress_reporter {
                     reporter.report(AddProgress::new(RepoAddStage::Checkout {
-                        message: format!("Checking out branch '{}'", final_branch),
+                        message: format!("Checking out branch '{final_branch}'"),
                     })).await;
                 }
                 
@@ -340,7 +340,7 @@ where
             // Report clone error
             if let Some(reporter) = &add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Error {
-                    message: format!("Git clone command failed: {}", stderr),
+                    message: format!("Git clone command failed: {stderr}"),
                 })).await;
             }
             
@@ -354,7 +354,7 @@ where
                     error!("Failed to remove directory {path_str} after failed clone: {error_str}");
                 }
             }
-            return Err(SagittaError::GitMessageError(format!("Git clone command failed: {}", stderr)));
+            return Err(SagittaError::GitMessageError(format!("Git clone command failed: {stderr}")));
         }
     } else {
         let path_str = final_local_path.display().to_string();
@@ -391,7 +391,7 @@ where
                 Ok(_) => resolved_target_ref = Some(target_ref.to_string()),
                 Err(e) => {
                     return Err(SagittaError::GitMessageError(format!(
-                        "Invalid target ref '{}': {}", target_ref, e
+                        "Invalid target ref '{target_ref}': {e}"
                     )));
                 }
             }
@@ -406,7 +406,7 @@ where
         // Report fetch start
         if let Some(reporter) = &add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Fetch {
-                message: format!("Fetching latest changes for target ref '{}'", target_ref),
+                message: format!("Fetching latest changes for target ref '{target_ref}'"),
                 progress: None,
             })).await;
         }
@@ -420,9 +420,9 @@ where
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context(format!("Failed to spawn git fetch before checkout for {}", repo_name))?
+            .context(format!("Failed to spawn git fetch before checkout for {repo_name}"))?
             .wait_with_output()
-            .context(format!("Failed to wait for git fetch before checkout for {}", repo_name))?;
+            .context(format!("Failed to wait for git fetch before checkout for {repo_name}"))?;
         
         if !fetch_status.status.success() {
             let stderr = String::from_utf8_lossy(&fetch_status.stderr);
@@ -434,7 +434,7 @@ where
         // Report checkout start
         if let Some(reporter) = &add_progress_reporter {
             reporter.report(AddProgress::new(RepoAddStage::Checkout {
-                message: format!("Checking out target ref '{}'", target_ref),
+                message: format!("Checking out target ref '{target_ref}'"),
             })).await;
         }
 
@@ -446,9 +446,9 @@ where
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context(format!("Failed to spawn git checkout {} for {}", target_ref, repo_name))?
+            .context(format!("Failed to spawn git checkout {target_ref} for {repo_name}"))?
             .wait_with_output()
-            .context(format!("Failed to wait for git checkout {} for {}", target_ref, repo_name))?;
+            .context(format!("Failed to wait for git checkout {target_ref} for {repo_name}"))?;
 
         if checkout_status.status.success() {
             info!("Successfully checked out target ref '{}' for repository '{}'.", target_ref, repo_name);
@@ -469,7 +469,7 @@ where
             // Report checkout error
             if let Some(reporter) = &add_progress_reporter {
                 reporter.report(AddProgress::new(RepoAddStage::Error {
-                    message: format!("Failed to checkout target ref '{}': {}", target_ref, stderr),
+                    message: format!("Failed to checkout target ref '{target_ref}': {stderr}"),
                 })).await;
             }
             
@@ -481,9 +481,7 @@ where
                 }
             }
             return Err(SagittaError::GitMessageError(format!(
-                "Failed to checkout target ref '{}': {}",
-                target_ref,
-                stderr
+                "Failed to checkout target ref '{target_ref}': {stderr}"
             )));
         }
     } else {
@@ -629,7 +627,7 @@ where
         return Ok(());
     }
     let dangerous_paths = ["/", "/usr", "/bin", "/sbin", "/etc", "/var", "/tmp", "/opt", "/boot", "/lib", "/dev", "/proc", "/sys", "/run"];
-    if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{}/", p))) {
+    if dangerous_paths.iter().any(|p| path_str == *p || path_str.starts_with(&format!("{p}/"))) {
         error!("Path '{path_str}' appears to be a system directory. Refusing to delete for safety.");
         return Ok(());
     }
@@ -747,7 +745,7 @@ where
         Ok(())
     } else {
         error!("Failed to delete repository directory after all attempts");
-        Err(SagittaError::Other(format!("Failed to delete repository directory")))
+        Err(SagittaError::Other("Failed to delete repository directory".to_string()))
     }
 }
 
@@ -778,7 +776,7 @@ pub struct CommitInfo {
 pub async fn sync_repository_branch(
     config: &AppConfig,
     repo_config_index: usize,
-    _client: Arc<impl QdrantClientTrait + Send + Sync + 'static>, // Keep client for future use maybe
+    _client: Arc<impl QdrantClientTrait + 'static>, // Keep client for future use maybe
     _fetch_and_merge: bool, // Keep flag for future use maybe
 ) -> Result<String, anyhow::Error> {
     let repo_config = config.repositories.get(repo_config_index)
@@ -813,7 +811,7 @@ pub async fn sync_repository_branch(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .context(format!("Failed to execute git rev-parse for target ref {}", target_ref))?;
+            .context(format!("Failed to execute git rev-parse for target ref {target_ref}"))?;
 
         if commit_hash_output.status.success() {
             let commit_hash = String::from_utf8(commit_hash_output.stdout)?.trim().to_string();
@@ -875,11 +873,11 @@ pub async fn sync_repository_branch(
     let local_commit_output = Command::new("git")
         .current_dir(repo_path)
         .arg("rev-parse")
-        .arg(format!("refs/heads/{}", branch_name)) // Target local branch ref
+        .arg(format!("refs/heads/{branch_name}")) // Target local branch ref
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git rev-parse for local {}", branch_name))?;
+        .context(format!("Failed to execute git rev-parse for local {branch_name}"))?;
 
     let local_commit_hash = if local_commit_output.status.success() {
         String::from_utf8(local_commit_output.stdout)?.trim().to_string()
@@ -888,7 +886,7 @@ pub async fn sync_repository_branch(
         let stderr = stderr_cow.as_ref();
         if stderr.contains("unknown revision or path not in the working tree") {
             warn!("Local branch {branch_name} not found in {repo_name}. It might have been deleted or not checked out.");
-            return Ok(format!("Local branch {} not found.", branch_name));
+            return Ok(format!("Local branch {branch_name} not found."));
         } else {
             error!("Failed to get local commit hash for {repo_name}/{branch_name}: {stderr}");
             return Err(anyhow!("Failed to get local commit hash for {}/{}: {}", repo_config.name, branch_name, stderr));
@@ -896,7 +894,7 @@ pub async fn sync_repository_branch(
     };
 
     // 3. Get remote commit hash
-    let remote_ref = format!("refs/remotes/{}/{}", remote_name, branch_name);
+    let remote_ref = format!("refs/remotes/{remote_name}/{branch_name}");
     let remote_commit_output = Command::new("git")
         .current_dir(repo_path)
         .arg("rev-parse")
@@ -904,7 +902,7 @@ pub async fn sync_repository_branch(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git rev-parse for remote {}", remote_ref))?;
+        .context(format!("Failed to execute git rev-parse for remote {remote_ref}"))?;
 
     let remote_commit_hash = if remote_commit_output.status.success() {
         String::from_utf8(remote_commit_output.stdout)?.trim().to_string()
@@ -913,7 +911,7 @@ pub async fn sync_repository_branch(
         let stderr = stderr_cow.as_ref();
         if stderr.contains("unknown revision or path not in the working tree") {
             info!("Remote branch {remote_ref} not found for {repo_name} after fetch (likely deleted).");
-            return Ok(format!("Remote branch {}/{} not found after fetch.", remote_name, branch_name));
+            return Ok(format!("Remote branch {remote_name}/{branch_name} not found after fetch."));
         } else {
             error!("Failed to get remote commit hash for {repo_name}/{remote_ref} even though ref exists: {stderr}");
             return Err(anyhow!("Failed to get remote commit hash for {}/{}: {}", repo_config.name, remote_ref, stderr));
@@ -923,7 +921,7 @@ pub async fn sync_repository_branch(
     // 4. Compare local and remote hashes
     if local_commit_hash == remote_commit_hash {
         info!("Branch {branch_name} already up-to-date for {repo_name}.");
-        return Ok(format!("Branch {} already up-to-date.", branch_name));
+        return Ok(format!("Branch {branch_name} already up-to-date."));
     }
 
     // 5. Determine relationship (behind, ahead, diverged) using merge-base
@@ -959,13 +957,13 @@ pub async fn sync_repository_branch(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .context(format!("Failed to execute git merge --ff-only for {}", branch_name))?;
+            .context(format!("Failed to execute git merge --ff-only for {branch_name}"))?;
 
         if !merge_output.status.success() {
             let stderr_cow = String::from_utf8_lossy(&merge_output.stderr);
             let stderr = stderr_cow.as_ref();
             error!("Fast-forward merge failed for {repo_name}/{branch_name}: {stderr}");
-            return Err(anyhow!("Fast-forward merge failed for {}/{}: {}", repo_config.name, branch_name, stderr));
+            Err(anyhow!("Fast-forward merge failed for {}/{}: {}", repo_config.name, branch_name, stderr))
         } else {
             let stdout = String::from_utf8_lossy(&merge_output.stdout);
             info!("Fast-forward merge successful for {repo_name}/{branch_name}. New commit: {remote_commit_hash}");
@@ -977,11 +975,11 @@ pub async fn sync_repository_branch(
     } else if merge_base_hash == remote_commit_hash {
         // Local is ahead of remote
         warn!("Local branch {branch_name} ({local_commit_hash}) is ahead of remote {remote_commit_hash} ({remote_commit_hash}) for {repo_name}. No automatic push configured.");
-        Ok(format!("Local branch {} is ahead of remote.", branch_name))
+        Ok(format!("Local branch {branch_name} is ahead of remote."))
     } else {
         // Local and remote have diverged
         warn!("Local branch {branch_name} ({local_commit_hash}) and remote {remote_commit_hash} ({remote_commit_hash}) have diverged (base: {merge_base_hash}) for {repo_name}. Manual merge required.");
-        Ok(format!("Branch {} has diverged from remote. Manual merge required.", branch_name))
+        Ok(format!("Branch {branch_name} has diverged from remote. Manual merge required."))
     }
 }
 
@@ -996,7 +994,7 @@ fn checkout_branch(repo_path: &Path, branch_name: &str) -> Result<(), anyhow::Er
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context(format!("Failed to execute git checkout {}", branch_name))?;
+        .context(format!("Failed to execute git checkout {branch_name}"))?;
 
     if !checkout_output.status.success() {
         let stderr_cow = String::from_utf8_lossy(&checkout_output.stderr);

@@ -115,9 +115,9 @@ where
     C: QdrantClientTrait + Send + Sync + 'static,
 {
     info!("[handle_repo_add] Starting repository addition process");
-    info!("[handle_repo_add] Args: {:?}", args);
+    info!("[handle_repo_add] Args: {args:?}");
     info!("[handle_repo_add] Repo base path: {}", repo_base_path_for_add.display());
-    info!("[handle_repo_add] Embedding dim: {}", embedding_dim);
+    info!("[handle_repo_add] Embedding dim: {embedding_dim}");
     
     // Validate basic arguments
     info!("[handle_repo_add] Validating arguments...");
@@ -131,7 +131,7 @@ where
     info!("[handle_repo_add] Determining repository name...");
     let repo_name = match &args.name {
         Some(name) => {
-            info!("[handle_repo_add] Using provided name: {}", name);
+            info!("[handle_repo_add] Using provided name: {name}");
             name.clone()
         },
         None => {
@@ -143,7 +143,7 @@ where
                     .and_then(|s| s.to_str())
                     .map(|s| s.trim_end_matches(".git").to_string())
                     .ok_or_else(|| AddRepoError::NameDerivationError("URL".to_string()))?;
-                info!("[handle_repo_add] Derived name from URL: {}", derived_name);
+                info!("[handle_repo_add] Derived name from URL: {derived_name}");
                 derived_name
             } else {
                 // If only local path is provided, derive name from the directory name
@@ -153,12 +153,12 @@ where
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
                     .ok_or_else(|| AddRepoError::NameDerivationError("local path".to_string()))?;
-                info!("[handle_repo_add] Derived name from local path: {}", derived_name);
+                info!("[handle_repo_add] Derived name from local path: {derived_name}");
                 derived_name
             }
         },
     };
-    info!("[handle_repo_add] Repository name determined: {}", repo_name);
+    info!("[handle_repo_add] Repository name determined: {repo_name}");
 
     // Use the passed-in base path
     info!("[handle_repo_add] Setting up repository base path...");
@@ -178,11 +178,11 @@ where
 
     // If URL is not provided but required for a new clone scenario (checked by prepare_repository)
     let repo_url = args.url.clone();
-    info!("[handle_repo_add] Repository URL: {:?}", repo_url);
+    info!("[handle_repo_add] Repository URL: {repo_url:?}");
 
     // Flag to indicate if the repo was added by specifying a local path initially
     let added_as_local_path_flag = args.local_path.is_some();
-    info!("[handle_repo_add] Added as local path: {}", added_as_local_path_flag);
+    info!("[handle_repo_add] Added as local path: {added_as_local_path_flag}");
 
     info!("[handle_repo_add] About to call prepare_repository...");
     info!("[handle_repo_add] prepare_repository args:");
@@ -195,7 +195,7 @@ where
     info!("[handle_repo_add]   ssh_key: {:?}", args.ssh_key.as_ref());
     info!("[handle_repo_add]   ssh_passphrase: {:?}", args.ssh_passphrase.as_deref().map(|_| "***"));
     info!("[handle_repo_add]   repo_base_path: {}", repo_base_path.display());
-    info!("[handle_repo_add]   embedding_dim: {}", embedding_dim);
+    info!("[handle_repo_add]   embedding_dim: {embedding_dim}");
 
     // Call prepare_repository for both new clones and existing local paths.
     // It handles cloning if necessary and ensures the Qdrant collection (tenant-specific).
@@ -214,7 +214,7 @@ where
         config,      // Pass AppConfig for collection_name_prefix and other settings
         progress_reporter,
     ).await.map_err(|e| {
-        error!("[handle_repo_add] prepare_repository failed: {}", e);
+        error!("[handle_repo_add] prepare_repository failed: {e}");
         // Map internal Error to AddRepoError
         match e {
             crate::error::SagittaError::GitMessageError(msg) => AddRepoError::GitError(anyhow!(msg)),

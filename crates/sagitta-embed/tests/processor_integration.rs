@@ -2,9 +2,8 @@
 
 use sagitta_embed::{
     DefaultFileProcessor, EmbeddingPool, FileProcessor, EmbeddingProcessor,
-    ProcessingConfig, EmbeddingConfig, EmbeddingModelType
+    ProcessingConfig, EmbeddingConfig
 };
-use std::path::PathBuf;
 use tempfile::tempdir;
 use std::fs;
 
@@ -88,23 +87,23 @@ async fn test_file_processor_concurrency() {
     // Create multiple test files
     let mut files = Vec::new();
     for i in 0..10 {
-        let file_path = temp_dir.path().join(format!("test_{}.js", i));
+        let file_path = temp_dir.path().join(format!("test_{i}.js"));
         let content = format!(r#"
-function test{}() {{
-    console.log("Test function {}");
-    return {};
+function test{i}() {{
+    console.log("Test function {i}");
+    return {i};
 }}
 
-class TestClass{} {{
+class TestClass{i} {{
     constructor() {{
-        this.value = {};
+        this.value = {i};
     }}
     
     getValue() {{
         return this.value;
     }}
 }}
-"#, i, i, i, i, i);
+"#);
         
         fs::write(&file_path, content).unwrap();
         files.push(file_path);

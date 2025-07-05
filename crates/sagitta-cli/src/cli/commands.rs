@@ -137,13 +137,13 @@ pub async fn execute_init_command(config: &mut AppConfig) -> Result<()> {
     let config_path_display = config_path_buf.display();
 
     if !config_path.exists() {
-        println!("Configuration file not found at {}, creating a new one.", config_path_display);
+        println!("Configuration file not found at {config_path_display}, creating a new one.");
         // Ensure directory exists if creating for the first time
         if let Some(parent_dir) = config_path.parent() {
             std::fs::create_dir_all(parent_dir)?;
         }
     } else {
-        println!("Existing configuration found at {}. Checking tenant_id.", config_path_display);
+        println!("Existing configuration found at {config_path_display}. Checking tenant_id.");
     }
 
     // Configuration loaded successfully
@@ -151,7 +151,7 @@ pub async fn execute_init_command(config: &mut AppConfig) -> Result<()> {
     // Save the potentially modified config
     sagitta_search::config::save_config(config, Some(&config_path_buf))?;
 
-    println!("Configuration saved to {}.\nEnsure ONNX model/tokenizer paths and Qdrant URL are correctly set.", config_path_display);
+    println!("Configuration saved to {config_path_display}.\nEnsure ONNX model/tokenizer paths and Qdrant URL are correctly set.");
     Ok(())
 }
 

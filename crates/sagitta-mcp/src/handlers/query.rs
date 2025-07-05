@@ -90,7 +90,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         error!(error = %e, "Failed to create embedding pool for query");
         ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to initialize embedding pool: {}", e),
+            message: format!("Failed to initialize embedding pool: {e}"),
             data: None,
         }
     })?;
@@ -111,12 +111,12 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
         match e {
             SagittaError::EmbeddingError(_) => ErrorObject {
                 code: error_codes::EMBEDDING_ERROR,
-                message: format!("Failed to generate embedding for query: {}", e),
+                message: format!("Failed to generate embedding for query: {e}"),
                 data: None,
             },
             _ => ErrorObject {
                 code: error_codes::QUERY_EXECUTION_FAILED,
-                message: format!("Failed to execute query: {}", e),
+                message: format!("Failed to execute query: {e}"),
                 data: None,
             },
         }

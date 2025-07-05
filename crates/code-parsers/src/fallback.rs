@@ -52,7 +52,7 @@ impl SyntaxParser for FallbackParser {
                 start_line,
                 end_line,
                 language: "fallback".to_string(),
-                element_type: format!("fallback_chunk_{}", i),
+                element_type: format!("fallback_chunk_{i}"),
             });
 
             current_line_start = end_line + 1;

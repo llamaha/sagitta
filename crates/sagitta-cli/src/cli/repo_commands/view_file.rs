@@ -45,7 +45,7 @@ pub async fn handle_repo_view_file(
     args: ViewFileArgs,
     config: &AppConfig,
 ) -> Result<()> {
-    log::debug!("Handling repo view-file with args: {:?}", args);
+    log::debug!("Handling repo view-file with args: {args:?}");
 
     let repo_config = get_active_repo_config(config, args.name.as_deref())?;
     let base_path = &repo_config.local_path;
@@ -84,7 +84,7 @@ pub async fn handle_repo_view_file(
         println!("{}", json!(result));
     } else {
         // Simple print for non-JSON output
-        println!("{}", content);
+        println!("{content}");
     }
     
     Ok(())

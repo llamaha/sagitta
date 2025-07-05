@@ -148,7 +148,7 @@ pub async fn index_paths<
     // --- 1. Ensure Collection Exists ---
     let embedding_dim = embedding_pool.dimension();
     ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?; 
-    log::debug!("Core: Collection \"{}\" ensured.", collection_name);
+    log::debug!("Core: Collection \"{collection_name}\" ensured.");
 
     // --- 2. Gather Files ---
     let files_to_process = gather_files(paths, file_extensions)?;
@@ -157,7 +157,7 @@ pub async fn index_paths<
     if files_to_process.is_empty() {
         log::warn!("Core: No files found matching the criteria. Indexing complete.");
         reporter.report(SyncProgress::new(SyncStage::Error {
-            message: format!("No files found to index"),
+            message: "No files found to index".to_string(),
         })).await;
         return Ok((0, 0));
     }
@@ -173,7 +173,7 @@ pub async fn index_paths<
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
         let chunks = crate::syntax::get_chunks(file_path)
-            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
+            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {e}")))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {
             sagitta_embed::processor::file_processor::ParsedChunk {
@@ -305,7 +305,7 @@ pub async fn index_paths<
         if points_batch.len() >= config.performance.batch_size {
             log::debug!("Upserting batch of {} points...", points_batch.len());
             if let Err(e) = upsert_batch(client.clone(), collection_name, points_batch).await {
-                log::error!("Failed to upsert batch: {}", e);
+                log::error!("Failed to upsert batch: {e}");
                 return Err(e.into());
             }
             points_batch = Vec::with_capacity(config.performance.batch_size);
@@ -316,7 +316,7 @@ pub async fn index_paths<
     if !points_batch.is_empty() {
         log::debug!("Upserting final batch of {} points...", points_batch.len());
         if let Err(e) = upsert_batch(client.clone(), collection_name, points_batch).await {
-            log::error!("Failed to upsert final batch: {}", e);
+            log::error!("Failed to upsert final batch: {e}");
             return Err(e.into());
         }
     }
@@ -385,7 +385,7 @@ pub async fn index_repo_files<
     if relative_paths.is_empty() {
         log::warn!("Core: No relative paths provided for repo indexing.");
         reporter.report(SyncProgress::new(SyncStage::Error {
-            message: format!("No files provided to index"),
+            message: "No files provided to index".to_string(),
         })).await;
         return Ok(0);
     }
@@ -393,7 +393,7 @@ pub async fn index_repo_files<
     // --- 1. Ensure Collection Exists ---
     let embedding_dim = embedding_pool.dimension();
     ensure_collection_exists(client.clone(), collection_name, embedding_dim as u64).await?;
-    log::debug!("Core: Collection \"{}\" ensured.", collection_name);
+    log::debug!("Core: Collection \"{collection_name}\" ensured.");
 
     // --- 2. Set up decoupled processing ---
     let embedding_config = app_config_to_embedding_config(config);
@@ -406,7 +406,7 @@ pub async fn index_repo_files<
     // Create syntax parser function that uses our existing syntax parsing infrastructure
     let syntax_parser_fn = |file_path: &std::path::Path| -> sagitta_embed::error::Result<Vec<sagitta_embed::processor::file_processor::ParsedChunk>> {
         let chunks = crate::syntax::get_chunks(file_path)
-            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {}", e)))?;
+            .map_err(|e| sagitta_embed::error::SagittaEmbedError::file_system(format!("Syntax parsing error: {e}")))?;
         
         let parsed_chunks = chunks.into_iter().map(|chunk| {
             sagitta_embed::processor::file_processor::ParsedChunk {
@@ -544,19 +544,19 @@ pub async fn index_repo_files<
     }
 
     let final_vocab_size = vocabulary_manager.len();
-    log::info!("Vocabulary updated. Size: {} -> {}", initial_vocab_size, final_vocab_size);
+    log::info!("Vocabulary updated. Size: {initial_vocab_size} -> {final_vocab_size}");
 
     // Save vocabulary
     vocabulary_manager.save(&vocab_path).map_err(|e| {
         log::error!("FATAL: Failed to save updated vocabulary to {}: {}", vocab_path.display(), e);
-        SagittaError::Other(format!("Failed to save vocabulary: {}", e)) 
+        SagittaError::Other(format!("Failed to save vocabulary: {e}")) 
     })?;
 
     log::info!("Updated vocabulary saved to {}", vocab_path.display());
 
     // --- 6. Upload Points to Qdrant (Network Bound, Concurrent) ---
     let semaphore = Arc::new(Semaphore::new(max_concurrent_upserts));
-    log::info!("Using max_concurrent_upserts: {}", max_concurrent_upserts);
+    log::info!("Using max_concurrent_upserts: {max_concurrent_upserts}");
     let mut upsert_tasks = Vec::new();
     let total_points_attempted_upsert = final_points.len();
 
@@ -585,15 +585,15 @@ pub async fn index_repo_files<
                  // Batch succeeded
              },
              Ok(Err(e)) => { 
-                 let error_msg = format!("Qdrant batch upsert failed: {}", e);
-                 log::error!("Batch upsert task failed: {}", e);
+                 let error_msg = format!("Qdrant batch upsert failed: {e}");
+                 log::error!("Batch upsert task failed: {e}");
                  upsert_errors.push(e.into()); 
                  reporter.report(SyncProgress::new(SyncStage::Error { message: error_msg })).await;
              },
              Err(join_err) => { 
-                 log::error!("Tokio task join error during upsert: {}", join_err);
-                 upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {}", join_err)));
-                 reporter.report(SyncProgress::new(SyncStage::Error { message: format!("Tokio task join error during upsert: {}", join_err) })).await;
+                 log::error!("Tokio task join error during upsert: {join_err}");
+                 upsert_errors.push(SagittaError::Other(format!("Tokio task join error: {join_err}")));
+                 reporter.report(SyncProgress::new(SyncStage::Error { message: format!("Tokio task join error during upsert: {join_err}") })).await;
              },
          }
     }
@@ -601,12 +601,12 @@ pub async fn index_repo_files<
     if !upsert_errors.is_empty() {
         log::error!("Encountered {} errors during Qdrant upsert:", upsert_errors.len());
         for e in upsert_errors.iter().take(10) {
-            log::error!("  - {}", e);
+            log::error!("  - {e}");
         }
         if upsert_errors.len() > 10 {
             log::error!("  ... and {} more upsert errors.", upsert_errors.len() - 10);
         }
-        return Err(upsert_errors.remove(0).into());
+        return Err(upsert_errors.remove(0));
     }
 
     log::info!(
@@ -701,7 +701,7 @@ pub async fn ensure_collection_exists<
     embedding_dimension: u64,
 ) -> Result<()> {
     if client.collection_exists(collection_name.to_string()).await? {
-        log::debug!("Collection '{}' already exists. Verifying dimension...", collection_name);
+        log::debug!("Collection '{collection_name}' already exists. Verifying dimension...");
         let collection_info = client.get_collection_info(collection_name.to_string()).await?;
         
         let mut current_dimension: Option<u64> = None;
@@ -716,7 +716,7 @@ pub async fn ensure_collection_exists<
                                 }
                             }
                             _ => {
-                                log::warn!("Collection '{}' has unexpected vector config type", collection_name);
+                                log::warn!("Collection '{collection_name}' has unexpected vector config type");
                             }
                         }
                     }
@@ -727,37 +727,33 @@ pub async fn ensure_collection_exists<
         if let Some(dim) = current_dimension {
             if dim != embedding_dimension {
                 log::warn!(
-                    "Collection '{}' exists but has dimension {} instead of expected {}. Recreating...",
-                    collection_name,
-                    dim,
-                    embedding_dimension
+                    "Collection '{collection_name}' exists but has dimension {dim} instead of expected {embedding_dimension}. Recreating..."
                 );
                 delete_collection_by_name(client.clone(), collection_name).await?;
             } else {
-                log::debug!("Collection '{}' exists with correct dimension {}.", collection_name, dim);
+                log::debug!("Collection '{collection_name}' exists with correct dimension {dim}.");
                 return Ok(());
             }
         } else {
             log::warn!(
-                "Collection '{}' exists but could not determine its dimension. Recreating...",
-                collection_name
+                "Collection '{collection_name}' exists but could not determine its dimension. Recreating..."
             );
             delete_collection_by_name(client.clone(), collection_name).await?;
         }
     }
 
-    log::info!("Creating collection '{}' with dimension {}...", collection_name, embedding_dimension);
+    log::info!("Creating collection '{collection_name}' with dimension {embedding_dimension}...");
     match client.create_collection(collection_name, embedding_dimension).await {
         Ok(true) => {
-            log::info!("Collection '{}' created/recreated successfully.", collection_name);
+            log::info!("Collection '{collection_name}' created/recreated successfully.");
             Ok(())
         }
         Ok(false) => {
-            log::error!("Qdrant reported false for collection creation/recreation of '{}', though no direct error was returned.", collection_name);
-            Err(SagittaError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{}'", collection_name)))
+            log::error!("Qdrant reported false for collection creation/recreation of '{collection_name}', though no direct error was returned.");
+            Err(SagittaError::QdrantOperationError(format!("Qdrant reported false for collection creation/recreation of '{collection_name}'")))
         }
         Err(e) => {
-            log::error!("Failed to create/recreate collection '{}': {:?}", collection_name, e);
+            log::error!("Failed to create/recreate collection '{collection_name}': {e:?}");
             Err(e)
         }
     }

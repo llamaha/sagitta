@@ -32,7 +32,7 @@ pub async fn handle_repo_search_file(
     args: SearchFileArgs,
     config: &AppConfig, // Use immutable ref for reading
 ) -> Result<()> {
-    log::debug!("Handling repo search-file with args: {:?}", args);
+    log::debug!("Handling repo search-file with args: {args:?}");
 
     let repo_config = get_active_repo_config(config, args.name.as_deref())?;
     let search_path = &repo_config.local_path;
@@ -42,19 +42,17 @@ pub async fn handle_repo_search_file(
 
     if args.json {
         let output = json!(matches);
-        println!("{}", output);
+        println!("{output}");
+    } else if matches.is_empty() {
+        println!("No files found matching the pattern '{}' in repository '{}'.", args.pattern, repo_config.name);
     } else {
-        if matches.is_empty() {
-            println!("No files found matching the pattern '{}' in repository '{}'.", args.pattern, repo_config.name);
-        } else {
-            println!("Found {} file(s) matching '{}' in repository '{}':", matches.len(), args.pattern, repo_config.name);
-            let mut stdout = StandardStream::stdout(ColorChoice::Auto);
-            for path in matches {
-                stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
-                writeln!(&mut stdout, "  {}", path.display())?;
-            }
-            stdout.reset()?;
+        println!("Found {} file(s) matching '{}' in repository '{}':", matches.len(), args.pattern, repo_config.name);
+        let mut stdout = StandardStream::stdout(ColorChoice::Auto);
+        for path in matches {
+            stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            writeln!(&mut stdout, "  {}", path.display())?;
         }
+        stdout.reset()?;
     }
 
     Ok(())

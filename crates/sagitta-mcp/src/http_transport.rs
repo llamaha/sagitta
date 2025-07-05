@@ -81,7 +81,7 @@ pub async fn run_http_server(
     let _ = tokio::spawn(start_progress_broadcaster(active_connections.clone()));
 
     // Extract host and port from the addr string
-    let server_url = format!("http://{}", addr_str);
+    let server_url = format!("http://{addr_str}");
     info!(server_url = %server_url, "Server URL for SSE endpoint");
 
     // Define API Key Management Routes with explicit prefix
@@ -114,7 +114,7 @@ pub async fn run_http_server(
             (StatusCode::NOT_FOUND, format!("Not found: {} {}", req.method(), req.uri().path()))
         });
 
-    let bind_addr: SocketAddr = addr_str.parse().context(format!("Invalid bind address: {}", addr_str))?;
+    let bind_addr: SocketAddr = addr_str.parse().context(format!("Invalid bind address: {addr_str}"))?;
     info!(address = %bind_addr, "Preparing to start HTTP server");
 
     info!(address = %bind_addr, "Starting HTTP server");
@@ -158,7 +158,7 @@ async fn sse_handler(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("localhost:8080");
     
-    let server_url = format!("http://{}", host);
+    let server_url = format!("http://{host}");
     info!(%session_id, server_url = %server_url, "Using server URL from request headers");
 
     // Create a channel for this connection
@@ -174,7 +174,7 @@ async fn sse_handler(
     // Send initial connection confirmation with session ID in both content and custom headers
     let initial_event = Event::default()
         .event("connection")
-        .id(&session_id.to_string())
+        .id(session_id.to_string())
         .data(json!({
             "type": "connection",
             SESSION_ID_HEADER: session_id.to_string(),
@@ -212,7 +212,7 @@ async fn start_progress_broadcaster(active_connections: Arc<DashMap<Uuid, mpsc::
         if let Some(messages) = crate::progress::take_pending_messages() {
             for msg in messages {
                 // Broadcast to all active connections
-                let connections: Vec<_> = active_connections.iter().map(|item| item.key().clone()).collect();
+                let connections: Vec<_> = active_connections.iter().map(|item| *item.key()).collect();
                 for session_id in connections {
                     if let Some(tx) = active_connections.get(&session_id) {
                         let _ = tx.send(msg.clone()).await;

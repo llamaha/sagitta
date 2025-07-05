@@ -23,7 +23,7 @@ impl From<SwitchResult> for LegacySyncResult {
         let (files_processed, message) = if let Some(sync_result) = switch_result.sync_result {
             let total_files = sync_result.files_added + sync_result.files_updated + sync_result.files_removed;
             let message = if sync_result.success {
-                format!("Branch switch completed: {} files processed", total_files)
+                format!("Branch switch completed: {total_files} files processed")
             } else {
                 sync_result.error_message.unwrap_or_else(|| "Sync failed".to_string())
             };

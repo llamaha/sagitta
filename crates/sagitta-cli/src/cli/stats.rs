@@ -95,7 +95,7 @@ where
     let collection_info_result = client
         .get_collection_info(collection_name.clone())
         .await
-        .context(format!("Failed to retrieve collection info for '{}'", collection_name));
+        .context(format!("Failed to retrieve collection info for '{collection_name}'"));
 
     if args.json {
         let info = collection_info_result.as_ref().ok().map(|info| CollectionInfoStats {
@@ -147,7 +147,7 @@ where
             }
             Err(e) => {
                 eprintln!("{}", "  Error: Could not retrieve collection info (collection might not exist yet). Run 'repo sync'?".red());
-                return Err(e.context(format!("Failed to get collection info for '{}'", collection_name)));
+                return Err(e.context(format!("Failed to get collection info for '{collection_name}'")));
             }
         }
     }

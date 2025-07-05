@@ -30,7 +30,7 @@ pub async fn handle_todo_write<C: QdrantClientTrait + Send + Sync + 'static>(
         if let Err(e) = fs::create_dir_all(parent).await {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to create .sagitta directory: {}", e),
+                message: format!("Failed to create .sagitta directory: {e}"),
                 data: None,
             });
         }
@@ -52,7 +52,7 @@ pub async fn handle_todo_write<C: QdrantClientTrait + Send + Sync + 'static>(
         Err(e) => {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to serialize todos: {}", e),
+                message: format!("Failed to serialize todos: {e}"),
                 data: None,
             });
         }
@@ -61,7 +61,7 @@ pub async fn handle_todo_write<C: QdrantClientTrait + Send + Sync + 'static>(
     if let Err(e) = fs::write(&todos_path, &json_content).await {
         return Err(ErrorObject {
             code: -32603,
-            message: format!("Failed to write todos file: {}", e),
+            message: format!("Failed to write todos file: {e}"),
             data: None,
         });
     }
@@ -72,8 +72,7 @@ pub async fn handle_todo_write<C: QdrantClientTrait + Send + Sync + 'static>(
     let in_progress = todos.iter().filter(|t| t.status == TodoStatus::InProgress).count();
     let pending = todos.iter().filter(|t| t.status == TodoStatus::Pending).count();
     
-    let summary = format!("Updated {} todos: {} completed, {} in progress, {} pending", 
-                         total, completed, in_progress, pending);
+    let summary = format!("Updated {total} todos: {completed} completed, {in_progress} in progress, {pending} pending");
     
     Ok(TodoWriteResult {
         todos,

@@ -92,8 +92,7 @@ impl ModelDownloader {
         
         // Construct the direct download URL
         let url = format!(
-            "https://huggingface.co/{}/resolve/main/{}",
-            model_id, filename
+            "https://huggingface.co/{model_id}/resolve/main/{filename}"
         );
         
         info!("Attempting direct download from: {url}");
@@ -181,8 +180,8 @@ impl ModelDownloader {
             }
             Err(e) => {
                 // Log the error for debugging
-                warn!("hf_hub download failed: {}", e);
-                warn!("Error details: {:?}", e);
+                warn!("hf_hub download failed: {e}");
+                warn!("Error details: {e:?}");
                 
                 // Use direct download as fallback for any hf_hub errors
                 // The hf_hub library has various issues that can cause downloads to fail
@@ -201,8 +200,8 @@ impl ModelDownloader {
                 for file in model.additional_files() {
                     let cache_path = model_cache_dir.join("snapshots").join("main").join(file);
                     match self.download_file_direct(model_id, file, &cache_path) {
-                        Ok(_) => debug!("Downloaded additional file: {}", file),
-                        Err(e) => debug!("Failed to download optional file {}: {}", file, e),
+                        Ok(_) => debug!("Downloaded additional file: {file}"),
+                        Err(e) => debug!("Failed to download optional file {file}: {e}"),
                     }
                 }
                 
@@ -229,26 +228,26 @@ impl ModelDownloader {
 
         // Download model file
         let model_file = model.model_file();
-        debug!("Downloading model file via hf_hub: {}", model_file);
+        debug!("Downloading model file via hf_hub: {model_file}");
         let model_path = repo
             .get(model_file)
-            .with_context(|| format!("Failed to download model file: {}", model_file))?;
+            .with_context(|| format!("Failed to download model file: {model_file}"))?;
 
         // Download tokenizer file
         let tokenizer_file = model.tokenizer_file();
-        debug!("Downloading tokenizer file via hf_hub: {}", tokenizer_file);
+        debug!("Downloading tokenizer file via hf_hub: {tokenizer_file}");
         let tokenizer_path = repo
             .get(tokenizer_file)
-            .with_context(|| format!("Failed to download tokenizer file: {}", tokenizer_file))?;
+            .with_context(|| format!("Failed to download tokenizer file: {tokenizer_file}"))?;
 
         // Download additional files
         let mut additional_paths = Vec::new();
         for file in model.additional_files() {
-            debug!("Downloading additional file: {}", file);
+            debug!("Downloading additional file: {file}");
             match repo.get(file) {
                 Ok(path) => additional_paths.push(path),
                 Err(e) => {
-                    debug!("Optional file {} not found: {}", file, e);
+                    debug!("Optional file {file} not found: {e}");
                     // Continue - some files might be optional
                 }
             }
@@ -338,7 +337,7 @@ mod tests {
         let model = EmbeddingModel::BgeSmallEnV15Quantized;
         let downloader = ModelDownloader::new().expect("Failed to create downloader");
         
-        println!("Testing download for model: {:?}", model);
+        println!("Testing download for model: {model:?}");
         println!("Model ID: {}", model.model_id());
         println!("Model file: {}", model.model_file());
         println!("Tokenizer file: {}", model.tokenizer_file());
@@ -360,9 +359,9 @@ mod tests {
             }
             Err(e) => {
                 // If download fails, provide helpful information
-                eprintln!("Model download failed: {}", e);
-                eprintln!("Full error: {:?}", e);
-                eprintln!("Error string: {}", e.to_string());
+                eprintln!("Model download failed: {e}");
+                eprintln!("Full error: {e:?}");
+                eprintln!("Error string: {}", e);
                 eprintln!("\nThis might be due to:");
                 eprintln!("1. Network connectivity issues");
                 eprintln!("2. SSL/TLS certificate problems (try: export HF_HUB_DISABLE_SSL_VERIFY=1)");
@@ -405,11 +404,11 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let cache_path = temp_dir.path().join(filename);
         
-        println!("Testing direct download of {} from {}", filename, model_id);
+        println!("Testing direct download of {filename} from {model_id}");
         
         match downloader.download_file_direct(model_id, filename, &cache_path) {
             Ok(path) => {
-                println!("Direct download succeeded: {:?}", path);
+                println!("Direct download succeeded: {path:?}");
                 assert!(path.exists(), "Downloaded file should exist");
                 
                 // Check file size to ensure it's not empty
@@ -418,7 +417,7 @@ mod tests {
                 println!("File size: {} bytes", metadata.len());
             }
             Err(e) => {
-                eprintln!("Direct download failed: {}", e);
+                eprintln!("Direct download failed: {e}");
                 panic!("Direct download should work");
             }
         }

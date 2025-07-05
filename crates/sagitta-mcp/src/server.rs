@@ -138,7 +138,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                             Some(Response::error(
                                 ErrorObject {
                                     code: error_codes::PARSE_ERROR,
-                                    message: format!("Failed to parse request: {}", e),
+                                    message: format!("Failed to parse request: {e}"),
                                     data: None,
                                 },
                                 None,
@@ -313,7 +313,7 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
                 warn!(error = %e, "Failed to parse JSON-RPC request string into mcp::types::Request");
                 let err_obj = ErrorObject {
                     code: error_codes::PARSE_ERROR,
-                    message: format!("Failed to parse request: {}", e),
+                    message: format!("Failed to parse request: {e}"),
                     data: None,
                 };
                 let response = crate::mcp::types::Response::error(err_obj, Some(serde_json::Value::Null));
@@ -334,15 +334,15 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
 pub fn map_add_repo_error(e: AddRepoError) -> ErrorObject {
     let (code, message) = match &e {
         AddRepoError::InvalidArgs(msg) => (error_codes::INVALID_PARAMS, msg.clone()),
-        AddRepoError::RepoExists(name) => (error_codes::REPO_ALREADY_EXISTS, format!("Repository '{}' already exists.", name)),
-        AddRepoError::NameDerivationError(from) => (error_codes::NAME_DERIVATION_FAILED, format!("Could not derive repository name from {}", from)),
-        AddRepoError::IoError(io_err) => (error_codes::INTERNAL_ERROR, format!("Filesystem error: {}", io_err)),
-        AddRepoError::ConfigError(cfg_err) => (error_codes::CONFIG_SAVE_FAILED, format!("Configuration error: {}", cfg_err)),
-        AddRepoError::GitError(git_err) => (error_codes::GIT_OPERATION_FAILED, format!("Git operation failed: {}", git_err)),
+        AddRepoError::RepoExists(name) => (error_codes::REPO_ALREADY_EXISTS, format!("Repository '{name}' already exists.")),
+        AddRepoError::NameDerivationError(from) => (error_codes::NAME_DERIVATION_FAILED, format!("Could not derive repository name from {from}")),
+        AddRepoError::IoError(io_err) => (error_codes::INTERNAL_ERROR, format!("Filesystem error: {io_err}")),
+        AddRepoError::ConfigError(cfg_err) => (error_codes::CONFIG_SAVE_FAILED, format!("Configuration error: {cfg_err}")),
+        AddRepoError::GitError(git_err) => (error_codes::GIT_OPERATION_FAILED, format!("Git operation failed: {git_err}")),
         AddRepoError::RepoOpenError(path, open_err) => (error_codes::INTERNAL_ERROR, format!("Failed to open repository at {}: {}", path.display(), open_err)),
-        AddRepoError::BranchDetectionError(branch_err) => (error_codes::BRANCH_DETECTION_FAILED, format!("Failed to determine default branch: {}", branch_err)),
-        AddRepoError::QdrantError(q_err) => (error_codes::QDRANT_OPERATION_FAILED, format!("Qdrant operation failed: {}", q_err)),
-        AddRepoError::EmbeddingError(emb_err) => (error_codes::EMBEDDING_ERROR, format!("Embedding logic error: {}", emb_err)),
+        AddRepoError::BranchDetectionError(branch_err) => (error_codes::BRANCH_DETECTION_FAILED, format!("Failed to determine default branch: {branch_err}")),
+        AddRepoError::QdrantError(q_err) => (error_codes::QDRANT_OPERATION_FAILED, format!("Qdrant operation failed: {q_err}")),
+        AddRepoError::EmbeddingError(emb_err) => (error_codes::EMBEDDING_ERROR, format!("Embedding logic error: {emb_err}")),
         AddRepoError::UrlDeterminationError => (error_codes::URL_DETERMINATION_FAILED, "Failed to determine repository URL.".to_string()),
     };
     
@@ -376,7 +376,7 @@ pub fn deserialize_params<T: serde::de::DeserializeOwned + Default>(params: Opti
 pub fn deserialize_value<T: serde::de::DeserializeOwned>(value: Value, method_name: &str) -> Result<T, ErrorObject> {
     serde_json::from_value(value).map_err(|e| ErrorObject {
         code: error_codes::INVALID_PARAMS,
-        message: format!("Invalid params/arguments for {}: {}", method_name, e),
+        message: format!("Invalid params/arguments for {method_name}: {e}"),
         data: None,
     })
 }
@@ -385,7 +385,7 @@ pub fn ok_some<T: serde::Serialize>(value: T) -> Result<Option<serde_json::Value
     serde_json::to_value(value)
         .map_err(|e| ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to serialize result: {}", e),
+            message: format!("Failed to serialize result: {e}"),
             data: None,
         })
         .map(Some)
@@ -399,7 +399,7 @@ pub fn result_to_call_result<T: serde::Serialize>(result: T) -> Result<CallToolR
         }),
         Err(e) => Err(ErrorObject {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Failed to serialize tool result: {}", e),
+            message: format!("Failed to serialize tool result: {e}"),
             data: None,
         }),
     }
@@ -420,6 +420,6 @@ pub fn create_error_data(e: &anyhow::Error) -> serde_json::Value {
         "sources": sources,
         "sagitta_error_type": e.source()
             .and_then(|source| source.downcast_ref::<SagittaError>())
-            .map(|specific| format!("{:?}", specific)),
+            .map(|specific| format!("{specific:?}")),
     })
 }

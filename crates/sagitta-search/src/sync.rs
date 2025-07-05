@@ -131,13 +131,13 @@ where
 
         // Determine target commit (based on target_ref or branch)
         if let Some(target_ref) = &target_ref_clone {
-            info!("Repository configured with target_ref: '{}'. Syncing static commit.", target_ref);
+            info!("Repository configured with target_ref: '{target_ref}'. Syncing static commit.");
             let object = repo.revparse_single(target_ref)
-                .with_context(|| format!("Could not find commit object for target_ref '{}'", target_ref))?;
+                .with_context(|| format!("Could not find commit object for target_ref '{target_ref}'"))?;
             branch_commit = object.peel_to_commit()
-                .with_context(|| format!("Target ref '{}' did not resolve to a commit.", target_ref))?;
+                .with_context(|| format!("Target ref '{target_ref}' did not resolve to a commit."))?;
             commit_oid_str = branch_commit.id().to_string();
-            debug!("Found commit {} for target_ref '{}'", commit_oid_str, target_ref);
+            debug!("Found commit {commit_oid_str} for target_ref '{target_ref}'");
         } else {
             // Logic for syncing a branch (either remote-tracking or local)
             let branch_name = &active_branch_clone;
@@ -145,7 +145,7 @@ where
                 debug!("Repository treated as remote. Fetching...");
                 // Fetch from remote
                 let mut remote = repo.find_remote(&remote_name_clone)
-                    .with_context(|| format!("Could not find remote '{}'", remote_name_clone))?;
+                    .with_context(|| format!("Could not find remote '{remote_name_clone}'"))?;
                 
                 // Use the appropriate create_fetch_options from repo_helpers::git_utils
                 // We need AppConfig or RepositoryConfig vec here - how to pass?
@@ -164,16 +164,16 @@ where
                 fetch_opts.download_tags(AutotagOption::All);
                 
                 match remote.fetch(&[branch_name], Some(&mut fetch_opts), None) {
-                    Ok(_) => info!("Fetched remote '{}' for branch '{}'", remote_name_clone, branch_name),
+                    Ok(_) => info!("Fetched remote '{remote_name_clone}' for branch '{branch_name}'"),
                     Err(e) => {
-                        warn!("Failed to fetch specific branch '{}' from remote '{}': {}. Proceeding with local refs.", branch_name, remote_name_clone, e);
+                        warn!("Failed to fetch specific branch '{branch_name}' from remote '{remote_name_clone}': {e}. Proceeding with local refs.");
                         // Don't error out, maybe remote is unavailable but local is ok?
                     }
                 };
                 eprintln!(); // Newline to stderr after fetch progress
 
                 // Find the remote-tracking branch reference with fallback logic
-                let ref_name = format!("refs/remotes/{}/{}", remote_name_clone, branch_name);
+                let ref_name = format!("refs/remotes/{remote_name_clone}/{branch_name}");
                 
                 // Try to find the specified branch first
                 let branch_result = repo.find_reference(&ref_name);
@@ -182,11 +182,11 @@ where
                     Ok(reference) => {
                         // Successfully found the specified branch
                         reference.peel_to_commit()
-                            .with_context(|| format!("Could not peel reference '{}' to commit.", ref_name))?
+                            .with_context(|| format!("Could not peel reference '{ref_name}' to commit."))?
                     },
                     Err(_) => {
                         // Branch not found, try fallback logic
-                        warn!("Could not find remote-tracking reference '{}'. Attempting fallback to default branches.", ref_name);
+                        warn!("Could not find remote-tracking reference '{ref_name}'. Attempting fallback to default branches.");
                         
                         // Try common default branch names
                         let fallback_branches = if branch_name == "main" {
@@ -199,9 +199,9 @@ where
                         
                         let mut found_branch = None;
                         for fallback_branch in fallback_branches {
-                            let fallback_ref_name = format!("refs/remotes/{}/{}", remote_name_clone, fallback_branch);
+                            let fallback_ref_name = format!("refs/remotes/{remote_name_clone}/{fallback_branch}");
                             if let Ok(reference) = repo.find_reference(&fallback_ref_name) {
-                                info!("Found fallback branch '{}' instead of '{}'", fallback_branch, branch_name);
+                                info!("Found fallback branch '{fallback_branch}' instead of '{branch_name}'");
                                 found_branch = Some(reference);
                                 break;
                             }
@@ -210,7 +210,7 @@ where
                         match found_branch {
                             Some(reference) => {
                                 reference.peel_to_commit()
-                                    .with_context(|| format!("Could not peel fallback reference to commit."))?
+                                    .with_context(|| "Could not peel fallback reference to commit.".to_string())?
                             },
                             None => {
                                 return Err(anyhow!(
@@ -225,15 +225,15 @@ where
             } else {
                 debug!("Repository treated as local-only.");
                 // Find the local branch reference
-                let ref_name = format!("refs/heads/{}", branch_name);
+                let ref_name = format!("refs/heads/{branch_name}");
                 branch_commit = repo.find_reference(&ref_name)
-                    .with_context(|| format!("Could not find local branch '{}'", ref_name))?
+                    .with_context(|| format!("Could not find local branch '{ref_name}'"))?
                     .peel_to_commit()
-                    .with_context(|| format!("Could not peel reference '{}' to commit.", ref_name))?;
+                    .with_context(|| format!("Could not peel reference '{ref_name}' to commit."))?;
                 commit_oid_str = branch_commit.id().to_string();
             }
         }
-        debug!("Target commit for sync: {}", commit_oid_str);
+        debug!("Target commit for sync: {commit_oid_str}");
 
         // --- Determine Sync Type and Calculate Diff ---
         let mut sync_type = SyncType::None;
@@ -248,14 +248,14 @@ where
             info!("Force flag set, performing full sync.");
         } else if let Some(last_commit_str) = last_synced_oid_str {
             if last_commit_str == &commit_oid_str {
-                info!("Repository branch '{}' already synced to commit: {}", current_branch_name, commit_oid_str);
+                info!("Repository branch '{current_branch_name}' already synced to commit: {commit_oid_str}");
             } else {
-                info!("Branch '{}' needs incremental sync from {} to {}", current_branch_name, last_commit_str, commit_oid_str);
+                info!("Branch '{current_branch_name}' needs incremental sync from {last_commit_str} to {commit_oid_str}");
                 sync_type = SyncType::Incremental;
                 let last_commit_oid = GitOid::from_str(last_commit_str)
-                    .with_context(|| format!("Invalid OID string in config for last sync: {}", last_commit_str))?;
+                    .with_context(|| format!("Invalid OID string in config for last sync: {last_commit_str}"))?;
                 let last_commit = repo.find_commit(last_commit_oid)
-                    .with_context(|| format!("Could not find last synced commit object: {}", last_commit_str))?;
+                    .with_context(|| format!("Could not find last synced commit object: {last_commit_str}"))?;
                 
                 let old_tree = last_commit.tree()?;
                 let new_tree = branch_commit.tree()?;
@@ -263,7 +263,7 @@ where
                 let mut diff_opts = DiffOptions::new();
                 let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut diff_opts))?;
 
-                diff_message = Some(format!("Calculated diff from {} to {}", last_commit_str, commit_oid_str));
+                diff_message = Some(format!("Calculated diff from {last_commit_str} to {commit_oid_str}"));
 
                 diff.foreach(
                     &mut |delta, _progress| {
@@ -283,7 +283,7 @@ where
                 info!("Incremental sync: {} files to index/update, {} files to delete.", files_to_index.len(), files_to_delete.len());
             }
         } else {
-            info!("No previous sync found for branch '{}'. Performing initial full sync.", current_branch_name);
+            info!("No previous sync found for branch '{current_branch_name}'. Performing initial full sync.");
             sync_type = SyncType::Full;
         }
         
@@ -335,15 +335,14 @@ where
         let collection_exists = match client.collection_exists(collection_name.clone()).await {
             Ok(exists) => exists,
             Err(e) => {
-                warn!("Failed to check collection existence: {}. Forcing full sync.", e);
+                warn!("Failed to check collection existence: {e}. Forcing full sync.");
                 false
             }
         };
         
         if !collection_exists {
             warn!(
-                "Collection '{}' does not exist but config shows repository was synced. Forcing full sync.",
-                collection_name
+                "Collection '{collection_name}' does not exist but config shows repository was synced. Forcing full sync."
             );
             // Force a full sync by clearing the sync type
             sync_needed = true;
@@ -356,8 +355,7 @@ where
                     let points_count = info.points_count.unwrap_or(0);
                     if points_count == 0 {
                         warn!(
-                            "Collection '{}' exists but is empty. Forcing full sync.",
-                            collection_name
+                            "Collection '{collection_name}' exists but is empty. Forcing full sync."
                         );
                         sync_needed = true;
                         files_to_index = Vec::new(); // Will be populated below
@@ -365,7 +363,7 @@ where
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to get collection info: {}. Forcing full sync.", e);
+                    warn!("Failed to get collection info: {e}. Forcing full sync.");
                     sync_needed = true;
                     files_to_index = Vec::new(); // Will be populated below
                     files_to_delete = Vec::new();
@@ -417,7 +415,7 @@ where
     
     // --- Filter Files By Extension ---
     if let Some(exts) = extensions_filter {
-        info!("Filtering files to index by extensions: {:?}", exts);
+        info!("Filtering files to index by extensions: {exts:?}");
         let original_count = files_to_index.len();
         files_to_index.retain(|path| {
             path.extension()
@@ -430,7 +428,7 @@ where
 
     let files_to_delete_count = files_to_delete.len();
     let files_to_index_count = files_to_index.len();
-    info!("Files to index/update: {}, Files to delete: {}", files_to_index_count, files_to_delete_count);
+    info!("Files to index/update: {files_to_index_count}, Files to delete: {files_to_delete_count}");
     
     // --- Qdrant Operations ---
     
@@ -443,7 +441,7 @@ where
         app_config
     );
     
-    info!("Using branch-aware collection: '{}' for branch/ref: '{}'", collection_name, current_sync_branch_or_ref);
+    info!("Using branch-aware collection: '{collection_name}' for branch/ref: '{current_sync_branch_or_ref}'");
     
     // Check if we already have sync metadata for this branch/ref
     let sync_metadata = repo_helpers::get_branch_sync_metadata(
@@ -509,8 +507,7 @@ where
             indexed_languages.sort();
             
             let skip_message = format!(
-                "Skipped sync for repository '{}' branch/ref '{}' - already up to date (commit: {})",
-                repo_name, current_sync_branch_or_ref, commit_oid_str
+                "Skipped sync for repository '{repo_name}' branch/ref '{current_sync_branch_or_ref}' - already up to date (commit: {commit_oid_str})"
             );
             
             return Ok(SyncResult {
@@ -524,7 +521,7 @@ where
         }
     }
     
-    info!("Proceeding with sync for branch '{}' (collection: '{}')", current_sync_branch_or_ref, collection_name);
+    info!("Proceeding with sync for branch '{current_sync_branch_or_ref}' (collection: '{collection_name}')");
     
     // Ensure collection exists (might need embedding dimension)
     // Get dimension from AppConfig or model - requires AppConfig here
@@ -535,7 +532,7 @@ where
     
     reporter.report(SyncProgress::new(
         SyncStage::VerifyingCollection {
-            message: format!("Ensuring collection '{}' exists with dimension {}", collection_name, embedding_dim)
+            message: format!("Ensuring collection '{collection_name}' exists with dimension {embedding_dim}")
         }
     )).await;
     crate::indexing::ensure_collection_exists(client.clone(), &collection_name, embedding_dim as u64).await?;
@@ -572,7 +569,7 @@ where
         info!("No new or modified files to index.");
     }
     
-    info!("Repository '{}' sync actions completed for commit {}", repo_name, commit_oid_str);
+    info!("Repository '{repo_name}' sync actions completed for commit {commit_oid_str}");
 
     // --- Query Indexed Languages --- 
     // (This logic remains largely the same, using the QdrantClientTrait)
@@ -619,7 +616,7 @@ where
         if scroll_count % heartbeat_interval == 0 {
             reporter.report(SyncProgress::new(
                 SyncStage::Heartbeat { 
-                    message: format!("Querying languages... processed {} batches", scroll_count)
+                    message: format!("Querying languages... processed {scroll_count} batches")
                 }
             )).await;
         }
@@ -632,10 +629,9 @@ where
     
     let mut indexed_languages: Vec<String> = indexed_languages_set.into_iter().collect();
     indexed_languages.sort();
-    info!("Indexed languages after sync: {:?}", indexed_languages);
+    info!("Indexed languages after sync: {indexed_languages:?}");
     
-    let success_message = format!("Successfully synced repository '{}' branch/ref '{}' to commit {}", 
-            repo_name, current_sync_branch_or_ref, commit_oid_str);
+    let success_message = format!("Successfully synced repository '{repo_name}' branch/ref '{current_sync_branch_or_ref}' to commit {commit_oid_str}");
     reporter.report(SyncProgress::new(
         SyncStage::Completed { message: success_message.clone() }
     )).await;

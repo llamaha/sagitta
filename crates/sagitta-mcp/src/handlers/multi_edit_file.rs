@@ -13,8 +13,8 @@ fn create_diff(old_content: &str, new_content: &str, file_path: &str) -> String 
     let diff = TextDiff::from_lines(old_content, new_content);
     
     let mut result = String::new();
-    result.push_str(&format!("--- {}\n", file_path));
-    result.push_str(&format!("+++ {}\n", file_path));
+    result.push_str(&format!("--- {file_path}\n"));
+    result.push_str(&format!("+++ {file_path}\n"));
     
     for group in diff.grouped_ops(3) {
         let mut first_old = None;
@@ -66,13 +66,13 @@ fn create_diff(old_content: &str, new_content: &str, file_path: &str) -> String 
                 new_start + 1, new_end - new_start));
             
             for op in &group {
-                for change in diff.iter_changes(&op) {
+                for change in diff.iter_changes(op) {
                     let prefix = match change.tag() {
                         similar::ChangeTag::Delete => "-",
                         similar::ChangeTag::Insert => "+",
                         similar::ChangeTag::Equal => " ",
                     };
-                    result.push_str(&format!("{}{}", prefix, change.to_string()));
+                    result.push_str(&format!("{}{}", prefix, change));
                     if !change.to_string().ends_with('\n') {
                         result.push('\n');
                     }
@@ -121,7 +121,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
         Err(e) => {
             return Err(ErrorObject {
                 code: -32603,
-                message: format!("Failed to read file: {}", e),
+                message: format!("Failed to read file: {e}"),
                 data: None,
             });
         }
@@ -159,7 +159,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
     if let Err(e) = fs::write(&params.file_path, &current_content).await {
         return Err(ErrorObject {
             code: -32603,
-            message: format!("Failed to write file: {}", e),
+            message: format!("Failed to write file: {e}"),
             data: None,
         });
     }
@@ -176,8 +176,7 @@ pub async fn handle_multi_edit_file<C: QdrantClientTrait + Send + Sync + 'static
         }
     }).sum();
     
-    let changes_summary = format!("Applied {} edits with {} total replacements", 
-                                edits_applied, total_replacements);
+    let changes_summary = format!("Applied {edits_applied} edits with {total_replacements} total replacements");
     
     Ok(MultiEditFileResult {
         file_path: params.file_path,

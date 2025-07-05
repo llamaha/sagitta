@@ -330,7 +330,7 @@ impl AppConfig {
 pub fn get_config_path_or_default(override_path: Option<&PathBuf>) -> Result<PathBuf> {
     // Check for test environment variable first
     if let Ok(test_path_str) = std::env::var("SAGITTA_TEST_CONFIG_PATH") {
-        log::debug!("Using test config path from ENV: {}", test_path_str);
+        log::debug!("Using test config path from ENV: {test_path_str}");
         return Ok(PathBuf::from(test_path_str));
     }
     // Then check for direct override path
@@ -376,7 +376,7 @@ pub fn load_config(override_path: Option<&PathBuf>) -> Result<AppConfig> {
 
         match toml::from_str::<AppConfig>(&config_content) {
             Ok(config) => {
-                log::debug!("Parsed config successfully: {:?}", config);
+                log::debug!("Parsed config successfully: {config:?}");
                 // Validate the configuration
                 config.validate()?;
                 Ok(config)
