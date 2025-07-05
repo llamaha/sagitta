@@ -58,7 +58,7 @@ impl EmbeddingModel {
     }
 
     /// Parse from string representation
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "bge-small-en-v1.5-q" | "bge-small-fast" => Self::BgeSmallEnV15Quantized,
             "bge-small-en-v1.5-fp16" | "bge-small-fp32" => Self::BgeSmallEnV15Fp32,
@@ -299,15 +299,15 @@ mod tests {
     #[test]
     fn test_embedding_model_from_str() {
         assert_eq!(
-            EmbeddingModel::from_str("bge-small-fast"),
+            EmbeddingModel::parse("bge-small-fast"),
             EmbeddingModel::BgeSmallEnV15Quantized
         );
         assert_eq!(
-            EmbeddingModel::from_str("bge-small-fp32"),
+            EmbeddingModel::parse("bge-small-fp32"),
             EmbeddingModel::BgeSmallEnV15Fp32
         );
         assert_eq!(
-            EmbeddingModel::from_str("custom/model-id"),
+            EmbeddingModel::parse("custom/model-id"),
             EmbeddingModel::Custom("custom/model-id".to_string())
         );
     }

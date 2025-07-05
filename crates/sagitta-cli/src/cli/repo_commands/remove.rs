@@ -30,7 +30,7 @@ pub async fn handle_repo_remove<C>(
     args: RemoveRepoArgs, 
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &crate::cli::CliArgs,
+    _cli_args: &crate::cli::CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where

@@ -122,7 +122,7 @@ impl EmbeddingPool {
 
         // Send batches to work queue
         for batch in chunks.chunks(chunk_size) {
-            if let Err(_) = batch_sender.send(batch.to_vec()).await {
+            if batch_sender.send(batch.to_vec()).await.is_err() {
                 return Err(SagittaEmbedError::thread_safety("Failed to queue batch for processing".to_string()));
             }
         }

@@ -43,7 +43,7 @@ pub async fn handle_cleanup_branches<C>(
     args: CleanupBranchesArgs,
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where

@@ -1,5 +1,5 @@
 use clap::Args;
-use anyhow::{anyhow, Context, Result, bail};
+use anyhow::{anyhow, Result, bail};
 use std::sync::Arc;
 use sagitta_search::{
     config::AppConfig,

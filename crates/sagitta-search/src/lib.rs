@@ -617,7 +617,7 @@ extern crate log;
 /// Converts AppConfig to EmbeddingConfig for use with sagitta-embed
 pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig {
     use sagitta_embed::EmbeddingModelType;
-    use sagitta_embed::model::download::{EmbeddingModel as DownloadableModel, ModelDownloader};
+    use sagitta_embed::model::download::{EmbeddingModel, ModelDownloader};
     use std::path::PathBuf;
 
     // First validate the config
@@ -633,7 +633,7 @@ pub fn app_config_to_embedding_config(app_config: &AppConfig) -> EmbeddingConfig
             (EmbeddingModelType::Default, None, None)
         } else {
             // Use automatic model downloading
-            let model = DownloadableModel::from_str(embed_model);
+            let model = EmbeddingModel::parse(embed_model);
             match ModelDownloader::new() {
             Ok(downloader) => {
                 match downloader.download_model(&model) {

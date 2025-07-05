@@ -151,16 +151,19 @@ impl QdrantClientTrait for Qdrant {
         Ok(response.result)
     }
     
-    async fn delete_points(&self, request: DeletePoints) -> Result<PointsOperationResponse> {
-        self.delete_points(request).await.map_err(SagittaError::from)
+    async fn delete_points(&self, _request: DeletePoints) -> Result<PointsOperationResponse> {
+        // TODO: Implement when qdrant-client supports this method
+        unimplemented!("delete_points not yet implemented for Qdrant client")
     }
 
-    async fn query_points(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query_points(request).await.map_err(SagittaError::from)
+    async fn query_points(&self, _request: QueryPoints) -> Result<QueryResponse> {
+        // TODO: Implement when qdrant-client supports this method  
+        unimplemented!("query_points not yet implemented for Qdrant client")
     }
 
-    async fn query(&self, request: QueryPoints) -> Result<QueryResponse> {
-        self.query(request).await.map_err(SagittaError::from)
+    async fn query(&self, _request: QueryPoints) -> Result<QueryResponse> {
+        // TODO: Implement when qdrant-client supports this method
+        unimplemented!("query not yet implemented for Qdrant client")
     }
 
     async fn list_collections(&self) -> Result<Vec<String>> {

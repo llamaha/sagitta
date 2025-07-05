@@ -118,7 +118,6 @@ where
 ///
 /// This module contains the central vector store trait that can be used
 /// by GUI components and analytics without pulling in all of sagitta-search.
-
 pub mod vector_store;
 
 pub use vector_store::{VectorStore, VectorStoreError, UpsertResult, CollectionConfig, DistanceMetric, VectorPoint, SearchQuery, CollectionInfo, CollectionStatus, ScrollResult};

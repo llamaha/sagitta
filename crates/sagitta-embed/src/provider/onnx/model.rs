@@ -1223,8 +1223,8 @@ impl EmbeddingProvider for OnnxEmbeddingModel {
                 let sample_attention_mask = &attention_masks_for_pooling[attention_mask_start..attention_mask_end];
                 
                 // Compute mean pooling over non-padding tokens
-                for token_idx in 0..seq_length.min(actual_seq_length) {
-                    if sample_attention_mask[token_idx] == 1 {
+                for (token_idx, &mask_value) in sample_attention_mask.iter().enumerate().take(seq_length.min(actual_seq_length)) {
+                    if mask_value == 1 {
                         non_padding_tokens += 1;
                         let token_start = batch_idx * seq_length * expected_dim + token_idx * expected_dim;
                         for dim_idx in 0..expected_dim {

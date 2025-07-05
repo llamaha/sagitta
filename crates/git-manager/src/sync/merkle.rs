@@ -113,12 +113,9 @@ fn should_ignore_entry(entry: &walkdir::DirEntry, ignore_patterns: &[&str]) -> b
                 }
             }
         }
-        // Handle directory patterns
-        else if path_str.contains(pattern) {
-            return true;
-        }
-        // Handle exact filename matches
-        else if path.file_name().is_some_and(|name| name.to_string_lossy() == *pattern) {
+        // Handle directory patterns or exact filename matches
+        else if path_str.contains(pattern) || 
+                path.file_name().is_some_and(|name| name.to_string_lossy() == *pattern) {
             return true;
         }
     }

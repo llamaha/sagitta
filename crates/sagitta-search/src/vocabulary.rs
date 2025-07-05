@@ -59,7 +59,7 @@ impl VocabularyManager {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, self)
-            .map_err(|e| IoError::other(e))
+            .map_err(IoError::other)
     }
 
     /// Loads the vocabulary from a specified JSON file.

@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::agent::conversation::types::{Conversation, ConversationCheckpoint, ContextSnapshot};
@@ -802,7 +802,7 @@ impl ContextSnapshotGenerator {
     }
     
     /// Check if a file should be excluded from snapshots
-    fn should_exclude_file(&self, file_path: &PathBuf, patterns: &[String]) -> bool {
+    fn should_exclude_file(&self, file_path: &Path, patterns: &[String]) -> bool {
         let path_str = file_path.to_string_lossy();
         
         for pattern in patterns {

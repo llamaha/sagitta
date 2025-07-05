@@ -41,7 +41,7 @@ pub async fn handle_sync_branches<C>(
     args: SyncBranchesArgs,
     config: &mut AppConfig,
     client: Arc<C>,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
     override_path: Option<&PathBuf>,
 ) -> Result<()>
 where

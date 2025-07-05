@@ -113,7 +113,7 @@ mod gui_app {
             let handle = tokio::runtime::Handle::current();
             handle.spawn(async move {
                 // Listen for update requests
-                while let Some(_) = update_receiver.recv().await {
+                while update_receiver.recv().await.is_some() {
                     // Handle update requests here if needed
                 }
             });

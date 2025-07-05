@@ -12,7 +12,6 @@ use crate::constants::COLLECTION_NAME_PREFIX;
 
 const APP_NAME: &str = "sagitta";
 const CONFIG_FILE_NAME: &str = "config.toml";
-const REPO_DIR_NAME: &str = "repositories";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 /// Represents configuration for a single managed repository
@@ -197,9 +196,6 @@ pub struct AppConfig {
 }
 
 /// Configuration settings related to indexing.
-// ... (IndexingConfig remains the same) ...
-
-
 // --- Default Implementation ---
 impl Default for AppConfig {
     fn default() -> Self {
@@ -494,6 +490,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::path::Path;
+    
+    const REPO_DIR_NAME: &str = "repositories";
 
     fn setup_test_env(temp_dir: &Path) -> (PathBuf, PathBuf) {
         let fake_config_dir = temp_dir.join("config");

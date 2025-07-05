@@ -27,8 +27,6 @@ struct SearchResult {
 }
 
 /// Formats search results for display, handling both JSON and human-readable output.
-///
-
 pub fn print_search_results(results: &[ScoredPoint], query_text: &str, json_output: bool) -> Result<()> {
     if results.is_empty() {
         if json_output {

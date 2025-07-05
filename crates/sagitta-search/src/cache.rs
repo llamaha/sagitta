@@ -3,7 +3,7 @@ use crate::error::{Result, SagittaError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{UNIX_EPOCH};
 use log;
 use chrono::{Utc};
@@ -83,6 +83,11 @@ impl EmbeddingCache {
     /// Returns the number of entries currently in the cache.
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Returns true if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Saves the current cache state to the file specified during creation.
@@ -235,6 +240,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use std::fs;
+    use std::path::PathBuf;
     
     use crate::EmbeddingModelType;
 

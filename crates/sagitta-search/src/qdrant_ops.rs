@@ -1,6 +1,6 @@
 /// Contains operations specific to Qdrant interactions, like deleting points.
 use crate::{
-    error::{Result as CoreResult, SagittaError},
+    error::Result as CoreResult,
     qdrant_client_trait::QdrantClientTrait,
 };
 use anyhow::Result;

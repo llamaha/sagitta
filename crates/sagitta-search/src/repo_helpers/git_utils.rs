@@ -1,6 +1,6 @@
 // Git-related helper functions from repo_helpers.rs will be moved here. 
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use git2::{Repository, FetchOptions, Cred, RemoteCallbacks, CredentialType};
 use anyhow::Result;
 use crate::config::RepositoryConfig;
@@ -111,7 +111,7 @@ pub fn collect_files_from_tree(
     repo: &Repository,
     tree: &git2::Tree,
     file_list: &mut Vec<PathBuf>,
-    current_path: &PathBuf,
+    current_path: &Path,
 ) -> Result<()> {
     for entry in tree.iter() {
         let entry_path = current_path.join(entry.name().unwrap_or(""));

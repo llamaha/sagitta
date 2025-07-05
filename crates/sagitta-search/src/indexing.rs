@@ -35,7 +35,6 @@ use sagitta_embed::processor::{
 /// This version handles file processing stages
 struct FileProcessingProgressBridge {
     reporter: Arc<dyn SyncProgressReporter>,
-    total_files: usize,
 }
 
 #[async_trait::async_trait]
@@ -75,7 +74,6 @@ impl EmbedProgressReporter for FileProcessingProgressBridge {
 /// This treats chunks as "files" for display purposes
 struct EmbeddingProgressBridge {
     reporter: Arc<dyn SyncProgressReporter>,
-    total_chunks: usize,
 }
 
 #[async_trait::async_trait]
@@ -194,7 +192,6 @@ pub async fn index_paths<
     // --- 4. Process Files (CPU-intensive, parallel) ---
     let progress_bridge = Arc::new(FileProcessingProgressBridge {
         reporter: reporter.clone(),
-        total_files: files_to_process.len(),
     });
 
     let _start_time = Instant::now();
@@ -213,7 +210,6 @@ pub async fn index_paths<
     // --- 5. Generate Embeddings (GPU-intensive, controlled) ---
     let progress_bridge = Arc::new(EmbeddingProgressBridge {
         reporter: reporter.clone(),
-        total_chunks: processed_chunks.len(),
     });
 
     let embedded_chunks = embedding_pool.process_chunks_with_progress(processed_chunks, progress_bridge).await?;
@@ -433,7 +429,6 @@ pub async fn index_repo_files<
     // --- 4. Process Files (CPU-intensive, parallel) ---
     let progress_bridge = Arc::new(FileProcessingProgressBridge {
         reporter: reporter.clone(),
-        total_files: relative_paths.len(),
     });
 
     let processed_chunks = file_processor.process_files_with_progress(&absolute_paths, progress_bridge).await?;
@@ -448,7 +443,6 @@ pub async fn index_repo_files<
     // --- 5. Generate Embeddings (GPU-intensive, controlled) ---
     let progress_bridge = Arc::new(EmbeddingProgressBridge {
         reporter: reporter.clone(),
-        total_chunks: processed_chunks.len(),
     });
 
     let embedded_chunks = embedding_pool_ref.process_chunks_with_progress(processed_chunks, progress_bridge).await?;

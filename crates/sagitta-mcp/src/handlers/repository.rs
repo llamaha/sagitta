@@ -31,6 +31,7 @@ use axum::Extension;
 use git_manager::GitManager;
 use futures_util::TryFutureExt;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
+use serde_json::json;
 
 /// Helper function to save config with proper test isolation
 /// During tests, this will save to a temporary location if SAGITTA_TEST_CONFIG_PATH is set
@@ -508,7 +509,7 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
                 data: None,
             }
         })?;
-        let embedding_dim = embedding_pool.dimension();
+        let _embedding_dim = embedding_pool.dimension();
         // >>>>>>>>>> End moved block <<<<<<<<<<
 
         let repo_root = &repo_config.local_path; // Use the initially cloned repo_config
@@ -792,7 +793,7 @@ where
         .unwrap_or_else(|| repo_config.default_branch.clone());
     
     // Drop the read lock before git operations
-    let app_config_clone = config_guard.clone();
+    let _app_config_clone = config_guard.clone();
     drop(config_guard);
 
     // Initialize git manager and perform branch switch

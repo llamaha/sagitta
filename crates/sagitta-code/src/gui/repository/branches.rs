@@ -578,7 +578,6 @@ fn render_sync_result(ui: &mut Ui, sync_result: &BranchSyncResult, theme: crate:
 }
 
 /// Helper functions for async operations
-
 fn reset_branch_state(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
     state.branch_management.available_branches.clear();
     state.branch_management.available_tags.clear();

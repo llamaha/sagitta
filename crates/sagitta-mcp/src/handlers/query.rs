@@ -26,7 +26,7 @@ pub async fn handle_query<C: QdrantClientTrait + Send + Sync + 'static>(
     params: QueryParams,
     config: Arc<RwLock<AppConfig>>,
     qdrant_client: Arc<C>,
-    auth_user_ext: Option<Extension<AuthenticatedUser>>,
+    _auth_user_ext: Option<Extension<AuthenticatedUser>>,
 ) -> Result<QueryResult, ErrorObject> {
     let query_text = params.query_text.clone();
     let limit = params.limit;

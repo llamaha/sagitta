@@ -275,7 +275,7 @@ where
                 log::info!("Collection '{collection_name}' does not exist. Creating...");
                 // Create collection using the trait method
                 client.create_collection(collection_name, vector_dim).await
-                    .map_err(|e| Error::Other(format!("Failed to create collection '{}': {}", collection_name, e)))?;
+                    .map_err(|e| Error::Other(format!("Failed to create collection '{collection_name}': {e}")))?;
                 log::info!(
                     "Created Qdrant collection '{collection_name}' with dimension {vector_dim}."
                 );

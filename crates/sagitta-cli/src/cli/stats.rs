@@ -55,7 +55,7 @@ pub async fn handle_stats<C>(
     args: StatsArgs,
     config: AppConfig,
     client: Arc<C>,
-    cli_args: &crate::cli::CliArgs,
+    _cli_args: &crate::cli::CliArgs,
 ) -> Result<()>
 where
     C: QdrantClientTrait + Send + Sync + 'static,

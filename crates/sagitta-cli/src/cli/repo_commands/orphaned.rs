@@ -190,7 +190,7 @@ async fn handle_list_orphaned(args: ListOrphanedArgs, config: &AppConfig) -> Res
     Ok(())
 }
 
-async fn handle_reclone(args: RecloneArgs, config: &AppConfig, override_path: Option<&PathBuf>) -> Result<()> {
+async fn handle_reclone(args: RecloneArgs, config: &AppConfig, _override_path: Option<&PathBuf>) -> Result<()> {
     let enhanced_list = get_enhanced_repository_list(config).await?;
     
     let missing_repos: Vec<_> = enhanced_list.repositories

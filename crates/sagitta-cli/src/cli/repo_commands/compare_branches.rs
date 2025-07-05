@@ -1,6 +1,6 @@
 use clap::Args;
 use anyhow::{Result, Context, anyhow};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::collections::HashMap;
 use git_manager::GitManager;
@@ -39,7 +39,7 @@ pub async fn handle_compare_branches<C>(
     args: CompareBranchesArgs,
     config: &AppConfig,
     client: Arc<C>,
-    cli_args: &CliArgs,
+    _cli_args: &CliArgs,
 ) -> Result<()>
 where
     C: QdrantClientTrait + Send + Sync + 'static,
@@ -190,7 +190,7 @@ struct BranchComparison {
 
 async fn compare_two_branches(
     git_manager: &GitManager,
-    repo_path: &PathBuf,
+    repo_path: &Path,
     branch_a: &str,
     branch_b: &str,
     branch_metadata: &HashMap<String, Option<BranchSyncMetadata>>,

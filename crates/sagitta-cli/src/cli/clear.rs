@@ -5,7 +5,6 @@ use qdrant_client::Qdrant;
 use std::io::{self, Write}; // Import io for confirmation prompt
 use std::sync::Arc;
 use sagitta_search::AppConfig; // Added RepositoryConfig
-use sagitta_search::qdrant_client_trait::QdrantClientTrait; // Use core trait
 use sagitta_search::repo_helpers::get_branch_aware_collection_name; // Use core helper
 
 #[derive(Args, Debug)]
@@ -24,7 +23,7 @@ pub async fn handle_clear(
     args: &ClearArgs, // Changed to reference
     config: AppConfig, // Keep ownership
     client: Arc<Qdrant>, // Accept client
-    cli_args: &crate::cli::CliArgs, // Added cli_args
+    _cli_args: &crate::cli::CliArgs, // Added cli_args
 ) -> Result<()> {
 
     let repo_name_to_clear = match args.repo_name.as_ref().or(config.active_repository.as_ref()) {
