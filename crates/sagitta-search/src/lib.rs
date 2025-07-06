@@ -1065,7 +1065,13 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
     
     // Get git status if it's a git repository
     let git_status = if filesystem_status.is_git_repository {
-        get_git_repository_status(&repo_config.local_path).await.ok()
+        match get_git_repository_status(&repo_config.local_path).await {
+            Ok(status) => Some(status),
+            Err(e) => {
+                log::debug!("Failed to get git repository status for {}: {}", repo_config.name, e);
+                None
+            }
+        }
     } else {
         None
     };
