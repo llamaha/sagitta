@@ -340,6 +340,9 @@ impl SyncOrchestrator {
                             };
                             
                             let _ = sender.send(notification);
+                            
+                            // Also trigger repository list refresh to update UI
+                            let _ = sender.send(AppEvent::RefreshRepositoryList);
                         }
                         
                         // Send result

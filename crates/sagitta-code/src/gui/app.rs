@@ -625,6 +625,7 @@ impl SagittaCodeApp {
         let sync_orchestrator = Arc::new(sync_orchestrator);
         self.sync_orchestrator = Some(sync_orchestrator.clone());
         self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
+        self.repo_panel.set_sync_orchestrator(sync_orchestrator.clone());
         
         // Start git controls command handler
         let command_rx = self.git_controls.start_command_handler();
