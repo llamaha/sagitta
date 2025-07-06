@@ -84,9 +84,8 @@ impl RepoPanel {
                         // Update each repository's sync status
                         for enhanced_repo in &mut state_guard.enhanced_repositories {
                             // Try to find sync status by matching local path
-                            let repo_path = std::path::PathBuf::from(&enhanced_repo.local_path);
-                            
-                            if let Some(sync_status) = sync_statuses.get(&repo_path) {
+                            if let Some(local_path) = &enhanced_repo.local_path {
+                                if let Some(sync_status) = sync_statuses.get(local_path) {
                                 // Map SyncOrchestrator's SyncState to the GUI's SyncState
                                 use crate::services::sync_orchestrator::SyncState as OrchestratorSyncState;
                                 use super::types::SyncState as GuiSyncState;
