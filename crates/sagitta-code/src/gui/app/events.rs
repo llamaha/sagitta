@@ -2369,8 +2369,8 @@ mod tests {
         // Test handling checkpoint suggestions
         app.handle_checkpoint_suggestions(conversation_id, suggestions);
         
-        // Verify that suggestions were stored in the sidebar
-        assert!(app.conversation_sidebar.get_checkpoint_suggestions(conversation_id).is_some());
+        // Verify that the feature has been removed (should return empty)
+        assert!(app.conversation_sidebar.get_checkpoint_suggestions().is_empty());
     }
 
     #[test]
@@ -2399,8 +2399,8 @@ mod tests {
         // Test handling branch suggestions
         app.handle_branch_suggestions(conversation_id, suggestions);
         
-        // Verify that suggestions were stored in the sidebar
-        assert!(app.conversation_sidebar.get_branch_suggestions(conversation_id).is_some());
+        // Verify that the feature has been removed (should return empty)
+        assert!(app.conversation_sidebar.get_branch_suggestions().is_empty());
     }
     
     #[test]

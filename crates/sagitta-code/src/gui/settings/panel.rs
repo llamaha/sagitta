@@ -946,6 +946,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
             sagitta_search::config::RepositoryConfig {
                 name: "test-repo-2".to_string(),
@@ -961,6 +962,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
         ];
         initial_sagitta_config.embed_model = Some("test-embed-model".to_string());

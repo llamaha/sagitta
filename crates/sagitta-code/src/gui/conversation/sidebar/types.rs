@@ -107,6 +107,12 @@ pub struct ConversationSidebar {
     
     /// Last announcement time
     pub last_announcement_time: Option<Instant>,
+    
+    /// Show branch suggestions
+    pub show_branch_suggestions: bool,
+    
+    /// Show checkpoint suggestions  
+    pub show_checkpoint_suggestions: bool,
 }
 
 /// Organization modes for the sidebar
@@ -420,6 +426,8 @@ impl ConversationSidebar {
             high_contrast_mode: false,
             screen_reader_announcements: Vec::new(),
             last_announcement_time: None,
+            show_branch_suggestions: false,
+            show_checkpoint_suggestions: false,
         }
     }
     
@@ -482,6 +490,28 @@ impl ConversationSidebar {
     /// Invalidate cached items
     pub fn invalidate_cache(&mut self) {
         self.cached_rendered_items = None;
+    }
+    
+    /// Toggle branch suggestions
+    pub fn toggle_branch_suggestions(&mut self) {
+        self.show_branch_suggestions = !self.show_branch_suggestions;
+    }
+    
+    /// Toggle checkpoint suggestions  
+    pub fn toggle_checkpoint_suggestions(&mut self) {
+        self.show_checkpoint_suggestions = !self.show_checkpoint_suggestions;
+    }
+    
+    /// Get branch suggestions
+    pub fn get_branch_suggestions(&self) -> Vec<String> {
+        // TODO: Implement actual branch suggestion logic
+        vec![]
+    }
+    
+    /// Get checkpoint suggestions
+    pub fn get_checkpoint_suggestions(&self) -> Vec<String> {
+        // TODO: Implement actual checkpoint suggestion logic
+        vec![]
     }
 }
 

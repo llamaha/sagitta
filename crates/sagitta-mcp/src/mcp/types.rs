@@ -829,7 +829,7 @@ pub struct WriteFileResult {
 // Git history types
 
 /// Parameters for repository_git_history
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryGitHistoryParams {
     /// Name of the repository to get history for
@@ -852,6 +852,20 @@ pub struct RepositoryGitHistoryParams {
     /// Optional path filter (show commits affecting specific paths)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+}
+
+impl Default for RepositoryGitHistoryParams {
+    fn default() -> Self {
+        Self {
+            repository_name: String::new(),
+            max_commits: default_max_commits(),
+            branch_name: None,
+            since: None,
+            until: None,
+            author: None,
+            path: None,
+        }
+    }
 }
 
 fn default_max_commits() -> u64 {

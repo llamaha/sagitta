@@ -1297,6 +1297,7 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         config.repositories.push(test_repo);
 

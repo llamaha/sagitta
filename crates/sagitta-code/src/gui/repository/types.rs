@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use sagitta_search::RepositoryConfig;
+use sagitta_search::{RepositoryConfig, config::RepositoryDependency};
 use tokio::sync::mpsc;
 pub use sagitta_search::sync_progress::SyncProgress as CoreSyncProgress;
 use sagitta_search::sync_progress::SyncStage as CoreSyncStage;
@@ -192,6 +192,7 @@ pub struct EnhancedRepoInfo {
     pub total_files: Option<usize>,
     pub size_bytes: Option<u64>,
     pub added_as_local_path: bool,
+    pub dependencies: Vec<RepositoryDependency>,
 }
 
 /// Filesystem status of the repository
@@ -312,6 +313,7 @@ impl From<sagitta_search::EnhancedRepositoryInfo> for EnhancedRepoInfo {
             total_files: enhanced.filesystem_status.total_files,
             size_bytes: enhanced.filesystem_status.size_bytes,
             added_as_local_path: enhanced.added_as_local_path,
+            dependencies: enhanced.dependencies,
         }
     }
 }
@@ -401,6 +403,7 @@ pub struct RepoPanelState {
     pub sync_options: SyncOptions,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
+    pub dependency_modal: super::dependency_modal::DependencyModal,
 }
 
 impl RepoPanelState {
@@ -1226,6 +1229,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
             EnhancedRepoInfo {
                 name: "enhanced-repo-2".to_string(),
@@ -1249,6 +1253,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
         ];
         
@@ -1364,6 +1369,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
         ];
         

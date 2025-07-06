@@ -288,6 +288,7 @@ mod enhanced_repository_tests {
             indexed_languages: Some(vec!["rust".to_string(), "markdown".to_string()]),
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         }
     }
 
@@ -374,6 +375,7 @@ mod enhanced_repository_tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
@@ -416,6 +418,7 @@ mod enhanced_repository_tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();

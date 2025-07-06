@@ -548,6 +548,7 @@ mod tests {
             indexed_languages: Some(vec!["rs".to_string()]),
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let repo2_path = data_path.join("repo2");
@@ -565,6 +566,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let config = AppConfig {
@@ -665,6 +667,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
     }

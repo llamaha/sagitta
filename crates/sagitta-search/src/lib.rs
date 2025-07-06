@@ -97,7 +97,7 @@ pub mod sync_progress;
 /// Utilities specific to testing within the core library.
 pub mod test_utils;
 
-pub use config::{AppConfig, IndexingConfig, RepositoryConfig, EmbeddingEngineConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
+pub use config::{AppConfig, IndexingConfig, RepositoryConfig, RepositoryDependency, EmbeddingEngineConfig, load_config, save_config, get_config_path_or_default, get_managed_repos_from_config};
 // Re-export from sagitta-embed crate
 pub use sagitta_embed::{EmbeddingModel, EmbeddingModelType, EmbeddingPool, EmbeddingProcessor};
 // Re-export EmbeddingConfig for convenience
@@ -228,6 +228,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 }
             ],
             ..Default::default()
@@ -356,6 +357,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 }
             ],
             ..Default::default()
@@ -449,6 +451,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 },
                 RepositoryConfig {
                     name: "missing-repo".to_string(),
@@ -464,6 +467,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 }
             ],
             ..Default::default()
@@ -518,6 +522,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: true, // This makes it non-reclonable
                     target_ref: None,
+                    dependencies: Vec::new(),
                 }
             ],
             ..Default::default()
@@ -586,6 +591,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let enhanced_info = get_enhanced_repository_info(&repo_config).await.unwrap();
@@ -852,6 +858,8 @@ pub struct EnhancedRepositoryInfo {
     pub target_ref: Option<String>,
     /// Last sync timestamp if available
     pub last_sync_time: Option<chrono::DateTime<chrono::Utc>>,
+    /// Repository dependencies
+    pub dependencies: Vec<RepositoryDependency>,
 }
 
 /// Filesystem status of the repository
@@ -1112,6 +1120,7 @@ pub async fn get_enhanced_repository_info(repo_config: &RepositoryConfig) -> Res
         added_as_local_path: repo_config.added_as_local_path,
         target_ref: repo_config.target_ref.clone(),
         last_sync_time: None, // TODO: Could be extracted from metadata
+        dependencies: repo_config.dependencies.clone(),
     })
 }
 

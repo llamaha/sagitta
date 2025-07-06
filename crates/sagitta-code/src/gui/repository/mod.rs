@@ -12,5 +12,6 @@ pub mod branches;
 pub mod shared_sync_state;
 pub mod create_project;
 pub mod git_controls;
+pub mod dependency_modal;
 
 pub use panel::RepoPanel; 

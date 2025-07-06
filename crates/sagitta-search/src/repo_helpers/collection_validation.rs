@@ -152,6 +152,7 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let app_config = AppConfig {
@@ -187,6 +188,7 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let app_config = AppConfig {
@@ -220,6 +222,7 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         assert_eq!(repo_config.last_synced_commits.len(), 2);

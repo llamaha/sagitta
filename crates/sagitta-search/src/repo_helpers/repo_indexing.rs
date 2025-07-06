@@ -1210,6 +1210,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let app_config = AppConfig {
@@ -1253,6 +1254,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         });
 
         let repo_index = 0;
@@ -1490,6 +1492,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
                 };
             
             let mut mock_client = MockQdrantClientTrait::new();

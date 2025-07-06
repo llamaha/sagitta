@@ -320,6 +320,17 @@ impl RepoPanel {
                     }
                 }
             });
+        
+        // Render the dependency modal if it's visible
+        if let Ok(mut state_guard) = self.state.try_lock() {
+            let available_repos = state_guard.repo_names();
+            state_guard.dependency_modal.render(
+                ctx,
+                &available_repos,
+                Arc::clone(&self.repo_manager),
+                &theme,
+            );
+        }
     }
 
     fn render_header(&mut self, ui: &mut Ui) {

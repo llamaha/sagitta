@@ -414,6 +414,7 @@ mod integration_tests {
                 ssh_key_passphrase: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
             client,
             &config,

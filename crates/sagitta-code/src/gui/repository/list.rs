@@ -49,7 +49,8 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
         🔄 Sync: {}\n\
         📊 Files: {}\n\
         💾 Size: {}\n\
-        🔤 Languages: {}",
+        🔤 Languages: {}\n\
+        🔗 Dependencies: {}",
         if enhanced_repo.filesystem_status.exists {
             if enhanced_repo.filesystem_status.is_git_repository {
                 "Git repository"
@@ -88,7 +89,21 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
             .unwrap_or_else(|| "unknown".to_string()),
         enhanced_repo.indexed_languages.as_ref()
             .map(|langs| langs.join(", "))
-            .unwrap_or_else(|| "none detected".to_string())
+            .unwrap_or_else(|| "none detected".to_string()),
+        if enhanced_repo.dependencies.is_empty() {
+            "none".to_string()
+        } else {
+            enhanced_repo.dependencies.iter()
+                .map(|dep| {
+                    if let Some(ref target_ref) = dep.target_ref {
+                        format!("{} ({})", dep.repository_name, target_ref)
+                    } else {
+                        dep.repository_name.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
     );
     
     ui.label(&tooltip_text);
@@ -173,24 +188,49 @@ pub fn render_repo_list(
                         RichText::new(&enhanced_repo.name)
                     };
                     
-                    if ui.selectable_label(is_selected, name_text).clicked() {
-                        if is_selected {
-                            state.selected_repo = None;
-                            // Also remove from selected_repos
-                            state.selected_repos.retain(|name| name != &enhanced_repo.name);
-                        } else {
-                            state.selected_repo = Some(enhanced_repo.name.clone());
-                            // Also add to selected_repos if not already there
-                            if !state.selected_repos.contains(&enhanced_repo.name) {
-                                state.selected_repos.push(enhanced_repo.name.clone());
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(is_selected, name_text).clicked() {
+                            if is_selected {
+                                state.selected_repo = None;
+                                // Also remove from selected_repos
+                                state.selected_repos.retain(|name| name != &enhanced_repo.name);
+                            } else {
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                // Also add to selected_repos if not already there
+                                if !state.selected_repos.contains(&enhanced_repo.name) {
+                                    state.selected_repos.push(enhanced_repo.name.clone());
+                                }
+                                
+                                // Initialize options for other tabs
+                                state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
+                                state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
+                                state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
                             }
-                            
-                            // Initialize options for other tabs
-                            state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
-                            state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
-                            state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
                         }
-                    }
+                        
+                        // Show dependency badge if repository has dependencies
+                        if !enhanced_repo.dependencies.is_empty() {
+                            ui.add_space(4.0);
+                            let badge_text = format!("🔗 {}", enhanced_repo.dependencies.len());
+                            let badge_response = ui.small_button(&badge_text);
+                            if badge_response.hovered() {
+                                egui::show_tooltip_at_pointer(ui.ctx(), egui::layers::LayerId::debug(), egui::Id::new("deps_tooltip"), |ui| {
+                                    ui.label("Dependencies:");
+                                    for dep in &enhanced_repo.dependencies {
+                                        let dep_text = if let Some(ref target_ref) = dep.target_ref {
+                                            format!("• {} ({})", dep.repository_name, target_ref)
+                                        } else {
+                                            format!("• {}", dep.repository_name)
+                                        };
+                                        ui.label(&dep_text);
+                                        if let Some(ref purpose) = dep.purpose {
+                                            ui.label(format!("  Purpose: {}", purpose));
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    });
                     
                     // Source column
                     let source_text = if let Some(remote) = &enhanced_repo.remote {
@@ -275,6 +315,14 @@ pub fn render_repo_list(
                                 state.active_tab = super::types::RepoPanelTab::Sync;
                                 state.selected_repo = Some(enhanced_repo.name.clone());
                                 state.sync_options.repository_name = enhanced_repo.name.clone();
+                            }
+                            
+                            // Dependencies button
+                            if ui.button("Deps").clicked() {
+                                state.dependency_modal.show_for_repository(
+                                    enhanced_repo.name.clone(),
+                                    enhanced_repo.dependencies.clone()
+                                );
                             }
                         }
                         
