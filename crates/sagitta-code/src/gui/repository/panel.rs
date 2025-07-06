@@ -23,6 +23,7 @@ pub struct RepoPanel {
     repo_manager: Arc<Mutex<RepositoryManager>>,
     config: Arc<Mutex<SagittaCodeConfig>>,
     agent: Option<Arc<Agent>>,
+    sync_orchestrator: Option<Arc<SyncOrchestrator>>,
     is_open: bool,
 }
 
@@ -38,6 +39,7 @@ impl RepoPanel {
             repo_manager,
             config,
             agent,
+            sync_orchestrator: None,
             is_open: false,
         }
     }
@@ -302,6 +304,11 @@ impl RepoPanel {
     /// Set the agent (usually done after initialization)
     pub fn set_agent(&mut self, agent: Arc<Agent>) {
         self.agent = Some(agent);
+    }
+    
+    /// Set the sync orchestrator (usually done after initialization)
+    pub fn set_sync_orchestrator(&mut self, sync_orchestrator: Arc<SyncOrchestrator>) {
+        self.sync_orchestrator = Some(sync_orchestrator);
     }
     
     /// Set the active tab
