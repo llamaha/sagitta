@@ -1246,7 +1246,7 @@ impl ConversationTree {
                         ui.close_menu();
                     }
                 },
-                NodeId::BranchMessage(branch_id, message_id) => {
+                NodeId::BranchMessage(_branch_id, message_id) => {
                     if ui.button("📍 Create Checkpoint").clicked() {
                         action = Some(TreeAction::CreateCheckpoint(*message_id));
                         ui.close_menu();
@@ -1256,7 +1256,7 @@ impl ConversationTree {
                         ui.close_menu();
                     }
                 },
-                NodeId::BranchRoot(branch_id) => {
+                NodeId::BranchRoot(_branch_id) => {
                     if ui.button("🌳 Expand/Collapse").clicked() {
                         action = Some(TreeAction::ToggleExpansion(node_id.clone()));
                         ui.close_menu();
@@ -1292,7 +1292,7 @@ impl ConversationTree {
     }
     
     /// Draw a node
-    fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, theme: &crate::gui::theme::AppTheme, hovered: bool) {
+    fn draw_node(&self, painter: &egui::Painter, node: &TreeNode, _theme: &crate::gui::theme::AppTheme, hovered: bool) {
         use egui::{Color32, FontId, Pos2, Rect, CornerRadius, Stroke, Vec2};
         
         let rect = Rect::from_min_size(
@@ -1343,7 +1343,7 @@ impl ConversationTree {
         );
         
         // Draw indicators
-        for (i, indicator) in node.display.indicators.iter().enumerate() {
+        for (_i, indicator) in node.display.indicators.iter().enumerate() {
             let indicator_pos = match indicator.position {
                 IndicatorPosition::TopLeft => rect.min + Vec2::new(2.0, 2.0),
                 IndicatorPosition::TopRight => rect.min + Vec2::new(rect.width() - 12.0, 2.0),

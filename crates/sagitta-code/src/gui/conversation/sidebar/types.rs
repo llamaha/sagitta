@@ -646,7 +646,7 @@ impl ConversationSidebar {
             CheckpointSuggestionAction::CreateCheckpoint { conversation_id, suggestion } => {
                 Some(SidebarAction::CreateCheckpoint(conversation_id, suggestion.message_id, suggestion.suggested_title))
             },
-            CheckpointSuggestionAction::DismissSuggestion { conversation_id, message_id } => {
+            CheckpointSuggestionAction::DismissSuggestion { conversation_id: _conversation_id, message_id } => {
                 self.checkpoint_suggestions_ui.dismiss_suggestion(message_id);
                 None
             },
@@ -659,7 +659,7 @@ impl ConversationSidebar {
                 // Trigger refresh - this would be handled by the app
                 None
             },
-            CheckpointSuggestionAction::JumpToMessage { conversation_id, message_id } => {
+            CheckpointSuggestionAction::JumpToMessage { conversation_id: _conversation_id, message_id: _message_id } => {
                 // Handle jumping to a specific message - this could be a new sidebar action or handled directly
                 // For now, we'll return None since this doesn't require a sidebar action
                 None

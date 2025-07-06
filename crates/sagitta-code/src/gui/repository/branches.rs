@@ -234,7 +234,7 @@ fn render_repository_selector(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'
 }
 
 /// Render reference type tabs
-fn render_ref_type_tabs(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>, theme: crate::gui::theme::AppTheme) {
+fn render_ref_type_tabs(ui: &mut Ui, state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>, _theme: crate::gui::theme::AppTheme) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         
@@ -604,7 +604,7 @@ fn load_branches(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
                 
                 if let Some(sender) = sender {
                     let current_branch = branches.first().cloned();
-                    if let Err(e) = sender.send(BranchOperationResult {
+                    if let Err(_e) = sender.send(BranchOperationResult {
                         repo_name,
                         success: true,
                         branches,
@@ -777,28 +777,28 @@ fn delete_branch(repo_manager: Arc<Mutex<RepositoryManager>>, repo_name: String,
 /// Helper functions for channel management
 fn initialize_channels_if_needed(state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>) {
     if state.branch_management.branch_result_receiver.is_none() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         state.branch_management.branch_result_receiver = Some(receiver);
         // Store sender in a way that can be accessed later - we'll use a different approach
     }
     
     if state.branch_management.tag_result_receiver.is_none() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         state.branch_management.tag_result_receiver = Some(receiver);
     }
     
     if state.branch_management.switch_result_receiver.is_none() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         state.branch_management.switch_result_receiver = Some(receiver);
     }
     
     if state.branch_management.create_result_receiver.is_none() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         state.branch_management.create_result_receiver = Some(receiver);
     }
     
     if state.branch_management.delete_result_receiver.is_none() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         state.branch_management.delete_result_receiver = Some(receiver);
     }
 }

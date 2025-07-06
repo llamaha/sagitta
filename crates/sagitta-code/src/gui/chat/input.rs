@@ -66,12 +66,12 @@ pub fn chat_input_ui(
     // Use theme colors properly
     let text_color = theme.text_color();
     let hint_color = theme.hint_text_color();
-    let button_bg_color = theme.button_background();
-    let button_hover_color = theme.button_hover_color();
+    let _button_bg_color = theme.button_background();
+    let _button_hover_color = theme.button_hover_color();
     let accent_color = theme.accent_color();
     let input_bg_color = theme.input_background();
     let border_color = theme.border_color();
-    let focus_border_color = theme.focus_border_color();
+    let _focus_border_color = theme.focus_border_color();
     let success_color = theme.success_color();
     let warning_color = theme.warning_color();
     let error_color = theme.error_color();

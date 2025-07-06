@@ -56,7 +56,7 @@ pub fn convert_messages_to_claude(messages: &[Message]) -> Vec<ClaudeMessage> {
                         text: format!("Tool Call [{tool_call_id}]: {name} with parameters:\n{params_str}") 
                     });
                 }
-                MessagePart::ToolResult { tool_call_id, name, result } => {
+                MessagePart::ToolResult { tool_call_id, name: _, result } => {
                     // Tool results should use the tool_result content type
                     let result_str = match result {
                         Value::String(s) => s.clone(),

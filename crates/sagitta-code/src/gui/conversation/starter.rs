@@ -482,7 +482,7 @@ impl ConversationStarter {
     }
     
     /// Render the conversation starter UI
-    pub fn render(&mut self, ui: &mut Ui, app_state: &mut AppState, theme: &AppTheme) -> Result<Option<StarterAction>> {
+    pub fn render(&mut self, ui: &mut Ui, app_state: &mut AppState, _theme: &AppTheme) -> Result<Option<StarterAction>> {
         if !self.visible {
             return Ok(None);
         }

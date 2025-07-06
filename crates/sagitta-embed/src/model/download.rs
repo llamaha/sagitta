@@ -361,7 +361,7 @@ mod tests {
                 // If download fails, provide helpful information
                 eprintln!("Model download failed: {e}");
                 eprintln!("Full error: {e:?}");
-                eprintln!("Error string: {}", e);
+                eprintln!("Error string: {e}");
                 eprintln!("\nThis might be due to:");
                 eprintln!("1. Network connectivity issues");
                 eprintln!("2. SSL/TLS certificate problems (try: export HF_HUB_DISABLE_SSL_VERIFY=1)");

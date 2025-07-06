@@ -261,7 +261,7 @@ impl BranchSuggestionsUI {
         &self,
         ui: &mut Ui,
         suggestion: &BranchSuggestion,
-        theme: &AppTheme,
+        _theme: &AppTheme,
     ) -> Result<()> {
         ui.collapsing("Suggestion Details", |ui| {
             ui.label(format!("Message ID: {}", suggestion.message_id));
@@ -327,7 +327,7 @@ impl BranchSuggestionsUI {
     }
     
     /// Get color for confidence level
-    fn get_confidence_color(&self, confidence: f32, theme: &AppTheme) -> Color32 {
+    fn get_confidence_color(&self, confidence: f32, _theme: &AppTheme) -> Color32 {
         if confidence >= 0.8 {
             Color32::from_rgb(0, 255, 0) // Green
         } else if confidence >= 0.6 {
@@ -338,7 +338,7 @@ impl BranchSuggestionsUI {
     }
     
     /// Get color for success probability
-    fn get_success_color(&self, success_prob: f32, theme: &AppTheme) -> Color32 {
+    fn get_success_color(&self, success_prob: f32, _theme: &AppTheme) -> Color32 {
         if success_prob >= 0.7 {
             Color32::from_rgb(0, 255, 0) // Green
         } else if success_prob >= 0.5 {
@@ -354,7 +354,7 @@ impl BranchSuggestionsUI {
         suggestion: &BranchSuggestion,
         theme: &AppTheme,
     ) -> bool {
-        let (icon, color) = match suggestion.reason {
+        let (_icon, color) = match suggestion.reason {
             BranchReason::MultipleSolutions => ("🔀", theme.accent_color()),
             BranchReason::ErrorRecovery => ("🔧", Color32::from_rgb(255, 165, 0)),
             BranchReason::UserUncertainty => ("❓", Color32::from_rgb(255, 255, 0)),

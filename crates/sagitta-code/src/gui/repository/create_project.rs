@@ -239,7 +239,7 @@ pub fn render_create_project(
 /// Create the project directly without AI involvement
 fn create_project(
     state: &mut RepoPanelState,
-    config: &SagittaCodeConfig,
+    _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
     let project_name = state.project_form.name.clone();

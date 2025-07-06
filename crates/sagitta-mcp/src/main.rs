@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
             }
         }
         TransportMode::Http { host, port } => {
-            let addr = format!("{}:{}", host, port);
+            let addr = format!("{host}:{port}");
             info!(address = %addr, "Running in HTTP/SSE mode");
             // HTTP mode also consumes the server instance for its AppState
             if let Err(e) = run_http_server(addr, server_instance).await {

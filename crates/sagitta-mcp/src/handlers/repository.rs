@@ -27,10 +27,11 @@ use std::path::PathBuf;
 use git2::Repository;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use axum::Extension;
- // For creating JSON content
+// For creating JSON content
+#[cfg(test)]
+use serde_json::json;
 use git_manager::GitManager;
 use crate::progress::LoggingProgressReporter; // Added LoggingProgressReporter
-use serde_json::json;
 
 /// Helper function to save config with proper test isolation
 /// During tests, this will save to a temporary location if SAGITTA_TEST_CONFIG_PATH is set
@@ -1254,7 +1255,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let repo_base = temp_dir.path().join("repos");
         let vocab_base = temp_dir.path().join("vocab");
-        let model_base = temp_dir.path().join("model");
+        let _model_base = temp_dir.path().join("model");
 
         let test_config = AppConfig {
             qdrant_url: "http://localhost:6334".to_string(),

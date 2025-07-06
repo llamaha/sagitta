@@ -171,7 +171,7 @@ fn print_summary_only(data: &EnhancedRepositoryList) {
 
 fn print_summary_statistics(summary: &sagitta_search::RepositoryListSummary) {
     println!("{}", "Summary Statistics:".bold());
-    println!("   📁 Total repositories: {}", summary.existing_count + if summary.existing_count == 0 { 0 } else { 0 });
+    println!("   📁 Total repositories: {}", summary.existing_count);
     println!("   ✅ Existing on filesystem: {}", summary.existing_count);
     println!("   🔄 Need syncing: {}", summary.needs_sync_count);
     println!("   ⚠️  With uncommitted changes: {}", summary.dirty_count);

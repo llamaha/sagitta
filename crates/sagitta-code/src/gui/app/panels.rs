@@ -1414,7 +1414,7 @@ impl AnalyticsPanel {
     }
 
     /// Render the success tab
-    fn render_success_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) -> Option<AnalyticsAction> {
+    fn render_success_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) -> Option<AnalyticsAction> {
         let mut action = None;
         
         ui.horizontal(|ui| {
@@ -1597,7 +1597,7 @@ impl AnalyticsPanel {
     }
 
     /// Render the patterns tab
-    fn render_patterns_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+    fn render_patterns_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) {
         ui.heading("🔍 Pattern Analysis");
         ui.add_space(10.0);
         
@@ -1757,7 +1757,7 @@ impl AnalyticsPanel {
     }
 
     /// Render the trends tab
-    fn render_trends_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, theme: AppTheme) {
+    fn render_trends_tab(&mut self, ui: &mut egui::Ui, report: &AnalyticsReport, _theme: AppTheme) {
         ui.heading("📈 Trending Topics");
         ui.add_space(10.0);
         
@@ -1881,7 +1881,7 @@ impl ModelSelectionPanel {
         &self.current_model
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui, theme: &crate::gui::theme::AppTheme) -> bool {
+    pub fn render(&mut self, ui: &mut egui::Ui, _theme: &crate::gui::theme::AppTheme) -> bool {
         let mut model_changed = false;
         
         if self.visible {

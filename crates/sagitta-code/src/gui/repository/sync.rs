@@ -179,7 +179,7 @@ pub fn render_sync_repo(
     ui.separator();
 
     let mut is_any_selected_syncing = false;
-    let is_any_repo_syncing_at_all = false;
+    let _is_any_repo_syncing_at_all = false;
     
     // Try to get sync status with better error handling
     for repo_name in &state.selected_repos {

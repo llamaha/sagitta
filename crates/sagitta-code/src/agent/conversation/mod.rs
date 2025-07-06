@@ -32,7 +32,10 @@ pub use analytics::*;
 pub use branching::*;
 pub use checkpoints::*;
 pub use cluster_namer::*;
-pub use clustering::*;
+// Re-export everything except ConversationCluster from clustering
+pub use clustering::{ConversationClusteringManager, ClusteringConfig};
+pub use clustering::ConversationCluster as ClusteringConversationCluster;
+// Re-export everything from navigation
 pub use navigation::*;
 pub use persistence::*;
 pub use search::*;

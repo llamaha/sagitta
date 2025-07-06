@@ -70,7 +70,7 @@ pub async fn handle_todo_read<C: QdrantClientTrait + Send + Sync + 'static>(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::path::PathBuf;
+    // use std::path::PathBuf;
     use crate::handlers::test_utils::TODO_TEST_MUTEX;
     use crate::mcp::types::{TodoItem, TodoPriority};
     

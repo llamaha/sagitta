@@ -72,7 +72,7 @@ fn create_diff(old_content: &str, new_content: &str, file_path: &str) -> String 
                         similar::ChangeTag::Insert => "+",
                         similar::ChangeTag::Equal => " ",
                     };
-                    result.push_str(&format!("{}{}", prefix, change));
+                    result.push_str(&format!("{prefix}{change}"));
                     if !change.to_string().ends_with('\n') {
                         result.push('\n');
                     }

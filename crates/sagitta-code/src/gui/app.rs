@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
 use super::settings::SettingsPanel;
-use super::conversation::ConversationSidebar;
+// Removed - ConversationSidebar is re-exported from conversation module
 use super::claude_md_modal::ClaudeMdModal;
 use crate::agent::Agent;
 use crate::agent::message::types::{AgentMessage, ToolCall};
@@ -35,8 +35,8 @@ mod panels;
 use super::conversation;
 pub mod events;
 pub mod tool_formatting;
-mod state;
-mod rendering;
+pub mod state;
+pub mod rendering;
 mod initialization;
 mod conversation_title_updater;
 

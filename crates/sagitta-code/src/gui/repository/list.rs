@@ -91,7 +91,7 @@ pub fn render_repo_list(
     ui: &mut Ui, 
     state: &mut tokio::sync::MutexGuard<'_, RepoPanelState>,
     repo_manager: Arc<Mutex<RepositoryManager>>,
-    theme: crate::gui::theme::AppTheme,
+    _theme: crate::gui::theme::AppTheme,
 ) {
     ui.horizontal(|ui| {
         ui.label("Filter:");

@@ -289,10 +289,7 @@ pub fn process_agent_events(app: &mut SagittaCodeApp) {
                     log::debug!("SagittaCodeApp: Tool stream event for run {run_id}: {event:?}");
                     handle_tool_stream(app, run_id, event);
                 },
-                AgentEvent::ConversationCompleted { conversation_id } => {
-                    log::info!("SagittaCodeApp: Conversation completed: {conversation_id}");
-                    handle_conversation_completed(app, conversation_id);
-                },
+                // Removed duplicate - already handled above
                 AgentEvent::ConversationSummarizing { conversation_id } => {
                     log::info!("SagittaCodeApp: Conversation summarizing: {conversation_id}");
                     // Could update UI to show summarizing status
@@ -1290,7 +1287,7 @@ pub fn handle_tool_run_completed(app: &mut SagittaCodeApp, run_id: ToolRunId, to
 }
 
 /// Handle tool stream event (progress updates)
-pub fn handle_tool_stream(app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
+pub fn handle_tool_stream(_app: &mut SagittaCodeApp, run_id: ToolRunId, event: String) {
     // Simplified tool stream handling without terminal_stream
     log::debug!("Tool stream event for run {run_id}: {event}");
 }

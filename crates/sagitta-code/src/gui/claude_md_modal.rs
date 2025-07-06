@@ -129,7 +129,7 @@ impl ClaudeMdModal {
     }
     
     /// Render the modal
-    pub fn render(&mut self, ctx: &Context, theme: &crate::gui::theme::AppTheme) -> Option<ClaudeMdModalAction> {
+    pub fn render(&mut self, ctx: &Context, _theme: &crate::gui::theme::AppTheme) -> Option<ClaudeMdModalAction> {
         if !self.is_open {
             return None;
         }

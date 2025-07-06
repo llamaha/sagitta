@@ -108,8 +108,7 @@ impl ClaudeCodeStream {
                                             ClaudeChunk::Result { .. } => log::info!("CLAUDE_CODE: Received result chunk at offset {last_valid_offset}"),
                                             ClaudeChunk::Assistant { .. } => log::info!("CLAUDE_CODE: Received assistant chunk at offset {last_valid_offset}"),
                                             ClaudeChunk::User { .. } => log::info!("CLAUDE_CODE: Received user chunk at offset {last_valid_offset}"),
-                                            ClaudeChunk::System { .. } => log::debug!("CLAUDE_CODE: Received system chunk at offset {last_valid_offset}"),
-                                            _ => {}
+                                            ClaudeChunk::System { .. } => log::debug!("CLAUDE_CODE: Received system chunk at offset {last_valid_offset}")
                                         }
                                     
                                     match chunk {
@@ -127,7 +126,7 @@ impl ClaudeCodeStream {
                                             });
                                             
                                             // Process content blocks directly
-                                            for (idx, content) in message.content.into_iter().enumerate() {
+                                            for (_idx, content) in message.content.into_iter().enumerate() {
                                                 // Process content blocks without logging
                                                 match content {
                                                     ContentBlock::Text { text } => {

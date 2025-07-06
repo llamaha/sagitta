@@ -227,7 +227,7 @@ pub async fn handle_edit_file<C: QdrantClientTrait + Send + Sync + 'static>(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use std::path::PathBuf;
+    // use std::path::PathBuf;
     
     fn create_mock_qdrant() -> Arc<qdrant_client::Qdrant> {
         Arc::new(qdrant_client::Qdrant::from_url("http://localhost:6334").build().unwrap())

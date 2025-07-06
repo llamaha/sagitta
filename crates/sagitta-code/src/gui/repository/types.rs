@@ -584,7 +584,7 @@ impl DisplayableSyncProgress {
                 total_overall = *total_files as u64;
                 displayable.stage_detail.overall_message = format!("Deleting file {current_file_num} of {total_files}");
             }
-            CoreSyncStage::CollectFiles { total_files, message } => {
+            CoreSyncStage::CollectFiles { total_files: _total_files, message } => {
                 displayable.stage_detail.name = "Collecting Files".to_string();
                 displayable.stage_detail.overall_message = message.clone();
                 // total_overall = *total_files as u64; // No current_overall here, it's a preparatory step

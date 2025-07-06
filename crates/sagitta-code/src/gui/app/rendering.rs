@@ -48,8 +48,8 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Update current agent mode (periodically)
     if let Some(agent) = &app.agent {
-        let agent_clone = agent.clone();
-        let current_mode = app.state.current_agent_mode;
+        let _agent_clone = agent.clone();
+        let _current_mode = app.state.current_agent_mode;
         tokio::spawn(async move {
             // This will run async and update the mode if needed
             // We can't directly update self here, but we could use events if needed
@@ -1157,7 +1157,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         
                         // Change working directory in background
                         tokio::spawn(async move {
-                            let repo_manager_lock = repo_manager.lock().await;
+                            let _repo_manager_lock = repo_manager.lock().await;
                             // Convert repo name to path (stub doesn't use it anyway)
                             let repo_path = std::path::Path::new(&repo_name_clone);
                             match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
@@ -1213,7 +1213,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             }
             
             // Store the input ID for potential future use
-            if let Some(id) = input_id {
+            if let Some(_id) = input_id {
                 // We can use this ID later if needed
             }
         });
@@ -1245,7 +1245,7 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
 }
 
 /// Render tool info modal
-fn render_tool_info_modal(app: &mut SagittaCodeApp, ctx: &Context, tool_name: &str, tool_args: &str) {
+fn render_tool_info_modal(app: &mut SagittaCodeApp, _ctx: &Context, tool_name: &str, tool_args: &str) {
     log::debug!("render_tool_info_modal called with tool_name: {tool_name}");
     
     // Check if this is a tool result (indicated by " Result" suffix or " - Terminal Output" suffix)

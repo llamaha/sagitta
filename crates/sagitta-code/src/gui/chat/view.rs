@@ -446,8 +446,8 @@ pub fn chat_view_ui(ui: &mut egui::Ui, messages: &[ChatMessage], app_theme: AppT
 pub fn modern_chat_view_ui(ui: &mut egui::Ui, items: &[ChatItem], app_theme: AppTheme, copy_state: &mut CopyButtonState, running_tools: &HashMap<ToolRunId, RunningToolInfo>, collapsed_thinking: &mut HashMap<String, bool>, tool_results: &HashMap<String, String>) -> Option<(String, String)> {
     // Use the app theme's colors directly
     let bg_color = app_theme.panel_background();
-    let text_color = app_theme.text_color();
-    let accent_color = app_theme.accent_color();
+    let _text_color = app_theme.text_color();
+    let _accent_color = app_theme.accent_color();
 
     // Get the total available width - use full width for compact design
     let total_width = ui.available_width();
@@ -806,7 +806,7 @@ fn render_single_message_content(
 }
 
 /// Render thinking content with streaming support and fade-out effects
-fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
+fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, collapsed_thinking: &mut HashMap<String, bool>) {
     // Check if we should show thinking content
     if !message.should_show_thinking() {
         return;
@@ -835,7 +835,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
             // Thinking icon with animation if streaming
             if message.thinking_is_streaming {
                 let time = ui.input(|i| i.time);
-                let rotation = (time * 2.0) as f32;
+                let _rotation = (time * 2.0) as f32;
                 ui.label(RichText::new(symbols::get_thinking_symbol()).size(14.0)); // Brain emoji for active thinking
             } else {
                 ui.label(RichText::new("💭").size(14.0));
@@ -907,7 +907,7 @@ fn render_thinking_content(ui: &mut Ui, message: &StreamingMessage, bg_color: &C
 }
 
 /// Render a single tool call as a compact, clickable card
-fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_single_tool_call(ui: &mut Ui, tool_call: &ToolCall, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -1137,7 +1137,7 @@ fn render_tool_calls_compact(ui: &mut Ui, tool_calls: &[ToolCall], bg_color: &Co
 }
 
 /// Render a standalone tool card
-fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, bg_color: &Color32, max_width: f32, app_theme: AppTheme, running_tools: &HashMap<ToolRunId, RunningToolInfo>, copy_state: &mut CopyButtonState) -> Option<(String, String)> {
+fn render_tool_card(ui: &mut Ui, tool_card: &ToolCard, _bg_color: &Color32, max_width: f32, app_theme: AppTheme, _running_tools: &HashMap<ToolRunId, RunningToolInfo>, _copy_state: &mut CopyButtonState) -> Option<(String, String)> {
     let mut clicked_tool_result = None;
     
     // Limit tool card width to 90% of max_width
@@ -1353,7 +1353,7 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
         render_text_with_tool_links(ui, text, bg_color, max_width, app_theme)
     } else {
         // Set the text color from theme before rendering
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1374,7 +1374,7 @@ fn render_text_content_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_
 }
 
 /// Render text with tool:// links as clickable buttons
-fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
+fn render_text_with_tool_links(ui: &mut Ui, text: &str, _bg_color: &Color32, max_width: f32, app_theme: AppTheme) -> Option<(String, String)> {
     let mut clicked_tool = None;
     
     // Parse all [text](tool://id) patterns in the text
@@ -1397,7 +1397,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
     
     if tool_links.is_empty() {
         // No tool links, render normally with CommonMark
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1425,7 +1425,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
             // Render text before the placeholder using CommonMark
             let before_text = &remaining_text[..split_pos];
             if !before_text.trim().is_empty() {
-                let original_text_color = ui.style().visuals.text_color();
+                let _original_text_color = ui.style().visuals.text_color();
                 ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
                 
                 COMMONMARK_CACHE.with(|cache| {
@@ -1457,7 +1457,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
     
     // Render any remaining text after the last placeholder using CommonMark
     if !remaining_text.trim().is_empty() {
-        let original_text_color = ui.style().visuals.text_color();
+        let _original_text_color = ui.style().visuals.text_color();
         ui.style_mut().visuals.override_text_color = Some(app_theme.text_color());
         
         COMMONMARK_CACHE.with(|cache| {
@@ -1479,7 +1479,7 @@ fn render_text_with_tool_links(ui: &mut Ui, text: &str, bg_color: &Color32, max_
 
 /// Render code block compactly
 fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_width: f32, app_theme: AppTheme) {
-    let opacity = 0.3; // Default opacity for UI elements
+    let _opacity = 0.3; // Default opacity for UI elements
     let mut lines = text.lines();
     let first_line = lines.next().unwrap_or("");
     let (language, remaining_text) = if first_line.trim().is_empty() {
@@ -1539,7 +1539,7 @@ fn render_code_block_compact(ui: &mut Ui, text: &str, bg_color: &Color32, max_wi
 }
 
 /// Render syntax highlighted code
-fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_color: &Color32, max_width: f32) {
+fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, _bg_color: &Color32, max_width: f32) {
     let syntax_set = get_syntax_set();
     let theme_set = get_theme_set();
     
@@ -1556,7 +1556,7 @@ fn render_syntax_highlighted_code(ui: &mut Ui, text: &str, language: &str, bg_co
     // Use a more compact approach by building the layout job directly
     let mut layout_job = egui::text::LayoutJob::default();
     
-    for (line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
+    for (_line_index, line) in LinesWithEndings::from(text).enumerate().take(20) {
         let ranges = highlighter.highlight_line(line, syntax_set).unwrap_or_default();
             
             for (style, text_part) in ranges {
@@ -3026,7 +3026,7 @@ fn render_diff_output(ui: &mut egui::Ui, result: &serde_json::Value, app_theme: 
         
         // Render diff lines with appropriate colors
         for line in diff_content.lines() {
-            let (text_color, prefix) = if line.starts_with('+') && !line.starts_with("+++") {
+            let (text_color, _prefix) = if line.starts_with('+') && !line.starts_with("+++") {
                 (app_theme.success_color(), "+ ")
             } else if line.starts_with('-') && !line.starts_with("---") {
                 (app_theme.error_color(), "- ")
