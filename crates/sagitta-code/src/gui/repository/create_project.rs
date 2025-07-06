@@ -73,12 +73,29 @@ pub fn render_create_project(
     repo_manager: Arc<Mutex<RepositoryManager>>,
     theme: AppTheme,
 ) {
-    // Check if a project was just created and switch to List tab if so
-    if let Some(newly_created) = state.newly_created_repository.take() {
-        log::info!("Project '{newly_created}' was created, switching to repository list");
-        state.active_tab = super::types::RepoPanelTab::List;
-        state.is_loading_repos = true; // Trigger a refresh
-        return;
+    // Check if project creation completed
+    if let Some(receiver) = &state.project_form.result_receiver {
+        if let Ok(result) = receiver.try_recv() {
+            match result {
+                Ok(project_name) => {
+                    log::info!("Project '{project_name}' was created successfully, switching to repository list");
+                    state.project_form.status_message = Some(format!("Project '{project_name}' created successfully!"));
+                    state.project_form.error_message = None;
+                    state.project_form.creating = false;
+                    state.active_tab = super::types::RepoPanelTab::List;
+                    state.is_loading_repos = true; // Trigger a refresh
+                    state.project_form.result_receiver = None; // Clear the receiver
+                    return;
+                }
+                Err(e) => {
+                    log::error!("Project creation failed: {e}");
+                    state.project_form.error_message = Some(format!("Project creation failed: {e}"));
+                    state.project_form.status_message = None;
+                    state.project_form.creating = false;
+                    state.project_form.result_receiver = None; // Clear the receiver
+                }
+            }
+        }
     }
     // Use repositories_base_path from config, with fallback
     let base_path = config.repositories_base_path();
@@ -228,9 +245,13 @@ pub fn render_create_project(
                 state.project_form.error_message = None;
                 state.project_form.status_message = None;
                 state.project_form.creating = true;
+                
+                // Create a channel for result communication
+                let (sender, receiver) = std::sync::mpsc::channel();
+                state.project_form.result_receiver = Some(receiver);
 
                 // Create the project
-                create_project(state, config, repo_manager.clone());
+                create_project(state, config, repo_manager.clone(), sender);
             }
             
             // Clear button
@@ -250,6 +271,7 @@ fn create_project(
     state: &mut RepoPanelState,
     _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
+    result_sender: std::sync::mpsc::Sender<Result<String, anyhow::Error>>,
 ) {
     let project_name = state.project_form.name.clone();
     let project_path = state.project_form.path.clone();
@@ -393,18 +415,21 @@ fn create_project(
                             // For local projects, we need to add them with local_path instead of URL
                             if let Err(e) = manager.add_local_repository(&project_name, &full_path).await {
                                 log::error!("Failed to add repository after creation: {e}");
+                                let _ = result_sender.send(Err(anyhow::anyhow!("Failed to add repository: {e}")));
                             } else {
                                 log::info!("Successfully added repository '{project_name}' to Sagitta as local repository");
-                                // Signal that the project was created successfully by storing the name
-                                // This will trigger a tab switch and refresh in the next render cycle
+                                // Signal that the project was created successfully
+                                let _ = result_sender.send(Ok(project_name.clone()));
                             }
                         }
                         Ok(output) => {
                             let error = String::from_utf8_lossy(&output.stderr);
                             log::error!("Failed to create project: {error}");
+                            let _ = result_sender.send(Err(anyhow::anyhow!("Failed to create project: {error}")));
                         }
                         Err(e) => {
                             log::error!("Failed to execute create command: {e}");
+                            let _ = result_sender.send(Err(anyhow::anyhow!("Failed to execute create command: {e}")));
                         }
                     }
                 }
@@ -412,6 +437,7 @@ fn create_project(
                     let tool = info.tool_name;
                     let instructions = info.install_instructions;
                     log::error!("{tool} is not installed. {instructions}");
+                    let _ = result_sender.send(Err(anyhow::anyhow!("{tool} is not installed. {instructions}")));
                 }
             }
         });
@@ -419,9 +445,9 @@ fn create_project(
         state.project_form.status_message = Some("Creating project... Check the logs for progress.".to_string());
     } else {
         state.project_form.error_message = Some(format!("Project creation for {language} is not yet supported"));
+        state.project_form.creating = false;
+        let _ = result_sender.send(Err(anyhow::anyhow!("Project creation for {language} is not yet supported")));
     }
-    
-    state.project_form.creating = false;
 }
 
 #[cfg(test)]

@@ -354,6 +354,7 @@ impl Default for ProjectCreationForm {
             creating: false,
             status_message: None,
             error_message: None,
+            result_receiver: None,
         }
     }
 }
