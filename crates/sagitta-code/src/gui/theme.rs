@@ -602,6 +602,15 @@ impl AppTheme {
     pub fn muted_text_color(&self) -> Color32 {
         self.hint_text_color()
     }
+    
+    /// Get info color (for informational messages)
+    pub fn info_color(&self) -> Color32 {
+        match self {
+            AppTheme::Dark => Color32::from_rgb(33, 150, 243),  // Blue
+            AppTheme::Light => Color32::from_rgb(25, 118, 210), // Darker blue for light theme
+            AppTheme::Custom => get_custom_theme_colors().accent_color,
+        }
+    }
 
     /// Get user message background color
     pub fn user_message_background(&self) -> Color32 {
