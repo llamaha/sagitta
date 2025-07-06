@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
-use crate::agent::conversation::types::{Conversation, ConversationManager};
-use crate::agent::message::types::AgentMessage;
-use crate::gui::app::conversation_title_updater::ConversationTitleUpdater;
+use crate::agent::conversation::types::Conversation;
 
 /// Event triggered when a conversation should be checked for title update
 #[derive(Debug, Clone)]

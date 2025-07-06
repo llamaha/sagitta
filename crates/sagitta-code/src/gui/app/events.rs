@@ -1449,6 +1449,15 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
     if app.state.current_conversation_id == Some(conversation_id) {
         app.state.current_conversation_title = Some(new_title);
     }
+    
+    // Mark this conversation as having a custom title to prevent auto-updates
+    if let Some(auto_title_updater) = &app.auto_title_updater {
+        let updater = auto_title_updater.clone();
+        tokio::spawn(async move {
+            updater.mark_custom_title(conversation_id).await;
+            log::debug!("Marked conversation {} as having custom title", conversation_id);
+        });
+    }
 }
 
 /// Handle manual conversation title update request
