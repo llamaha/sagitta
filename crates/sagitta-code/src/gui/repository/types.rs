@@ -330,7 +330,7 @@ pub struct SimpleSyncStatus {
 }
 
 /// Project creation form state
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProjectCreationForm {
     pub name: String,
     pub language: String,
@@ -341,6 +341,22 @@ pub struct ProjectCreationForm {
     pub status_message: Option<String>,
     pub error_message: Option<String>,
     pub result_receiver: Option<std::sync::mpsc::Receiver<Result<String, anyhow::Error>>>,
+}
+
+impl Clone for ProjectCreationForm {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            language: self.language.clone(),
+            path: self.path.clone(),
+            description: self.description.clone(),
+            initialize_git: self.initialize_git,
+            creating: self.creating,
+            status_message: self.status_message.clone(),
+            error_message: self.error_message.clone(),
+            result_receiver: None, // Cannot clone receiver
+        }
+    }
 }
 
 impl Default for ProjectCreationForm {

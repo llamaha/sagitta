@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke, CornerRadius};
 use tokio::sync::Mutex;
+use anyhow;
 
 use crate::gui::theme::AppTheme;
 use crate::config::types::SagittaCodeConfig;
@@ -503,5 +504,6 @@ mod tests {
         assert!(!form.creating);
         assert!(form.status_message.is_none());
         assert!(form.error_message.is_none());
+        assert!(form.result_receiver.is_none());
     }
 }
