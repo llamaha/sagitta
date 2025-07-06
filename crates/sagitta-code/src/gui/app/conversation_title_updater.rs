@@ -118,6 +118,14 @@ impl ConversationTitleUpdater {
                 updated_conversation.tags = tags;
             }
             
+            // Analyze conversation status based on recent messages
+            let new_status = self.analyze_conversation_status(&updated_conversation);
+            if new_status != updated_conversation.status {
+                log::info!("Updating conversation {} status from {:?} to {:?}", 
+                    conversation_id, updated_conversation.status, new_status);
+                updated_conversation.status = new_status;
+            }
+            
             self.conversation_service.update_conversation(updated_conversation).await?;
         }
 

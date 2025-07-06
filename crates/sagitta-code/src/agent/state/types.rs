@@ -37,8 +37,6 @@ pub enum ConversationStatus {
     Summarizing,
     Paused,
     Completed,
-    Success,
-    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
