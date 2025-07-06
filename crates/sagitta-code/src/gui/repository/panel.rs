@@ -330,6 +330,11 @@ impl RepoPanel {
                 Arc::clone(&self.repo_manager),
                 &theme,
             );
+            
+            // Render remove confirmation dialog at panel level
+            if state_guard.show_remove_confirmation {
+                super::list::render_remove_confirmation_dialog(ctx, &mut state_guard, Arc::clone(&self.repo_manager), &theme);
+            }
         }
     }
 

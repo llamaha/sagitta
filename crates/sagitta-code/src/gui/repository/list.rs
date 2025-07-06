@@ -530,26 +530,27 @@ fn render_basic_repos(
         ui.end_row();
     }
     
-    // Render remove confirmation dialog
-    if state.show_remove_confirmation {
-        render_remove_confirmation_dialog(ui.ctx(), state, repo_manager);
-    }
 }
 
 /// Render the repository removal confirmation dialog
-fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::types::RepoPanelState, repo_manager: Arc<Mutex<RepositoryManager>>) {
+pub fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::types::RepoPanelState, repo_manager: Arc<Mutex<RepositoryManager>>, theme: &crate::gui::theme::AppTheme) {
     egui::Window::new("⚠️ Confirm Repository Removal")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .frame(egui::Frame::window(&ctx.style()).fill(theme.panel_background()))
         .show(ctx, |ui| {
+            ui.visuals_mut().override_text_color = Some(theme.text_color());
+            ui.visuals_mut().widgets.noninteractive.bg_fill = theme.panel_background();
+            ui.visuals_mut().widgets.inactive.bg_fill = theme.input_background();
+            ui.visuals_mut().widgets.active.bg_fill = theme.button_background();
             ui.vertical(|ui| {
                 ui.add_space(5.0);
                 
                 // Warning message
                 ui.horizontal(|ui| {
                     ui.label("⚠️");
-                    ui.label(egui::RichText::new("This action cannot be undone!").strong().color(egui::Color32::from_rgb(220, 53, 69)));
+                    ui.colored_label(theme.warning_color(), egui::RichText::new("This action cannot be undone!").strong());
                 });
                 
                 ui.add_space(10.0);
@@ -568,7 +569,7 @@ fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::typ
                 // Action buttons
                 ui.horizontal(|ui| {
                     // Cancel button
-                    if ui.button("Cancel").clicked() {
+                    if ui.add(egui::Button::new("Cancel").fill(theme.button_background())).clicked() {
                         state.show_remove_confirmation = false;
                         state.repository_to_remove = None;
                     }
@@ -577,7 +578,7 @@ fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::typ
                     
                     // Confirm remove button
                     if ui.add(egui::Button::new(egui::RichText::new("Remove Repository").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(220, 53, 69))).clicked() {
+                        .fill(theme.error_color())).clicked() {
                         
                         if let Some(repo_name) = state.repository_to_remove.take() {
                             // Perform the actual removal
