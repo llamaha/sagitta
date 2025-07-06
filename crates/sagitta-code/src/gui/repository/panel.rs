@@ -503,4 +503,58 @@ mod tests {
         assert!(!state.use_enhanced_repos, "Enhanced repos should be reset to trigger reload");
     }
 
+    #[tokio::test]
+    async fn test_panel_toggle_triggers_refresh_on_list_tab() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let mut panel = RepoPanel::new(repo_manager, config, None);
+        
+        // Set up initial state - panel closed, List tab active
+        panel.is_open = false;
+        {
+            let mut state = panel.state.lock().await;
+            state.active_tab = RepoPanelTab::List;
+            state.is_loading_repos = false;
+            state.use_enhanced_repos = true;
+        }
+        
+        // Toggle panel open (simulate Ctrl+R)
+        panel.toggle();
+        
+        // Verify panel is now open
+        assert!(panel.is_open(), "Panel should be open after toggle");
+        
+        // Verify refresh was triggered for List tab
+        let state = panel.state.lock().await;
+        assert!(state.is_loading_repos, "Refresh should be triggered when panel is opened on List tab");
+        assert!(!state.use_enhanced_repos, "Enhanced repos should be reset to trigger reload");
+    }
+
+    #[tokio::test]
+    async fn test_panel_toggle_no_refresh_on_other_tabs() {
+        let repo_manager = create_test_repo_manager();
+        let config = create_test_config();
+        let mut panel = RepoPanel::new(repo_manager, config, None);
+        
+        // Set up initial state - panel closed, Sync tab active
+        panel.is_open = false;
+        {
+            let mut state = panel.state.lock().await;
+            state.active_tab = RepoPanelTab::Sync;
+            state.is_loading_repos = false;
+            state.use_enhanced_repos = true;
+        }
+        
+        // Toggle panel open
+        panel.toggle();
+        
+        // Verify panel is now open
+        assert!(panel.is_open(), "Panel should be open after toggle");
+        
+        // Verify no refresh was triggered for non-List tab
+        let state = panel.state.lock().await;
+        assert!(!state.is_loading_repos, "Refresh should NOT be triggered when panel is opened on non-List tab");
+        assert!(state.use_enhanced_repos, "Enhanced repos should remain unchanged");
+    }
+
 } 
