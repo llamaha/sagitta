@@ -28,6 +28,8 @@ pub fn chat_input_ui(
     available_repositories: &[String],
     on_repository_context_change: &mut Option<String>,
     on_repository_refresh_requested: &mut bool,
+    // Git controls
+    git_controls: &mut crate::gui::repository::git_controls::GitControls,
     // Loop control parameters
     is_in_loop: bool,
     loop_break_requested: &mut bool,
@@ -143,6 +145,20 @@ pub fn chat_input_ui(
             // Trigger repository refresh when ComboBox is opened
             if combo_response.response.clicked() {
                 *on_repository_refresh_requested = true;
+            }
+            
+            // Show git controls if a repository is selected
+            if let Some(repo_name) = current_repository_context {
+                if !repo_name.is_empty() {
+                    ui.separator();
+                    // Check if git controls need to update repository context
+                    if git_controls.state().current_repository.as_ref() != Some(repo_name) {
+                        // We can't call async method here, so we'll set a flag for later processing
+                        // For now, just render the controls with the current state
+                    }
+                    // Render git workflow controls
+                    git_controls.render(ui, theme);
+                }
             }
             
             // Show "Create new repository" and "Add existing" buttons when "No repository" is selected

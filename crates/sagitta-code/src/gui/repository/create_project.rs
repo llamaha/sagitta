@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use egui::{Ui, RichText, Grid, TextEdit, Button, Checkbox, ComboBox, Frame, Stroke, CornerRadius};
 use tokio::sync::Mutex;
+use anyhow;
 
 use crate::gui::theme::AppTheme;
 use crate::config::types::SagittaCodeConfig;
@@ -73,6 +74,30 @@ pub fn render_create_project(
     repo_manager: Arc<Mutex<RepositoryManager>>,
     theme: AppTheme,
 ) {
+    // Check if project creation completed
+    if let Some(receiver) = &state.project_form.result_receiver {
+        if let Ok(result) = receiver.try_recv() {
+            match result {
+                Ok(project_name) => {
+                    log::info!("Project '{project_name}' was created successfully, switching to repository list");
+                    state.project_form.status_message = Some(format!("Project '{project_name}' created successfully!"));
+                    state.project_form.error_message = None;
+                    state.project_form.creating = false;
+                    state.active_tab = super::types::RepoPanelTab::List;
+                    state.is_loading_repos = true; // Trigger a refresh
+                    state.project_form.result_receiver = None; // Clear the receiver
+                    return;
+                }
+                Err(e) => {
+                    log::error!("Project creation failed: {e}");
+                    state.project_form.error_message = Some(format!("Project creation failed: {e}"));
+                    state.project_form.status_message = None;
+                    state.project_form.creating = false;
+                    state.project_form.result_receiver = None; // Clear the receiver
+                }
+            }
+        }
+    }
     // Use repositories_base_path from config, with fallback
     let base_path = config.repositories_base_path();
     state.project_form.path = base_path.to_string_lossy().to_string();
@@ -80,32 +105,34 @@ pub fn render_create_project(
     ui.heading("Create New Project");
     ui.add_space(8.0);
 
-    // Show project info if we have a project name
-    if !state.project_form.name.is_empty() {
-        Frame::NONE
-            .fill(theme.info_background())
-            .stroke(Stroke::new(1.0, theme.info_color()))
-            .corner_radius(CornerRadius::same(4))
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("💡").size(14.0));
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("Project Info:").strong().color(theme.info_color()));
-                        let path = &state.project_form.path;
-                        let name = &state.project_form.name;
-                        ui.label(format!("• Location: {path}/{name}"));
-                        
-                        // Check if the language tool is available
-                        if let Some(info) = LanguageProjectInfo::get_language_info(&state.project_form.language) {
-                            let tool = info.tool_name;
-                            ui.label(format!("• Will use {tool} to create project"));
-                        }
-                    });
+    // Always show project info frame to avoid layout changes
+    Frame::NONE
+        .fill(theme.info_background())
+        .stroke(Stroke::new(1.0, theme.info_color()))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("💡").size(14.0));
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Project Info:").strong().color(theme.info_color()));
+                    let path = &state.project_form.path;
+                    let name = if state.project_form.name.is_empty() {
+                        "<project-name>"
+                    } else {
+                        &state.project_form.name
+                    };
+                    ui.label(format!("• Location: {path}/{name}"));
+                    
+                    // Check if the language tool is available
+                    if let Some(info) = LanguageProjectInfo::get_language_info(&state.project_form.language) {
+                        let tool = info.tool_name;
+                        ui.label(format!("• Will use {tool} to create project"));
+                    }
                 });
             });
-        ui.add_space(8.0);
-    }
+        });
+    ui.add_space(8.0);
 
     // Main form
     Frame::NONE
@@ -219,9 +246,13 @@ pub fn render_create_project(
                 state.project_form.error_message = None;
                 state.project_form.status_message = None;
                 state.project_form.creating = true;
+                
+                // Create a channel for result communication
+                let (sender, receiver) = std::sync::mpsc::channel();
+                state.project_form.result_receiver = Some(receiver);
 
                 // Create the project
-                create_project(state, config, repo_manager.clone());
+                create_project(state, config, repo_manager.clone(), sender);
             }
             
             // Clear button
@@ -241,11 +272,13 @@ fn create_project(
     state: &mut RepoPanelState,
     _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
+    result_sender: std::sync::mpsc::Sender<Result<String, anyhow::Error>>,
 ) {
     let project_name = state.project_form.name.clone();
     let project_path = state.project_form.path.clone();
     let language = state.project_form.language.clone();
     let initialize_git = state.project_form.initialize_git;
+    let description = state.project_form.description.clone();
     
     if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
         let repo_manager_clone = repo_manager.clone();
@@ -296,12 +329,12 @@ fn create_project(
                             if initialize_git {
                                 let git_init_result = if cfg!(windows) {
                                     tokio::process::Command::new("cmd")
-                                        .args(["/C", &format!("cd /d \"{full_path}\" && git init")])
+                                        .args(["/C", &format!("cd /d \"{full_path}\" && git init -b main")])
                                         .output()
                                         .await
                                 } else {
                                     tokio::process::Command::new("sh")
-                                        .args(["-c", &format!("cd '{full_path}' && git init")])
+                                        .args(["-c", &format!("cd '{full_path}' && git init -b main")])
                                         .output()
                                         .await
                                 };
@@ -309,6 +342,63 @@ fn create_project(
                                 match git_init_result {
                                     Ok(git_output) if git_output.status.success() => {
                                         log::info!("Git repository initialized at {full_path}");
+                                        
+                                        // Create an initial commit to avoid "unborn branch" state
+                                        let readme_content = format!("# {project_name}\n\n{}", 
+                                            if !description.is_empty() {
+                                                &description
+                                            } else {
+                                                "A new project created with Sagitta Code."
+                                            }
+                                        );
+                                        
+                                        // Create README.md
+                                        if let Err(e) = tokio::fs::write(format!("{full_path}/README.md"), &readme_content).await {
+                                            log::warn!("Failed to create README.md: {e}");
+                                        }
+                                        
+                                        // Create .gitignore with common patterns
+                                        let gitignore_content = match language.as_str() {
+                                            "rust" => "target/\nCargo.lock\n*.rs.bk\n",
+                                            "python" => "venv/\n__pycache__/\n*.py[cod]\n.env\n",
+                                            "javascript" | "typescript" => "node_modules/\nnpm-debug.log*\n.env\ndist/\n",
+                                            "go" => "*.exe\n*.dll\n*.so\n*.dylib\n",
+                                            _ => "*.log\n*.tmp\n.DS_Store\n",
+                                        };
+                                        
+                                        if let Err(e) = tokio::fs::write(format!("{full_path}/.gitignore"), gitignore_content).await {
+                                            log::warn!("Failed to create .gitignore: {e}");
+                                        }
+                                        
+                                        // Create initial commit
+                                        let commit_commands = format!(
+                                            "cd '{full_path}' && git add . && git commit -m \"Initial commit\n\nProject created with Sagitta Code\""
+                                        );
+                                        
+                                        let commit_result = if cfg!(windows) {
+                                            tokio::process::Command::new("cmd")
+                                                .args(["/C", &commit_commands.replace('\'', "\"")])
+                                                .output()
+                                                .await
+                                        } else {
+                                            tokio::process::Command::new("sh")
+                                                .args(["-c", &commit_commands])
+                                                .output()
+                                                .await
+                                        };
+                                        
+                                        match commit_result {
+                                            Ok(output) if output.status.success() => {
+                                                log::info!("Initial commit created for {full_path}");
+                                            }
+                                            Ok(output) => {
+                                                let error = String::from_utf8_lossy(&output.stderr);
+                                                log::warn!("Failed to create initial commit: {error}");
+                                            }
+                                            Err(e) => {
+                                                log::warn!("Failed to execute commit command: {e}");
+                                            }
+                                        }
                                     }
                                     Ok(git_output) => {
                                         let error = String::from_utf8_lossy(&git_output.stderr);
@@ -320,21 +410,26 @@ fn create_project(
                                 }
                             }
                             
-                            // Add to repository manager
+                            // Add to repository manager as a local repository
                             let manager = repo_manager_clone.lock().await;
-                            if let Err(e) = manager.add_repository(&project_name, &full_path, None, None).await {
+                            // For local projects, we need to add them with local_path instead of URL
+                            if let Err(e) = manager.add_local_repository(&project_name, &full_path).await {
                                 log::error!("Failed to add repository after creation: {e}");
+                                let _ = result_sender.send(Err(anyhow::anyhow!("Failed to add repository: {e}")));
                             } else {
-                                log::info!("Successfully added repository '{project_name}' to Sagitta");
-                                // Project created successfully - the repository list will refresh automatically
+                                log::info!("Successfully added repository '{project_name}' to Sagitta as local repository");
+                                // Signal that the project was created successfully
+                                let _ = result_sender.send(Ok(project_name.clone()));
                             }
                         }
                         Ok(output) => {
                             let error = String::from_utf8_lossy(&output.stderr);
                             log::error!("Failed to create project: {error}");
+                            let _ = result_sender.send(Err(anyhow::anyhow!("Failed to create project: {error}")));
                         }
                         Err(e) => {
                             log::error!("Failed to execute create command: {e}");
+                            let _ = result_sender.send(Err(anyhow::anyhow!("Failed to execute create command: {e}")));
                         }
                     }
                 }
@@ -342,6 +437,7 @@ fn create_project(
                     let tool = info.tool_name;
                     let instructions = info.install_instructions;
                     log::error!("{tool} is not installed. {instructions}");
+                    let _ = result_sender.send(Err(anyhow::anyhow!("{tool} is not installed. {instructions}")));
                 }
             }
         });
@@ -349,9 +445,9 @@ fn create_project(
         state.project_form.status_message = Some("Creating project... Check the logs for progress.".to_string());
     } else {
         state.project_form.error_message = Some(format!("Project creation for {language} is not yet supported"));
+        state.project_form.creating = false;
+        let _ = result_sender.send(Err(anyhow::anyhow!("Project creation for {language} is not yet supported")));
     }
-    
-    state.project_form.creating = false;
 }
 
 #[cfg(test)]
@@ -407,5 +503,71 @@ mod tests {
         assert!(!form.creating);
         assert!(form.status_message.is_none());
         assert!(form.error_message.is_none());
+        assert!(form.result_receiver.is_none());
+    }
+    
+    #[test]
+    fn test_project_creation_form_clone() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let form = ProjectCreationForm {
+            name: "test-project".to_string(),
+            language: "python".to_string(),
+            path: "/tmp".to_string(),
+            description: "A test project".to_string(),
+            initialize_git: false,
+            creating: true,
+            status_message: Some("Creating...".to_string()),
+            error_message: Some("Error occurred".to_string()),
+            result_receiver: Some(receiver),
+        };
+        
+        let cloned = form.clone();
+        assert_eq!(cloned.name, "test-project");
+        assert_eq!(cloned.language, "python");
+        assert_eq!(cloned.path, "/tmp");
+        assert_eq!(cloned.description, "A test project");
+        assert!(!cloned.initialize_git);
+        assert!(cloned.creating);
+        assert_eq!(cloned.status_message, Some("Creating...".to_string()));
+        assert_eq!(cloned.error_message, Some("Error occurred".to_string()));
+        assert!(cloned.result_receiver.is_none()); // Should not be cloned
+        
+        // Ensure original sender is still valid
+        assert!(sender.send(Ok("test".to_string())).is_ok());
+    }
+    
+    #[test]
+    fn test_project_creation_callback_mechanism() {
+        // Test that the callback mechanism allows async signaling
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        // Simulate successful project creation
+        let result = sender.send(Ok("test-project".to_string()));
+        assert!(result.is_ok());
+        
+        // Simulate receiving the result
+        let received = receiver.try_recv();
+        assert!(received.is_ok());
+        let received_result: Result<String, anyhow::Error> = received.unwrap();
+        assert!(received_result.is_ok());
+        assert_eq!(received_result.unwrap(), "test-project");
+    }
+    
+    #[test]
+    fn test_project_creation_error_callback() {
+        // Test that error callback mechanism works
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        // Simulate failed project creation
+        let error_msg = "Failed to create project: tool not found";
+        let result = sender.send(Err(anyhow::anyhow!(error_msg)));
+        assert!(result.is_ok());
+        
+        // Simulate receiving the error
+        let received = receiver.try_recv();
+        assert!(received.is_ok());
+        let received_result: Result<String, anyhow::Error> = received.unwrap();
+        assert!(received_result.is_err());
+        assert_eq!(received_result.unwrap_err().to_string(), error_msg);
     }
 }

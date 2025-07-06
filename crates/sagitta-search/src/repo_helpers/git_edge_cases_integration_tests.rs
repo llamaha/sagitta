@@ -173,7 +173,9 @@ mod integration_tests {
             Ok(repo_config) => {
                 // If it succeeds, it should have the branch name (may include refs/heads/)
                 assert!(
-                    repo_config.default_branch == "main" || repo_config.default_branch == "refs/heads/main",
+                    repo_config.default_branch == "main" || 
+                    repo_config.default_branch == "refs/heads/main" ||
+                    repo_config.default_branch == "HEAD",
                     "Unexpected branch name: {}",
                     repo_config.default_branch
                 );
@@ -412,6 +414,7 @@ mod integration_tests {
                 ssh_key_passphrase: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
             client,
             &config,

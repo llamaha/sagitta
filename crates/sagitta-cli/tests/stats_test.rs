@@ -55,6 +55,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             };
             config.repositories.push(repo);
             config.active_repository = Some("test_repo".to_string());
@@ -111,6 +112,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             };
             config.repositories.push(repo1);
 
@@ -129,6 +131,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             };
             config.repositories.push(repo2);
 

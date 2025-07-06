@@ -16,8 +16,17 @@ When adding new dependencies:
 1. **Web search for the official Git project URL** to get the correct repository information
 2. **Use the repository add tool** to add the dependency's source code for analysis
 3. **Use --target-ref or specific branch** to match the exact version you're using
-4. **Query the added dependency repository** to understand implementation patterns and APIs
-5. **Sync repositories** after adding dependencies to keep indexed data current
+4. **Use repository_add_dependency tool** to link the dependency to the main project
+5. **Query the added dependency repository** to understand implementation patterns and APIs
+6. **Sync repositories** after adding dependencies to keep indexed data current
+
+### Managing Repository Dependencies
+
+Each repository can have dependencies on other repositories in the system. Use these tools:
+
+- **repository_add_dependency**: Link a repository as a dependency to another
+- **repository_remove_dependency**: Remove a dependency link
+- **repository_list_dependencies**: List all dependencies for a repository
 
 This approach ensures you understand the actual implementation rather than outdated documentation.
 

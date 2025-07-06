@@ -9,6 +9,9 @@ use std::ops::{Deref, DerefMut};
 
 use super::repository::manager::RepositoryManager;
 use super::repository::RepoPanel;
+use super::repository::git_controls::GitControls;
+use crate::services::{SyncOrchestrator, FileWatcherService, AutoCommitter, CommitMessageGenerator};
+use crate::services::file_watcher::FileWatcherConfig as ServiceFileWatcherConfig;
 use super::settings::SettingsPanel;
 // Removed - ConversationSidebar is re-exported from conversation module
 use super::claude_md_modal::ClaudeMdModal;
@@ -38,7 +41,7 @@ pub mod tool_formatting;
 pub mod state;
 pub mod rendering;
 mod initialization;
-mod conversation_title_updater;
+pub mod conversation_title_updater;
 
 #[cfg(test)]
 mod tests;
@@ -75,6 +78,7 @@ pub struct SagittaCodeApp {
     // Core components
     pub agent: Option<Arc<Agent>>,
     pub repo_panel: RepoPanel,
+    pub git_controls: GitControls,
     pub chat_manager: Arc<StreamingChatManager>,
     pub settings_panel: SettingsPanel,
     conversation_sidebar: ConversationSidebar,
@@ -108,6 +112,13 @@ pub struct SagittaCodeApp {
     
     // Working directory management
     working_dir_manager: Option<Arc<crate::tools::WorkingDirectoryManager>>,
+    
+    // Auto-sync services
+    sync_orchestrator: Option<Arc<SyncOrchestrator>>,
+    file_watcher: Option<Arc<FileWatcherService>>,
+    auto_committer: Option<Arc<AutoCommitter>>,
+    auto_title_updater: Option<Arc<crate::services::AutoTitleUpdater>>,
+    auto_title_sender: Option<mpsc::UnboundedSender<crate::services::ConversationUpdateEvent>>,
 }
 
 impl SagittaCodeApp {
@@ -150,6 +161,7 @@ impl SagittaCodeApp {
                 Arc::new(Mutex::new(sagitta_code_config.clone())),
                 None, // Agent will be set later during initialization
             ),
+            git_controls: GitControls::new(repo_manager.clone()),
             chat_manager: Arc::new(StreamingChatManager::new()),
             settings_panel,
             conversation_sidebar: ConversationSidebar::with_default_config(),
@@ -179,6 +191,13 @@ impl SagittaCodeApp {
             
             // Title updater - will be initialized later with conversation service
             title_updater: None,
+            
+            // Auto-sync services - will be initialized later
+            sync_orchestrator: None,
+            file_watcher: None,
+            auto_committer: None,
+            auto_title_updater: None,
+            auto_title_sender: None,
         }
     }
 
@@ -227,7 +246,12 @@ impl SagittaCodeApp {
 
     /// Initialize application state, including loading configurations and setting up the agent
     pub async fn initialize(&mut self) -> Result<()> {
-        initialization::initialize(self).await
+        initialization::initialize(self).await?;
+        
+        // Initialize auto-sync services after main initialization
+        self.initialize_auto_sync_services().await?;
+        
+        Ok(())
     }
 
     /// Initialize conversation service with clustering support
@@ -580,6 +604,144 @@ impl SagittaCodeApp {
                 }
             }
         });
+    }
+    
+    /// Initialize auto-sync services
+    pub async fn initialize_auto_sync_services(&mut self) -> Result<()> {
+        let config_guard = self.config.lock().await;
+        
+        if !config_guard.auto_sync.enabled {
+            log::info!("Auto-sync is disabled in configuration");
+            return Ok(());
+        }
+        
+        log::info!("Initializing auto-sync services...");
+        
+        // Get repository manager
+        let repo_manager = self.repo_panel.get_repo_manager();
+        
+        // Create sync orchestrator
+        let mut sync_orchestrator = SyncOrchestrator::new(
+            config_guard.auto_sync.clone(),
+            repo_manager.clone(),
+        );
+        sync_orchestrator.set_app_event_sender(self.app_event_sender.clone());
+        let sync_orchestrator = Arc::new(sync_orchestrator);
+        self.sync_orchestrator = Some(sync_orchestrator.clone());
+        self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
+        self.repo_panel.set_sync_orchestrator(sync_orchestrator.clone());
+        
+        // Start git controls command handler
+        let command_rx = self.git_controls.start_command_handler();
+        let mut git_controls_clone = GitControls::new(repo_manager.clone());
+        git_controls_clone.set_sync_orchestrator(sync_orchestrator.clone());
+        
+        tokio::spawn(async move {
+            git_controls_clone.handle_commands(command_rx).await;
+        });
+        
+        // Only initialize file watcher and auto-committer if their respective features are enabled
+        if config_guard.auto_sync.file_watcher.enabled && config_guard.auto_sync.auto_commit.enabled {
+            // Create commit message generator
+            let mut fast_model_provider = crate::llm::fast_model::FastModelProvider::new(config_guard.clone());
+            if let Err(e) = fast_model_provider.initialize().await {
+                log::warn!("Failed to initialize fast model provider for auto-commit: {e}");
+            }
+            let commit_generator = CommitMessageGenerator::new(
+                fast_model_provider,
+                config_guard.auto_sync.auto_commit.clone(),
+            );
+            
+            // Create auto-committer
+            let mut auto_committer = AutoCommitter::new(
+                config_guard.auto_sync.auto_commit.clone(),
+                commit_generator,
+            );
+            let commit_rx = auto_committer.start();
+            let auto_committer = Arc::new(auto_committer);
+            self.auto_committer = Some(auto_committer.clone());
+            
+            // Create file watcher with converted config
+            let service_file_watcher_config = ServiceFileWatcherConfig {
+                enabled: config_guard.auto_sync.file_watcher.enabled,
+                debounce_ms: config_guard.auto_sync.file_watcher.debounce_ms,
+                exclude_patterns: config_guard.auto_sync.file_watcher.exclude_patterns.clone(),
+                max_buffer_size: 1000, // Default value
+            };
+            let mut file_watcher = FileWatcherService::new(service_file_watcher_config);
+            let change_rx = file_watcher.start().await?;
+            let file_watcher = Arc::new(file_watcher);
+            self.file_watcher = Some(file_watcher.clone());
+            
+            // Set the file watcher on the sync orchestrator
+            sync_orchestrator.set_file_watcher(file_watcher.clone()).await;
+            
+            // Start auto-commit handler
+            let auto_committer_handler = auto_committer.clone();
+            tokio::spawn(async move {
+                auto_committer_handler.handle_file_changes(change_rx).await;
+            });
+            
+            // Start sync handler for commits
+            let sync_orchestrator_handler = sync_orchestrator.clone();
+            let mut commit_rx = commit_rx;
+            tokio::spawn(async move {
+                while let Some(commit_result) = commit_rx.recv().await {
+                    if let Err(e) = sync_orchestrator_handler.handle_commit_result(commit_result).await {
+                        log::error!("Failed to handle commit result: {}", e);
+                    }
+                }
+            });
+            
+            log::info!("Auto-sync services initialized and started");
+            
+            // Add existing repositories to file watcher and sync them in the background
+            let repo_manager_clone = repo_manager.clone();
+            let sync_orchestrator_clone = sync_orchestrator.clone();
+            tokio::spawn(async move {
+                log::info!("Starting background repository initialization");
+                
+                let repo_manager_guard = repo_manager_clone.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    log::info!("Adding {} existing repositories to file watcher", repositories.len());
+                    
+                    for repo in repositories {
+                        let repo_path = std::path::PathBuf::from(&repo.local_path);
+                        if let Err(e) = sync_orchestrator_clone.add_repository(&repo_path).await {
+                            log::error!("Failed to add existing repository {} to file watcher: {}", repo.name, e);
+                        } else {
+                            log::info!("Added existing repository {} to file watcher and sync queue", repo.name);
+                        }
+                    }
+                    
+                    // Also ensure all out-of-sync repositories get synced
+                    if let Err(e) = sync_orchestrator_clone.sync_out_of_sync_repositories().await {
+                        log::error!("Failed to queue out-of-sync repositories: {}", e);
+                    }
+                }
+                
+                log::info!("Background repository initialization complete");
+            });
+        } else {
+            log::info!("File watcher and/or auto-commit disabled, skipping initialization");
+        }
+        
+        // Initialize auto title updater if we have a title updater and conversation service
+        if let (Some(title_updater), Some(_conversation_service)) = (&self.title_updater, &self.conversation_service) {
+            let auto_title_config = crate::services::AutoTitleConfig::default();
+            let mut auto_title_updater = crate::services::AutoTitleUpdater::new(
+                auto_title_config,
+                title_updater.clone(),
+            );
+            
+            let update_tx = auto_title_updater.start();
+            self.auto_title_sender = Some(update_tx);
+            self.auto_title_updater = Some(Arc::new(auto_title_updater));
+            
+            log::info!("Auto title updater initialized and started");
+        }
+        
+        Ok(())
     }
 }
 

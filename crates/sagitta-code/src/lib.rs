@@ -39,6 +39,9 @@ pub mod gui;
 /// Tasks
 pub mod tasks;
 
+/// Services (file watching, auto-commit, etc.)
+pub mod services;
+
 /// Conversation functionality 
 pub mod conversation {
     pub use crate::agent::conversation::*;

@@ -258,6 +258,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 },
                 RepositoryConfig {
                     name: "repo2".to_string(),
@@ -273,6 +274,7 @@ mod tests {
                     indexed_languages: None,
                     added_as_local_path: false,
                     target_ref: None,
+                    dependencies: Vec::new(),
                 },
             ],
             active_repository: None,
@@ -326,6 +328,7 @@ mod tests {
                  indexed_languages: Some(vec!["rust".to_string()]),
                  added_as_local_path: false,
                  target_ref: None,
+                 dependencies: Vec::new(),
                 });
             config.active_repository = Some("other_repo".to_string());
             save_config(&config, Some(&temp_path)).unwrap();
@@ -374,6 +377,7 @@ mod tests {
                  indexed_languages: Some(vec!["python".to_string()]),
                  added_as_local_path: false,
                  target_ref: None,
+                 dependencies: Vec::new(),
                  });
              config.active_repository = Some(active_repo_name.clone());
              save_config(&config, Some(&temp_path)).unwrap();
@@ -519,6 +523,7 @@ mod tests {
                   indexed_languages: None,
                   added_as_local_path: false,
                   target_ref: None,
+                  dependencies: Vec::new(),
                    });
               save_config(&config, Some(&temp_path)).unwrap();
               let initial_repo_count = config.repositories.len();
@@ -573,6 +578,7 @@ mod tests {
                  indexed_languages: None,
                  added_as_local_path: false,
                  target_ref: None,
+                 dependencies: Vec::new(),
                  });
              config.active_repository = None;
              save_config(&config, Some(&config_path)).unwrap();

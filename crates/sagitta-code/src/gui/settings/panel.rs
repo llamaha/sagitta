@@ -51,6 +51,16 @@ pub struct SettingsPanel {
     // Conversation features - Fast model
     pub conversation_fast_model: String,
     pub conversation_enable_fast_model: bool,
+    
+    // Auto-sync config fields
+    pub auto_sync_enabled: bool,
+    pub auto_sync_file_watcher_enabled: bool,
+    pub auto_sync_file_watcher_debounce_ms: u64,
+    pub auto_sync_auto_commit_enabled: bool,
+    pub auto_sync_auto_commit_cooldown_seconds: u64,
+    pub auto_sync_sync_after_commit: bool,
+    pub auto_sync_sync_on_repo_switch: bool,
+    pub auto_sync_sync_on_repo_add: bool,
 }
 
 impl SettingsPanel {
@@ -98,6 +108,16 @@ impl SettingsPanel {
             // Conversation features - Fast model
             conversation_fast_model: initial_sagitta_code_config.conversation.fast_model.clone(),
             conversation_enable_fast_model: initial_sagitta_code_config.conversation.enable_fast_model,
+            
+            // Auto-sync config
+            auto_sync_enabled: initial_sagitta_code_config.auto_sync.enabled,
+            auto_sync_file_watcher_enabled: initial_sagitta_code_config.auto_sync.file_watcher.enabled,
+            auto_sync_file_watcher_debounce_ms: initial_sagitta_code_config.auto_sync.file_watcher.debounce_ms,
+            auto_sync_auto_commit_enabled: initial_sagitta_code_config.auto_sync.auto_commit.enabled,
+            auto_sync_auto_commit_cooldown_seconds: initial_sagitta_code_config.auto_sync.auto_commit.cooldown_seconds,
+            auto_sync_sync_after_commit: initial_sagitta_code_config.auto_sync.sync_after_commit,
+            auto_sync_sync_on_repo_switch: initial_sagitta_code_config.auto_sync.sync_on_repo_switch,
+            auto_sync_sync_on_repo_add: initial_sagitta_code_config.auto_sync.sync_on_repo_add,
         }
     }
     
@@ -449,6 +469,68 @@ impl SettingsPanel {
                             });
                             ui.add_space(16.0);
                             
+                            // Auto-sync Settings
+                            ui.heading("Auto-Sync & Commit");
+                            ui.collapsing("Auto-Sync Settings", |ui| {
+                                ui.label("Configure automatic commit and sync features for repositories");
+                                
+                                Grid::new("auto_sync_grid")
+                                    .num_columns(2)
+                                    .spacing([8.0, 8.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Enable Auto-Sync:");
+                                        ui.checkbox(&mut self.auto_sync_enabled, "")
+                                            .on_hover_text("Enable automatic file watching, commits, and syncing");
+                                        ui.end_row();
+                                        
+                                        if self.auto_sync_enabled {
+                                            ui.label("File Watcher:");
+                                            ui.checkbox(&mut self.auto_sync_file_watcher_enabled, "")
+                                                .on_hover_text("Watch for file changes in repositories");
+                                            ui.end_row();
+                                            
+                                            if self.auto_sync_file_watcher_enabled {
+                                                ui.label("Debounce (ms):");
+                                                ui.add(egui::DragValue::new(&mut self.auto_sync_file_watcher_debounce_ms)
+                                                    .range(100..=10000)
+                                                    .speed(100.0))
+                                                    .on_hover_text("Wait time before processing file changes");
+                                                ui.end_row();
+                                            }
+                                            
+                                            ui.label("Auto-Commit:");
+                                            ui.checkbox(&mut self.auto_sync_auto_commit_enabled, "")
+                                                .on_hover_text("Automatically commit changes with AI-generated messages");
+                                            ui.end_row();
+                                            
+                                            if self.auto_sync_auto_commit_enabled {
+                                                ui.label("Cooldown (seconds):");
+                                                ui.add(egui::DragValue::new(&mut self.auto_sync_auto_commit_cooldown_seconds)
+                                                    .range(5..=300)
+                                                    .speed(5.0))
+                                                    .on_hover_text("Minimum time between auto-commits");
+                                                ui.end_row();
+                                            }
+                                            
+                                            ui.label("Sync After Commit:");
+                                            ui.checkbox(&mut self.auto_sync_sync_after_commit, "")
+                                                .on_hover_text("Automatically sync repository after commits");
+                                            ui.end_row();
+                                            
+                                            ui.label("Sync on Repo Switch:");
+                                            ui.checkbox(&mut self.auto_sync_sync_on_repo_switch, "")
+                                                .on_hover_text("Sync when switching between repositories");
+                                            ui.end_row();
+                                            
+                                            ui.label("Sync on Repo Add:");
+                                            ui.checkbox(&mut self.auto_sync_sync_on_repo_add, "")
+                                                .on_hover_text("Sync when adding new repositories");
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                            ui.add_space(16.0);
+                            
                             // Status message
                             if let Some((message, color)) = &self.status_message {
                                 ui.label(RichText::new(message).color(*color));
@@ -606,6 +688,16 @@ impl SettingsPanel {
         updated_config.conversation.fast_model = self.conversation_fast_model.clone();
         updated_config.conversation.enable_fast_model = self.conversation_enable_fast_model;
         
+        // Update auto-sync settings
+        updated_config.auto_sync.enabled = self.auto_sync_enabled;
+        updated_config.auto_sync.file_watcher.enabled = self.auto_sync_file_watcher_enabled;
+        updated_config.auto_sync.file_watcher.debounce_ms = self.auto_sync_file_watcher_debounce_ms;
+        updated_config.auto_sync.auto_commit.enabled = self.auto_sync_auto_commit_enabled;
+        updated_config.auto_sync.auto_commit.cooldown_seconds = self.auto_sync_auto_commit_cooldown_seconds;
+        updated_config.auto_sync.sync_after_commit = self.auto_sync_sync_after_commit;
+        updated_config.auto_sync.sync_on_repo_switch = self.auto_sync_sync_on_repo_switch;
+        updated_config.auto_sync.sync_on_repo_add = self.auto_sync_sync_on_repo_add;
+        
         // Preserve all other fields
         // and all other config sections (sagitta, ui, logging) from the original
         
@@ -668,6 +760,7 @@ mod tests {
             ui: UiConfig::default(),
             logging: LoggingConfig::default(),
             conversation: ConversationConfig::default(),
+            auto_sync: crate::config::types::AutoSyncConfig::default(),
         }
     }
 
@@ -853,6 +946,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
             sagitta_search::config::RepositoryConfig {
                 name: "test-repo-2".to_string(),
@@ -868,6 +962,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
             },
         ];
         initial_sagitta_config.embed_model = Some("test-embed-model".to_string());

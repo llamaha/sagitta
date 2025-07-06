@@ -824,4 +824,151 @@ pub struct WriteFileResult {
     pub bytes_written: u64,
     /// Whether this was a new file creation
     pub created: bool,
+}
+
+// Git history types
+
+/// Parameters for repository_git_history
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGitHistoryParams {
+    /// Name of the repository to get history for
+    pub repository_name: String,
+    /// Maximum number of commits to retrieve (default: 100, max: 1000)
+    #[serde(default = "default_max_commits")]
+    pub max_commits: u64,
+    /// Optional branch name (defaults to current branch)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    /// Optional start date filter (RFC3339 format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// Optional end date filter (RFC3339 format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    /// Optional author name/email filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Optional path filter (show commits affecting specific paths)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+impl Default for RepositoryGitHistoryParams {
+    fn default() -> Self {
+        Self {
+            repository_name: String::new(),
+            max_commits: default_max_commits(),
+            branch_name: None,
+            since: None,
+            until: None,
+            author: None,
+            path: None,
+        }
+    }
+}
+
+fn default_max_commits() -> u64 {
+    100
+}
+
+/// A single commit in the git history
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    /// Full commit hash
+    pub id: String,
+    /// Short commit hash (first 7 characters)
+    pub short_id: String,
+    /// Commit message
+    pub message: String,
+    /// Author name
+    pub author: String,
+    /// Author email
+    pub email: String,
+    /// Commit timestamp (RFC3339 format)
+    pub timestamp: String,
+    /// Parent commit hashes
+    pub parents: Vec<String>,
+    /// Branch/tag references pointing to this commit
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub refs: Vec<String>,
+}
+
+/// Result of repository_git_history
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGitHistoryResult {
+    /// List of commits in reverse chronological order
+    pub commits: Vec<GitCommit>,
+    /// Current branch name
+    pub current_branch: String,
+    /// Total number of commits returned
+    pub total_commits: u64,
+    /// Whether the history was truncated due to max_commits
+    pub truncated: bool,
+}
+
+// Dependency management types
+
+/// Parameters for adding/removing repository dependencies
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDependencyParams {
+    /// The main repository to add/remove dependency from
+    pub repository_name: String,
+    /// The dependency repository name
+    pub dependency_name: String,
+    /// Optional specific ref (branch/tag/commit) for the dependency
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<String>,
+    /// Optional description of why this dependency is needed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+}
+
+/// Result of dependency operations
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDependencyResult {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Status message
+    pub message: String,
+}
+
+/// Parameters for listing repository dependencies
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryListDependenciesParams {
+    /// The repository to list dependencies for
+    pub repository_name: String,
+}
+
+/// Information about a single dependency
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyInfo {
+    /// Name of the dependency repository
+    pub repository_name: String,
+    /// Target ref specified for this dependency
+    pub target_ref: Option<String>,
+    /// Purpose/description of the dependency
+    pub purpose: Option<String>,
+    /// Whether the dependency repository is available in the system
+    pub is_available: bool,
+    /// Local path of the dependency repository (if available)
+    pub local_path: Option<String>,
+    /// Current ref of the dependency repository (if available)
+    pub current_ref: Option<String>,
+}
+
+/// Result of listing dependencies
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryListDependenciesResult {
+    /// The repository name
+    pub repository_name: String,
+    /// List of dependencies
+    pub dependencies: Vec<DependencyInfo>,
 } 

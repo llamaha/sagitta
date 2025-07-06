@@ -3,10 +3,8 @@ use egui::Color32;
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 
-use crate::agent::conversation::types::ProjectType;
-use crate::agent::state::types::ConversationStatus;
 use crate::config::{SagittaCodeConfig, SidebarPersistentConfig};
-use super::types::{ConversationSidebar, OrganizationMode, SidebarFilters};
+use super::types::{ConversationSidebar, OrganizationMode};
 
 impl ConversationSidebar {
     /// Get display name for organization mode
@@ -42,47 +40,6 @@ impl ConversationSidebar {
         self.search_query = config.last_search_query.clone();
         self.search_input = self.search_query.clone().unwrap_or_default();
         
-        // Load filter settings
-        self.filters = SidebarFilters {
-            project_types: config.filters.project_types.iter()
-                .filter_map(|pt_str| match pt_str.as_str() {
-                    "Unknown" => Some(ProjectType::Unknown),
-                    "Rust" => Some(ProjectType::Rust),
-                    "Python" => Some(ProjectType::Python),
-                    "JavaScript" => Some(ProjectType::JavaScript),
-                    "TypeScript" => Some(ProjectType::TypeScript),
-                    "Go" => Some(ProjectType::Go),
-                    "Ruby" => Some(ProjectType::Ruby),
-                    "Markdown" => Some(ProjectType::Markdown),
-                    "Yaml" => Some(ProjectType::Yaml),
-                    "Html" => Some(ProjectType::Html),
-                    _ => None,
-                })
-                .collect(),
-            statuses: config.filters.statuses.iter()
-                .filter_map(|s| match s.as_str() {
-                    "Active" => Some(ConversationStatus::Active),
-                    "Paused" => Some(ConversationStatus::Paused),
-                    "Completed" => Some(ConversationStatus::Completed),
-                    "Archived" => Some(ConversationStatus::Archived),
-                    "Summarizing" => Some(ConversationStatus::Summarizing),
-                    _ => None,
-                })
-                .collect(),
-            tags: config.filters.tags.clone(),
-            date_range: None, // Date ranges are not persisted for now
-            min_messages: config.filters.min_messages,
-            min_success_rate: config.filters.min_success_rate,
-            favorites_only: config.filters.favorites_only,
-            branches_only: config.filters.branches_only,
-            checkpoints_only: config.filters.checkpoints_only,
-        };
-        
-        // Load UI state
-        self.show_filters = config.show_filters;
-        self.show_branch_suggestions = config.show_branch_suggestions;
-        self.show_checkpoint_suggestions = config.show_checkpoint_suggestions;
-        
         // Load accessibility settings
         self.accessibility_enabled = config.enable_accessibility;
         self.color_blind_friendly = config.color_blind_friendly;
@@ -109,43 +66,6 @@ impl ConversationSidebar {
         // Save search query
         config.last_search_query = self.search_query.clone();
         
-        // Save filter settings
-        config.filters.project_types = self.filters.project_types.iter()
-            .map(|pt| match pt {
-                ProjectType::Unknown => "Unknown".to_string(),
-                ProjectType::Rust => "Rust".to_string(),
-                ProjectType::Python => "Python".to_string(),
-                ProjectType::JavaScript => "JavaScript".to_string(),
-                ProjectType::TypeScript => "TypeScript".to_string(),
-                ProjectType::Go => "Go".to_string(),
-                ProjectType::Ruby => "Ruby".to_string(),
-                ProjectType::Markdown => "Markdown".to_string(),
-                ProjectType::Yaml => "Yaml".to_string(),
-                ProjectType::Html => "Html".to_string(),
-            })
-            .collect();
-            
-        config.filters.statuses = self.filters.statuses.iter()
-            .map(|status| match status {
-                ConversationStatus::Active => "Active".to_string(),
-                ConversationStatus::Paused => "Paused".to_string(),
-                ConversationStatus::Completed => "Completed".to_string(),
-                ConversationStatus::Archived => "Archived".to_string(),
-                ConversationStatus::Summarizing => "Summarizing".to_string(),
-            })
-            .collect();
-            
-        config.filters.tags = self.filters.tags.clone();
-        config.filters.min_messages = self.filters.min_messages;
-        config.filters.min_success_rate = self.filters.min_success_rate;
-        config.filters.favorites_only = self.filters.favorites_only;
-        config.filters.branches_only = self.filters.branches_only;
-        config.filters.checkpoints_only = self.filters.checkpoints_only;
-        
-        // Save UI state
-        config.show_filters = self.show_filters;
-        config.show_branch_suggestions = self.show_branch_suggestions;
-        config.show_checkpoint_suggestions = self.show_checkpoint_suggestions;
         
         // Save accessibility settings
         config.enable_accessibility = self.accessibility_enabled;

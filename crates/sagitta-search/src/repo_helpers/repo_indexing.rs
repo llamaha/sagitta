@@ -390,6 +390,31 @@ where
         info!("Ensuring Qdrant collection '{collection_name}' exists (dim={}) for existing clone...", params.embedding_dim);
         ensure_collection_exists(client.clone(), &collection_name, params.embedding_dim).await?;
         info!("Qdrant collection ensured for existing clone.");
+        
+        // For existing local repositories, check if we need to checkout the specified branch
+        if let Some(branch) = params.branch_opt {
+            if branch != "main" && branch != "master" {
+                info!("Checking out specified branch '{}' for existing repository...", branch);
+                
+                let checkout_result = Command::new("git")
+                    .current_dir(&final_local_path)
+                    .arg("checkout")
+                    .arg(branch)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .context(format!("Failed to spawn git checkout {branch} for {repo_name}"))?
+                    .wait_with_output()
+                    .context(format!("Failed to wait for git checkout {branch} for {repo_name}"))?;
+                
+                if !checkout_result.status.success() {
+                    let stderr = String::from_utf8_lossy(&checkout_result.stderr);
+                    warn!("Failed to checkout branch '{}': {}. Will use current branch.", branch, stderr);
+                } else {
+                    info!("Successfully checked out branch '{}'", branch);
+                }
+            }
+        }
     }
 
     // --- Handle target_ref --- 
@@ -513,8 +538,41 @@ where
             )));
         }
     } else {
-        // No target_ref specified, use the initially cloned/existing branch
-        final_active_branch = final_branch.to_string();
+        // No target_ref specified, detect the actual current branch for existing repositories
+        if final_local_path.exists() {
+            match git2::Repository::open(&final_local_path) {
+                Ok(repo) => {
+                    match repo.head() {
+                        Ok(head) => {
+                            if let Some(branch_name) = head.shorthand() {
+                                info!("Detected current branch '{}' for repository '{}'", branch_name, repo_name);
+                                final_active_branch = branch_name.to_string();
+                            } else {
+                                warn!("Could not determine branch name from HEAD, using default '{}'", final_branch);
+                                final_active_branch = final_branch.to_string();
+                            }
+                        }
+                        Err(e) => {
+                            if e.code() == git2::ErrorCode::UnbornBranch {
+                                // Repository has no commits yet
+                                info!("Repository '{}' has no commits yet (unborn branch), using '{}'", repo_name, final_branch);
+                                final_active_branch = final_branch.to_string();
+                            } else {
+                                warn!("Failed to get HEAD for repository '{}': {}, using default '{}'", repo_name, e, final_branch);
+                                final_active_branch = final_branch.to_string();
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open repository '{}' to detect branch: {}, using default '{}'", repo_name, e, final_branch);
+                    final_active_branch = final_branch.to_string();
+                }
+            }
+        } else {
+            // For new clones, use the branch we specified
+            final_active_branch = final_branch.to_string();
+        }
     }
 
     // Determine the final URL for the RepositoryConfig
@@ -569,6 +627,7 @@ where
         ssh_key_passphrase: params.ssh_passphrase_opt.map(String::from),
         added_as_local_path: params.local_path_opt.is_some(),
         target_ref: params.target_ref_opt.map(|s| s.to_string()),
+        dependencies: Vec::new(),
     })
 }
 
@@ -1151,6 +1210,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let app_config = AppConfig {
@@ -1194,6 +1254,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         });
 
         let repo_index = 0;
@@ -1431,6 +1492,7 @@ mod tests {
                 indexed_languages: None,
                 added_as_local_path: false,
                 target_ref: None,
+                dependencies: Vec::new(),
                 };
             
             let mut mock_client = MockQdrantClientTrait::new();

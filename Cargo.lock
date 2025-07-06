@@ -1546,11 +1546,11 @@ dependencies = [
 
 [[package]]
 name = "egui-notify"
-version = "0.15.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0c6c49d9c02771e28f3b40289c16b4473308807b1ed09a878713d7f11e3dcad"
+checksum = "9ab6bab52b2ef6d7ba32697da10a2ae7d3e8a245f9da42f62826af3afcd8fdc3"
 dependencies = [
- "egui 0.28.1",
+ "egui 0.31.1",
 ]
 
 [[package]]
@@ -5292,6 +5292,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mockall",
+ "notify",
  "once_cell",
  "petgraph",
  "qdrant-client",
@@ -5360,6 +5361,7 @@ dependencies = [
  "chrono",
  "clap",
  "dashmap",
+ "dirs",
  "env_logger 0.10.2",
  "futures-util",
  "git-manager",

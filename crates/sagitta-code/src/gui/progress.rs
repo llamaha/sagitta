@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sagitta_search::sync_progress::{SyncProgress, SyncProgressReporter as CoreSyncProgressReporter, SyncStage};
 use sagitta_search::sync_progress::{AddProgress, AddProgressReporter as CoreAddProgressReporter, RepoAddStage};
-use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS};
+use crate::gui::repository::shared_sync_state::{SIMPLE_STATUS, DETAILED_STATUS, schedule_sync_status_cleanup};
 use crate::gui::repository::types::{DisplayableSyncProgress, DisplayableAddProgress};
 
 // Using String for RepositoryId as per observations in manager.rs
@@ -76,6 +76,9 @@ impl CoreSyncProgressReporter for GuiProgressReporter {
                 simple.final_message = if simple.is_success { "✅ Completed" } else { "❌ Failed" }.to_string();
                 simple.final_elapsed_seconds = None; // No start time available
             }
+            
+            // Schedule cleanup of this sync status after completion
+            schedule_sync_status_cleanup(self.repo_id.clone());
         }
     }
 }
@@ -109,6 +112,26 @@ impl CoreAddProgressReporter for GuiProgressReporter {
             simple.output_lines.remove(0);
         }
         simple.output_lines.push(displayable.message.clone());
+        
+        if simple.is_complete {
+            if let Some(started_at) = simple.started_at {
+                let duration = started_at.elapsed();
+                let final_elapsed_seconds = duration.as_secs_f64();
+                let final_message = format!(
+                    "{} in {:.2}s",
+                    if simple.is_success { "✅ Completed" } else { "❌ Failed" },
+                    duration.as_secs_f32()
+                );
+                simple.final_message = final_message;
+                simple.final_elapsed_seconds = Some(final_elapsed_seconds);
+            } else {
+                simple.final_message = if simple.is_success { "✅ Completed" } else { "❌ Failed" }.to_string();
+                simple.final_elapsed_seconds = None; // No start time available
+            }
+            
+            // Schedule cleanup of this add operation status after completion
+            schedule_sync_status_cleanup(self.repo_id.clone());
+        }
     }
 }
 

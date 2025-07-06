@@ -421,11 +421,286 @@ mod graph_calculation_tests {
         calculate_graph_layout(&mut state);
         
         assert_eq!(state.graph_nodes.len(), 2);
-        // First commit (index 0) gets lane 0, second commit (index 1) gets lane 1
+        // After our fix, all commits should be in lane 0 (linear layout)
         assert_eq!(state.graph_nodes[0].lane, 0);
-        assert_eq!(state.graph_nodes[1].lane, 1);
+        assert_eq!(state.graph_nodes[1].lane, 0);
         // Y positions should increment
         assert_eq!(state.graph_nodes[0].y, 0.0);
         assert_eq!(state.graph_nodes[1].y, 40.0); // ROW_HEIGHT = 40.0
+    }
+}
+
+#[cfg(test)]
+mod utf8_safety_tests {
+    
+    #[test]
+    fn test_utf8_author_truncation() {
+        // Test cases with various UTF-8 characters
+        let test_cases = vec![
+            ("Enrique Alcántara", 12, "Enrique Alcá..."),
+            ("José María González", 10, "José María..."),
+            ("李明 (Li Ming)", 8, "李明 (Li M..."),
+            ("🎉 Emoji User 🚀", 10, "🎉 Emoji Us..."),
+            ("Владимир Путин", 7, "Владими..."),
+            ("محمد علي", 5, "محمد ..."),
+            ("Short", 20, "Short"), // No truncation needed
+        ];
+        
+        for (author, max_chars, expected) in test_cases {
+            let result = if author.chars().count() > max_chars {
+                let truncated: String = author.chars().take(max_chars).collect();
+                format!("{}...", truncated)
+            } else {
+                author.to_string()
+            };
+            
+            assert_eq!(result, expected, "Failed for author: {}", author);
+            
+            // Ensure the result is valid UTF-8 and doesn't panic
+            let _ = result.as_bytes();
+            let _ = result.chars().count();
+        }
+    }
+    
+    #[test]
+    fn test_utf8_message_truncation() {
+        // Test the actual message truncation logic from the code
+        let test_cases = vec![
+            // Long message (> 50 chars)
+            (
+                "This is a very long commit message with special characters: café, niño, 中文",
+                "This is a very long commit message with special...",
+            ),
+            // Short message (< 50 chars)
+            (
+                "Short message with émojis 🎉 and accents",
+                "Short message with émojis 🎉 and accents",
+            ),
+            // Long Japanese message (> 50 chars)
+            (
+                "日本語のコミットメッセージも正しく処理される必要があります。これはとても長いメッセージですので、正しく切り詰められる必要があります。",
+                "日本語のコミットメッセージも正しく処理される必要があります。これはとても長いメッセージですので...",
+            ),
+            // Short mixed script (< 50 chars)
+            (
+                "Mixed script: Hello мир 世界 🌍",
+                "Mixed script: Hello мир 世界 🌍",
+            ),
+        ];
+        
+        for (message, expected) in test_cases {
+            // This matches the actual code in graph.rs
+            let result = if message.chars().count() > 50 {
+                let truncated: String = message.chars().take(47).collect();
+                format!("{}...", truncated)
+            } else {
+                message.to_string()
+            };
+            
+            assert_eq!(result, expected, "Failed for message: {}", message);
+            
+            // Ensure no panic on byte operations
+            let _ = result.as_bytes();
+            let _ = result.len();
+            assert!(result.is_char_boundary(0));
+            assert!(result.is_char_boundary(result.len()));
+        }
+    }
+    
+    #[test]
+    fn test_boundary_edge_cases() {
+        // Test edge cases where truncation might fall on multi-byte character boundaries
+        let edge_cases = vec![
+            ("a".repeat(100), 50), // ASCII only
+            ("😀".repeat(25), 10),  // 4-byte emoji characters
+            ("中".repeat(30), 15),  // 3-byte Chinese characters
+            ("é".repeat(40), 20),   // 2-byte accented characters
+        ];
+        
+        for (text, max_chars) in edge_cases {
+            let truncated: String = text.chars().take(max_chars).collect();
+            let result = format!("{}...", truncated);
+            
+            // Should not panic
+            let _ = result.as_bytes();
+            assert!(result.is_char_boundary(0));
+            assert!(result.is_char_boundary(result.len()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod state_management_tests {
+    use super::*;
+    
+    #[test]
+    fn test_modal_visibility_toggle() {
+        let mut modal = GitHistoryModal::new();
+        
+        assert!(!modal.visible);
+        
+        modal.toggle();
+        assert!(modal.visible);
+        
+        modal.toggle();
+        assert!(!modal.visible);
+    }
+    
+    #[test] 
+    fn test_repository_change() {
+        let mut modal = GitHistoryModal::new();
+        let path = PathBuf::from("/test/repo");
+        
+        // Set repository - should not panic
+        modal.set_repository(path.clone());
+        
+        // Set different repository - should not panic
+        let new_path = PathBuf::from("/new/repo/path");
+        modal.set_repository(new_path);
+        
+        // Set same repository again - should not panic
+        modal.set_repository(path);
+    }
+}
+
+#[cfg(test)]
+mod interaction_tests {
+    use crate::gui::git_history::types::{GitHistoryState, CommitInfo};
+    use chrono::Utc;
+    
+    #[test]
+    fn test_commit_selection_toggle() {
+        let mut state = GitHistoryState::default();
+        
+        // Add test commits
+        let commit1 = CommitInfo {
+            id: "abc123".to_string(),
+            short_id: "abc123".to_string(),
+            message: "First commit".to_string(),
+            author: "Test Author".to_string(),
+            email: "test@example.com".to_string(),
+            timestamp: Utc::now(),
+            parents: vec![],
+            branch_refs: vec![],
+        };
+        
+        state.commits = vec![commit1.clone()];
+        
+        // Initially no commit is selected
+        assert!(state.selected_commit.is_none());
+        
+        // Select commit
+        state.selected_commit = Some("abc123".to_string());
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+        
+        // Toggle selection - should deselect if same commit
+        if state.selected_commit.as_ref() == Some(&"abc123".to_string()) {
+            state.selected_commit = None;
+        }
+        assert!(state.selected_commit.is_none());
+        
+        // Select again
+        state.selected_commit = Some("abc123".to_string());
+        
+        // Select different commit
+        state.selected_commit = Some("def456".to_string());
+        assert_eq!(state.selected_commit, Some("def456".to_string()));
+    }
+    
+    #[test]
+    fn test_hover_state() {
+        let mut state = GitHistoryState::default();
+        
+        // Initially no commit is hovered
+        assert!(state.hovered_commit.is_none());
+        
+        // Hover over commit
+        state.hovered_commit = Some("abc123".to_string());
+        assert_eq!(state.hovered_commit, Some("abc123".to_string()));
+        
+        // Stop hovering
+        state.hovered_commit = None;
+        assert!(state.hovered_commit.is_none());
+    }
+    
+    #[test]
+    fn test_selection_persists_across_hover() {
+        let mut state = GitHistoryState::default();
+        
+        // Select a commit
+        state.selected_commit = Some("abc123".to_string());
+        
+        // Hover over different commit
+        state.hovered_commit = Some("def456".to_string());
+        
+        // Selection should persist
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+        assert_eq!(state.hovered_commit, Some("def456".to_string()));
+        
+        // Stop hovering
+        state.hovered_commit = None;
+        
+        // Selection should still persist
+        assert_eq!(state.selected_commit, Some("abc123".to_string()));
+    }
+    
+    #[test]
+    fn test_clear_selection() {
+        let mut state = GitHistoryState::default();
+        
+        // Select a commit
+        state.selected_commit = Some("abc123".to_string());
+        assert!(state.selected_commit.is_some());
+        
+        // Clear selection
+        state.selected_commit = None;
+        assert!(state.selected_commit.is_none());
+    }
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::*;
+    use std::path::PathBuf;
+    
+    #[test]
+    fn test_modal_initialization_with_repository() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Set repository (simulating initialization)
+        let repo_path = PathBuf::from("/test/repo");
+        modal.set_repository(repo_path.clone());
+        
+        // Should not panic - this tests that initialization works
+        // The actual repository path is private, so we can only test behavior
+    }
+    
+    #[test]
+    fn test_modal_repository_change() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Initialize with first repository
+        let repo_path1 = PathBuf::from("/repo1");
+        modal.set_repository(repo_path1);
+        
+        // Change to second repository
+        let repo_path2 = PathBuf::from("/repo2");
+        modal.set_repository(repo_path2);
+        
+        // Should not panic - tests that repository changes work correctly
+    }
+    
+    #[test]
+    fn test_modal_same_repository_no_change() {
+        let mut modal = GitHistoryModal::new();
+        
+        // Set repository
+        let repo_path = PathBuf::from("/test/repo");
+        modal.set_repository(repo_path.clone());
+        
+        // Set same repository again
+        modal.set_repository(repo_path);
+        
+        // Should not panic - tests that setting same repository is handled
     }
 }

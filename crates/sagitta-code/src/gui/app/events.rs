@@ -11,6 +11,15 @@ use super::panels::{SystemEventType};
 use super::SagittaCodeApp;
 use serde_json::Value;
 
+/// Types of sync notifications
+#[derive(Debug, Clone)]
+pub enum SyncNotificationType {
+    Success,
+    Warning,
+    Error,
+    Info,
+}
+
 /// Application-specific UI events
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -28,6 +37,8 @@ pub enum AppEvent {
     RepositoryListUpdated(Vec<String>),
     RefreshRepositoryList,
     UpdateGitHistoryPath(std::path::PathBuf),
+    RepositoryAdded(String),
+    RepositorySwitched(String),
     CancelTool(ToolRunId),
     RenameConversation {
         conversation_id: uuid::Uuid,
@@ -39,6 +50,12 @@ pub enum AppEvent {
     SaveClaudeMdTemplate,
     ApplyClaudeMdToAllRepos,
     CreateNewConversation,
+    // Sync status notifications
+    ShowSyncNotification {
+        repository: String,
+        message: String,
+        notification_type: SyncNotificationType,
+    },
     // Add other app-level UI events here if needed
 }
 
@@ -338,7 +355,20 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                     app.state.current_response_id = None;
                 }
                 
-                // Don't update title after every response - wait for conversation completion
+                // Notify auto title updater after assistant response completes
+                if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
+                    // Get current message count after assistant response
+                    let message_count = app.chat_manager.get_all_messages().len();
+                    
+                    crate::services::auto_title_updater::notify_conversation_updated(
+                        sender,
+                        conversation_id,
+                        message_count,
+                    );
+                    
+                    log::debug!("Notified auto title updater after response complete for conversation {} with {} messages", 
+                        conversation_id, message_count);
+                }
             }
             AppEvent::RefreshConversationList => {
                 log::info!("SagittaCodeApp: Received RefreshConversationList event. Forcing refresh.");
@@ -392,8 +422,41 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
                 log::info!("Received CreateNewConversation event");
                 handle_create_new_conversation(app);
             },
+            AppEvent::RepositoryAdded(repo_name) => {
+                log::info!("Received RepositoryAdded event for repository: {repo_name}");
+                handle_repository_added(app, repo_name);
+            },
+            AppEvent::RepositorySwitched(repo_name) => {
+                log::info!("Received RepositorySwitched event for repository: {repo_name}");
+                handle_repository_switched(app, repo_name);
+            },
+            AppEvent::ShowSyncNotification { repository, message, notification_type } => {
+                log::info!("Received ShowSyncNotification event for repository: {repository}");
+                handle_sync_notification(app, repository, message, notification_type);
+            },
         }
     }
+}
+
+/// Handle sync notification
+fn handle_sync_notification(app: &mut SagittaCodeApp, repository: String, message: String, notification_type: SyncNotificationType) {
+    use egui_notify::ToastLevel;
+    
+    let level = match notification_type {
+        SyncNotificationType::Success => ToastLevel::Success,
+        SyncNotificationType::Warning => ToastLevel::Warning,
+        SyncNotificationType::Error => ToastLevel::Error,
+        SyncNotificationType::Info => ToastLevel::Info,
+    };
+    
+    // Format the notification with repository name
+    let formatted_message = format!("{}: {}", repository, message);
+    
+    // Create toast with correct API
+    app.state.toasts
+        .basic(&formatted_message)
+        .level(level)
+        .duration(Some(std::time::Duration::from_secs(5)));
 }
 
 /// Create a chat message from an agent message
@@ -1183,38 +1246,14 @@ impl SagittaCodeApp {
         );
     }
 
-    /// Handle checkpoint suggestions
-    pub fn handle_checkpoint_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>) {
-        log::info!("Received {} checkpoint suggestions for conversation {}", suggestions.len(), conversation_id);
-        
-        // Update the sidebar with checkpoint suggestions
-        self.conversation_sidebar.update_checkpoint_suggestions(conversation_id, suggestions.clone());
-        
-        // If this is the current conversation, enable checkpoint suggestions panel
-        if self.state.current_conversation_id == Some(conversation_id) {
-            self.conversation_sidebar.show_checkpoint_suggestions = true;
-            // Also set the UI as visible
-            self.conversation_sidebar.checkpoint_suggestions_ui.set_visible(true);
-        }
-        
-        // Add event to events panel for debugging
-        self.panels.events_panel.add_event(
-            SystemEventType::Info,
-            format!("Found {} checkpoint suggestions for conversation", suggestions.len())
-        );
+    /// Handle checkpoint suggestions (removed feature - now does nothing)
+    pub fn handle_checkpoint_suggestions(&mut self, _conversation_id: uuid::Uuid, _suggestions: Vec<crate::agent::conversation::checkpoints::CheckpointSuggestion>) {
+        log::info!("Checkpoint suggestions feature has been removed");
     }
 
-    /// Handle branch suggestions
-    pub fn handle_branch_suggestions(&mut self, conversation_id: uuid::Uuid, suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>) {
-        log::info!("Received {} branch suggestions for conversation {}", suggestions.len(), conversation_id);
-        
-        // Update the sidebar with branch suggestions
-        self.conversation_sidebar.update_branch_suggestions(conversation_id, suggestions);
-        
-        // If this is the current conversation, enable branch suggestions panel
-        if self.state.current_conversation_id == Some(conversation_id) {
-            self.conversation_sidebar.show_branch_suggestions = true;
-        }
+    /// Handle branch suggestions (removed feature - now does nothing)  
+    pub fn handle_branch_suggestions(&mut self, _conversation_id: uuid::Uuid, _suggestions: Vec<crate::agent::conversation::branching::BranchSuggestion>) {
+        log::info!("Branch suggestions feature has been removed");
     }
 
     /// Handle conversation messages loaded from service
@@ -1385,6 +1424,15 @@ pub fn handle_rename_conversation(app: &mut SagittaCodeApp, conversation_id: uui
     // Update current conversation title if it's the active one
     if app.state.current_conversation_id == Some(conversation_id) {
         app.state.current_conversation_title = Some(new_title);
+    }
+    
+    // Mark this conversation as having a custom title to prevent auto-updates
+    if let Some(auto_title_updater) = &app.auto_title_updater {
+        let updater = auto_title_updater.clone();
+        tokio::spawn(async move {
+            updater.mark_custom_title(conversation_id).await;
+            log::debug!("Marked conversation {} as having custom title", conversation_id);
+        });
     }
 }
 
@@ -1639,6 +1687,63 @@ fn handle_apply_claude_md_to_all_repos(app: &mut SagittaCodeApp) {
     });
 }
 
+/// Handle repository added event
+fn handle_repository_added(app: &mut SagittaCodeApp, repo_name: String) {
+    // Check if auto-sync is enabled for new repositories
+    if let Some(sync_orchestrator) = &app.sync_orchestrator {
+        let config = app.config.clone();
+        let sync_orchestrator = sync_orchestrator.clone();
+        let repo_manager = app.repo_panel.get_repo_manager();
+        
+        tokio::spawn(async move {
+            let config_guard = config.lock().await;
+            if config_guard.auto_sync.sync_on_repo_add {
+                log::info!("Auto-sync enabled for repository add, triggering sync for: {repo_name}");
+                
+                // Get repository path from repository manager
+                let repo_manager_guard = repo_manager.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
+                        let repo_path = std::path::PathBuf::from(&repo_config.local_path);
+                        // Add repository to file watcher and trigger sync
+                        if let Err(e) = sync_orchestrator.add_repository(&repo_path).await {
+                            log::error!("Failed to add repository {} to sync orchestrator: {}", repo_name, e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Handle repository switched event
+fn handle_repository_switched(app: &mut SagittaCodeApp, repo_name: String) {
+    // Check if auto-sync is enabled for repository switching
+    if let Some(sync_orchestrator) = &app.sync_orchestrator {
+        let config = app.config.clone();
+        let sync_orchestrator = sync_orchestrator.clone();
+        let repo_manager = app.repo_panel.get_repo_manager();
+        
+        tokio::spawn(async move {
+            let config_guard = config.lock().await;
+            if config_guard.auto_sync.sync_on_repo_switch {
+                log::info!("Auto-sync enabled for repository switch, triggering sync for: {repo_name}");
+                
+                // Get repository path from repository manager
+                let repo_manager_guard = repo_manager.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
+                        let repo_path = std::path::PathBuf::from(&repo_config.local_path);
+                        if let Err(e) = sync_orchestrator.switch_repository(&repo_path).await {
+                            log::error!("Failed to trigger sync for switched repository {}: {}", repo_name, e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1717,6 +1822,9 @@ mod tests {
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
             AppEvent::UpdateGitHistoryPath(_) => assert!(true),
+            AppEvent::RepositoryAdded(_) => assert!(true),
+            AppEvent::RepositorySwitched(_) => assert!(true),
+            AppEvent::ShowSyncNotification { .. } => assert!(true),
         }
         
         // Test the other variant too
@@ -1736,6 +1844,9 @@ mod tests {
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
             AppEvent::UpdateGitHistoryPath(_) => assert!(true),
+            AppEvent::RepositoryAdded(_) => assert!(true),
+            AppEvent::RepositorySwitched(_) => assert!(true),
+            AppEvent::ShowSyncNotification { .. } => assert!(true),
         }
     }
 
@@ -2258,8 +2369,8 @@ mod tests {
         // Test handling checkpoint suggestions
         app.handle_checkpoint_suggestions(conversation_id, suggestions);
         
-        // Verify that suggestions were stored in the sidebar
-        assert!(app.conversation_sidebar.get_checkpoint_suggestions(conversation_id).is_some());
+        // Verify that the feature has been removed (should return empty)
+        assert!(app.conversation_sidebar.get_checkpoint_suggestions().is_empty());
     }
 
     #[test]
@@ -2288,8 +2399,8 @@ mod tests {
         // Test handling branch suggestions
         app.handle_branch_suggestions(conversation_id, suggestions);
         
-        // Verify that suggestions were stored in the sidebar
-        assert!(app.conversation_sidebar.get_branch_suggestions(conversation_id).is_some());
+        // Verify that the feature has been removed (should return empty)
+        assert!(app.conversation_sidebar.get_branch_suggestions().is_empty());
     }
     
     #[test]

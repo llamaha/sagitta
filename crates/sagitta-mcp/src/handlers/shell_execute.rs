@@ -9,6 +9,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use std::time::Instant;
 use std::process::Stdio;
+use std::path::PathBuf;
 
 /// Get the appropriate shell command based on the OS
 fn get_shell_command(command: &str) -> (String, Vec<String>) {
@@ -19,6 +20,41 @@ fn get_shell_command(command: &str) -> (String, Vec<String>) {
         // Unix-like (Linux, macOS): Use sh
         ("sh".to_string(), vec!["-c".to_string(), command.to_string()])
     }
+}
+
+/// Get the current repository working directory from state file
+async fn get_current_repository_path() -> Option<PathBuf> {
+    // Try to read from a state file in the config directory
+    let mut state_path = dirs::config_dir()?;
+    state_path.push("sagitta-code");
+    state_path.push("current_repository.txt");
+    
+    match tokio::fs::read_to_string(&state_path).await {
+        Ok(content) => {
+            let path_str = content.trim();
+            if !path_str.is_empty() {
+                let path = PathBuf::from(path_str);
+                if path.exists() && path.is_dir() {
+                    log::debug!("Read current repository path from state file: {}", path.display());
+                    return Some(path);
+                }
+            }
+        }
+        Err(e) => {
+            log::trace!("Could not read repository state file: {e}");
+        }
+    }
+    
+    // Fallback to environment variable
+    if let Ok(repo_path) = std::env::var("SAGITTA_CURRENT_REPO_PATH") {
+        let path = PathBuf::from(repo_path);
+        if path.exists() && path.is_dir() {
+            log::debug!("Using repository path from environment: {}", path.display());
+            return Some(path);
+        }
+    }
+    
+    None
 }
 
 /// Handler for shell command execution
@@ -40,9 +76,13 @@ pub async fn handle_shell_execute<C: QdrantClientTrait + Send + Sync + 'static>(
         .stderr(Stdio::piped())
         .stdin(Stdio::null()); // Don't allow stdin to avoid hanging
     
-    // Set working directory if specified
+    // Set working directory if specified, or use current repository path
     if let Some(ref dir) = params.working_directory {
         cmd.current_dir(dir);
+    } else if let Some(repo_path) = get_current_repository_path().await {
+        // Use the current repository path if no specific directory provided
+        cmd.current_dir(&repo_path);
+        log::info!("Using current repository as working directory: {}", repo_path.display());
     }
     
     // Set environment variables if specified
@@ -153,6 +193,50 @@ mod tests {
         // Normalize paths for comparison
         let stdout = result.stdout.trim().replace('\\', "/");
         let expected = temp_path.replace('\\', "/");
+        assert!(stdout.contains(&expected) || stdout == expected);
+    }
+    
+    #[tokio::test]
+    async fn test_shell_execute_with_repository_state_file() {
+        use tokio::fs;
+        
+        // Create a temporary directory to act as the repository
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap().to_string();
+        
+        // Write repository path to state file
+        let mut state_dir = dirs::config_dir().unwrap();
+        state_dir.push("sagitta-code");
+        fs::create_dir_all(&state_dir).await.unwrap();
+        
+        let mut state_file = state_dir.clone();
+        state_file.push("current_repository.txt");
+        fs::write(&state_file, &repo_path).await.unwrap();
+        
+        // Execute command without specifying working directory
+        let params = ShellExecuteParams {
+            command: if cfg!(target_os = "windows") {
+                "cd".to_string()
+            } else {
+                "pwd".to_string()
+            },
+            working_directory: None, // Not specified
+            timeout_ms: 5000,
+            env: None,
+        };
+        
+        let config = Arc::new(RwLock::new(AppConfig::default()));
+        let qdrant_client = create_mock_qdrant();
+        
+        let result = handle_shell_execute(params, config, qdrant_client, None).await.unwrap();
+        
+        // Clean up state file
+        let _ = fs::remove_file(&state_file).await;
+        
+        assert_eq!(result.exit_code, 0);
+        // Should use repository path from state file
+        let stdout = result.stdout.trim().replace('\\', "/");
+        let expected = repo_path.replace('\\', "/");
         assert!(stdout.contains(&expected) || stdout == expected);
     }
     

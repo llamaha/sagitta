@@ -58,6 +58,7 @@ mod qdrant_wipe_recovery_tests {
             ssh_key_passphrase: None,
             added_as_local_path: true,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let app_config = AppConfig {
@@ -176,6 +177,7 @@ mod qdrant_wipe_recovery_tests {
             ssh_key_passphrase: None,
             added_as_local_path: true,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let app_config = AppConfig {
@@ -268,6 +270,7 @@ mod qdrant_wipe_recovery_tests {
             ssh_key_passphrase: None,
             added_as_local_path: true,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         
         let app_config = AppConfig {

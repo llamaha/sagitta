@@ -31,6 +31,10 @@ fn get_sync_status_indicator(sync_state: &SyncState) -> (String, Color32) {
         SyncState::UpToDate => ("✅".to_string(), Color32::from_rgb(46, 160, 67)),
         SyncState::NeedsSync => ("🔄".to_string(), Color32::from_rgb(255, 193, 7)),
         SyncState::NeverSynced => ("❓".to_string(), Color32::from_rgb(108, 117, 125)),
+        SyncState::LocalOnly => ("📁".to_string(), Color32::from_rgb(33, 150, 243)),
+        SyncState::LocalIndexedRemoteFailed => ("📡".to_string(), Color32::from_rgb(255, 152, 0)),
+        SyncState::Syncing => ("⏳".to_string(), Color32::from_rgb(156, 39, 176)),
+        SyncState::Failed => ("❌".to_string(), Color32::from_rgb(244, 67, 54)),
         SyncState::Unknown => ("⚠️".to_string(), Color32::from_rgb(220, 53, 69)),
     }
 }
@@ -45,7 +49,8 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
         🔄 Sync: {}\n\
         📊 Files: {}\n\
         💾 Size: {}\n\
-        🔤 Languages: {}",
+        🔤 Languages: {}\n\
+        🔗 Dependencies: {}",
         if enhanced_repo.filesystem_status.exists {
             if enhanced_repo.filesystem_status.is_git_repository {
                 "Git repository"
@@ -67,10 +72,14 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
             })
             .unwrap_or_else(|| "unknown".to_string()),
         match enhanced_repo.sync_status.state {
-            SyncState::UpToDate => "up-to-date",
-            SyncState::NeedsSync => "needs sync",
-            SyncState::NeverSynced => "never synced",
-            SyncState::Unknown => "unknown",
+            SyncState::UpToDate => "✅ Fully synced with remote",
+            SyncState::NeedsSync => "🔄 Needs sync with remote",
+            SyncState::NeverSynced => "❓ Never synced",
+            SyncState::LocalOnly => "📁 Local repository (no remote)",
+            SyncState::LocalIndexedRemoteFailed => "📡 Indexed locally, remote sync failed",
+            SyncState::Syncing => "⏳ Currently syncing",
+            SyncState::Failed => "❌ Sync failed",
+            SyncState::Unknown => "⚠️ Unknown status",
         },
         enhanced_repo.total_files
             .map(|count| count.to_string())
@@ -80,7 +89,21 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
             .unwrap_or_else(|| "unknown".to_string()),
         enhanced_repo.indexed_languages.as_ref()
             .map(|langs| langs.join(", "))
-            .unwrap_or_else(|| "none detected".to_string())
+            .unwrap_or_else(|| "none detected".to_string()),
+        if enhanced_repo.dependencies.is_empty() {
+            "none".to_string()
+        } else {
+            enhanced_repo.dependencies.iter()
+                .map(|dep| {
+                    if let Some(ref target_ref) = dep.target_ref {
+                        format!("{} ({})", dep.repository_name, target_ref)
+                    } else {
+                        dep.repository_name.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
     );
     
     ui.label(&tooltip_text);
@@ -98,9 +121,11 @@ pub fn render_repo_list(
         ui.text_edit_singleline(&mut state.repository_filter.search_term);
         
         if ui.button("Refresh").clicked() {
-            // Set loading flag to trigger refresh in panel.rs
+            // Force refresh by setting flag and ensuring it's processed
             state.is_loading_repos = true;
             state.use_enhanced_repos = false; // Reset to trigger enhanced reload
+            
+            log::info!("Repository List: Refresh button clicked, forcing refresh");
         }
     });
     
@@ -163,24 +188,49 @@ pub fn render_repo_list(
                         RichText::new(&enhanced_repo.name)
                     };
                     
-                    if ui.selectable_label(is_selected, name_text).clicked() {
-                        if is_selected {
-                            state.selected_repo = None;
-                            // Also remove from selected_repos
-                            state.selected_repos.retain(|name| name != &enhanced_repo.name);
-                        } else {
-                            state.selected_repo = Some(enhanced_repo.name.clone());
-                            // Also add to selected_repos if not already there
-                            if !state.selected_repos.contains(&enhanced_repo.name) {
-                                state.selected_repos.push(enhanced_repo.name.clone());
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(is_selected, name_text).clicked() {
+                            if is_selected {
+                                state.selected_repo = None;
+                                // Also remove from selected_repos
+                                state.selected_repos.retain(|name| name != &enhanced_repo.name);
+                            } else {
+                                state.selected_repo = Some(enhanced_repo.name.clone());
+                                // Also add to selected_repos if not already there
+                                if !state.selected_repos.contains(&enhanced_repo.name) {
+                                    state.selected_repos.push(enhanced_repo.name.clone());
+                                }
+                                
+                                // Initialize options for other tabs
+                                state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
+                                state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
+                                state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
                             }
-                            
-                            // Initialize options for other tabs
-                            state.query_options = super::types::QueryOptions::new(enhanced_repo.name.clone());
-                            state.file_search_options = super::types::FileSearchOptions::new(enhanced_repo.name.clone());
-                            state.file_view_options = super::types::FileViewOptions::new(enhanced_repo.name.clone());
                         }
-                    }
+                        
+                        // Show dependency badge if repository has dependencies
+                        if !enhanced_repo.dependencies.is_empty() {
+                            ui.add_space(4.0);
+                            let badge_text = format!("🔗 {}", enhanced_repo.dependencies.len());
+                            let badge_response = ui.small_button(&badge_text);
+                            if badge_response.hovered() {
+                                egui::show_tooltip_at_pointer(ui.ctx(), egui::layers::LayerId::debug(), egui::Id::new("deps_tooltip"), |ui| {
+                                    ui.label("Dependencies:");
+                                    for dep in &enhanced_repo.dependencies {
+                                        let dep_text = if let Some(ref target_ref) = dep.target_ref {
+                                            format!("• {} ({})", dep.repository_name, target_ref)
+                                        } else {
+                                            format!("• {}", dep.repository_name)
+                                        };
+                                        ui.label(&dep_text);
+                                        if let Some(ref purpose) = dep.purpose {
+                                            ui.label(format!("  Purpose: {}", purpose));
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    });
                     
                     // Source column
                     let source_text = if let Some(remote) = &enhanced_repo.remote {
@@ -266,30 +316,21 @@ pub fn render_repo_list(
                                 state.selected_repo = Some(enhanced_repo.name.clone());
                                 state.sync_options.repository_name = enhanced_repo.name.clone();
                             }
+                            
+                            // Dependencies button
+                            if ui.button("Deps").clicked() {
+                                state.dependency_modal.show_for_repository(
+                                    enhanced_repo.name.clone(),
+                                    enhanced_repo.dependencies.clone()
+                                );
+                            }
                         }
                         
                         // Remove button is always available
                         if ui.button("Remove").clicked() {
-                            // Set up the remove
-                            let repo_name = enhanced_repo.name.clone();
-                            let repo_name_for_async = repo_name.clone();
-                            
-                            // Schedule the remove operation
-                            let repo_manager_clone = Arc::clone(&repo_manager);
-                            let handle = tokio::runtime::Handle::current();
-                            
-                            handle.spawn(async move {
-                                let mut manager = repo_manager_clone.lock().await;
-                                let _ = manager.remove_repository(&repo_name_for_async).await;
-                            });
-                            
-                            // Also remove from UI state immediately for responsiveness
-                            state.enhanced_repositories.retain(|r| r.name != repo_name);
-                            state.repositories.retain(|r| r.name != repo_name);
-                            if state.selected_repo.as_ref() == Some(&repo_name) {
-                                state.selected_repo = None;
-                            }
-                            state.selected_repos.retain(|name| name != &repo_name);
+                            // Show confirmation dialog instead of immediately removing
+                            state.show_remove_confirmation = true;
+                            state.repository_to_remove = Some(enhanced_repo.name.clone());
                         }
                     });
                     
@@ -488,4 +529,81 @@ fn render_basic_repos(
         
         ui.end_row();
     }
+    
+    // Render remove confirmation dialog
+    if state.show_remove_confirmation {
+        render_remove_confirmation_dialog(ui.ctx(), state, repo_manager);
+    }
+}
+
+/// Render the repository removal confirmation dialog
+fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::types::RepoPanelState, repo_manager: Arc<Mutex<RepositoryManager>>) {
+    egui::Window::new("⚠️ Confirm Repository Removal")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(5.0);
+                
+                // Warning message
+                ui.horizontal(|ui| {
+                    ui.label("⚠️");
+                    ui.label(egui::RichText::new("This action cannot be undone!").strong().color(egui::Color32::from_rgb(220, 53, 69)));
+                });
+                
+                ui.add_space(10.0);
+                
+                if let Some(repo_name) = &state.repository_to_remove {
+                    ui.label(format!("Are you sure you want to remove the repository '{}'?", repo_name));
+                    ui.add_space(5.0);
+                    ui.label("This will:");
+                    ui.label("• Remove all indexed data for this repository");
+                    ui.label("• Delete the local repository files");
+                    ui.label("• Remove the repository from your configuration");
+                }
+                
+                ui.add_space(15.0);
+                
+                // Action buttons
+                ui.horizontal(|ui| {
+                    // Cancel button
+                    if ui.button("Cancel").clicked() {
+                        state.show_remove_confirmation = false;
+                        state.repository_to_remove = None;
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // Confirm remove button
+                    if ui.add(egui::Button::new(egui::RichText::new("Remove Repository").color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(220, 53, 69))).clicked() {
+                        
+                        if let Some(repo_name) = state.repository_to_remove.take() {
+                            // Perform the actual removal
+                            let repo_name_for_async = repo_name.clone();
+                            let repo_manager_clone = Arc::clone(&repo_manager);
+                            let handle = tokio::runtime::Handle::current();
+                            
+                            handle.spawn(async move {
+                                let mut manager = repo_manager_clone.lock().await;
+                                let _ = manager.remove_repository(&repo_name_for_async).await;
+                            });
+                            
+                            // Also remove from UI state immediately for responsiveness
+                            state.enhanced_repositories.retain(|r| r.name != repo_name);
+                            state.repositories.retain(|r| r.name != repo_name);
+                            if state.selected_repo.as_ref() == Some(&repo_name) {
+                                state.selected_repo = None;
+                            }
+                            state.selected_repos.retain(|name| name != &repo_name);
+                        }
+                        
+                        state.show_remove_confirmation = false;
+                    }
+                });
+                
+                ui.add_space(5.0);
+            });
+        });
 } 

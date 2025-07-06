@@ -2,7 +2,8 @@ use crate::mcp::types::{
     ErrorObject, InitializeParams, PingParams, QueryParams, RepositoryAddParams, RepositoryListParams, RepositorySyncParams, RepositoryRemoveParams,
     Request, Response, ListToolsParams, ListToolsResult, InitializedNotificationParams,
     CallToolParams, CallToolResult, ContentBlock, RepositorySearchFileParams, RepositoryViewFileParams,
-    RepositorySwitchBranchParams, RepositoryListBranchesParams,
+    RepositorySwitchBranchParams, RepositoryListBranchesParams, RepositoryGitHistoryParams,
+    RepositoryDependencyParams, RepositoryListDependenciesParams,
 };
 use crate::mcp::error_codes;
 use anyhow::{anyhow, Context, Result};
@@ -35,6 +36,12 @@ use crate::handlers::repository::{
     handle_repository_view_file,
     handle_repository_switch_branch,
     handle_repository_list_branches,
+};
+use crate::handlers::git_history::handle_repository_git_history;
+use crate::handlers::dependency::{
+    handle_repository_add_dependency,
+    handle_repository_remove_dependency,
+    handle_repository_list_dependencies,
 };
 use crate::handlers::tool::{handle_tools_call, get_tool_definitions};
 use crate::handlers::initialize::handle_initialize;
@@ -254,6 +261,41 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             "repository/list_branches" | "mcp_sagitta_mcp_repository_list_branches" => {
                 let params: RepositoryListBranchesParams = deserialize_params(request.params, "repository/list_branches")?;
                 let result = handle_repository_list_branches(params, config, None).await?;
+                ok_some(result)
+            }
+            "repository/git_history" | "mcp_sagitta_mcp_repository_git_history" => {
+                let params: RepositoryGitHistoryParams = deserialize_params(request.params, "repository/git_history")?;
+                let result = handle_repository_git_history(params, config, qdrant_client, None).await?;
+                ok_some(result)
+            }
+            "repository/add_dependency" | "mcp_sagitta_mcp_repository_add_dependency" => {
+                let params: RepositoryDependencyParams = deserialize_params(request.params, "repository/add_dependency")?;
+                let result = handle_repository_add_dependency(params, config).await
+                    .map_err(|e| ErrorObject {
+                        code: error_codes::INTERNAL_ERROR,
+                        message: e.to_string(),
+                        data: None,
+                    })?;
+                ok_some(result)
+            }
+            "repository/remove_dependency" | "mcp_sagitta_mcp_repository_remove_dependency" => {
+                let params: RepositoryDependencyParams = deserialize_params(request.params, "repository/remove_dependency")?;
+                let result = handle_repository_remove_dependency(params, config).await
+                    .map_err(|e| ErrorObject {
+                        code: error_codes::INTERNAL_ERROR,
+                        message: e.to_string(),
+                        data: None,
+                    })?;
+                ok_some(result)
+            }
+            "repository/list_dependencies" | "mcp_sagitta_mcp_repository_list_dependencies" => {
+                let params: RepositoryListDependenciesParams = deserialize_params(request.params, "repository/list_dependencies")?;
+                let result = handle_repository_list_dependencies(params, config).await
+                    .map_err(|e| ErrorObject {
+                        code: error_codes::INTERNAL_ERROR,
+                        message: e.to_string(),
+                        data: None,
+                    })?;
                 ok_some(result)
             }
             "tools/list" | "mcp_sagitta_mcp_tools_list" => {

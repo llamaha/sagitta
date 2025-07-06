@@ -301,9 +301,20 @@ impl ClaudeCodeStream {
                 
                 // Handle any remaining data in buffer
                 if !json_buffer.is_empty() {
-                    log::warn!("CLAUDE_CODE: {} bytes of unprocessed data at end", json_buffer.len());
+                    // Check if remaining data is just whitespace (which is normal)
                     if let Ok(s) = std::str::from_utf8(&json_buffer) {
-                        log::warn!("CLAUDE_CODE: Unprocessed data: {s}");
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            // Only warn if there's actual non-whitespace content
+                            log::warn!("CLAUDE_CODE: {} bytes of unprocessed data at end", json_buffer.len());
+                            log::warn!("CLAUDE_CODE: Unprocessed data: {s}");
+                        } else {
+                            // Just debug log for whitespace-only trailing data
+                            log::debug!("CLAUDE_CODE: {} bytes of trailing whitespace at end (normal)", json_buffer.len());
+                        }
+                    } else {
+                        // Non-UTF8 data - this is more concerning
+                        log::warn!("CLAUDE_CODE: {} bytes of non-UTF8 unprocessed data at end", json_buffer.len());
                     }
                 }
                 

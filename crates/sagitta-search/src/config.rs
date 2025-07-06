@@ -50,6 +50,20 @@ pub struct RepositoryConfig {
     /// If set, `repo sync` will index this specific ref statically and will *not* pull updates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_ref: Option<String>,
+    /// List of other repositories that this repository depends on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<RepositoryDependency>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+/// Represents a dependency relationship between repositories
+pub struct RepositoryDependency {
+    /// Name of the repository this depends on (must exist in the repository manager)
+    pub repository_name: String,
+    /// Specific ref (branch/tag/commit) of the dependency to use
+    pub target_ref: Option<String>,
+    /// Human-readable description of why this dependency exists
+    pub purpose: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -534,6 +548,7 @@ mod tests {
             indexed_languages: Some(vec!["rs".to_string()]),
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let repo2_path = data_path.join("repo2");
@@ -551,6 +566,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
 
         let config = AppConfig {
@@ -651,6 +667,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         };
         assert_eq!(repo_config.local_path, base_path.join("my-test-repo"));
     }

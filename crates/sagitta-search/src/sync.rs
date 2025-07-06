@@ -169,7 +169,7 @@ where
                 match remote.fetch(&[branch_name], Some(&mut fetch_opts), None) {
                     Ok(_) => info!("Fetched remote '{remote_name_clone}' for branch '{branch_name}'"),
                     Err(e) => {
-                        warn!("Failed to fetch specific branch '{branch_name}' from remote '{remote_name_clone}': {e}. Proceeding with local refs.");
+                        debug!("Failed to fetch specific branch '{branch_name}' from remote '{remote_name_clone}': {e}. Proceeding with local refs.");
                         // Don't error out, maybe remote is unavailable but local is ok?
                     }
                 };
@@ -189,7 +189,7 @@ where
                     },
                     Err(_) => {
                         // Branch not found, try fallback logic
-                        warn!("Could not find remote-tracking reference '{ref_name}'. Attempting fallback to default branches.");
+                        debug!("Could not find remote-tracking reference '{ref_name}'. Attempting fallback to default branches.");
                         
                         // Try common default branch names
                         let fallback_branches = if branch_name == "main" {
@@ -753,6 +753,7 @@ mod tests {
             ssh_key_passphrase: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         }
     }
 

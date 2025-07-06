@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use sagitta_search::RepositoryConfig;
+use sagitta_search::{RepositoryConfig, config::RepositoryDependency};
 use tokio::sync::mpsc;
 pub use sagitta_search::sync_progress::SyncProgress as CoreSyncProgress;
 use sagitta_search::sync_progress::SyncStage as CoreSyncStage;
@@ -192,6 +192,7 @@ pub struct EnhancedRepoInfo {
     pub total_files: Option<usize>,
     pub size_bytes: Option<u64>,
     pub added_as_local_path: bool,
+    pub dependencies: Vec<RepositoryDependency>,
 }
 
 /// Filesystem status of the repository
@@ -222,9 +223,21 @@ pub struct RepoSyncStatus {
 /// Sync state enumeration
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyncState {
+    /// Never synced
     NeverSynced,
+    /// Fully synced with remote repository
     UpToDate,
+    /// Needs sync with remote repository
     NeedsSync,
+    /// Local repository with no remote
+    LocalOnly,
+    /// Indexed locally but remote sync failed (auth/network issues)
+    LocalIndexedRemoteFailed,
+    /// Currently syncing
+    Syncing,
+    /// Failed to index or sync
+    Failed,
+    /// Unknown sync state
     Unknown,
 }
 
@@ -300,6 +313,7 @@ impl From<sagitta_search::EnhancedRepositoryInfo> for EnhancedRepoInfo {
             total_files: enhanced.filesystem_status.total_files,
             size_bytes: enhanced.filesystem_status.size_bytes,
             added_as_local_path: enhanced.added_as_local_path,
+            dependencies: enhanced.dependencies,
         }
     }
 }
@@ -317,8 +331,9 @@ pub struct SimpleSyncStatus {
     pub last_progress_time: Option<std::time::Instant>, // Last time progress was updated (for watchdog)
 }
 
+
 /// Project creation form state
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProjectCreationForm {
     pub name: String,
     pub language: String,
@@ -328,6 +343,23 @@ pub struct ProjectCreationForm {
     pub creating: bool,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
+    pub result_receiver: Option<std::sync::mpsc::Receiver<Result<String, anyhow::Error>>>,
+}
+
+impl Clone for ProjectCreationForm {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            language: self.language.clone(),
+            path: self.path.clone(),
+            description: self.description.clone(),
+            initialize_git: self.initialize_git,
+            creating: self.creating,
+            status_message: self.status_message.clone(),
+            error_message: self.error_message.clone(),
+            result_receiver: None, // Cannot clone receiver
+        }
+    }
 }
 
 impl Default for ProjectCreationForm {
@@ -341,6 +373,7 @@ impl Default for ProjectCreationForm {
             creating: false,
             status_message: None,
             error_message: None,
+            result_receiver: None,
         }
     }
 }
@@ -359,7 +392,6 @@ pub struct RepoPanelState {
     pub project_form: ProjectCreationForm,
     pub selected_repo: Option<String>,
     pub selected_repos: Vec<String>,
-    pub branch_overrides: std::collections::HashMap<String, String>,
     pub query_options: QueryOptions,
     pub query_result: QueryResult,
     pub file_search_options: FileSearchOptions,
@@ -369,8 +401,11 @@ pub struct RepoPanelState {
     pub file_view_result: FileViewResult,
     pub branch_management: BranchManagementState,
     pub sync_options: SyncOptions,
+    pub show_remove_confirmation: bool,
+    pub repository_to_remove: Option<String>,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
+    pub dependency_modal: super::dependency_modal::DependencyModal,
 }
 
 impl RepoPanelState {
@@ -1196,6 +1231,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
             EnhancedRepoInfo {
                 name: "enhanced-repo-2".to_string(),
@@ -1219,6 +1255,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
         ];
         
@@ -1334,6 +1371,7 @@ mod tests {
                 total_files: None,
                 size_bytes: None,
                 added_as_local_path: false,
+                dependencies: vec![],
             },
         ];
         

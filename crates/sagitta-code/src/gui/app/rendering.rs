@@ -31,6 +31,8 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process app events
     app.process_app_events();
     
+    // Update git controls repository context
+    update_git_controls_repository_context(app);
     
     // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
@@ -82,6 +84,9 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     
     // Render CLAUDE.md modal
     render_claude_md_modal(app, ctx);
+    
+    // Render toast notifications
+    app.state.toasts.show(ctx);
 }
 
 /// Render tools list modal
@@ -346,6 +351,20 @@ fn handle_chat_input_submission(app: &mut SagittaCodeApp) {
             
             // Add user message to chat using the streaming manager
             app.chat_manager.add_user_message(user_message.clone());
+            
+            // Notify auto title updater if we have an active conversation
+            if let (Some(conversation_id), Some(sender)) = (app.state.current_conversation_id, &app.auto_title_sender) {
+                // Get current message count (user messages + assistant messages)
+                let message_count = app.state.messages.len() + 1; // +1 for the message we just added
+                
+                crate::services::auto_title_updater::notify_conversation_updated(
+                    sender,
+                    conversation_id,
+                    message_count,
+                );
+                
+                log::debug!("Notified auto title updater for conversation {} with {} messages", conversation_id, message_count);
+            }
 
             // CRITICAL FIX: Force clear current_response_id when user submits new message
             // This ensures Sagitta Code ALWAYS creates a new message for each response
@@ -1029,6 +1048,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &app.state.available_repositories,
                 &mut app.state.pending_repository_context_change,
                 &mut repository_refresh_requested,
+                // Git controls
+                &mut app.git_controls,
                 // Loop control parameters
                 app.state.is_in_loop,
                 &mut app.state.loop_break_requested,
@@ -1157,16 +1178,40 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                         
                         // Change working directory in background
                         tokio::spawn(async move {
-                            let _repo_manager_lock = repo_manager.lock().await;
-                            // Convert repo name to path (stub doesn't use it anyway)
-                            let repo_path = std::path::Path::new(&repo_name_clone);
-                            match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
-                                Ok(()) => {
-                                    log::info!("Changed working directory to repository '{repo_name_clone}'");
+                            let repo_manager_lock = repo_manager.lock().await;
+                            // Get the actual repository path from the repository configuration
+                            if let Ok(repositories) = repo_manager_lock.list_repositories().await {
+                                if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name_clone) {
+                                    let repo_path = std::path::Path::new(&repo_config.local_path);
+                                    match working_dir_manager_clone.set_repository_context(Some(repo_path)) {
+                                        Ok(()) => {
+                                            log::info!("Changed working directory to repository '{repo_name_clone}' at path '{}'", repo_config.local_path.display());
+                                            
+                                            // Write the current repository path to state file for MCP server
+                                            let mut state_path = dirs::config_dir().unwrap_or_default();
+                                            state_path.push("sagitta-code");
+                                            
+                                            // Ensure directory exists
+                                            if let Err(e) = tokio::fs::create_dir_all(&state_path).await {
+                                                log::warn!("Failed to create state directory: {e}");
+                                            } else {
+                                                state_path.push("current_repository.txt");
+                                                if let Err(e) = tokio::fs::write(&state_path, repo_config.local_path.to_string_lossy().as_bytes()).await {
+                                                    log::warn!("Failed to write repository state file: {e}");
+                                                } else {
+                                                    log::debug!("Wrote current repository path to state file: {}", state_path.display());
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to change working directory to repository '{repo_name_clone}': {e}");
+                                        }
+                                    }
+                                } else {
+                                    log::error!("Repository '{repo_name_clone}' not found in repository list");
                                 }
-                                Err(e) => {
-                                    log::error!("Failed to change working directory to repository '{repo_name_clone}': {e}");
-                                }
+                            } else {
+                                log::error!("Failed to get repository list when changing working directory");
                             }
                         });
                     } else {
@@ -1178,6 +1223,19 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                             match working_dir_manager_clone.change_directory(&base_dir) {
                                 Ok(()) => {
                                     log::info!("Reset working directory to base");
+                                    
+                                    // Clear the repository state file
+                                    let mut state_path = dirs::config_dir().unwrap_or_default();
+                                    state_path.push("sagitta-code");
+                                    state_path.push("current_repository.txt");
+                                    
+                                    if let Err(e) = tokio::fs::remove_file(&state_path).await {
+                                        if e.kind() != std::io::ErrorKind::NotFound {
+                                            log::warn!("Failed to remove repository state file: {e}");
+                                        }
+                                    } else {
+                                        log::debug!("Cleared repository state file");
+                                    }
                                 }
                                 Err(e) => {
                                     log::error!("Failed to reset working directory to base: {e}");
@@ -1209,6 +1267,15 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
                 
                 log::info!("Repository context changed to: {new_repo:?}");
+                
+                // Trigger repository switched event if a repository was selected
+                if let Some(repo_name) = &repo_context {
+                    if !repo_name.is_empty() {
+                        if let Err(e) = app.app_event_sender.send(super::events::AppEvent::RepositorySwitched(repo_name.clone())) {
+                            log::error!("Failed to send RepositorySwitched event: {e}");
+                        }
+                    }
+                }
                 }
             }
             
@@ -1227,6 +1294,38 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
+                // Show sync status warning if repository is out of sync
+                if let Some(sync_status) = app.git_controls.get_current_sync_status() {
+                    if sync_status.is_out_of_sync {
+                        let current_theme = app.state.current_theme;
+                        let warning_frame = Frame::default()
+                            .fill(current_theme.warning_color().gamma_multiply(0.1))
+                            .stroke(egui::Stroke::new(1.0, current_theme.warning_color()))
+                            .inner_margin(8.0)
+                            .corner_radius(4.0);
+                            
+                        warning_frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("⚠").color(current_theme.warning_color()).size(16.0));
+                                ui.label(egui::RichText::new("Repository is out of sync").color(current_theme.warning_color()));
+                                ui.label(egui::RichText::new("- changes are not indexed. Run sync to update.").color(current_theme.text_color()));
+                                
+                                if ui.button(egui::RichText::new("Sync Now").color(current_theme.button_text_color()))
+                                    .on_hover_text("Sync repository to update indexed content")
+                                    .clicked() {
+                                    if let Some(repo_name) = &app.state.current_repository_context {
+                                        app.git_controls.send_command(crate::gui::repository::git_controls::GitCommand::ForceSync { 
+                                            repo_name: repo_name.clone() 
+                                        });
+                                    }
+                                }
+                            });
+                        });
+                        
+                        ui.add_space(8.0);
+                    }
+                }
+                
                 // Use the modern streaming chat view with all items (messages + tool cards)
                 let items = app.chat_manager.get_all_items();
                 
@@ -1430,6 +1529,50 @@ fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
             },
         }
+    }
+}
+
+/// Update git controls repository context if it has changed
+fn update_git_controls_repository_context(app: &mut SagittaCodeApp) {
+    use crate::gui::repository::git_controls::GitCommand;
+    
+    let current_git_repo = app.git_controls.state().current_repository.clone();
+    let current_app_repo = app.state.current_repository_context.clone();
+    
+    if current_git_repo != current_app_repo {
+        // Send a command to update the repository context
+        if let Some(repo_name) = current_app_repo.clone() {
+            if !repo_name.is_empty() && !repo_name.starts_with("__") {
+                app.git_controls.send_command(GitCommand::UpdateRepository { 
+                    repo_name: Some(repo_name) 
+                });
+            }
+        } else {
+            app.git_controls.send_command(GitCommand::UpdateRepository { 
+                repo_name: None 
+            });
+        }
+    }
+    
+    // Periodically update sync statuses
+    static LAST_SYNC_UPDATE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let should_update = {
+        let mut last_update = LAST_SYNC_UPDATE.lock().unwrap();
+        match *last_update {
+            None => {
+                *last_update = Some(std::time::Instant::now());
+                true
+            }
+            Some(time) if time.elapsed() > std::time::Duration::from_secs(5) => {
+                *last_update = Some(std::time::Instant::now());
+                true
+            }
+            _ => false
+        }
+    };
+    
+    if should_update {
+        app.git_controls.send_command(GitCommand::UpdateSyncStatuses);
     }
 }
 
