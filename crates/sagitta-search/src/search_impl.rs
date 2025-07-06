@@ -305,7 +305,10 @@ pub fn document_search_config() -> SearchConfig {
     }
 }
 
-// Legacy function for backward compatibility
+/// Legacy function for backward compatibility with the old search API.
+/// 
+/// This function wraps the new `search_collection` function to maintain
+/// compatibility with existing code that uses the old parameter structure.
 pub async fn search_collection_legacy<C>(
     client: Arc<C>,
     collection_name: &str,

@@ -379,7 +379,7 @@ impl ConversationBranchingManager {
         &self,
         message: &AgentMessage,
         context_messages: &[&AgentMessage],
-        message_index: usize,
+        _message_index: usize,
         conversation: &Conversation,
     ) -> Result<Option<BranchSuggestion>> {
         let content = &message.content.to_lowercase();

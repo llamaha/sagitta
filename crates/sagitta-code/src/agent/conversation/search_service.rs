@@ -355,12 +355,12 @@ impl ConversationSearchService for ConversationSearchServiceImpl {
         Ok(results)
     }
     
-    async fn find_similar_conversations(&self, conversation_id: Uuid, limit: usize) -> Result<Vec<ConversationSearchResult>> {
+    async fn find_similar_conversations(&self, _conversation_id: Uuid, _limit: usize) -> Result<Vec<ConversationSearchResult>> {
         // For now, return empty results as this requires more complex implementation
         Ok(Vec::new())
     }
     
-    async fn get_conversation_embeddings(&self, conversation_ids: &[Uuid]) -> Result<Vec<ConversationEmbedding>> {
+    async fn get_conversation_embeddings(&self, _conversation_ids: &[Uuid]) -> Result<Vec<ConversationEmbedding>> {
         // For now, return empty results as this requires more complex implementation
         Ok(Vec::new())
     }

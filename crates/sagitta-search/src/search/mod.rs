@@ -1,6 +1,7 @@
 // crates/sagitta-search/src/search/mod.rs
 //! Core module for handling search operations (semantic, potentially others later).
 
+/// Result types for search operations.
 pub mod result;
 
 pub use result::SearchResult;

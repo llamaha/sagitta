@@ -429,8 +429,8 @@ pub async fn handle_repository_sync<C: QdrantClientTrait + Send + Sync + 'static
     .await;
 
     let sync_message: String;
-    let mut actual_synced_commit: Option<String> = None;
-    let mut indexed_languages_from_sync: Vec<String> = Vec::new();
+    let actual_synced_commit: Option<String>;
+    let indexed_languages_from_sync: Vec<String>;
 
     match core_sync_result { // Match on the direct result
         Ok(core_success_result) => {

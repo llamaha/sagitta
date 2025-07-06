@@ -236,7 +236,7 @@ impl Agent {
     }
     
     /// Set recovery configuration
-    pub fn with_recovery_config(self, config: RecoveryConfig) -> Self {
+    pub fn with_recovery_config(self, _config: RecoveryConfig) -> Self {
         // Note: This creates a new recovery manager with the new config
         // In practice, you might want to update the existing one
         self

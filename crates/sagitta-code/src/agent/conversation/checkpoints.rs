@@ -343,7 +343,7 @@ impl ConversationCheckpointManager {
         &self,
         message: &AgentMessage,
         context_messages: &[&AgentMessage],
-        message_index: usize,
+        _message_index: usize,
         conversation: &Conversation,
     ) -> Result<Option<CheckpointSuggestion>> {
         let content = &message.content.to_lowercase();

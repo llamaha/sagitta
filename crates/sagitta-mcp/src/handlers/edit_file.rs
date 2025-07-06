@@ -9,7 +9,7 @@ use tokio::fs;
 use similar::{TextDiff, ChangeTag};
 
 /// Get context around the edit location (10 lines before and after)
-fn get_context_lines(content: &str, match_start: usize, match_end: usize) -> (String, String) {
+fn _get_context_lines(content: &str, match_start: usize, match_end: usize) -> (String, String) {
     let lines: Vec<&str> = content.lines().collect();
     let mut start_line = 0;
     let mut end_line = lines.len();

@@ -33,6 +33,9 @@ use crate::middleware::secure_headers_middleware;
 use std::net::SocketAddr;
 use anyhow::Context;
 
+// Type alias for the SSE stream return type
+type SseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
+
 // Shared state for the Axum application
 #[derive(Clone)]
 pub struct AppState {
@@ -78,7 +81,7 @@ pub async fn run_http_server(
     };
 
     // Initialize streaming progress reports for this server instance
-    let _ = tokio::spawn(start_progress_broadcaster(active_connections.clone()));
+    tokio::spawn(start_progress_broadcaster(active_connections.clone()));
 
     // Extract host and port from the addr string
     let server_url = format!("http://{addr_str}");
@@ -147,7 +150,7 @@ impl Drop for ConnectionGuard {
 async fn sse_handler(
     State(app_state): State<AppState>, 
     headers: HeaderMap, 
-) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+) -> Sse<SseStream> {
     let session_id = Uuid::new_v4(); 
     info!(%session_id, "New SSE connection (/sse), establishing session.");
     info!(%session_id, headers = ?headers, "SSE connection headers");
@@ -300,8 +303,8 @@ async fn mcp_json_rpc_handler(
 }
 
 #[derive(Deserialize)]
-struct ApiKeyQuery {
-    key: String,
+struct _ApiKeyQuery {
+    _key: String,
 }
 
 async fn health_check_handler() -> impl IntoResponse {

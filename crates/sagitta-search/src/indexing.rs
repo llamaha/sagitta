@@ -340,15 +340,25 @@ pub async fn index_paths<
 
 /// Parameters for indexing repository files
 pub struct IndexRepoFilesParams<'a, C> {
+    /// Application configuration.
     pub config: &'a AppConfig,
+    /// Root directory of the repository.
     pub repo_root: &'a PathBuf,
+    /// List of relative file paths to index.
     pub relative_paths: &'a [PathBuf],
+    /// Name of the Qdrant collection to index into.
     pub collection_name: &'a str,
+    /// Name of the git branch being indexed.
     pub branch_name: &'a str,
+    /// Git commit hash for tracking indexed version.
     pub commit_hash: &'a str,
+    /// Qdrant client for vector operations.
     pub client: Arc<C>,
+    /// Embedding pool for generating embeddings.
     pub embedding_pool: Arc<EmbeddingPool>,
+    /// Optional progress reporter for tracking indexing status.
     pub progress_reporter: Option<Arc<dyn SyncProgressReporter>>,
+    /// Maximum number of concurrent upsert operations.
     pub max_concurrent_upserts: usize,
 }
 

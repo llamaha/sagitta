@@ -175,7 +175,7 @@ impl GitHistoryModal {
                     ui.label(egui::RichText::new("Commit:").strong());
                     ui.monospace(&commit.short_id);
                     if ui.button("📋").on_hover_text("Copy full commit ID").clicked() {
-                        ui.output_mut(|o| o.copied_text = commit.id.clone());
+                        ui.ctx().copy_text(commit.id.clone());
                     }
                 });
 
