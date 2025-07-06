@@ -28,9 +28,28 @@ pub struct SyncResult {
     pub timestamp: Instant,
 }
 
+/// Represents different sync states for repositories
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncState {
+    /// Fully synced with remote repository
+    FullySynced,
+    /// Local repository with no remote
+    LocalOnly,
+    /// Indexed locally but remote sync failed (auth/network issues)
+    LocalIndexedRemoteFailed,
+    /// Currently syncing
+    Syncing,
+    /// Failed to index or sync
+    Failed,
+    /// Not yet synced
+    NotSynced,
+}
+
 /// Tracks the sync status of repositories
 #[derive(Debug, Clone)]
 pub struct RepositorySyncStatus {
+    /// Current sync state
+    pub sync_state: SyncState,
     /// Last successful sync timestamp
     pub last_sync: Option<Instant>,
     /// Last commit hash that was synced
@@ -41,6 +60,23 @@ pub struct RepositorySyncStatus {
     pub is_out_of_sync: bool,
     /// Last sync error, if any
     pub last_sync_error: Option<String>,
+    /// Detailed sync error type
+    pub sync_error_type: Option<SyncErrorType>,
+    /// Whether this is a local-only repository (no remote)
+    pub is_local_only: bool,
+}
+
+/// Types of sync errors for better handling
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncErrorType {
+    /// Authentication required but failed
+    AuthenticationFailed,
+    /// Network connection failed
+    NetworkError,
+    /// Repository has no remote
+    NoRemote,
+    /// Other errors
+    Other(String),
 }
 
 /// Orchestrates file watching, auto-commits, and repository syncing
