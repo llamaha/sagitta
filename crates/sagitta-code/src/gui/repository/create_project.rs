@@ -283,7 +283,6 @@ fn create_project(
     if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
         let repo_manager_clone = repo_manager.clone();
         let full_path = format!("{project_path}/{project_name}");
-        let project_name_for_state = project_name.clone();
         
         tokio::spawn(async move {
             // First check if the tool is available
@@ -505,5 +504,70 @@ mod tests {
         assert!(form.status_message.is_none());
         assert!(form.error_message.is_none());
         assert!(form.result_receiver.is_none());
+    }
+    
+    #[test]
+    fn test_project_creation_form_clone() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let form = ProjectCreationForm {
+            name: "test-project".to_string(),
+            language: "python".to_string(),
+            path: "/tmp".to_string(),
+            description: "A test project".to_string(),
+            initialize_git: false,
+            creating: true,
+            status_message: Some("Creating...".to_string()),
+            error_message: Some("Error occurred".to_string()),
+            result_receiver: Some(receiver),
+        };
+        
+        let cloned = form.clone();
+        assert_eq!(cloned.name, "test-project");
+        assert_eq!(cloned.language, "python");
+        assert_eq!(cloned.path, "/tmp");
+        assert_eq!(cloned.description, "A test project");
+        assert!(!cloned.initialize_git);
+        assert!(cloned.creating);
+        assert_eq!(cloned.status_message, Some("Creating...".to_string()));
+        assert_eq!(cloned.error_message, Some("Error occurred".to_string()));
+        assert!(cloned.result_receiver.is_none()); // Should not be cloned
+        
+        // Ensure original sender is still valid
+        assert!(sender.send(Ok("test".to_string())).is_ok());
+    }
+    
+    #[test]
+    fn test_project_creation_callback_mechanism() {
+        // Test that the callback mechanism allows async signaling
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        // Simulate successful project creation
+        let result = sender.send(Ok("test-project".to_string()));
+        assert!(result.is_ok());
+        
+        // Simulate receiving the result
+        let received = receiver.try_recv();
+        assert!(received.is_ok());
+        let received_result = received.unwrap();
+        assert!(received_result.is_ok());
+        assert_eq!(received_result.unwrap(), "test-project");
+    }
+    
+    #[test]
+    fn test_project_creation_error_callback() {
+        // Test that error callback mechanism works
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        // Simulate failed project creation
+        let error_msg = "Failed to create project: tool not found";
+        let result = sender.send(Err(anyhow::anyhow!(error_msg)));
+        assert!(result.is_ok());
+        
+        // Simulate receiving the error
+        let received = receiver.try_recv();
+        assert!(received.is_ok());
+        let received_result = received.unwrap();
+        assert!(received_result.is_err());
+        assert_eq!(received_result.unwrap_err().to_string(), error_msg);
     }
 }
