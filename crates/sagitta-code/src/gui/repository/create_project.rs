@@ -251,8 +251,6 @@ fn create_project(
     _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
-    // Get a handle to the state for the async task
-    let state_weak = std::sync::Arc::downgrade(&std::sync::Arc::new(std::sync::Mutex::new(state as *mut RepoPanelState)));
     let project_name = state.project_form.name.clone();
     let project_path = state.project_form.path.clone();
     let language = state.project_form.language.clone();
@@ -397,8 +395,8 @@ fn create_project(
                                 log::error!("Failed to add repository after creation: {e}");
                             } else {
                                 log::info!("Successfully added repository '{project_name}' to Sagitta as local repository");
-                                // Signal that the project was created successfully
-                                // This will be checked in the next render cycle
+                                // Signal that the project was created successfully by storing the name
+                                // This will trigger a tab switch and refresh in the next render cycle
                             }
                         }
                         Ok(output) => {

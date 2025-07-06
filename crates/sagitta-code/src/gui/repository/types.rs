@@ -340,6 +340,7 @@ pub struct ProjectCreationForm {
     pub creating: bool,
     pub status_message: Option<String>,
     pub error_message: Option<String>,
+    pub result_receiver: Option<std::sync::mpsc::Receiver<Result<String, anyhow::Error>>>,
 }
 
 impl Default for ProjectCreationForm {
