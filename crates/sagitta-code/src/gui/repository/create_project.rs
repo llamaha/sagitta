@@ -80,32 +80,34 @@ pub fn render_create_project(
     ui.heading("Create New Project");
     ui.add_space(8.0);
 
-    // Show project info if we have a project name
-    if !state.project_form.name.is_empty() {
-        Frame::NONE
-            .fill(theme.info_background())
-            .stroke(Stroke::new(1.0, theme.info_color()))
-            .corner_radius(CornerRadius::same(4))
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("💡").size(14.0));
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("Project Info:").strong().color(theme.info_color()));
-                        let path = &state.project_form.path;
-                        let name = &state.project_form.name;
-                        ui.label(format!("• Location: {path}/{name}"));
-                        
-                        // Check if the language tool is available
-                        if let Some(info) = LanguageProjectInfo::get_language_info(&state.project_form.language) {
-                            let tool = info.tool_name;
-                            ui.label(format!("• Will use {tool} to create project"));
-                        }
-                    });
+    // Always show project info frame to avoid layout changes
+    Frame::NONE
+        .fill(theme.info_background())
+        .stroke(Stroke::new(1.0, theme.info_color()))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("💡").size(14.0));
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Project Info:").strong().color(theme.info_color()));
+                    let path = &state.project_form.path;
+                    let name = if state.project_form.name.is_empty() {
+                        "<project-name>"
+                    } else {
+                        &state.project_form.name
+                    };
+                    ui.label(format!("• Location: {path}/{name}"));
+                    
+                    // Check if the language tool is available
+                    if let Some(info) = LanguageProjectInfo::get_language_info(&state.project_form.language) {
+                        let tool = info.tool_name;
+                        ui.label(format!("• Will use {tool} to create project"));
+                    }
                 });
             });
-        ui.add_space(8.0);
-    }
+        });
+    ui.add_space(8.0);
 
     // Main form
     Frame::NONE
@@ -297,12 +299,12 @@ fn create_project(
                             if initialize_git {
                                 let git_init_result = if cfg!(windows) {
                                     tokio::process::Command::new("cmd")
-                                        .args(["/C", &format!("cd /d \"{full_path}\" && git init")])
+                                        .args(["/C", &format!("cd /d \"{full_path}\" && git init -b main")])
                                         .output()
                                         .await
                                 } else {
                                     tokio::process::Command::new("sh")
-                                        .args(["-c", &format!("cd '{full_path}' && git init")])
+                                        .args(["-c", &format!("cd '{full_path}' && git init -b main")])
                                         .output()
                                         .await
                                 };
