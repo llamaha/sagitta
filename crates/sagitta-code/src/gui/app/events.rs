@@ -1846,6 +1846,9 @@ mod tests {
             AppEvent::UpdateConversationTitle { .. } => assert!(true),
             AppEvent::CreateNewConversation => assert!(true),
             AppEvent::UpdateGitHistoryPath(_) => assert!(true),
+            AppEvent::RepositoryAdded(_) => assert!(true),
+            AppEvent::RepositorySwitched(_) => assert!(true),
+            AppEvent::ShowSyncNotification { .. } => assert!(true),
         }
     }
 
