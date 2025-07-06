@@ -622,8 +622,6 @@ impl SagittaCodeApp {
             repo_manager.clone(),
         ));
         self.sync_orchestrator = Some(sync_orchestrator.clone());
-        
-        // Set sync orchestrator on git controls
         self.git_controls.set_sync_orchestrator(sync_orchestrator.clone());
         
         // Start git controls command handler
@@ -665,6 +663,9 @@ impl SagittaCodeApp {
             let file_watcher = Arc::new(file_watcher);
             self.file_watcher = Some(file_watcher.clone());
             
+            // Set the file watcher on the sync orchestrator
+            sync_orchestrator.set_file_watcher(file_watcher.clone()).await;
+            
             // Start auto-commit handler
             let auto_committer_handler = auto_committer.clone();
             tokio::spawn(async move {
@@ -683,6 +684,26 @@ impl SagittaCodeApp {
             });
             
             log::info!("Auto-sync services initialized and started");
+            
+            // Add existing repositories to file watcher and sync them
+            let repo_manager_guard = repo_manager.lock().await;
+            if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                log::info!("Adding {} existing repositories to file watcher", repositories.len());
+                
+                for repo in repositories {
+                    let repo_path = std::path::PathBuf::from(&repo.local_path);
+                    if let Err(e) = sync_orchestrator.add_repository(&repo_path).await {
+                        log::error!("Failed to add existing repository {} to file watcher: {}", repo.name, e);
+                    } else {
+                        log::info!("Added existing repository {} to file watcher and sync queue", repo.name);
+                    }
+                }
+                
+                // Also ensure all out-of-sync repositories get synced
+                if let Err(e) = sync_orchestrator.sync_out_of_sync_repositories().await {
+                    log::error!("Failed to queue out-of-sync repositories: {}", e);
+                }
+            }
         } else {
             log::info!("File watcher and/or auto-commit disabled, skipping initialization");
         }

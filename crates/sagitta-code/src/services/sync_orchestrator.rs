@@ -54,7 +54,11 @@ pub struct SyncOrchestrator {
     sync_result_tx: mpsc::UnboundedSender<SyncResult>,
     sync_result_rx: Option<mpsc::UnboundedReceiver<SyncResult>>,
     /// File watcher service
-    file_watcher: Option<FileWatcherService>,
+    file_watcher: Arc<RwLock<Option<Arc<FileWatcherService>>>>,
+    /// Sync queue to ensure sequential processing
+    sync_queue: Arc<Mutex<Vec<PathBuf>>>,
+    /// Flag to track if sync processor is running
+    sync_processor_running: Arc<RwLock<bool>>,
 }
 
 impl SyncOrchestrator {
@@ -68,8 +72,16 @@ impl SyncOrchestrator {
             sync_statuses: Arc::new(RwLock::new(HashMap::new())),
             sync_result_tx,
             sync_result_rx: Some(sync_result_rx),
-            file_watcher: None,
+            file_watcher: Arc::new(RwLock::new(None)),
+            sync_queue: Arc::new(Mutex::new(Vec::new())),
+            sync_processor_running: Arc::new(RwLock::new(false)),
         }
+    }
+
+    /// Set the file watcher service (can be called after creation)
+    pub async fn set_file_watcher(&self, file_watcher: Arc<FileWatcherService>) {
+        let mut fw = self.file_watcher.write().await;
+        *fw = Some(file_watcher);
     }
 
     /// Start the sync orchestrator
@@ -92,7 +104,8 @@ impl SyncOrchestrator {
 
             let mut file_watcher = FileWatcherService::new(file_watcher_config);
             let change_rx = file_watcher.start().await?;
-            self.file_watcher = Some(file_watcher);
+            let mut fw = self.file_watcher.write().await;
+            *fw = Some(Arc::new(file_watcher));
 
             // Start file change processing
             let sync_tx = self.sync_result_tx.clone();
@@ -140,8 +153,88 @@ impl SyncOrchestrator {
         Ok(())
     }
 
-    /// Sync a repository using the MCP repository sync tool
-    pub async fn sync_repository(&self, repo_path: &Path) -> Result<SyncResult> {
+    /// Queue a repository for syncing
+    pub async fn queue_repository_sync(&self, repo_path: &Path) -> Result<()> {
+        let repo_path = repo_path.to_path_buf();
+        
+        // Add to sync queue
+        {
+            let mut queue = self.sync_queue.lock().await;
+            if !queue.contains(&repo_path) {
+                info!("Queueing repository for sync: {}", repo_path.display());
+                queue.push(repo_path);
+            } else {
+                debug!("Repository already queued for sync: {}", repo_path.display());
+            }
+        }
+        
+        // Start sync processor if not already running
+        self.start_sync_processor().await;
+        
+        Ok(())
+    }
+    
+    /// Start the sync processor if not already running
+    async fn start_sync_processor(&self) {
+        let mut is_running = self.sync_processor_running.write().await;
+        if *is_running {
+            return;
+        }
+        *is_running = true;
+        drop(is_running);
+        
+        let sync_queue = self.sync_queue.clone();
+        let sync_processor_running = self.sync_processor_running.clone();
+        let sync_result_tx = self.sync_result_tx.clone();
+        let repository_manager = self.repository_manager.clone();
+        let sync_statuses = self.sync_statuses.clone();
+        
+        tokio::spawn(async move {
+            info!("Sync processor started");
+            
+            loop {
+                // Get next repository from queue
+                let next_repo = {
+                    let mut queue = sync_queue.lock().await;
+                    queue.pop()
+                };
+                
+                match next_repo {
+                    Some(repo_path) => {
+                        info!("Processing sync for: {}", repo_path.display());
+                        
+                        // Perform the sync
+                        let result = Self::sync_repository_internal(
+                            &repo_path,
+                            &repository_manager,
+                            &sync_statuses,
+                        ).await;
+                        
+                        // Send result
+                        if let Err(e) = sync_result_tx.send(result) {
+                            error!("Failed to send sync result: {}", e);
+                        }
+                    }
+                    None => {
+                        // No more repositories to sync
+                        debug!("Sync queue empty, stopping processor");
+                        break;
+                    }
+                }
+            }
+            
+            let mut is_running = sync_processor_running.write().await;
+            *is_running = false;
+            info!("Sync processor stopped");
+        });
+    }
+
+    /// Sync a repository using the MCP repository sync tool (internal implementation)
+    async fn sync_repository_internal(
+        repo_path: &Path,
+        repository_manager: &Arc<Mutex<RepositoryManager>>,
+        sync_statuses: &Arc<RwLock<HashMap<PathBuf, RepositorySyncStatus>>>,
+    ) -> SyncResult {
         let start_time = Instant::now();
         let repo_path = repo_path.to_path_buf();
 
@@ -149,7 +242,7 @@ impl SyncOrchestrator {
 
         // Mark as syncing
         {
-            let mut statuses = self.sync_statuses.write().await;
+            let mut statuses = sync_statuses.write().await;
             let status = statuses.entry(repo_path.clone()).or_insert_with(|| {
                 RepositorySyncStatus {
                     last_sync: None,
@@ -164,7 +257,7 @@ impl SyncOrchestrator {
         }
 
         // Perform the sync using RepositoryManager
-        let sync_result = match self.perform_repository_sync(&repo_path).await {
+        let sync_result = match Self::perform_repository_sync_static(&repo_path, repository_manager).await {
             Ok(files_processed) => {
                 let duration = start_time.elapsed();
                 info!(
@@ -176,7 +269,7 @@ impl SyncOrchestrator {
 
                 // Update sync status
                 {
-                    let mut statuses = self.sync_statuses.write().await;
+                    let mut statuses = sync_statuses.write().await;
                     if let Some(status) = statuses.get_mut(&repo_path) {
                         status.last_sync = Some(Instant::now());
                         status.is_syncing = false;
@@ -202,7 +295,7 @@ impl SyncOrchestrator {
 
                 // Update sync status
                 {
-                    let mut statuses = self.sync_statuses.write().await;
+                    let mut statuses = sync_statuses.write().await;
                     if let Some(status) = statuses.get_mut(&repo_path) {
                         status.is_syncing = false;
                         status.last_sync_error = Some(e.to_string());
@@ -220,17 +313,29 @@ impl SyncOrchestrator {
             }
         };
 
-        // Send sync result
-        if let Err(e) = self.sync_result_tx.send(sync_result.clone()) {
-            error!("Failed to send sync result: {}", e);
-        }
-
-        Ok(sync_result)
+        sync_result
+    }
+    
+    /// Sync a repository (adds to queue)
+    pub async fn sync_repository(&self, repo_path: &Path) -> Result<SyncResult> {
+        // Queue the repository for sync
+        self.queue_repository_sync(repo_path).await?;
+        
+        // For now, return a placeholder result since actual sync is async
+        // In a more sophisticated implementation, we could wait for the result
+        Ok(SyncResult {
+            repo_path: repo_path.to_path_buf(),
+            success: true,
+            error_message: None,
+            duration: Duration::from_secs(0),
+            files_processed: None,
+            timestamp: Instant::now(),
+        })
     }
 
-    /// Perform repository sync using RepositoryManager
-    async fn perform_repository_sync(&self, repo_path: &Path) -> Result<usize> {
-        let mut repo_manager = self.repository_manager.lock().await;
+    /// Perform repository sync using RepositoryManager (static version)
+    async fn perform_repository_sync_static(repo_path: &Path, repository_manager: &Arc<Mutex<RepositoryManager>>) -> Result<usize> {
+        let mut repo_manager = repository_manager.lock().await;
 
         // Get repository name from path
         let repo_name = repo_path
@@ -287,12 +392,15 @@ impl SyncOrchestrator {
     }
 
     /// Add a repository to watch and sync
-    pub async fn add_repository(&mut self, repo_path: &Path) -> Result<()> {
+    pub async fn add_repository(&self, repo_path: &Path) -> Result<()> {
         info!("Adding repository to sync orchestrator: {}", repo_path.display());
 
         // Add to file watcher if available
-        if let Some(ref file_watcher) = self.file_watcher {
-            file_watcher.watch_repository(repo_path).await?;
+        {
+            let file_watcher_guard = self.file_watcher.read().await;
+            if let Some(ref file_watcher) = *file_watcher_guard {
+                file_watcher.watch_repository(repo_path).await?;
+            }
         }
 
         // Initialize sync status
@@ -312,19 +420,22 @@ impl SyncOrchestrator {
 
         // Trigger initial sync if configured
         if self.config.sync_on_repo_add {
-            self.sync_repository(repo_path).await?;
+            self.queue_repository_sync(repo_path).await?;
         }
 
         Ok(())
     }
 
     /// Remove a repository from watching and syncing
-    pub async fn remove_repository(&mut self, repo_path: &Path) -> Result<()> {
+    pub async fn remove_repository(&self, repo_path: &Path) -> Result<()> {
         info!("Removing repository from sync orchestrator: {}", repo_path.display());
 
         // Remove from file watcher if available
-        if let Some(ref file_watcher) = self.file_watcher {
-            file_watcher.unwatch_repository(repo_path).await?;
+        {
+            let file_watcher_guard = self.file_watcher.read().await;
+            if let Some(ref file_watcher) = *file_watcher_guard {
+                file_watcher.unwatch_repository(repo_path).await?;
+            }
         }
 
         // Remove sync status
@@ -342,7 +453,7 @@ impl SyncOrchestrator {
 
         // Trigger sync if configured
         if self.config.sync_on_repo_switch {
-            self.sync_repository(repo_path).await?;
+            self.queue_repository_sync(repo_path).await?;
         }
 
         Ok(())
@@ -366,31 +477,40 @@ impl SyncOrchestrator {
     }
 
     /// Force sync all repositories
-    pub async fn sync_all_repositories(&self) -> Result<Vec<SyncResult>> {
+    pub async fn sync_all_repositories(&self) -> Result<()> {
         let repo_paths: Vec<PathBuf> = {
             let statuses = self.sync_statuses.read().await;
             statuses.keys().cloned().collect()
         };
 
-        let mut results = Vec::new();
         for repo_path in repo_paths {
-            match self.sync_repository(&repo_path).await {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    error!("Failed to sync repository {}: {}", repo_path.display(), e);
-                    results.push(SyncResult {
-                        repo_path,
-                        success: false,
-                        error_message: Some(e.to_string()),
-                        duration: Duration::from_secs(0),
-                        files_processed: None,
-                        timestamp: Instant::now(),
-                    });
-                }
+            if let Err(e) = self.queue_repository_sync(&repo_path).await {
+                error!("Failed to queue repository {} for sync: {}", repo_path.display(), e);
             }
         }
 
-        Ok(results)
+        Ok(())
+    }
+    
+    /// Sync all out-of-sync repositories
+    pub async fn sync_out_of_sync_repositories(&self) -> Result<()> {
+        let out_of_sync_repos: Vec<PathBuf> = {
+            let statuses = self.sync_statuses.read().await;
+            statuses.iter()
+                .filter(|(_, status)| status.is_out_of_sync && !status.is_syncing)
+                .map(|(path, _)| path.clone())
+                .collect()
+        };
+        
+        info!("Found {} out-of-sync repositories", out_of_sync_repos.len());
+        
+        for repo_path in out_of_sync_repos {
+            if let Err(e) = self.queue_repository_sync(&repo_path).await {
+                error!("Failed to queue out-of-sync repository {} for sync: {}", repo_path.display(), e);
+            }
+        }
+        
+        Ok(())
     }
 
     /// Update configuration

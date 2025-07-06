@@ -75,9 +75,13 @@ impl AutoCommitter {
 
     /// Process file change events and potentially trigger commits
     pub async fn handle_file_changes(&self, mut change_rx: mpsc::UnboundedReceiver<FileChangeEvent>) {
-        info!("Starting auto-committer file change handler");
+        info!("Starting auto-committer file change handler, auto-commit enabled: {}", self.config.enabled);
 
         while let Some(change_event) = change_rx.recv().await {
+            info!("Auto-committer received file change event: {} in {}", 
+                change_event.file_path.display(), 
+                change_event.repo_path.display()
+            );
             if !self.config.enabled {
                 continue;
             }

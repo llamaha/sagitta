@@ -1667,9 +1667,9 @@ fn handle_repository_added(app: &mut SagittaCodeApp, repo_name: String) {
                 if let Ok(repositories) = repo_manager_guard.list_repositories().await {
                     if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
                         let repo_path = std::path::PathBuf::from(&repo_config.local_path);
-                        // Use switch_repository for add as well since add_repository requires mutable reference
-                        if let Err(e) = sync_orchestrator.switch_repository(&repo_path).await {
-                            log::error!("Failed to trigger sync for newly added repository {}: {}", repo_name, e);
+                        // Add repository to file watcher and trigger sync
+                        if let Err(e) = sync_orchestrator.add_repository(&repo_path).await {
+                            log::error!("Failed to add repository {} to sync orchestrator: {}", repo_name, e);
                         }
                     }
                 }

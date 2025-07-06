@@ -153,7 +153,7 @@ impl FileWatcherService {
         let repo_path = repo_path.canonicalize()
             .context("Failed to canonicalize repository path")?;
 
-        info!("Adding file watcher for repository: {}", repo_path.display());
+        info!("Adding file watcher for repository: {}, watcher enabled: {}", repo_path.display(), self.config.enabled);
 
         let event_tx = self.event_tx.clone();
         let mut watcher = RecommendedWatcher::new(
@@ -245,9 +245,11 @@ impl FileWatcherService {
         _change_tx: mpsc::UnboundedSender<FileChangeEvent>,
         config: FileWatcherConfig,
     ) {
+        info!("File watcher event processing started");
         while let Some(event_result) = event_rx.recv().await {
             match event_result {
                 Ok(event) => {
+                    debug!("Received file system event: {:?} for paths: {:?}", event.kind, event.paths);
                     if let Err(e) = Self::handle_file_event(event, &pending_changes, &config).await {
                         error!("Error handling file event: {}", e);
                     }
@@ -350,11 +352,16 @@ impl FileWatcherService {
             // Emit the debounced changes
             for (_, change) in to_emit {
                 let event = FileChangeEvent {
-                    repo_path: change.repo_path,
-                    file_path: change.file_path,
-                    change_type: change.change_type,
+                    repo_path: change.repo_path.clone(),
+                    file_path: change.file_path.clone(),
+                    change_type: change.change_type.clone(),
                     timestamp: change.last_seen,
                 };
+
+                info!("Emitting debounced file change event: {} in {}", 
+                    event.file_path.display(), 
+                    event.repo_path.display()
+                );
 
                 if let Err(e) = change_tx.send(event) {
                     error!("Failed to send file change event: {}", e);
