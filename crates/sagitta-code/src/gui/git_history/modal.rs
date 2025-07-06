@@ -45,7 +45,13 @@ impl GitHistoryModal {
     pub fn set_repository(&mut self, path: PathBuf) {
         if self.repository_path.as_ref() != Some(&path) {
             self.repository_path = Some(path);
+            // Always refresh when repository changes, even if modal is visible
             self.refresh_commits();
+            
+            // Clear any previous selection since it's from a different repo
+            self.state.selected_commit = None;
+            self.revert_target = None;
+            self.show_revert_confirmation = false;
         }
     }
 
@@ -62,10 +68,9 @@ impl GitHistoryModal {
         }
 
         egui::Window::new("📜 Git History")
-            .default_size([800.0, 600.0])
+            .default_size([1000.0, 700.0])
             .resizable(true)
             .collapsible(false)
-            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 self.render_content(ui, theme);
             });
@@ -149,7 +154,17 @@ impl GitHistoryModal {
 
             // Right column: Commit details
             columns[1].group(|ui| {
-                ui.label(egui::RichText::new("Commit Details").strong());
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Commit Details").strong());
+                    
+                    if self.state.selected_commit.is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Clear Selection").clicked() {
+                                self.state.selected_commit = None;
+                            }
+                        });
+                    }
+                });
                 ui.separator();
                 
                 if let Some(selected_id) = &self.state.selected_commit {
@@ -227,7 +242,6 @@ impl GitHistoryModal {
         egui::Window::new("Confirm Revert")
             .collapsible(false)
             .resizable(false)
-            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.label("⚠️ Warning: This will reset your repository to the selected commit.");
                 ui.label("All changes after this commit will be lost!");

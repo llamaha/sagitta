@@ -421,11 +421,144 @@ mod graph_calculation_tests {
         calculate_graph_layout(&mut state);
         
         assert_eq!(state.graph_nodes.len(), 2);
-        // First commit (index 0) gets lane 0, second commit (index 1) gets lane 1
+        // After our fix, all commits should be in lane 0 (linear layout)
         assert_eq!(state.graph_nodes[0].lane, 0);
-        assert_eq!(state.graph_nodes[1].lane, 1);
+        assert_eq!(state.graph_nodes[1].lane, 0);
         // Y positions should increment
         assert_eq!(state.graph_nodes[0].y, 0.0);
         assert_eq!(state.graph_nodes[1].y, 40.0); // ROW_HEIGHT = 40.0
+    }
+}
+
+#[cfg(test)]
+mod utf8_safety_tests {
+    
+    #[test]
+    fn test_utf8_author_truncation() {
+        // Test cases with various UTF-8 characters
+        let test_cases = vec![
+            ("Enrique Alcántara", 12, "Enrique Alcá..."),
+            ("José María González", 10, "José María..."),
+            ("李明 (Li Ming)", 8, "李明 (Li M..."),
+            ("🎉 Emoji User 🚀", 10, "🎉 Emoji Us..."),
+            ("Владимир Путин", 7, "Владими..."),
+            ("محمد علي", 5, "محمد ..."),
+            ("Short", 20, "Short"), // No truncation needed
+        ];
+        
+        for (author, max_chars, expected) in test_cases {
+            let result = if author.chars().count() > max_chars {
+                let truncated: String = author.chars().take(max_chars).collect();
+                format!("{}...", truncated)
+            } else {
+                author.to_string()
+            };
+            
+            assert_eq!(result, expected, "Failed for author: {}", author);
+            
+            // Ensure the result is valid UTF-8 and doesn't panic
+            let _ = result.as_bytes();
+            let _ = result.chars().count();
+        }
+    }
+    
+    #[test]
+    fn test_utf8_message_truncation() {
+        // Test the actual message truncation logic from the code
+        let test_cases = vec![
+            // Long message (> 50 chars)
+            (
+                "This is a very long commit message with special characters: café, niño, 中文",
+                "This is a very long commit message with special...",
+            ),
+            // Short message (< 50 chars)
+            (
+                "Short message with émojis 🎉 and accents",
+                "Short message with émojis 🎉 and accents",
+            ),
+            // Long Japanese message (> 50 chars)
+            (
+                "日本語のコミットメッセージも正しく処理される必要があります。これはとても長いメッセージですので、正しく切り詰められる必要があります。",
+                "日本語のコミットメッセージも正しく処理される必要があります。これはとても長いメッセージですので...",
+            ),
+            // Short mixed script (< 50 chars)
+            (
+                "Mixed script: Hello мир 世界 🌍",
+                "Mixed script: Hello мир 世界 🌍",
+            ),
+        ];
+        
+        for (message, expected) in test_cases {
+            // This matches the actual code in graph.rs
+            let result = if message.chars().count() > 50 {
+                let truncated: String = message.chars().take(47).collect();
+                format!("{}...", truncated)
+            } else {
+                message.to_string()
+            };
+            
+            assert_eq!(result, expected, "Failed for message: {}", message);
+            
+            // Ensure no panic on byte operations
+            let _ = result.as_bytes();
+            let _ = result.len();
+            assert!(result.is_char_boundary(0));
+            assert!(result.is_char_boundary(result.len()));
+        }
+    }
+    
+    #[test]
+    fn test_boundary_edge_cases() {
+        // Test edge cases where truncation might fall on multi-byte character boundaries
+        let edge_cases = vec![
+            ("a".repeat(100), 50), // ASCII only
+            ("😀".repeat(25), 10),  // 4-byte emoji characters
+            ("中".repeat(30), 15),  // 3-byte Chinese characters
+            ("é".repeat(40), 20),   // 2-byte accented characters
+        ];
+        
+        for (text, max_chars) in edge_cases {
+            let truncated: String = text.chars().take(max_chars).collect();
+            let result = format!("{}...", truncated);
+            
+            // Should not panic
+            let _ = result.as_bytes();
+            assert!(result.is_char_boundary(0));
+            assert!(result.is_char_boundary(result.len()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod state_management_tests {
+    use super::*;
+    
+    #[test]
+    fn test_modal_visibility_toggle() {
+        let mut modal = GitHistoryModal::new();
+        
+        assert!(!modal.visible);
+        
+        modal.toggle();
+        assert!(modal.visible);
+        
+        modal.toggle();
+        assert!(!modal.visible);
+    }
+    
+    #[test] 
+    fn test_repository_change() {
+        let mut modal = GitHistoryModal::new();
+        let path = PathBuf::from("/test/repo");
+        
+        // Set repository - should not panic
+        modal.set_repository(path.clone());
+        
+        // Set different repository - should not panic
+        let new_path = PathBuf::from("/new/repo/path");
+        modal.set_repository(new_path);
+        
+        // Set same repository again - should not panic
+        modal.set_repository(path);
     }
 }

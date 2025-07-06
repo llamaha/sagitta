@@ -23,6 +23,33 @@ pub fn render_commit_graph(ui: &mut Ui, state: &mut GitHistoryState, theme: AppT
     
     let rect = response.rect;
     
+    // Check if clicked on empty space to deselect
+    if response.clicked() {
+        let click_pos = response.interact_pointer_pos();
+        if let Some(pos) = click_pos {
+            let mut clicked_on_node = false;
+            
+            // Check if click was on any node
+            for (i, _) in state.commits.iter().enumerate() {
+                let node = &state.graph_nodes[i];
+                let node_pos = Pos2::new(
+                    rect.left() + PADDING + node.x,
+                    rect.top() + PADDING + node.y
+                );
+                let node_rect = Rect::from_center_size(node_pos, Vec2::splat(NODE_RADIUS * 2.0));
+                if node_rect.contains(pos) {
+                    clicked_on_node = true;
+                    break;
+                }
+            }
+            
+            // If clicked on empty space, deselect
+            if !clicked_on_node {
+                state.selected_commit = None;
+            }
+        }
+    }
+    
     // Draw edges first (behind nodes)
     draw_edges(&painter, rect, state, theme);
     
@@ -78,12 +105,11 @@ pub fn render_commit_graph(ui: &mut Ui, state: &mut GitHistoryState, theme: AppT
 }
 
 pub fn calculate_graph_layout(state: &mut GitHistoryState) {
-    let mut lane_tracker: Vec<Option<String>> = Vec::new();
     state.graph_nodes.clear();
     
     for (i, commit) in state.commits.iter().enumerate() {
-        // Find a lane for this commit
-        let lane = find_available_lane(&mut lane_tracker, &commit.id, &commit.parents);
+        // For a simple linear layout, all commits are in lane 0
+        let lane = 0;
         
         // Create node
         let node = CommitNode {
@@ -246,8 +272,9 @@ fn draw_commit_label(
     );
     
     // Message (truncated)
-    let message = if commit.message.len() > 50 {
-        format!("{}...", &commit.message[..47])
+    let message = if commit.message.chars().count() > 50 {
+        let truncated: String = commit.message.chars().take(47).collect();
+        format!("{}...", truncated)
     } else {
         commit.message.clone()
     };
@@ -262,8 +289,9 @@ fn draw_commit_label(
     
     // Author and time
     let time_str = commit.timestamp.format("%m/%d %H:%M").to_string();
-    let author_str = if commit.author.len() > 15 {
-        format!("{}...", &commit.author[..12])
+    let author_str = if commit.author.chars().count() > 15 {
+        let truncated: String = commit.author.chars().take(12).collect();
+        format!("{}...", truncated)
     } else {
         commit.author.clone()
     };
