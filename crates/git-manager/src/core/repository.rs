@@ -62,36 +62,51 @@ impl GitRepository {
 
     /// Get the current branch name
     pub fn current_branch(&self) -> GitResult<String> {
-        let head = self.repo.head()?;
-        
-        // Check if we're in detached HEAD state
-        if head.is_branch() {
-            // We're on a branch, get the branch name
-            if let Some(branch_name) = head.shorthand() {
-                Ok(branch_name.to_string())
-            } else {
-                // This shouldn't happen for a branch, but handle gracefully
-                let oid = head.target().ok_or_else(|| {
-                    GitError::invalid_state("HEAD has no target")
-                })?;
-                Ok(format!("detached-{oid}"))
+        match self.repo.head() {
+            Ok(head) => {
+                // Check if we're in detached HEAD state
+                if head.is_branch() {
+                    // We're on a branch, get the branch name
+                    if let Some(branch_name) = head.shorthand() {
+                        Ok(branch_name.to_string())
+                    } else {
+                        // This shouldn't happen for a branch, but handle gracefully
+                        let oid = head.target().ok_or_else(|| {
+                            GitError::invalid_state("HEAD has no target")
+                        })?;
+                        Ok(format!("detached-{oid}"))
+                    }
+                } else {
+                    // We're in detached HEAD state
+                    let oid = head.target().ok_or_else(|| {
+                        GitError::invalid_state("HEAD has no target")
+                    })?;
+                    Ok(format!("detached-{oid}"))
+                }
             }
-        } else {
-            // We're in detached HEAD state
-            let oid = head.target().ok_or_else(|| {
-                GitError::invalid_state("HEAD has no target")
-            })?;
-            Ok(format!("detached-{oid}"))
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+                // Repository has no commits yet - return default branch name
+                Ok("main".to_string())
+            }
+            Err(e) => Err(GitError::from(e)),
         }
     }
 
     /// Get the current commit hash
     pub fn current_commit_hash(&self) -> GitResult<String> {
-        let head = self.repo.head()?;
-        let oid = head.target().ok_or_else(|| {
-            GitError::invalid_state("HEAD has no target")
-        })?;
-        Ok(oid.to_string())
+        match self.repo.head() {
+            Ok(head) => {
+                let oid = head.target().ok_or_else(|| {
+                    GitError::invalid_state("HEAD has no target")
+                })?;
+                Ok(oid.to_string())
+            }
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+                // Repository has no commits yet - return a placeholder
+                Ok("0000000000000000000000000000000000000000".to_string())
+            }
+            Err(e) => Err(GitError::from(e)),
+        }
     }
 
     /// List all branches (local and remote)
@@ -145,17 +160,28 @@ impl GitRepository {
         let mut refs = Vec::new();
         
         // Add local branches
-        let local_branches = self.list_branches(Some(BranchType::Local))?;
-        refs.extend(local_branches);
+        match self.list_branches(Some(BranchType::Local)) {
+            Ok(local_branches) => refs.extend(local_branches),
+            Err(e) => {
+                // If we can't list branches (e.g., no commits), return empty list
+                log::debug!("Failed to list local branches: {}", e);
+            }
+        }
         
         // Add remote branches (strip remote prefix for display)
-        let remote_branches = self.list_branches(Some(BranchType::Remote))?;
-        for remote_branch in remote_branches {
-            // Convert "origin/feature" to "feature" for display
-            if let Some(branch_name) = remote_branch.split('/').nth(1) {
-                if !refs.contains(&branch_name.to_string()) {
-                    refs.push(branch_name.to_string());
+        match self.list_branches(Some(BranchType::Remote)) {
+            Ok(remote_branches) => {
+                for remote_branch in remote_branches {
+                    // Convert "origin/feature" to "feature" for display
+                    if let Some(branch_name) = remote_branch.split('/').nth(1) {
+                        if !refs.contains(&branch_name.to_string()) {
+                            refs.push(branch_name.to_string());
+                        }
+                    }
                 }
+            }
+            Err(e) => {
+                log::debug!("Failed to list remote branches: {}", e);
             }
         }
         
@@ -164,6 +190,11 @@ impl GitRepository {
             for tag in tag_refs.iter().flatten() {
                 refs.push(tag.to_string());
             }
+        }
+        
+        // If no refs found (new repository), return at least the default branch
+        if refs.is_empty() {
+            refs.push("main".to_string());
         }
         
         Ok(refs)

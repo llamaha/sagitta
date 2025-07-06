@@ -1108,6 +1108,92 @@ impl RepositoryManager {
         
         Ok(())
     }
+
+    /// List all git references (branches, tags) for a repository
+    pub async fn list_git_references(&self, repo_name: &str) -> Result<Vec<crate::gui::repository::git_controls::GitRef>> {
+        log::info!("[GUI RepoManager] List git references for: {repo_name}");
+        
+        let config_guard = self.config.lock().await;
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        let git_manager = GitManager::new();
+        let refs = git_manager.list_all_references(&repo_config.local_path)?;
+        
+        // Get current repository info to determine current branch
+        let repo_info = git_manager.get_repository_info(&repo_config.local_path)?;
+        
+        // Convert to GitRef format
+        let mut git_refs = Vec::new();
+        
+        for ref_name in refs {
+            let ref_type = if ref_name.starts_with("refs/heads/") {
+                crate::gui::repository::git_controls::GitRefType::Branch
+            } else if ref_name.starts_with("refs/tags/") {
+                crate::gui::repository::git_controls::GitRefType::Tag
+            } else {
+                crate::gui::repository::git_controls::GitRefType::Commit
+            };
+            
+            // Get just the name without the refs/ prefix
+            let clean_name = ref_name
+                .strip_prefix("refs/heads/")
+                .or_else(|| ref_name.strip_prefix("refs/tags/"))
+                .unwrap_or(&ref_name)
+                .to_string();
+            
+            // Use the current commit as hash (simplified for now)
+            let hash = repo_info.current_commit.clone();
+            
+            // Determine if this is the current ref
+            let is_current = match ref_type {
+                crate::gui::repository::git_controls::GitRefType::Branch => {
+                    clean_name == repo_info.current_branch
+                }
+                _ => false,
+            };
+            
+            git_refs.push(crate::gui::repository::git_controls::GitRef {
+                name: clean_name,
+                ref_type,
+                hash,
+                is_current,
+            });
+        }
+        
+        Ok(git_refs)
+    }
+
+    /// Get the current git reference for a repository
+    pub async fn get_current_git_ref(&self, repo_name: &str) -> Result<Option<crate::gui::repository::git_controls::GitRef>> {
+        log::info!("[GUI RepoManager] Get current git ref for: {repo_name}");
+        
+        let config_guard = self.config.lock().await;
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        let git_manager = GitManager::new();
+        let repo_info = git_manager.get_repository_info(&repo_config.local_path)?;
+        
+        Ok(Some(crate::gui::repository::git_controls::GitRef {
+            name: repo_info.current_branch,
+            ref_type: crate::gui::repository::git_controls::GitRefType::Branch,
+            hash: repo_info.current_commit,
+            is_current: true,
+        }))
+    }
+
+    /// Get the local path for a repository
+    pub async fn get_repository_path(&self, repo_name: &str) -> Result<std::path::PathBuf> {
+        let config_guard = self.config.lock().await;
+        let repo_config = config_guard.repositories.iter()
+            .find(|r| r.name == repo_name)
+            .ok_or_else(|| anyhow!("Repository '{}' not found", repo_name))?;
+        
+        Ok(repo_config.local_path.clone())
+    }
 }
 
 #[cfg(test)]

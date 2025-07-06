@@ -26,6 +26,10 @@ pub struct SagittaCodeConfig {
     /// Conversation management configuration
     #[serde(default)]
     pub conversation: ConversationConfig,
+    
+    /// Auto-sync configuration (file watching, auto-commit, etc.)
+    #[serde(default)]
+    pub auto_sync: AutoSyncConfig,
 }
 
 
@@ -442,6 +446,114 @@ impl Default for ConversationConfig {
     }
 }
 
+/// Configuration for auto-sync features (file watching, auto-commit, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoSyncConfig {
+    /// Enable auto-sync features
+    #[serde(default = "default_auto_sync_enabled")]
+    pub enabled: bool,
+    
+    /// File watcher configuration
+    #[serde(default)]
+    pub file_watcher: FileWatcherConfig,
+    
+    /// Auto-commit configuration
+    #[serde(default)]
+    pub auto_commit: AutoCommitConfig,
+    
+    /// Auto-sync after commit
+    #[serde(default = "default_sync_after_commit")]
+    pub sync_after_commit: bool,
+    
+    /// Auto-sync when switching repositories
+    #[serde(default = "default_sync_on_repo_switch")]
+    pub sync_on_repo_switch: bool,
+    
+    /// Auto-sync when adding new repositories
+    #[serde(default = "default_sync_on_repo_add")]
+    pub sync_on_repo_add: bool,
+}
+
+impl Default for AutoSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auto_sync_enabled(),
+            file_watcher: FileWatcherConfig::default(),
+            auto_commit: AutoCommitConfig::default(),
+            sync_after_commit: default_sync_after_commit(),
+            sync_on_repo_switch: default_sync_on_repo_switch(),
+            sync_on_repo_add: default_sync_on_repo_add(),
+        }
+    }
+}
+
+/// Configuration for file watching
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileWatcherConfig {
+    /// Enable file watching
+    #[serde(default = "default_file_watcher_enabled")]
+    pub enabled: bool,
+    
+    /// Debounce interval in milliseconds
+    #[serde(default = "default_file_watcher_debounce_ms")]
+    pub debounce_ms: u64,
+    
+    /// Patterns to exclude from watching
+    #[serde(default = "default_file_watcher_exclude_patterns")]
+    pub exclude_patterns: Vec<String>,
+    
+    /// Maximum number of events to buffer
+    #[serde(default = "default_file_watcher_max_buffer_size")]
+    pub max_buffer_size: usize,
+}
+
+impl Default for FileWatcherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_file_watcher_enabled(),
+            debounce_ms: default_file_watcher_debounce_ms(),
+            exclude_patterns: default_file_watcher_exclude_patterns(),
+            max_buffer_size: default_file_watcher_max_buffer_size(),
+        }
+    }
+}
+
+/// Configuration for auto-commit
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoCommitConfig {
+    /// Enable auto-commit
+    #[serde(default = "default_auto_commit_enabled")]
+    pub enabled: bool,
+    
+    /// Custom commit message template
+    #[serde(default = "default_auto_commit_template")]
+    pub commit_message_template: String,
+    
+    /// Attribution line to add to commit messages
+    #[serde(default = "default_auto_commit_attribution")]
+    pub attribution: String,
+    
+    /// Whether to skip pre-commit hooks
+    #[serde(default = "default_auto_commit_skip_hooks")]
+    pub skip_hooks: bool,
+    
+    /// Minimum time between auto-commits in seconds
+    #[serde(default = "default_auto_commit_cooldown_seconds")]
+    pub cooldown_seconds: u64,
+}
+
+impl Default for AutoCommitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auto_commit_enabled(),
+            commit_message_template: default_auto_commit_template(),
+            attribution: default_auto_commit_attribution(),
+            skip_hooks: default_auto_commit_skip_hooks(),
+            cooldown_seconds: default_auto_commit_cooldown_seconds(),
+        }
+    }
+}
+
 /// Configuration for project workspaces
 fn default_dark_mode() -> bool {
     true
@@ -553,6 +665,79 @@ fn default_auto_create_claude_md() -> bool {
 
 fn default_claude_md_template() -> String {
     include_str!("../../templates/CLAUDE.md").to_string()
+}
+
+// Auto-sync configuration defaults
+fn default_auto_sync_enabled() -> bool {
+    true
+}
+
+fn default_sync_after_commit() -> bool {
+    true
+}
+
+fn default_sync_on_repo_switch() -> bool {
+    true
+}
+
+fn default_sync_on_repo_add() -> bool {
+    true
+}
+
+// File watcher configuration defaults
+fn default_file_watcher_enabled() -> bool {
+    true
+}
+
+fn default_file_watcher_debounce_ms() -> u64 {
+    2000 // 2 seconds like aider
+}
+
+fn default_file_watcher_exclude_patterns() -> Vec<String> {
+    vec![
+        ".git/".to_string(),
+        "target/".to_string(),
+        "node_modules/".to_string(),
+        ".cache/".to_string(),
+        "build/".to_string(),
+        "dist/".to_string(),
+        ".next/".to_string(),
+        "__pycache__/".to_string(),
+        "*.tmp".to_string(),
+        "*.temp".to_string(),
+        "*.swp".to_string(),
+        "*.swo".to_string(),
+        "*~".to_string(),
+        ".DS_Store".to_string(),
+        "Thumbs.db".to_string(),
+    ]
+}
+
+fn default_file_watcher_max_buffer_size() -> usize {
+    1000
+}
+
+// Auto-commit configuration defaults
+fn default_auto_commit_enabled() -> bool {
+    true
+}
+
+fn default_auto_commit_template() -> String {
+    "Auto-commit: {summary}
+
+{details}".to_string()
+}
+
+fn default_auto_commit_attribution() -> String {
+    "Co-authored-by: Sagitta AI <noreply@sagitta.ai>".to_string()
+}
+
+fn default_auto_commit_skip_hooks() -> bool {
+    false
+}
+
+fn default_auto_commit_cooldown_seconds() -> u64 {
+    30 // 30 seconds minimum between auto-commits
 }
 
 #[cfg(test)]

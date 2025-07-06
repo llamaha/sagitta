@@ -246,6 +246,7 @@ fn create_project(
     let project_path = state.project_form.path.clone();
     let language = state.project_form.language.clone();
     let initialize_git = state.project_form.initialize_git;
+    let description = state.project_form.description.clone();
     
     if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
         let repo_manager_clone = repo_manager.clone();
@@ -309,6 +310,63 @@ fn create_project(
                                 match git_init_result {
                                     Ok(git_output) if git_output.status.success() => {
                                         log::info!("Git repository initialized at {full_path}");
+                                        
+                                        // Create an initial commit to avoid "unborn branch" state
+                                        let readme_content = format!("# {project_name}\n\n{}", 
+                                            if !description.is_empty() {
+                                                &description
+                                            } else {
+                                                "A new project created with Sagitta Code."
+                                            }
+                                        );
+                                        
+                                        // Create README.md
+                                        if let Err(e) = tokio::fs::write(format!("{full_path}/README.md"), &readme_content).await {
+                                            log::warn!("Failed to create README.md: {e}");
+                                        }
+                                        
+                                        // Create .gitignore with common patterns
+                                        let gitignore_content = match language.as_str() {
+                                            "rust" => "target/\nCargo.lock\n*.rs.bk\n",
+                                            "python" => "venv/\n__pycache__/\n*.py[cod]\n.env\n",
+                                            "javascript" | "typescript" => "node_modules/\nnpm-debug.log*\n.env\ndist/\n",
+                                            "go" => "*.exe\n*.dll\n*.so\n*.dylib\n",
+                                            _ => "*.log\n*.tmp\n.DS_Store\n",
+                                        };
+                                        
+                                        if let Err(e) = tokio::fs::write(format!("{full_path}/.gitignore"), gitignore_content).await {
+                                            log::warn!("Failed to create .gitignore: {e}");
+                                        }
+                                        
+                                        // Create initial commit
+                                        let commit_commands = format!(
+                                            "cd '{full_path}' && git add . && git commit -m \"Initial commit\n\nProject created with Sagitta Code\""
+                                        );
+                                        
+                                        let commit_result = if cfg!(windows) {
+                                            tokio::process::Command::new("cmd")
+                                                .args(["/C", &commit_commands.replace('\'', "\"")])
+                                                .output()
+                                                .await
+                                        } else {
+                                            tokio::process::Command::new("sh")
+                                                .args(["-c", &commit_commands])
+                                                .output()
+                                                .await
+                                        };
+                                        
+                                        match commit_result {
+                                            Ok(output) if output.status.success() => {
+                                                log::info!("Initial commit created for {full_path}");
+                                            }
+                                            Ok(output) => {
+                                                let error = String::from_utf8_lossy(&output.stderr);
+                                                log::warn!("Failed to create initial commit: {error}");
+                                            }
+                                            Err(e) => {
+                                                log::warn!("Failed to execute commit command: {e}");
+                                            }
+                                        }
                                     }
                                     Ok(git_output) => {
                                         let error = String::from_utf8_lossy(&git_output.stderr);

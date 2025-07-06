@@ -31,6 +31,8 @@ pub fn render(app: &mut SagittaCodeApp, ctx: &Context) {
     // Process app events
     app.process_app_events();
     
+    // Update git controls repository context
+    update_git_controls_repository_context(app);
     
     // Refresh conversation clusters periodically (every 5 minutes)
     refresh_clusters_periodically(app);
@@ -1029,6 +1031,8 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 &app.state.available_repositories,
                 &mut app.state.pending_repository_context_change,
                 &mut repository_refresh_requested,
+                // Git controls
+                &mut app.git_controls,
                 // Loop control parameters
                 app.state.is_in_loop,
                 &mut app.state.loop_break_requested,
@@ -1246,6 +1250,15 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
                 });
                 
                 log::info!("Repository context changed to: {new_repo:?}");
+                
+                // Trigger repository switched event if a repository was selected
+                if let Some(repo_name) = &repo_context {
+                    if !repo_name.is_empty() {
+                        if let Err(e) = app.app_event_sender.send(super::events::AppEvent::RepositorySwitched(repo_name.clone())) {
+                            log::error!("Failed to send RepositorySwitched event: {e}");
+                        }
+                    }
+                }
                 }
             }
             
@@ -1264,6 +1277,38 @@ fn render_main_ui(app: &mut SagittaCodeApp, ctx: &Context) {
             // Force UI to use the full available width and reset text wrap settings
             ui.set_min_width(ui.available_width());
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
+                // Show sync status warning if repository is out of sync
+                if let Some(sync_status) = app.git_controls.get_current_sync_status() {
+                    if sync_status.is_out_of_sync {
+                        let current_theme = app.state.current_theme;
+                        let warning_frame = Frame::default()
+                            .fill(current_theme.warning_color().gamma_multiply(0.1))
+                            .stroke(egui::Stroke::new(1.0, current_theme.warning_color()))
+                            .inner_margin(8.0)
+                            .corner_radius(4.0);
+                            
+                        warning_frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("⚠").color(current_theme.warning_color()).size(16.0));
+                                ui.label(egui::RichText::new("Repository is out of sync").color(current_theme.warning_color()));
+                                ui.label(egui::RichText::new("- changes are not indexed. Run sync to update.").color(current_theme.text_color()));
+                                
+                                if ui.button(egui::RichText::new("Sync Now").color(current_theme.button_text_color()))
+                                    .on_hover_text("Sync repository to update indexed content")
+                                    .clicked() {
+                                    if let Some(repo_name) = &app.state.current_repository_context {
+                                        app.git_controls.send_command(crate::gui::repository::git_controls::GitCommand::ForceSync { 
+                                            repo_name: repo_name.clone() 
+                                        });
+                                    }
+                                }
+                            });
+                        });
+                        
+                        ui.add_space(8.0);
+                    }
+                }
+                
                 // Use the modern streaming chat view with all items (messages + tool cards)
                 let items = app.chat_manager.get_all_items();
                 
@@ -1467,6 +1512,50 @@ fn render_claude_md_modal(app: &mut SagittaCodeApp, ctx: &Context) {
                 }
             },
         }
+    }
+}
+
+/// Update git controls repository context if it has changed
+fn update_git_controls_repository_context(app: &mut SagittaCodeApp) {
+    use crate::gui::repository::git_controls::GitCommand;
+    
+    let current_git_repo = app.git_controls.state().current_repository.clone();
+    let current_app_repo = app.state.current_repository_context.clone();
+    
+    if current_git_repo != current_app_repo {
+        // Send a command to update the repository context
+        if let Some(repo_name) = current_app_repo.clone() {
+            if !repo_name.is_empty() && !repo_name.starts_with("__") {
+                app.git_controls.send_command(GitCommand::UpdateRepository { 
+                    repo_name: Some(repo_name) 
+                });
+            }
+        } else {
+            app.git_controls.send_command(GitCommand::UpdateRepository { 
+                repo_name: None 
+            });
+        }
+    }
+    
+    // Periodically update sync statuses
+    static LAST_SYNC_UPDATE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let should_update = {
+        let mut last_update = LAST_SYNC_UPDATE.lock().unwrap();
+        match *last_update {
+            None => {
+                *last_update = Some(std::time::Instant::now());
+                true
+            }
+            Some(time) if time.elapsed() > std::time::Duration::from_secs(5) => {
+                *last_update = Some(std::time::Instant::now());
+                true
+            }
+            _ => false
+        }
+    };
+    
+    if should_update {
+        app.git_controls.send_command(GitCommand::UpdateSyncStatuses);
     }
 }
 

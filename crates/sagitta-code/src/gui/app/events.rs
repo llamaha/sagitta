@@ -28,6 +28,8 @@ pub enum AppEvent {
     RepositoryListUpdated(Vec<String>),
     RefreshRepositoryList,
     UpdateGitHistoryPath(std::path::PathBuf),
+    RepositoryAdded(String),
+    RepositorySwitched(String),
     CancelTool(ToolRunId),
     RenameConversation {
         conversation_id: uuid::Uuid,
@@ -391,6 +393,14 @@ pub fn process_app_events(app: &mut SagittaCodeApp) {
             AppEvent::CreateNewConversation => {
                 log::info!("Received CreateNewConversation event");
                 handle_create_new_conversation(app);
+            },
+            AppEvent::RepositoryAdded(repo_name) => {
+                log::info!("Received RepositoryAdded event for repository: {repo_name}");
+                handle_repository_added(app, repo_name);
+            },
+            AppEvent::RepositorySwitched(repo_name) => {
+                log::info!("Received RepositorySwitched event for repository: {repo_name}");
+                handle_repository_switched(app, repo_name);
             },
         }
     }
@@ -1637,6 +1647,63 @@ fn handle_apply_claude_md_to_all_repos(app: &mut SagittaCodeApp) {
             }
         }
     });
+}
+
+/// Handle repository added event
+fn handle_repository_added(app: &mut SagittaCodeApp, repo_name: String) {
+    // Check if auto-sync is enabled for new repositories
+    if let Some(sync_orchestrator) = &app.sync_orchestrator {
+        let config = app.config.clone();
+        let sync_orchestrator = sync_orchestrator.clone();
+        let repo_manager = app.repo_panel.get_repo_manager();
+        
+        tokio::spawn(async move {
+            let config_guard = config.lock().await;
+            if config_guard.auto_sync.sync_on_repo_add {
+                log::info!("Auto-sync enabled for repository add, triggering sync for: {repo_name}");
+                
+                // Get repository path from repository manager
+                let repo_manager_guard = repo_manager.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
+                        let repo_path = std::path::PathBuf::from(&repo_config.local_path);
+                        // Use switch_repository for add as well since add_repository requires mutable reference
+                        if let Err(e) = sync_orchestrator.switch_repository(&repo_path).await {
+                            log::error!("Failed to trigger sync for newly added repository {}: {}", repo_name, e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Handle repository switched event
+fn handle_repository_switched(app: &mut SagittaCodeApp, repo_name: String) {
+    // Check if auto-sync is enabled for repository switching
+    if let Some(sync_orchestrator) = &app.sync_orchestrator {
+        let config = app.config.clone();
+        let sync_orchestrator = sync_orchestrator.clone();
+        let repo_manager = app.repo_panel.get_repo_manager();
+        
+        tokio::spawn(async move {
+            let config_guard = config.lock().await;
+            if config_guard.auto_sync.sync_on_repo_switch {
+                log::info!("Auto-sync enabled for repository switch, triggering sync for: {repo_name}");
+                
+                // Get repository path from repository manager
+                let repo_manager_guard = repo_manager.lock().await;
+                if let Ok(repositories) = repo_manager_guard.list_repositories().await {
+                    if let Some(repo_config) = repositories.iter().find(|r| r.name == repo_name) {
+                        let repo_path = std::path::PathBuf::from(&repo_config.local_path);
+                        if let Err(e) = sync_orchestrator.switch_repository(&repo_path).await {
+                            log::error!("Failed to trigger sync for switched repository {}: {}", repo_name, e);
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

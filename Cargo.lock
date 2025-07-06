@@ -5292,6 +5292,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mockall",
+ "notify",
  "once_cell",
  "petgraph",
  "qdrant-client",

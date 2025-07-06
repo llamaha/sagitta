@@ -63,6 +63,28 @@ impl FastModelProvider {
     async fn get_client(&self) -> Option<&Arc<dyn LlmClient>> {
         self.client.as_ref()
     }
+
+    /// Generate simple text response from a prompt (for commit messages, etc.)
+    pub async fn generate_simple_text(&self, prompt: &str) -> Result<String> {
+        if let Some(client) = self.get_client().await {
+            let prompt_messages = vec![Message {
+                id: uuid::Uuid::new_v4(),
+                role: crate::llm::client::Role::User,
+                parts: vec![crate::llm::client::MessagePart::Text { text: prompt.to_string() }],
+                metadata: Default::default(),
+            }];
+            
+            // Generate with fast model
+            let response = client.generate(&prompt_messages, &[]).await
+                .map_err(|e| anyhow::anyhow!("Failed to generate text: {}", e))?;
+            
+            // Extract text from response
+            let text = extract_text_from_response(&response);
+            Ok(text.trim().to_string())
+        } else {
+            Err(anyhow::anyhow!("Fast model not available"))
+        }
+    }
 }
 
 #[async_trait]
