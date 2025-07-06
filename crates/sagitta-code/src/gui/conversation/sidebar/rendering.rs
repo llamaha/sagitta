@@ -145,7 +145,7 @@ impl ConversationSidebar {
     }
 
     /// Render the sidebar header
-    fn render_header(&mut self, ui: &mut Ui, _app_state: &mut AppState, _theme: &AppTheme) {
+    fn render_header(&mut self, ui: &mut Ui, _app_state: &mut AppState, theme: &AppTheme) {
         let screen_size = ui.ctx().screen_rect().size();
         let is_small_screen = self.config.responsive.enabled && 
             screen_size.x <= self.config.responsive.small_screen_breakpoint;
