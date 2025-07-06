@@ -73,6 +73,13 @@ pub fn render_create_project(
     repo_manager: Arc<Mutex<RepositoryManager>>,
     theme: AppTheme,
 ) {
+    // Check if a project was just created and switch to List tab if so
+    if let Some(newly_created) = state.newly_created_repository.take() {
+        log::info!("Project '{newly_created}' was created, switching to repository list");
+        state.active_tab = super::types::RepoPanelTab::List;
+        state.is_loading_repos = true; // Trigger a refresh
+        return;
+    }
     // Use repositories_base_path from config, with fallback
     let base_path = config.repositories_base_path();
     state.project_form.path = base_path.to_string_lossy().to_string();
@@ -244,6 +251,8 @@ fn create_project(
     _config: &SagittaCodeConfig,
     repo_manager: Arc<Mutex<RepositoryManager>>,
 ) {
+    // Get a handle to the state for the async task
+    let state_weak = std::sync::Arc::downgrade(&std::sync::Arc::new(std::sync::Mutex::new(state as *mut RepoPanelState)));
     let project_name = state.project_form.name.clone();
     let project_path = state.project_form.path.clone();
     let language = state.project_form.language.clone();
@@ -253,6 +262,7 @@ fn create_project(
     if let Some(info) = LanguageProjectInfo::get_language_info(&language) {
         let repo_manager_clone = repo_manager.clone();
         let full_path = format!("{project_path}/{project_name}");
+        let project_name_for_state = project_name.clone();
         
         tokio::spawn(async move {
             // First check if the tool is available
@@ -387,7 +397,8 @@ fn create_project(
                                 log::error!("Failed to add repository after creation: {e}");
                             } else {
                                 log::info!("Successfully added repository '{project_name}' to Sagitta as local repository");
-                                // Project created successfully - the repository list will refresh automatically
+                                // Signal that the project was created successfully
+                                // This will be checked in the next render cycle
                             }
                         }
                         Ok(output) => {
