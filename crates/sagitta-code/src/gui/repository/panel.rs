@@ -15,6 +15,7 @@ use super::branches::render_branch_management;
 use super::create_project::render_create_project;
 use crate::config::types::SagittaCodeConfig;
 use crate::agent::Agent;
+use crate::services::SyncOrchestrator;
 
 /// Repository management panel
 pub struct RepoPanel {
