@@ -171,11 +171,14 @@ impl SyncOrchestrator {
             let mut statuses = self.sync_statuses.write().await;
             let status = statuses.entry(commit_result.repo_path.clone()).or_insert_with(|| {
                 RepositorySyncStatus {
+                    sync_state: SyncState::NotSynced,
                     last_sync: None,
                     last_synced_commit: None,
                     is_syncing: false,
                     is_out_of_sync: true,
                     last_sync_error: None,
+                    sync_error_type: None,
+                    is_local_only: false,
                 }
             });
             status.is_out_of_sync = true;
