@@ -86,26 +86,27 @@ impl RepoPanel {
                             // Try to find sync status by matching local path
                             if let Some(local_path) = &enhanced_repo.local_path {
                                 if let Some(sync_status) = sync_statuses.get(local_path) {
-                                // Map SyncOrchestrator's SyncState to the GUI's SyncState
-                                use crate::services::sync_orchestrator::SyncState as OrchestratorSyncState;
-                                use super::types::SyncState as GuiSyncState;
-                                
-                                enhanced_repo.sync_status.state = match sync_status.sync_state {
-                                    OrchestratorSyncState::FullySynced => GuiSyncState::UpToDate,
-                                    OrchestratorSyncState::LocalOnly => GuiSyncState::LocalOnly,
-                                    OrchestratorSyncState::LocalIndexedRemoteFailed => GuiSyncState::LocalIndexedRemoteFailed,
-                                    OrchestratorSyncState::Syncing => GuiSyncState::Syncing,
-                                    OrchestratorSyncState::Failed => GuiSyncState::Failed,
-                                    OrchestratorSyncState::NotSynced => {
-                                        if sync_status.is_out_of_sync {
-                                            GuiSyncState::NeedsSync
-                                        } else {
-                                            GuiSyncState::NeverSynced
+                                    // Map SyncOrchestrator's SyncState to the GUI's SyncState
+                                    use crate::services::sync_orchestrator::SyncState as OrchestratorSyncState;
+                                    use super::types::SyncState as GuiSyncState;
+                                    
+                                    enhanced_repo.sync_status.state = match sync_status.sync_state {
+                                        OrchestratorSyncState::FullySynced => GuiSyncState::UpToDate,
+                                        OrchestratorSyncState::LocalOnly => GuiSyncState::LocalOnly,
+                                        OrchestratorSyncState::LocalIndexedRemoteFailed => GuiSyncState::LocalIndexedRemoteFailed,
+                                        OrchestratorSyncState::Syncing => GuiSyncState::Syncing,
+                                        OrchestratorSyncState::Failed => GuiSyncState::Failed,
+                                        OrchestratorSyncState::NotSynced => {
+                                            if sync_status.is_out_of_sync {
+                                                GuiSyncState::NeedsSync
+                                            } else {
+                                                GuiSyncState::NeverSynced
+                                            }
                                         }
-                                    }
-                                };
-                                
-                                log::debug!("Updated sync status for {}: {:?}", enhanced_repo.name, enhanced_repo.sync_status.state);
+                                    };
+                                    
+                                    log::debug!("Updated sync status for {}: {:?}", enhanced_repo.name, enhanced_repo.sync_status.state);
+                                }
                             }
                         }
                     }

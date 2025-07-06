@@ -378,12 +378,13 @@ fn create_project(
                                 }
                             }
                             
-                            // Add to repository manager
+                            // Add to repository manager as a local repository
                             let manager = repo_manager_clone.lock().await;
-                            if let Err(e) = manager.add_repository(&project_name, &full_path, None, None).await {
+                            // For local projects, we need to add them with local_path instead of URL
+                            if let Err(e) = manager.add_local_repository(&project_name, &full_path).await {
                                 log::error!("Failed to add repository after creation: {e}");
                             } else {
-                                log::info!("Successfully added repository '{project_name}' to Sagitta");
+                                log::info!("Successfully added repository '{project_name}' to Sagitta as local repository");
                                 // Project created successfully - the repository list will refresh automatically
                             }
                         }
