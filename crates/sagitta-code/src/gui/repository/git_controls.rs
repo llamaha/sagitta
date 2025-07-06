@@ -316,18 +316,61 @@ impl GitControls {
 
     /// Render sync status indicator
     fn render_sync_status_indicator(&self, ui: &mut Ui, sync_status: &RepositorySyncStatus, theme: AppTheme) {
-        let (icon, color, tooltip) = if sync_status.is_syncing {
-            ("🔄", theme.accent_color(), "Repository is currently syncing")
-        } else if sync_status.is_out_of_sync {
-            ("⚠", theme.warning_color(), "Repository is out of sync - changes not indexed")
-        } else if sync_status.last_sync_error.is_some() {
-            ("❌", theme.error_color(), "Last sync failed")
-        } else {
-            ("✅", theme.success_color(), "Repository is up to date")
+        use crate::services::SyncState;
+        
+        let (icon, color, tooltip) = match sync_status.sync_state {
+            SyncState::FullySynced => {
+                ("✅", theme.success_color(), "Fully synced with remote repository")
+            }
+            SyncState::LocalOnly => {
+                ("📁", theme.info_color(), "Local repository (no remote configured)")
+            }
+            SyncState::LocalIndexedRemoteFailed => {
+                let error_detail = match &sync_status.sync_error_type {
+                    Some(crate::services::SyncErrorType::AuthenticationFailed) => {
+                        "Authentication failed - check your SSH keys or credentials"
+                    }
+                    Some(crate::services::SyncErrorType::NetworkError) => {
+                        "Network error - check your internet connection"
+                    }
+                    _ => "Remote sync failed, but local indexing succeeded"
+                };
+                ("📡", theme.warning_color(), error_detail)
+            }
+            SyncState::Syncing => {
+                ("⏳", theme.accent_color(), "Repository is currently syncing...")
+            }
+            SyncState::Failed => {
+                let error_msg = sync_status.last_sync_error.as_deref().unwrap_or("Sync failed");
+                ("❌", theme.error_color(), error_msg)
+            }
+            SyncState::NotSynced => {
+                if sync_status.is_out_of_sync {
+                    ("🔄", theme.warning_color(), "Repository has changes that need syncing")
+                } else {
+                    ("❓", theme.muted_color(), "Repository not yet synced")
+                }
+            }
         };
 
-        ui.colored_label(color, icon)
-            .on_hover_text(tooltip);
+        let mut response = ui.colored_label(color, icon);
+        
+        // Show detailed tooltip
+        response = response.on_hover_ui(|ui| {
+            ui.label(tooltip);
+            
+            if let Some(error) = &sync_status.last_sync_error {
+                ui.separator();
+                ui.colored_label(theme.error_color(), format!("Error: {}", error));
+            }
+            
+            if sync_status.is_local_only {
+                ui.separator();
+                ui.label("💡 This is a local-only repository. To sync with a remote:");
+                ui.label("1. Add a remote: git remote add origin <url>");
+                ui.label("2. Push your changes: git push -u origin main");
+            }
+        });
     }
 
     /// Render reference selector

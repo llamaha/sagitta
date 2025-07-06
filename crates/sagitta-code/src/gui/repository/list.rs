@@ -71,10 +71,14 @@ fn show_repo_status_tooltip(ui: &mut Ui, enhanced_repo: &EnhancedRepoInfo) {
             })
             .unwrap_or_else(|| "unknown".to_string()),
         match enhanced_repo.sync_status.state {
-            SyncState::UpToDate => "up-to-date",
-            SyncState::NeedsSync => "needs sync",
-            SyncState::NeverSynced => "never synced",
-            SyncState::Unknown => "unknown",
+            SyncState::UpToDate => "✅ Fully synced with remote",
+            SyncState::NeedsSync => "🔄 Needs sync with remote",
+            SyncState::NeverSynced => "❓ Never synced",
+            SyncState::LocalOnly => "📁 Local repository (no remote)",
+            SyncState::LocalIndexedRemoteFailed => "📡 Indexed locally, remote sync failed",
+            SyncState::Syncing => "⏳ Currently syncing",
+            SyncState::Failed => "❌ Sync failed",
+            SyncState::Unknown => "⚠️ Unknown status",
         },
         enhanced_repo.total_files
             .map(|count| count.to_string())
