@@ -1504,6 +1504,7 @@ pub async fn add_orphaned_repository(
         indexed_languages: None,
         added_as_local_path: true, // Mark as added from local path
         target_ref: None,
+        dependencies: Vec::new(),
     };
     
     // Check if repository with same name already exists

@@ -10,6 +10,7 @@ use crate::mcp::{
         ShellExecuteParams,
         ReadFileParams, WriteFileParams,
         RepositoryGitHistoryParams,
+        RepositoryDependencyParams, RepositoryListDependenciesParams,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
@@ -19,7 +20,9 @@ use crate::handlers::{ping::handle_ping, query::handle_query, repository::*,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
                       read_file::handle_read_file, write_file::handle_write_file,
-                      git_history::handle_repository_git_history}; // Import actual handlers
+                      git_history::handle_repository_git_history,
+                      dependency::{handle_repository_add_dependency, handle_repository_remove_dependency, 
+                                   handle_repository_list_dependencies}}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -176,6 +179,39 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
             match handle_repository_git_history(history_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
+            }
+        }
+        "repository_add_dependency" => {
+            let dep_params: RepositoryDependencyParams = deserialize_value(arguments, tool_name)?;
+            match handle_repository_add_dependency(dep_params, config.clone()).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e.to_string(),
+                    data: None,
+                }),
+            }
+        }
+        "repository_remove_dependency" => {
+            let dep_params: RepositoryDependencyParams = deserialize_value(arguments, tool_name)?;
+            match handle_repository_remove_dependency(dep_params, config.clone()).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e.to_string(),
+                    data: None,
+                }),
+            }
+        }
+        "repository_list_dependencies" => {
+            let list_params: RepositoryListDependenciesParams = deserialize_value(arguments, tool_name)?;
+            match handle_repository_list_dependencies(list_params, config.clone()).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(ErrorObject {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e.to_string(),
+                    data: None,
+                }),
             }
         }
         _ => Err(ErrorObject {
@@ -655,6 +691,70 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 open_world_hint: Some(false),
             }),
         },
+        
+        // --- Repository Add Dependency ---
+        ToolDefinition {
+            name: "repository_add_dependency".to_string(),
+            description: Some("Adds or updates a dependency for a repository. Dependencies are other repositories in the system that the main repository depends on.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "The main repository to add the dependency to." },
+                    "dependencyName": { "type": "string", "description": "The name of the dependency repository (must already exist in the system)." },
+                    "targetRef": { "type": "string", "description": "Optional specific ref (branch/tag/commit) of the dependency to use." },
+                    "purpose": { "type": "string", "description": "Optional description of why this dependency is needed." }
+                },
+                "required": ["repositoryName", "dependencyName"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Add Repository Dependency".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Repository Remove Dependency ---
+        ToolDefinition {
+            name: "repository_remove_dependency".to_string(),
+            description: Some("Removes a dependency from a repository.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "The main repository to remove the dependency from." },
+                    "dependencyName": { "type": "string", "description": "The name of the dependency repository to remove." }
+                },
+                "required": ["repositoryName", "dependencyName"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Remove Repository Dependency".to_string()),
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
+        
+        // --- Repository List Dependencies ---
+        ToolDefinition {
+            name: "repository_list_dependencies".to_string(),
+            description: Some("Lists all dependencies for a repository, showing their target refs and availability status.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "The repository to list dependencies for." }
+                },
+                "required": ["repositoryName"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("List Repository Dependencies".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
     ]
 }
 
@@ -756,6 +856,9 @@ mod tests {
             "repository_switch_branch",
             "repository_list_branches",
             "repository_git_history",
+            "repository_add_dependency",
+            "repository_remove_dependency",
+            "repository_list_dependencies",
             "todo_read",
             "todo_write",
             "edit_file",

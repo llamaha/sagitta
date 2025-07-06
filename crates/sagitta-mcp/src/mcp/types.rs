@@ -893,4 +893,68 @@ pub struct RepositoryGitHistoryResult {
     pub total_commits: u64,
     /// Whether the history was truncated due to max_commits
     pub truncated: bool,
+}
+
+// Dependency management types
+
+/// Parameters for adding/removing repository dependencies
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDependencyParams {
+    /// The main repository to add/remove dependency from
+    pub repository_name: String,
+    /// The dependency repository name
+    pub dependency_name: String,
+    /// Optional specific ref (branch/tag/commit) for the dependency
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_ref: Option<String>,
+    /// Optional description of why this dependency is needed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+}
+
+/// Result of dependency operations
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDependencyResult {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Status message
+    pub message: String,
+}
+
+/// Parameters for listing repository dependencies
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryListDependenciesParams {
+    /// The repository to list dependencies for
+    pub repository_name: String,
+}
+
+/// Information about a single dependency
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyInfo {
+    /// Name of the dependency repository
+    pub repository_name: String,
+    /// Target ref specified for this dependency
+    pub target_ref: Option<String>,
+    /// Purpose/description of the dependency
+    pub purpose: Option<String>,
+    /// Whether the dependency repository is available in the system
+    pub is_available: bool,
+    /// Local path of the dependency repository (if available)
+    pub local_path: Option<String>,
+    /// Current ref of the dependency repository (if available)
+    pub current_ref: Option<String>,
+}
+
+/// Result of listing dependencies
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryListDependenciesResult {
+    /// The repository name
+    pub repository_name: String,
+    /// List of dependencies
+    pub dependencies: Vec<DependencyInfo>,
 } 

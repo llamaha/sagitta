@@ -627,6 +627,7 @@ where
         ssh_key_passphrase: params.ssh_passphrase_opt.map(String::from),
         added_as_local_path: params.local_path_opt.is_some(),
         target_ref: params.target_ref_opt.map(|s| s.to_string()),
+        dependencies: Vec::new(),
     })
 }
 

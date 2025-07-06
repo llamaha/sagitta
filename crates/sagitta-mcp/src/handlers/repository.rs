@@ -1188,6 +1188,7 @@ mod tests {
             indexed_languages: None,
             added_as_local_path: false,
             target_ref: None,
+            dependencies: Vec::new(),
         }
     }
 
