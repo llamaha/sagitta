@@ -513,8 +513,41 @@ where
             )));
         }
     } else {
-        // No target_ref specified, use the initially cloned/existing branch
-        final_active_branch = final_branch.to_string();
+        // No target_ref specified, detect the actual current branch for existing repositories
+        if final_local_path.exists() {
+            match git2::Repository::open(&final_local_path) {
+                Ok(repo) => {
+                    match repo.head() {
+                        Ok(head) => {
+                            if let Some(branch_name) = head.shorthand() {
+                                info!("Detected current branch '{}' for repository '{}'", branch_name, repo_name);
+                                final_active_branch = branch_name.to_string();
+                            } else {
+                                warn!("Could not determine branch name from HEAD, using default '{}'", final_branch);
+                                final_active_branch = final_branch.to_string();
+                            }
+                        }
+                        Err(e) => {
+                            if e.code() == git2::ErrorCode::UnbornBranch {
+                                // Repository has no commits yet
+                                info!("Repository '{}' has no commits yet (unborn branch), using '{}'", repo_name, final_branch);
+                                final_active_branch = final_branch.to_string();
+                            } else {
+                                warn!("Failed to get HEAD for repository '{}': {}, using default '{}'", repo_name, e, final_branch);
+                                final_active_branch = final_branch.to_string();
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open repository '{}' to detect branch: {}, using default '{}'", repo_name, e, final_branch);
+                    final_active_branch = final_branch.to_string();
+                }
+            }
+        } else {
+            // For new clones, use the branch we specified
+            final_active_branch = final_branch.to_string();
+        }
     }
 
     // Determine the final URL for the RepositoryConfig
