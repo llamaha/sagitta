@@ -1217,8 +1217,12 @@ async fn get_sync_status(repo_config: &RepositoryConfig, git_status: Option<&Git
             }
         }
     } else {
-        // Can't determine git status (e.g., no commits, corrupted repo)
-        SyncState::Unknown
+        // Can't determine git status (e.g., no commits, corrupted repo, doesn't exist)
+        if repo_config.last_synced_commits.is_empty() {
+            SyncState::NeverSynced
+        } else {
+            SyncState::Unknown
+        }
     };
     
     Ok(SyncStatus {
