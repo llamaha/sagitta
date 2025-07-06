@@ -52,7 +52,7 @@ async fn test_fast_model_configuration() -> Result<()> {
     let mut config = SagittaCodeConfig::default();
     
     // Check default values
-    assert_eq!(config.conversation.fast_model, "sonnet");
+    assert_eq!(config.conversation.fast_model, "claude-3-5-haiku-20241022");
     assert!(config.conversation.enable_fast_model);
     
     // Update configuration
