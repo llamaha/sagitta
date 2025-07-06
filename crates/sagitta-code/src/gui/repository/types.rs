@@ -222,9 +222,21 @@ pub struct RepoSyncStatus {
 /// Sync state enumeration
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyncState {
+    /// Never synced
     NeverSynced,
+    /// Fully synced with remote repository
     UpToDate,
+    /// Needs sync with remote repository
     NeedsSync,
+    /// Local repository with no remote
+    LocalOnly,
+    /// Indexed locally but remote sync failed (auth/network issues)
+    LocalIndexedRemoteFailed,
+    /// Currently syncing
+    Syncing,
+    /// Failed to index or sync
+    Failed,
+    /// Unknown sync state
     Unknown,
 }
 

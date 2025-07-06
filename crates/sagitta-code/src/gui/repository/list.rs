@@ -31,6 +31,10 @@ fn get_sync_status_indicator(sync_state: &SyncState) -> (String, Color32) {
         SyncState::UpToDate => ("✅".to_string(), Color32::from_rgb(46, 160, 67)),
         SyncState::NeedsSync => ("🔄".to_string(), Color32::from_rgb(255, 193, 7)),
         SyncState::NeverSynced => ("❓".to_string(), Color32::from_rgb(108, 117, 125)),
+        SyncState::LocalOnly => ("📁".to_string(), Color32::from_rgb(33, 150, 243)),
+        SyncState::LocalIndexedRemoteFailed => ("📡".to_string(), Color32::from_rgb(255, 152, 0)),
+        SyncState::Syncing => ("⏳".to_string(), Color32::from_rgb(156, 39, 176)),
+        SyncState::Failed => ("❌".to_string(), Color32::from_rgb(244, 67, 54)),
         SyncState::Unknown => ("⚠️".to_string(), Color32::from_rgb(220, 53, 69)),
     }
 }

@@ -550,15 +550,21 @@ impl SyncOrchestrator {
 
         // Initialize sync status
         {
+            // Check if this is a local-only repository
+            let is_local_only = !Self::check_repository_has_remote(repo_path).await;
+            
             let mut statuses = self.sync_statuses.write().await;
             statuses.insert(
                 repo_path.to_path_buf(),
                 RepositorySyncStatus {
+                    sync_state: if is_local_only { SyncState::LocalOnly } else { SyncState::NotSynced },
                     last_sync: None,
                     last_synced_commit: None,
                     is_syncing: false,
-                    is_out_of_sync: true, // New repositories start as out-of-sync
+                    is_out_of_sync: !is_local_only, // Local-only repos don't need remote sync
                     last_sync_error: None,
+                    sync_error_type: None,
+                    is_local_only,
                 },
             );
         }
