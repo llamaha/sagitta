@@ -2,7 +2,7 @@ use crate::mcp::types::{
     ErrorObject, InitializeParams, PingParams, QueryParams, RepositoryAddParams, RepositoryListParams, RepositorySyncParams, RepositoryRemoveParams,
     Request, Response, ListToolsParams, ListToolsResult, InitializedNotificationParams,
     CallToolParams, CallToolResult, ContentBlock, RepositorySearchFileParams, RepositoryViewFileParams,
-    RepositorySwitchBranchParams, RepositoryListBranchesParams,
+    RepositorySwitchBranchParams, RepositoryListBranchesParams, RepositoryGitHistoryParams,
 };
 use crate::mcp::error_codes;
 use anyhow::{anyhow, Context, Result};
@@ -36,6 +36,7 @@ use crate::handlers::repository::{
     handle_repository_switch_branch,
     handle_repository_list_branches,
 };
+use crate::handlers::git_history::handle_repository_git_history;
 use crate::handlers::tool::{handle_tools_call, get_tool_definitions};
 use crate::handlers::initialize::handle_initialize;
 
@@ -254,6 +255,11 @@ impl<C: QdrantClientTrait + Send + Sync + 'static> Server<C> {
             "repository/list_branches" | "mcp_sagitta_mcp_repository_list_branches" => {
                 let params: RepositoryListBranchesParams = deserialize_params(request.params, "repository/list_branches")?;
                 let result = handle_repository_list_branches(params, config, None).await?;
+                ok_some(result)
+            }
+            "repository/git_history" | "mcp_sagitta_mcp_repository_git_history" => {
+                let params: RepositoryGitHistoryParams = deserialize_params(request.params, "repository/git_history")?;
+                let result = handle_repository_git_history(params, config, qdrant_client, None).await?;
                 ok_some(result)
             }
             "tools/list" | "mcp_sagitta_mcp_tools_list" => {

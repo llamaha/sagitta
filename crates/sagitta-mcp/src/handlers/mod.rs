@@ -12,6 +12,7 @@ pub mod multi_edit_file;
 pub mod shell_execute;
 pub mod read_file;
 pub mod write_file;
+pub mod git_history;
 
 #[cfg(test)]
 pub mod test_utils;

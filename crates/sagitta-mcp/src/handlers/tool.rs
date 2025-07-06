@@ -9,6 +9,7 @@ use crate::mcp::{
         EditFileParams, MultiEditFileParams,
         ShellExecuteParams,
         ReadFileParams, WriteFileParams,
+        RepositoryGitHistoryParams,
     },
 };
 use crate::server::{deserialize_value, ok_some, result_to_call_result}; // Import necessary helpers
@@ -17,7 +18,8 @@ use crate::handlers::{ping::handle_ping, query::handle_query, repository::*,
                       todo_read::handle_todo_read, todo_write::handle_todo_write,
                       edit_file::handle_edit_file, multi_edit_file::handle_multi_edit_file,
                       shell_execute::handle_shell_execute,
-                      read_file::handle_read_file, write_file::handle_write_file}; // Import actual handlers
+                      read_file::handle_read_file, write_file::handle_write_file,
+                      git_history::handle_repository_git_history}; // Import actual handlers
 
 use anyhow::Result;
 use serde_json::json;
@@ -165,6 +167,13 @@ pub async fn handle_tools_call<C: QdrantClientTrait + Send + Sync + 'static>(
         "write_file" => {
             let write_params: WriteFileParams = deserialize_value(arguments, tool_name)?;
             match handle_write_file(write_params, config, qdrant_client, None).await {
+                Ok(res) => result_to_call_result(res),
+                Err(e) => Err(e),
+            }
+        }
+        "repository_git_history" => {
+            let history_params: RepositoryGitHistoryParams = deserialize_value(arguments, tool_name)?;
+            match handle_repository_git_history(history_params, config, qdrant_client, None).await {
                 Ok(res) => result_to_call_result(res),
                 Err(e) => Err(e),
             }
@@ -620,6 +629,32 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 open_world_hint: Some(false),
             }),
         },
+        
+        // --- Repository Git History ---
+        ToolDefinition {
+            name: "repository_git_history".to_string(),
+            description: Some("Retrieves git commit history for a repository with filtering options.".to_string()),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repositoryName": { "type": "string", "description": "Name of the repository to get history for." },
+                    "maxCommits": { "type": "integer", "description": "Maximum number of commits to retrieve (default: 100, max: 1000)." },
+                    "branchName": { "type": "string", "description": "Optional branch name (defaults to current branch)." },
+                    "since": { "type": "string", "description": "Optional start date filter (RFC3339 format, e.g., '2024-01-01T00:00:00Z')." },
+                    "until": { "type": "string", "description": "Optional end date filter (RFC3339 format)." },
+                    "author": { "type": "string", "description": "Optional author name/email filter (partial match)." },
+                    "path": { "type": "string", "description": "Optional path filter (show commits affecting specific paths)." }
+                },
+                "required": ["repositoryName"]
+            }),
+            annotations: Some(ToolAnnotations {
+                title: Some("Get Git History".to_string()),
+                read_only_hint: Some(true),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(false),
+            }),
+        },
     ]
 }
 
@@ -720,6 +755,14 @@ mod tests {
             // "repository_map", // DISABLED - consumes too many tokens
             "repository_switch_branch",
             "repository_list_branches",
+            "repository_git_history",
+            "todo_read",
+            "todo_write",
+            "edit_file",
+            "multi_edit_file",
+            "shell_execute",
+            "read_file",
+            "write_file",
         ];
         
         for expected_tool in expected_tools {

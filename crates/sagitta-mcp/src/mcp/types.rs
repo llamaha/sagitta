@@ -824,4 +824,73 @@ pub struct WriteFileResult {
     pub bytes_written: u64,
     /// Whether this was a new file creation
     pub created: bool,
+}
+
+// Git history types
+
+/// Parameters for repository_git_history
+#[derive(Serialize, Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGitHistoryParams {
+    /// Name of the repository to get history for
+    pub repository_name: String,
+    /// Maximum number of commits to retrieve (default: 100, max: 1000)
+    #[serde(default = "default_max_commits")]
+    pub max_commits: u64,
+    /// Optional branch name (defaults to current branch)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    /// Optional start date filter (RFC3339 format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    /// Optional end date filter (RFC3339 format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    /// Optional author name/email filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Optional path filter (show commits affecting specific paths)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+fn default_max_commits() -> u64 {
+    100
+}
+
+/// A single commit in the git history
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    /// Full commit hash
+    pub id: String,
+    /// Short commit hash (first 7 characters)
+    pub short_id: String,
+    /// Commit message
+    pub message: String,
+    /// Author name
+    pub author: String,
+    /// Author email
+    pub email: String,
+    /// Commit timestamp (RFC3339 format)
+    pub timestamp: String,
+    /// Parent commit hashes
+    pub parents: Vec<String>,
+    /// Branch/tag references pointing to this commit
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub refs: Vec<String>,
+}
+
+/// Result of repository_git_history
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGitHistoryResult {
+    /// List of commits in reverse chronological order
+    pub commits: Vec<GitCommit>,
+    /// Current branch name
+    pub current_branch: String,
+    /// Total number of commits returned
+    pub total_commits: u64,
+    /// Whether the history was truncated due to max_commits
+    pub truncated: bool,
 } 
