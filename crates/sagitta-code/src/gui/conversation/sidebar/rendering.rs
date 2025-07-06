@@ -192,6 +192,15 @@ impl ConversationSidebar {
         
         ui.horizontal(|ui| {
             ui.label("Organize by:");
+            
+            // Apply theme styling to the combo box
+            ui.style_mut().visuals.widgets.inactive.bg_fill = theme.input_background();
+            ui.style_mut().visuals.widgets.hovered.bg_fill = theme.button_hover_color();
+            ui.style_mut().visuals.widgets.active.bg_fill = theme.button_background();
+            ui.style_mut().visuals.selection.bg_fill = theme.accent_color();
+            ui.style_mut().visuals.widgets.inactive.fg_stroke.color = theme.text_color();
+            ui.style_mut().visuals.widgets.hovered.fg_stroke.color = theme.text_color();
+            
             ComboBox::from_label("")
                 .selected_text(self.get_organization_mode_label())
                 .show_ui(ui, |ui| {
