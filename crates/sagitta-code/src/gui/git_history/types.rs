@@ -13,36 +13,10 @@ pub struct CommitInfo {
     pub branch_refs: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CommitNode {
-    pub commit: CommitInfo,
-    pub x: f32,
-    pub y: f32,
-    pub lane: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct GitGraphEdge {
-    pub from: String,
-    pub to: String,
-    pub edge_type: EdgeType,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum EdgeType {
-    Direct,
-    Merge,
-    Branch,
-}
-
 #[derive(Debug, Default)]
 pub struct GitHistoryState {
     pub commits: Vec<CommitInfo>,
     pub commit_map: HashMap<String, usize>,
-    pub graph_nodes: Vec<CommitNode>,
-    pub graph_edges: Vec<GitGraphEdge>,
-    pub selected_commit: Option<String>,
-    pub hovered_commit: Option<String>,
     pub show_all_branches: bool,
     pub max_commits: usize,
 }

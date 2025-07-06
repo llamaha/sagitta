@@ -401,6 +401,8 @@ pub struct RepoPanelState {
     pub file_view_result: FileViewResult,
     pub branch_management: BranchManagementState,
     pub sync_options: SyncOptions,
+    pub show_remove_confirmation: bool,
+    pub repository_to_remove: Option<String>,
     pub force_sync: bool, // Force sync option
     pub newly_created_repository: Option<String>, // Name of repository that was just created
     pub dependency_modal: super::dependency_modal::DependencyModal,

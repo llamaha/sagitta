@@ -328,26 +328,9 @@ pub fn render_repo_list(
                         
                         // Remove button is always available
                         if ui.button("Remove").clicked() {
-                            // Set up the remove
-                            let repo_name = enhanced_repo.name.clone();
-                            let repo_name_for_async = repo_name.clone();
-                            
-                            // Schedule the remove operation
-                            let repo_manager_clone = Arc::clone(&repo_manager);
-                            let handle = tokio::runtime::Handle::current();
-                            
-                            handle.spawn(async move {
-                                let mut manager = repo_manager_clone.lock().await;
-                                let _ = manager.remove_repository(&repo_name_for_async).await;
-                            });
-                            
-                            // Also remove from UI state immediately for responsiveness
-                            state.enhanced_repositories.retain(|r| r.name != repo_name);
-                            state.repositories.retain(|r| r.name != repo_name);
-                            if state.selected_repo.as_ref() == Some(&repo_name) {
-                                state.selected_repo = None;
-                            }
-                            state.selected_repos.retain(|name| name != &repo_name);
+                            // Show confirmation dialog instead of immediately removing
+                            state.show_remove_confirmation = true;
+                            state.repository_to_remove = Some(enhanced_repo.name.clone());
                         }
                     });
                     
@@ -546,4 +529,81 @@ fn render_basic_repos(
         
         ui.end_row();
     }
+    
+    // Render remove confirmation dialog
+    if state.show_remove_confirmation {
+        render_remove_confirmation_dialog(ui.ctx(), state, repo_manager);
+    }
+}
+
+/// Render the repository removal confirmation dialog
+fn render_remove_confirmation_dialog(ctx: &egui::Context, state: &mut super::types::RepoPanelState, repo_manager: Arc<Mutex<RepositoryManager>>) {
+    egui::Window::new("⚠️ Confirm Repository Removal")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(5.0);
+                
+                // Warning message
+                ui.horizontal(|ui| {
+                    ui.label("⚠️");
+                    ui.label(egui::RichText::new("This action cannot be undone!").strong().color(egui::Color32::from_rgb(220, 53, 69)));
+                });
+                
+                ui.add_space(10.0);
+                
+                if let Some(repo_name) = &state.repository_to_remove {
+                    ui.label(format!("Are you sure you want to remove the repository '{}'?", repo_name));
+                    ui.add_space(5.0);
+                    ui.label("This will:");
+                    ui.label("• Remove all indexed data for this repository");
+                    ui.label("• Delete the local repository files");
+                    ui.label("• Remove the repository from your configuration");
+                }
+                
+                ui.add_space(15.0);
+                
+                // Action buttons
+                ui.horizontal(|ui| {
+                    // Cancel button
+                    if ui.button("Cancel").clicked() {
+                        state.show_remove_confirmation = false;
+                        state.repository_to_remove = None;
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // Confirm remove button
+                    if ui.add(egui::Button::new(egui::RichText::new("Remove Repository").color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(220, 53, 69))).clicked() {
+                        
+                        if let Some(repo_name) = state.repository_to_remove.take() {
+                            // Perform the actual removal
+                            let repo_name_for_async = repo_name.clone();
+                            let repo_manager_clone = Arc::clone(&repo_manager);
+                            let handle = tokio::runtime::Handle::current();
+                            
+                            handle.spawn(async move {
+                                let mut manager = repo_manager_clone.lock().await;
+                                let _ = manager.remove_repository(&repo_name_for_async).await;
+                            });
+                            
+                            // Also remove from UI state immediately for responsiveness
+                            state.enhanced_repositories.retain(|r| r.name != repo_name);
+                            state.repositories.retain(|r| r.name != repo_name);
+                            if state.selected_repo.as_ref() == Some(&repo_name) {
+                                state.selected_repo = None;
+                            }
+                            state.selected_repos.retain(|name| name != &repo_name);
+                        }
+                        
+                        state.show_remove_confirmation = false;
+                    }
+                });
+                
+                ui.add_space(5.0);
+            });
+        });
 } 
