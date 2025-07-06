@@ -52,7 +52,7 @@ async fn test_fast_model_configuration() -> Result<()> {
     let mut config = SagittaCodeConfig::default();
     
     // Check default values
-    assert_eq!(config.conversation.fast_model, "claude-haiku-20250102");
+    assert_eq!(config.conversation.fast_model, "claude-3-5-haiku-latest");
     assert!(config.conversation.enable_fast_model);
     
     // Update configuration
@@ -93,12 +93,12 @@ async fn test_title_generation_with_fast_model() -> Result<()> {
     
     // Generate title with fast model
     let start = tokio::time::Instant::now();
-    let title = provider.generate_title("claude-haiku-20250102", &messages).await?;
+    let title = provider.generate_title("claude-3-5-haiku-latest", &messages).await?;
     let duration = start.elapsed();
     
     // Verify fast model was used
     let model_used = provider.model_used.lock().await.clone();
-    assert_eq!(model_used, Some("claude-haiku-20250102".to_string()));
+    assert_eq!(model_used, Some("claude-3-5-haiku-latest".to_string()));
     
     // Verify response time is fast
     assert!(duration.as_millis() < 500, "Title generation should be fast");
@@ -115,12 +115,12 @@ async fn test_tag_suggestion_with_fast_model() -> Result<()> {
     
     // Suggest tags with fast model
     let start = tokio::time::Instant::now();
-    let tags = provider.suggest_tags("claude-haiku-20250102", &conversation).await?;
+    let tags = provider.suggest_tags("claude-3-5-haiku-latest", &conversation).await?;
     let duration = start.elapsed();
     
     // Verify fast model was used
     let model_used = provider.model_used.lock().await.clone();
-    assert_eq!(model_used, Some("claude-haiku-20250102".to_string()));
+    assert_eq!(model_used, Some("claude-3-5-haiku-latest".to_string()));
     
     // Verify response time is fast
     assert!(duration.as_millis() < 500, "Tag suggestion should be fast");
@@ -141,12 +141,12 @@ async fn test_status_suggestion_with_fast_model() -> Result<()> {
     
     // Suggest status with fast model
     let start = tokio::time::Instant::now();
-    let (status, confidence) = provider.suggest_status("claude-haiku-20250102", &conversation).await?;
+    let (status, confidence) = provider.suggest_status("claude-3-5-haiku-latest", &conversation).await?;
     let duration = start.elapsed();
     
     // Verify fast model was used
     let model_used = provider.model_used.lock().await.clone();
-    assert_eq!(model_used, Some("claude-haiku-20250102".to_string()));
+    assert_eq!(model_used, Some("claude-3-5-haiku-latest".to_string()));
     
     // Verify response time is fast
     assert!(duration.as_millis() < 500, "Status suggestion should be fast");
@@ -199,9 +199,9 @@ async fn test_concurrent_fast_model_operations() -> Result<()> {
     let messages1 = messages.clone();
     
     let (title_result, tags_result, status_result) = tokio::join!(
-        provider1.generate_title("claude-haiku-20250102", &messages1),
-        provider2.suggest_tags("claude-haiku-20250102", &conversation1),
-        provider3.suggest_status("claude-haiku-20250102", &conversation2),
+        provider1.generate_title("claude-3-5-haiku-latest", &messages1),
+        provider2.suggest_tags("claude-3-5-haiku-latest", &conversation1),
+        provider3.suggest_status("claude-3-5-haiku-latest", &conversation2),
     );
     
     // All operations should succeed
@@ -221,7 +221,7 @@ async fn test_fast_model_performance_benchmarks() -> Result<()> {
     
     for _ in 0..iterations {
         let start = tokio::time::Instant::now();
-        let _ = provider.generate_title("claude-haiku-20250102", &[]).await?;
+        let _ = provider.generate_title("claude-3-5-haiku-latest", &[]).await?;
         durations.push(start.elapsed());
     }
     
@@ -243,7 +243,7 @@ async fn test_fast_model_performance_benchmarks() -> Result<()> {
 #[tokio::test]
 async fn test_model_selection_logic() -> Result<()> {
     let config = ConversationConfig {
-        fast_model: "claude-haiku-20250102".to_string(),
+        fast_model: "claude-3-5-haiku-latest".to_string(),
         enable_fast_model: true,
         ..Default::default()
     };
@@ -255,7 +255,7 @@ async fn test_model_selection_logic() -> Result<()> {
         "claude-sonnet-4-20250514" // Default model
     };
     
-    assert_eq!(selected_model, "claude-haiku-20250102");
+    assert_eq!(selected_model, "claude-3-5-haiku-latest");
     
     Ok(())
 }
